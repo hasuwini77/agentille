@@ -1,0 +1,23 @@
+# OS
+.DS_Store
+Thumbs.db
+
+# Editors
+.vscode/
+.idea/
+*.swp
+
+# Logs
+*.log
+
+# Env / secrets (paranoia — there should be no env files in a markdown repo)
+.env
+.env.*
+
+# Node (in case anyone adds tooling later)
+node_modules/
+dist/
+build/
+
+# Local Claude Code state
+.claude/

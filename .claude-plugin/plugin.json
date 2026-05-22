@@ -1,0 +1,32 @@
+{
+  "name": "agentille",
+  "version": "1.0.0",
+  "description": "Personal AI coding orchestrator for Claude Code — opinionated dispatch + voice profile + UI design wedge.",
+  "author": {
+    "name": "@hasuwini77",
+    "url": "https://github.com/hasuwini77"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/hasuwini77/agentille"
+  },
+  "homepage": "https://github.com/hasuwini77/agentille",
+  "keywords": [
+    "claude-code",
+    "orchestrator",
+    "skills",
+    "agent",
+    "design-review",
+    "code-review"
+  ],
+  "skills": [
+    "agentille",
+    "agentille-init",
+    "agentille-project",
+    "agentille-planner",
+    "agentille-executor",
+    "agentille-code-reviewer",
+    "agentille-design-reviewer"
+  ]
+}

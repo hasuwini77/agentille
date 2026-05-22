@@ -1,0 +1,20 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "hasuwini77-agentille",
+  "description": "Personal Claude Code marketplace by @hasuwini77 — hosts the agentille orchestration plugin.",
+  "owner": {
+    "name": "@hasuwini77"
+  },
+  "plugins": [
+    {
+      "name": "agentille",
+      "description": "Personal AI coding orchestrator for Claude Code. Seven skills with smart model routing, parallel git worktrees, and code + design review built in.",
+      "author": {
+        "name": "@hasuwini77"
+      },
+      "category": "development",
+      "source": "./",
+      "homepage": "https://github.com/hasuwini77/agentille"
+    }
+  ]
+}

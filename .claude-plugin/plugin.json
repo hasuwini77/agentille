@@ -1,17 +1,16 @@
 {
+  "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
   "name": "agentille",
+  "displayName": "Agentille",
   "version": "1.0.0",
   "description": "Personal AI coding orchestrator for Claude Code. Seven skills with smart model routing, parallel git worktrees, and code + design review built in.",
   "author": {
     "name": "@hasuwini77",
     "url": "https://github.com/hasuwini77"
   },
-  "license": "MIT",
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/hasuwini77/agentille"
-  },
   "homepage": "https://github.com/hasuwini77/agentille",
+  "repository": "https://github.com/hasuwini77/agentille",
+  "license": "MIT",
   "keywords": [
     "claude-code",
     "orchestrator",
@@ -19,14 +18,5 @@
     "agent",
     "design-review",
     "code-review"
-  ],
-  "skills": [
-    "./skills/agentille",
-    "./skills/agentille-init",
-    "./skills/agentille-project",
-    "./skills/agentille-planner",
-    "./skills/agentille-executor",
-    "./skills/agentille-code-reviewer",
-    "./skills/agentille-design-reviewer"
   ]
 }

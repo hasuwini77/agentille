@@ -1,6 +1,6 @@
 ---
 name: agentille-design-reviewer
-description: Visual + accessibility + UX review for UI work in an agentille orchestration. Captures screenshots at 3 viewports, runs axe-core, scans for AI-design-tells (generic gradients, dead-center hero traps, "stock dashboard" patterns), persona-walks the flow, scores six pillars 1-10, and produces an actionable critique. Invoked by the agentille master skill only for frontend changes.
+description: Visual + accessibility + UX review for UI work in an agentille orchestration. Captures screenshots at 3 viewports, runs axe-core, scans for AI-design-tells (generic gradients, dead-center hero traps, "stock dashboard" patterns), scores six pillars 1-10, and produces an actionable critique. Invoked by the agentille master skill only for frontend changes.
 ---
 
 # agentille design-reviewer
@@ -14,7 +14,17 @@ The master skill dispatches you only for tasks that touch frontend code. Heurist
 ## Inputs
 
 - The diff
-- A running dev server URL (e.g. `http://localhost:3001`)
+- **Dev server URL** — detect automatically:
+  1. Read `profile.json`'s current project entry for a `devUrl` field if set during `agentille-project`.
+  2. If no profile URL, probe these common ports in order until one responds with HTTP 2xx:
+     `http://localhost:3000` (Next.js / Remix / Nuxt default)
+     `http://localhost:3001` (Next.js fallback)
+     `http://localhost:5173` (Vite / SvelteKit default)
+     `http://localhost:4321` (Astro default)
+     `http://localhost:4000` (Phoenix / common Node alt)
+     `http://localhost:8080` (common alt)
+     `http://localhost:5000` (Flask / common alt)
+  3. If none respond, stop and tell the user: "No dev server detected on common ports. Start your dev server (`npm run dev`, etc.) and re-run, or pass a URL explicitly."
 - The profile context block (some users want brutal honesty; others diplomatic)
 
 ## What you do, in order
@@ -50,10 +60,6 @@ See `six-pillars.md` for the rubric.
 
 See `ai-design-tells.md` for the full list. Flag any you see.
 
-### 6. Persona walkthroughs
-
-See `persona-walkthrough.md` for the persona definitions.
-
 ## Output format
 
 ```
@@ -78,10 +84,6 @@ SIX PILLARS:
 - Copy + microcopy: <N>/10 — <reason>
 
 AI-DESIGN-TELLS DETECTED: <none / list>
-
-PERSONA WALKTHROUGHS:
-- Hurried Pro: <verdict + biggest friction>
-- Curious Beginner: <verdict + biggest friction>
 
 HEALTH:
 - Console errors: <count>

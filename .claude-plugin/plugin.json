@@ -1,7 +1,7 @@
 {
   "name": "agentille",
   "version": "1.0.0",
-  "description": "Personal AI coding orchestrator for Claude Code — opinionated dispatch + voice profile + UI design wedge.",
+  "description": "Personal AI coding orchestrator for Claude Code. Seven skills with smart model routing, parallel git worktrees, and code + design review built in.",
   "author": {
     "name": "@hasuwini77",
     "url": "https://github.com/hasuwini77"
@@ -21,12 +21,12 @@
     "code-review"
   ],
   "skills": [
-    "agentille",
-    "agentille-init",
-    "agentille-project",
-    "agentille-planner",
-    "agentille-executor",
-    "agentille-code-reviewer",
-    "agentille-design-reviewer"
+    "./skills/agentille",
+    "./skills/agentille-init",
+    "./skills/agentille-project",
+    "./skills/agentille-planner",
+    "./skills/agentille-executor",
+    "./skills/agentille-code-reviewer",
+    "./skills/agentille-design-reviewer"
   ]
 }

@@ -63,3 +63,26 @@
     - enum: `diplomatic` / `direct` / `brutal`
 
 (Yes, that's actually 19 — section 3 has 5 questions. "18" in section headers is a rough estimate; the canonical count is in `profile-schema.md`.)
+
+## Section 4 — Team mode (optional, 3 questions)
+
+Team mode lets agentille spawn multiple parallel Claude Code sessions (Agent Teams) for complex tasks. It's experimental, uses ~4× tokens of subagent mode, and requires `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1` in `~/.claude/settings.json`. Most users should leave this off until they need it.
+
+### Q19 — Enable team mode?
+**Field:** `team.enabled` (boolean)
+**Options:** `yes` / `no`
+**Default:** `no`
+
+### Q20 — Default mode when not specified
+**Field:** `team.defaultMode` (enum)
+**Options:**
+- `auto` — let agentille decide per task (Stage 1 → Stage 2 classifier)
+- `subagent` — always use subagent dispatch (the v1.0 path; no team mode auto-pick)
+- `team` — always use team mode (requires `team.enabled = yes`)
+- `solo` — always execute inline in the orchestrator (no spawn)
+**Default:** `auto` if Q19 = yes, else `subagent`
+
+### Q21 — Maximum teammates per team
+**Field:** `team.maxTeammates` (integer, 1-10)
+**Default:** `4`
+**Hint:** Recommended 3-5. More teammates = more parallelism but more token cost.

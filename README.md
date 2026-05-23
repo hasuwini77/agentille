@@ -19,6 +19,50 @@ A complete orchestration plugin for Claude Code. Seven skills that route the rig
 - **Voice-aware.** Your profile shapes every prompt. Tell agentille you want brutal feedback, every subagent is brutal.
 - **Design review built in.** Screenshots at three viewports, axe-core, and a scan for the generic AI-design patterns that make most AI-generated UIs feel cheap. No other orchestrator does this.
 
+## Team mode (v1.2+)
+
+Optionally use Claude Code's experimental Agent Teams primitive instead of subagent dispatch. Each role becomes an independent Claude Code session (with its own context window) that can message peers and coordinate via a shared task list. Best for tasks where multiple perspectives help — parallel code review, cross-layer features, competing-hypothesis debugging.
+
+**Default off.** Existing users see no change. Opt in by enabling the env var:
+
+```
+# In ~/.claude/settings.json:
+{
+  "env": { "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1" }
+}
+```
+
+Restart Claude Code. Then either:
+- Let agentille auto-pick per task (set `team.defaultMode = "auto"` in your profile)
+- Force team mode per command: `/agentille --mode team "review the latest PR"`
+- Pick a named template: `/agentille --team incident-team "debug the auth race"`
+
+Three starter templates ship:
+
+| Template | When to use | Roster |
+|---|---|---|
+| `feature-team` | Cross-layer feature with design review | 1 planner + 2 executor + 1 code-reviewer + 1 design-reviewer |
+| `review-team` | Parallel multi-pillar review | code + design + security reviewers in parallel |
+| `incident-team` | Hard-to-debug issue, multiple possible root causes | 3 executor instances with adversarial framing |
+
+**Cost note:** team mode uses ~4× tokens of subagent mode. agentille warns once per session if you cross the daily soft cap (default 10 team-mode runs, configurable in profile).
+
+**Cross-platform:** split-pane visual layout (one terminal pane per teammate) on macOS / Linux / WSL2 with tmux installed. Native Windows degrades to in-process mode (Shift+Down to cycle teammates).
+
+## Shipped log
+
+Every completed `/agentille` run (subagent or team mode) appends one line to `./docs/agentille-log.md` in your project. Reverse-chronological by date heading, format:
+
+```
+## 2026-05-23
+
+- **feat:** User profile wizard — `feature-team` (4 teammates · 12m)
+  - Files: src/wizard/ src/profile/
+  - PR: #42
+```
+
+Committed by default (it's documentation). Disable per-project by adding `docs/agentille-log.md` to your `.gitignore`.
+
 ## Install
 
 ```bash

@@ -2,6 +2,28 @@
 
 All notable changes to agentille are documented here.
 
+## [1.2.0] — 2026-05-23
+
+### Added — Team mode
+
+- **Agent Teams support** via Claude Code 2.1.32+ experimental primitive. Auto-detected; opt-in via `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1`.
+- **Three team templates** under `.claude-plugin/teams/`:
+  - `feature-team` — cross-layer feature with parallel code + design review
+  - `review-team` — parallel code + design + security review
+  - `incident-team` — competing-hypothesis debugging (3 adversarial executors)
+- **agentille-security-reviewer** — new skill, read-only severity-classified review for security issues (secret leaks, injection vectors, auth bypass, deserialization, CSRF/XSS, dependency CVEs).
+- **Two-stage classifier**:
+  - Stage 1 (fast-path, no LLM): flags > profile defaultMode > verb match > trivial → solo. See `skills/agentille/team-mode.md`.
+  - Stage 2 (planner-classify): for ambiguous prose, planner returns structured `{mode, team_template, roster}` JSON.
+- **Shipped log hook** (`.claude-plugin/hooks/agentille-log.sh`): appends one line per completed run to `./docs/agentille-log.md`. Registered on `TaskCompleted` via exec-form args.
+- **agentille-init Section 4** (3 new questions): enable team mode, default mode, max teammates. Existing profiles without a `team` section default to `enabled: false`, so existing users see no behavior change.
+
+### Backward compatibility
+
+- Profiles without a `team` section default to v1.0 subagent behavior. No migration needed.
+- Setting `team.defaultMode = "subagent"` makes the orchestrator skip team-mode auto-pick entirely — Stage 1 short-circuits to subagent on every task.
+- Team mode requires Claude Code 2.1.32+ and the experimental env var. If either is missing, the orchestrator degrades to subagent mode silently with a one-line log note.
+
 ## [1.0.0] — 2026-05-22
 
 ### Added
@@ -22,7 +44,7 @@ All notable changes to agentille are documented here.
 - The `agentille init` and `agentille project` CLIs are now skills.
 - The wizard now runs natively inside Claude Code — no Node.js install needed.
 
-## Planned for v1.1
+## Planned for v1.3+
 
 - **Iterative grading loop** — the master `agentille` skill will run `agentille-design-reviewer` in a loop: review → dispatch executor to apply P0/P1 fixes → re-review, until all pillar scores ≥ 7 or 3 iterations reached. Cap on token spend, exits early on plateau.
 - **Refactoring UI ruleset baked in** — a new reference file `design-rules-canon.md` distilling Adam Wathan + Steve Schoger's Refactoring UI principles (spacing scales, type-scale contrast, color saturation/lightness curve, hierarchy beyond size, whitespace, etc.) — the practitioner standard for web design rules.

@@ -210,3 +210,30 @@ Notes on `projects` and `selectedPrompts`:
   { "value": "default", "label": "Default", "description": "Balanced honesty appropriate to context" }
 ]
 ```
+
+---
+
+## team (added in v1.2)
+
+| Field | Type | Default | Notes |
+|---|---|---|---|
+| `enabled` | bool | `false` | Master switch for team mode |
+| `defaultMode` | enum | `subagent` | One of: `auto`, `subagent`, `team`, `solo` |
+| `maxTeammates` | int | `4` | Cap on teammates per team |
+| `displayMode` | enum | `auto` | One of: `auto`, `tmux`, `in-process` (set by detection, not user) |
+| `dailySoftCap` | int | `10` | Soft cap on team-mode runs per 24h; 0 disables warning |
+
+Example:
+```json
+{
+  "team": {
+    "enabled": false,
+    "defaultMode": "subagent",
+    "maxTeammates": 4,
+    "displayMode": "auto",
+    "dailySoftCap": 10
+  }
+}
+```
+
+**Migration from v1.0/v1.1 profiles:** If `team` is absent, the orchestrator treats it as `{ enabled: false, defaultMode: "subagent", maxTeammates: 4, displayMode: "auto", dailySoftCap: 10 }`. Users without a `team` section see no behavior change — agentille keeps using subagent dispatch as in v1.0/v1.1.

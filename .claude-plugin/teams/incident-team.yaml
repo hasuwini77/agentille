@@ -1,0 +1,10 @@
+name: incident-team
+description: Competing-hypothesis debugging. Three executor instances investigate distinct theories and adversarially challenge each other.
+lead: agentille-planner
+teammates:
+  - role: agentille-executor
+    count: 3
+    require-plan-approval: false
+display-mode: auto
+hooks:
+  task-completed: agentille-log.sh

@@ -1,0 +1,14 @@
+name: feature-team
+description: Cross-layer feature implementation with code + design review running in parallel.
+lead: agentille-planner
+teammates:
+  - role: agentille-executor
+    count: 2
+    require-plan-approval: true
+  - role: agentille-code-reviewer
+    count: 1
+  - role: agentille-design-reviewer
+    count: 1
+display-mode: auto
+hooks:
+  task-completed: agentille-log.sh

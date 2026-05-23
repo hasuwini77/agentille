@@ -1,6 +1,6 @@
 ---
 name: agentille-init
-description: One-time global setup for agentille. Captures the user's communication, thinking, and identity preferences in 18 questions across 3 sections, then writes ~/.agentille/profile.json. Run this once per machine before using `/agentille <task>`. The master orchestrator skill (`agentille`) reads the profile to dispatch subagents in the user's voice.
+description: One-time global setup for agentille. Captures the user's communication, thinking, and identity preferences in 21 questions across 4 sections, then writes ~/.agentille/profile.json. Run this once per machine before using `/agentille <task>`. The master orchestrator skill (`agentille`) reads the profile to dispatch subagents in the user's voice.
 ---
 
 # agentille-init — global profile setup
@@ -25,7 +25,7 @@ Do NOT auto-trigger on generic setup prompts.
 
    If it exists, ask the user: *"A profile already exists at `~/.agentille/profile.json`. Overwrite, or keep it?"* — only proceed on explicit overwrite.
 
-2. **Ask the 18 questions** in `questions.md` — three sections of 6-ish, with progress markers ("Step 1 of 3 — Identity").
+2. **Ask the 21 questions** in `questions.md` — four sections, with progress markers ("Step 1 of 4 — Identity"). Section 4 covers team mode (3 questions) and is optional — if the user wants to skip it, record the defaults (`team.enabled = false`, `team.defaultMode = "subagent"`, `team.maxTeammates = 4`) without asking.
    - Use Claude Code's natural conversation flow (one question at a time, or grouped 3-4 if the user prefers).
    - For multi-select fields (`techStack`, `useCases`, `neverDo`), present the option list and accept comma-separated answers or numbered picks.
    - For enum fields (`deliveryStyle`, `tone`, `honestyLevel`, etc.), show all options with their hints and ask the user to pick.

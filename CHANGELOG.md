@@ -2,7 +2,7 @@
 
 All notable changes to agentille are documented here.
 
-## [Unreleased]
+## [1.3.1] — 2026-05-23
 
 ### Changed
 

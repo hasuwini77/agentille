@@ -1,6 +1,8 @@
 ---
 name: agentille-planner
 description: Goal-backward planner for agentille orchestration. Produces a numbered plan with explicit parallelizability markers. Invoked by the agentille master skill for tasks with ≥3 distinct steps. Not for ad-hoc use — invoked only as part of `/agentille`.
+tools: Read, Grep, Glob, Bash
+model: claude-opus-4-7
 ---
 
 # agentille planner

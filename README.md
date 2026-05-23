@@ -7,124 +7,127 @@
 ╚═╝  ╚═╝ ╚═════╝ ╚══════╝╚═╝  ╚═══╝   ╚═╝   ╚═╝╚══════╝╚══════╝╚══════╝
 ```
 
-A complete orchestration plugin for Claude Code. Three skills + five worker agents that route the right Claude model to each task, run parallel work in isolated git worktrees, and review both code and design before shipping.
+> A personal AI coding orchestrator for Claude Code. Type **`/agt "task"`** and it classifies the work, dispatches a tailored team of agents, routes the right Claude model to each, and applies *your* voice to every prompt.
 
-## What you get
+One command instead of manually chaining skills. Planning runs on Opus, execution on Sonnet, and code + design review are built in. Optionally fan the work out across a real Claude Code **agent team**, one teammate per pane.
 
-- **True multi-agent orchestration.** One command, `/agt "task"`, routes work through planner, executor, reviewers, and design checks.
-- **Token-efficient.** Opus for planning where it shines, Sonnet for execution where it's fastest. Tokens go where they earn the most.
-- **Parallel-safe.** Each task runs in its own git worktree with atomic commits and an auto-opened PR. Ship multiple features in parallel without history conflicts.
-- **Voice-aware.** Your profile shapes every prompt. Tell agentille you want brutal feedback, every subagent is brutal.
-- **Design review built in.** Screenshots at three viewports, axe-core, and a scan for the generic AI-design patterns that make most AI-generated UIs feel cheap. No other orchestrator does this.
+---
 
-## Team mode
-
-Optionally use Claude Code's Agent Teams primitive instead of subagent dispatch. Each role becomes an independent Claude Code session (its own context window) that can message peers and coordinate via a shared task list — teammates are spawned from the same `agents/agentille-*` definitions. Best where multiple perspectives help — parallel code review, cross-layer features, competing-hypothesis debugging.
-
-**Opt in** by enabling the env var (requires Claude Code 2.1.32+):
-
-```
-# In ~/.claude/settings.json:
-{
-  "env": { "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1" }
-}
-```
-
-Then trigger it per command (this overrides your profile's `team.defaultMode`):
-- Named template: `/agt --team incident-team "debug the auth race"`
-- Force mode: `/agt --mode team "review the latest PR"`
-
-Three starter templates ship:
-
-| Template | When to use | Roster |
-|---|---|---|
-| `feature-team` | Cross-layer feature with design review | 1 planner + 2 executor + 1 code-reviewer + 1 design-reviewer |
-| `review-team` | Parallel multi-pillar review | code + design + security reviewers in parallel |
-| `incident-team` | Hard-to-debug issue, multiple possible root causes | 3 executor instances with adversarial framing |
-
-**Cost note:** team mode uses ~4× tokens of subagent mode. agentille warns once per session if you cross the daily soft cap (default 10 team-mode runs, configurable in profile).
-
-**Split panes (the "wow"):** whether each teammate gets its own pane is *your* Claude Code setting, not agentille's — set `teammateMode: "tmux"` (or `"auto"` while inside a tmux session) in `~/.claude/settings.json` and install tmux or iTerm2. Otherwise teammates run in-process in one terminal (Shift+Down to cycle). Split panes are unsupported in VS Code's integrated terminal, Windows Terminal, and Ghostty.
-
-## Shipped log
-
-Every completed `/agt` run (subagent or team mode) appends one line to `./docs/agentille-log.md` in your project. Reverse-chronological by date heading, format:
-
-```
-## 2026-05-23
-
-- **feat:** User profile wizard — `feature-team` (4 teammates · 12m)
-  - Files: src/wizard/ src/profile/
-  - PR: #42
-```
-
-Committed by default (it's documentation). Disable per-project by adding `docs/agentille-log.md` to your `.gitignore`.
-
-## Install
+## Quickstart
 
 ```bash
+# 1. Install (inside Claude Code)
 /plugin marketplace add hasuwini77/agentille
 /plugin install agentille
-```
 
-Then run the one-time setup inside Claude Code:
-
-```
+# 2. One-time setup — teaches agentille your voice (writes ~/.agentille/profile.json)
 /agentille-init
-```
 
-Twenty-two questions about how you communicate. Writes `~/.agentille/profile.json`, which every other agentille skill reads.
-
-## Use it
-
-Register the current repo once:
-
-```bash
-cd ~/path/to/your/repo
-# in Claude Code:
-/agentille-project
-```
-
-Adds the repo to your profile and writes `./CLAUDE.md` with project context inheriting your global voice.
-
-Then dispatch work:
-
-```
+# 3. Register a repo, then dispatch work
+cd ~/your/repo
+/agentille-project          # writes ./CLAUDE.md with project context
 /agt "refactor the dashboard sidebar to be collapsible"
 ```
 
-The master orchestrator classifies the task, picks the right agents, routes each to the appropriate Claude model, and applies your voice to every prompt.
+That's it. `/agt` does the rest: classify → plan (if needed) → implement → review → summarize.
+
+---
+
+## What you get
+
+- **One-command orchestration.** `/agt "task"` routes work through planner, executor, and reviewers automatically — no manual skill-chaining.
+- **Right model for the job.** Opus for planning, Sonnet for execution and review, Haiku for cheap classification. Tokens go where they earn the most.
+- **Parallel-safe by default.** Each chunk of work runs in its own git worktree with atomic commits and an auto-opened PR — ship multiple features without history conflicts.
+- **Voice-aware.** Your profile shapes every prompt. Ask for brutal feedback once, and every agent is brutal.
+- **Review built in.** Code review (bugs/security/quality) on every change, plus a design review (screenshots at 3 viewports, axe-core, and a scan for the generic AI-design tells that make most AI UIs feel cheap) whenever UI is touched.
+
+## How it works
+
+When you run `/agt "task"`, the orchestrator:
+
+1. **Reads your profile** (`~/.agentille/profile.json`) for communication style, tone, and rules.
+2. **Classifies the task** — feature, bugfix, refactor, design, review, debug, research, or planning.
+3. **Picks a roster** — only the agents that task needs (e.g. no design reviewer on a backend change).
+4. **Routes a model per role** and **applies your voice** to every dispatched prompt.
+5. **Runs in dependency order**, parallelizing independent work (max 3 executors at once), then returns one summary.
 
 ## What's inside
 
-**Skills** (you invoke these):
+**Skills** — you invoke these:
 
 | Skill | Role |
 |---|---|
-| `/agt` | Master orchestrator — reads profile, classifies task, picks + dispatches the roster |
-| `agentille-init` | One-time global profile setup |
-| `agentille-project` | Per-repo registration, writes `./CLAUDE.md` |
+| `/agt` | Master orchestrator — reads profile, classifies the task, picks and dispatches the roster |
+| `/agentille-init` | One-time global setup; captures your voice into `~/.agentille/profile.json` |
+| `/agentille-project` | Per-repo registration; writes a `./CLAUDE.md` that inherits your global voice |
 
-**Agents** (the orchestrator dispatches these as `agentille:agentille-*`; also usable as agent-team teammates):
+**Agents** — the orchestrator dispatches these (as `agentille:agentille-*`); they also work as agent-team teammates:
 
-| Agent | Role |
-|---|---|
-| `agentille-planner` | Goal-backward plan with parallelizable steps marked (Opus) |
-| `agentille-executor` | Headless implementation — atomic commits, opens PR (Sonnet) |
-| `agentille-code-reviewer` | Read-only review for bugs, security, quality (Sonnet) |
-| `agentille-design-reviewer` | 6-pillar visual review, axe-core, AI-design-tell scan (Sonnet) |
-| `agentille-security-reviewer` | Severity-classified security review (Sonnet) |
+| Agent | Role | Model |
+|---|---|---|
+| `agentille-planner` | Goal-backward plan with parallelizable steps marked | Opus |
+| `agentille-executor` | Headless implementation — atomic commits, opens a PR | Sonnet |
+| `agentille-code-reviewer` | Read-only review for bugs, security, quality | Sonnet |
+| `agentille-design-reviewer` | 6-pillar visual review, axe-core, AI-design-tell scan | Sonnet |
+| `agentille-security-reviewer` | Severity-classified security review | Sonnet |
+
+## Team mode (optional)
+
+Instead of in-session subagents, agentille can drive a real Claude Code **agent team**: each role becomes an independent Claude session with its own context window that messages peers and shares a task list. Best when parallel perspectives genuinely help — multi-pillar review, cross-layer features, or competing-hypothesis debugging.
+
+**Enable it** (requires Claude Code 2.1.32+):
+
+```jsonc
+// ~/.claude/settings.json
+{ "env": { "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1" } }
+```
+
+**Trigger it** per command (overrides your profile's `team.defaultMode`):
+
+```bash
+/agt --team review-team "review the latest PR"
+/agt --team incident-team "debug the auth race"
+```
+
+Starter templates:
+
+| Template | When to use | Roster |
+|---|---|---|
+| `feature-team` | Cross-layer feature with design review | planner + 2 executors + code + design reviewers |
+| `review-team` | Parallel multi-pillar review | code + design + security reviewers |
+| `incident-team` | Hard bug with several possible causes | 3 executors testing competing hypotheses |
+
+**Split panes (the "wow"):** one pane per teammate is *your* Claude Code setting, not agentille's. Set `"teammateMode": "tmux"` in `~/.claude/settings.json` and install tmux (or iTerm2). Otherwise teammates run in-process (Shift+Down to cycle). The smoothest experience is **iTerm2 + `tmux -CC`**; split panes aren't supported in VS Code's integrated terminal, Windows Terminal, or Ghostty.
+
+**Cost:** team mode uses ~4× the tokens of subagent mode (each teammate is a full session). agentille warns once per session if you pass the daily soft cap (default 10, set in your profile).
+
+## Shipped log
+
+Every completed `/agt` run appends one line to `./docs/agentille-log.md` in the target project — a lightweight, reverse-chronological record:
+
+```
+## 2026-05-23
+- **feat:** user profile wizard — `feature-team (4 teammates · 12m)`
+  - PR: #42
+```
+
+It's documentation, so it's committed by default. To opt out, add `docs/agentille-log.md` to that project's `.gitignore`.
+
+## Requirements
+
+- Claude Code (any recent version for subagent mode; **2.1.32+** for team mode).
+- A `~/.agentille/profile.json` — created by `/agentille-init`.
 
 ## Philosophy
 
-- Opinionated, not generic. The skills encode how I actually want to work.
-- Right model for right task. Tokens go where they earn the most.
-- Parallel by default. Worktrees keep features isolated, history clean, reviews focused.
+- **Opinionated, not generic.** The agents encode how I actually want to work.
+- **Right model for the right task.** Tokens go where they earn the most.
+- **Parallel by default.** Worktrees keep features isolated, history clean, and reviews focused.
 
 ## License
 
-MIT. See [LICENSE](./LICENSE). Audit it, fork it, ship it.
+MIT — see [LICENSE](./LICENSE). Audit it, fork it, ship it.
 
 ## Author
 
-[@hasuwini77](https://github.com/hasuwini77), solo dev shipping opinionated tools.
+[@hasuwini77](https://github.com/hasuwini77) — solo dev shipping opinionated tools.

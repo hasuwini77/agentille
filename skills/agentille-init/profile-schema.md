@@ -4,6 +4,7 @@ The profile written to `~/.agentille/profile.json` matches this shape:
 
 ```json
 {
+  "schemaVersion": 2,
   "name": "string",
   "role": "string",
   "responsibilities": "string",
@@ -30,6 +31,21 @@ The profile written to `~/.agentille/profile.json` matches this shape:
   "selectedPrompts": []
 }
 ```
+
+## schemaVersion
+
+Integer. Current value: **2**.
+
+| Value | Meaning |
+|---|---|
+| absent or `1` | Pre-team profile (v1.0/v1.1). Has all Section 1–3 keys; `team` object is absent. |
+| `2` | Team section present (v1.2+). All 4 sections complete. |
+
+**How it works with key-presence detection:**
+- Key-presence is the robust, field-level signal: a field is "already answered" if its key exists in the profile JSON, even if the value is empty.
+- `schemaVersion` is the explicit migration marker for batch upgrades and tooling.
+- On re-run with an absent or `1` profile: the wizard detects `team` keys are absent, asks only the 3 Section 4 questions, then re-stamps `schemaVersion: 2`.
+- When future schema versions add new fields, those fields will also be detected as absent via key-presence — `schemaVersion` alone is not the gating check.
 
 ## Option arrays
 

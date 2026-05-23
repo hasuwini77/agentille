@@ -2,6 +2,12 @@
 
 All notable changes to agentille are documented here.
 
+## [1.7.2] — 2026-05-24
+
+### Changed
+
+- Plugin `displayName` lowercased to `agentille` (was `Agentille`) to match Claude Code plugin-naming convention. Install identifier (`name`) was already lowercase — unaffected.
+
 ## [1.7.1] — 2026-05-24
 
 ### Documentation

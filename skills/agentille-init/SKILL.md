@@ -9,7 +9,7 @@ Run this skill to capture the user's preferences. It writes `~/.agentille/profil
 
 ## When to invoke
 
-- User explicitly asks to "set up agentille", "run agentille init", or "configure my agentille profile"
+- User explicitly asks to "set up agentille", "run /agentille-init", or "configure my agentille profile"
 - The master `agt` skill detected a missing profile and asked the user to run init
 - Profile exists but user wants to update specific answers (idempotent re-run, fills gaps only)
 - User passes `--reconfigure` to redo the full wizard

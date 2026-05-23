@@ -65,6 +65,10 @@ Whether teammates appear in separate panes is the **user's** setting, not agenti
 
 If the user asks "why no panes?", point them at `~/.claude/settings.json` → `teammateMode` plus installing tmux/iTerm2. Split panes are unsupported in VS Code's integrated terminal, Windows Terminal, and Ghostty.
 
+## Terminal ergonomics (tmux)
+
+For readability when the lead is talking to you, make the lead the dominant pane: `tmux select-layout main-vertical` (lead = large left pane, teammates = small stacked right), or zoom the focused pane with prefix + `z`. In Warp the tmux prefix (Ctrl+b) is frequently intercepted — add `set -g mouse on` to `~/.tmux.conf` to click-focus and drag-resize panes, or use iTerm2 + `tmux -CC` for native panes. Teammate panes do not auto-minimize when idle; `main-vertical` keeps them small from the start.
+
 ## Team dispatch
 
 The `.claude-plugin/teams/<name>.yaml` files are **agentille's own role manifests** — they tell the orchestrator which roles/counts make up a template. They are NOT Claude Code team config: Claude Code auto-generates and owns `~/.claude/teams/<name>/config.json` (session IDs, pane IDs) and overwrites any hand-authored version, so never pre-author that file.
@@ -106,6 +110,8 @@ Track team-mode invocations per 24h in `~/.agentille/state/runs.jsonl` (append o
 > *"You've run N team-mode tasks today (cap: M, set in profile). Continue? [Y/n]"*
 
 Suppressible with `--yes` or by setting `dailySoftCap: 0`. After execution, append the run record.
+
+**Hardening note:** the orchestrator must write the shipped-log line and the `runs.jsonl` record using the **Write tool**, NEVER a shell command containing arithmetic expansion (e.g. `$(( ... ))`) or other constructs that can trigger a Bash safety prompt — that would stall the lead and violate the "logging never blocks the user" contract. If a log write would prompt or fail, skip it silently.
 
 ## Cost transparency
 

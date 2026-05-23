@@ -12,12 +12,13 @@ Before dispatching, check in order. First match wins:
 
 1. User passed `--team <name>` → team mode, named template, skip Stage 2.
 2. User passed `--mode <mode>` → respect, skip Stage 2.
-3. `profile.team.defaultMode === 'subagent'` → subagent (authoritative, even if verb matches).
-4. `profile.team.defaultMode === 'solo'` → solo (authoritative).
-5. Trivial: task mentions exactly one file (e.g. `utils.ts`) AND no architectural verb (`refactor`, `design`, `architect`, `migrate`, `redesign`, `restructure`) → solo.
-6. Task verb = `review` → team, `review-team` template.
-7. Task verb = `debug` → team, `incident-team` template.
-8. Else → fall through to Stage 2 (planner-classify).
+3. `profile.team.enabled === false` → subagent, authoritative. Blocks all auto-promotion below. (Sits below the explicit-flag rules so a per-run `--team`/`--mode` can still override the profile default intentionally.)
+4. `profile.team.defaultMode === 'subagent'` → subagent (authoritative, even if verb matches).
+5. `profile.team.defaultMode === 'solo'` → solo (authoritative).
+6. Trivial: task mentions exactly one file (e.g. `utils.ts`) AND no architectural verb (`refactor`, `design`, `architect`, `migrate`, `redesign`, `restructure`) → solo.
+7. Task verb = `review` → team, `review-team` template.
+8. Task verb = `debug` → team, `incident-team` template.
+9. Else → fall through to Stage 2 (planner-classify).
 
 ## Stage 2 — planner-classify (Opus)
 

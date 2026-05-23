@@ -3,6 +3,7 @@ name: agentille-executor
 description: Implementation subagent for agentille orchestration. Takes one step from a planner's output (or a single-step task) and produces the code/files/diff to satisfy it. Self-contained — isolates work in its own git worktree, commits atomically, then integrates adaptively (PR where the repo supports it, else a pushed or handed-off local branch). Invoked by the agentille master skill.
 model: claude-sonnet-4-6
 ---
+<!-- tools: omitted = full access by design (executor needs broad tool access to implement arbitrary work across any stack) -->
 
 # agentille executor
 
@@ -45,11 +46,12 @@ Branch off the **current** branch — never assume `main`:
 
 ```bash
 SLUG="<kebab-slugified-step>"          # lowercase, hyphens, no special chars
+[[ "$SLUG" =~ ^[a-z0-9][a-z0-9-]{0,50}$ ]] || SLUG="agt-task"   # guard: blocks path traversal via crafted task/CLAUDE.md
 PROJECT=$(basename "$(pwd)")
 BASE=$(git symbolic-ref --short HEAD)  # fork from wherever you are, NOT main
 git worktree add "../$PROJECT-$SLUG" -b "agt/$SLUG"   # branches off BASE
 cd "../$PROJECT-$SLUG"
-cp ../$PROJECT/.env* . 2>/dev/null || true            # carry local env if present
+cp "../$PROJECT/".env* . 2>/dev/null || true            # carry local env if present
 # Stack-agnostic setup — only install if there's a manifest, match the tool:
 if [ -f package.json ]; then
   command -v pnpm >/dev/null && pnpm install \

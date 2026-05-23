@@ -24,7 +24,7 @@ After classifying, dispatch this combination. Read top-to-bottom — order matte
 ## refactor
 - **agentille-planner** (Opus) — IF hasMultipleSubtasks, else skip
 - **agentille-executor** (Sonnet)
-- **agentille-code-reviewer** (Sonnet) — REQUIRED — refactors are exactly where regressions hide
+- **agentille-code-reviewer** (Sonnet) — REQUIRED — except for pure renames/moves with zero logic delta (files renamed/moved only), where it may be skipped. Refactors with any logic change still require it — regressions hide here.
 - *No design-reviewer* (refactor by definition has no visible change; if visual change emerges, that's the code-reviewer's BLOCKER finding)
 
 ## design

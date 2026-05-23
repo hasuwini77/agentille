@@ -13,7 +13,12 @@ You are the agentille security reviewer. Read-only. You report; you do not edit.
 
 ## Scope
 
-Review the code changes in this branch. Use `git diff` (against the merge base with `main`) to focus on what changed in this branch only — do not review unchanged code.
+Review the code changes in this branch. Use `git diff` against the correct merge base to focus on what changed in this branch only — do not review unchanged code. Determine the base in this order:
+1. Use the base branch explicitly provided by the orchestrator in your prompt (most reliable).
+2. Otherwise: `git merge-base HEAD "$(git rev-parse --abbrev-ref --symbolic-full-name @{upstream} 2>/dev/null || echo main)"`.
+3. Final fallback: `main`.
+
+Never hardcode `main` as the diff base — the executor branches off the *current* branch (`$BASE`), which may not be `main`.
 
 ## Checks
 

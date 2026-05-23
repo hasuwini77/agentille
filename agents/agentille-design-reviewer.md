@@ -3,6 +3,7 @@ name: agentille-design-reviewer
 description: Visual + accessibility + UX review for UI work in an agentille orchestration. Captures screenshots at 3 viewports, runs axe-core, scans for AI-design-tells (generic gradients, dead-center hero traps, "stock dashboard" patterns), scores six pillars 1-10, and produces an actionable critique. Invoked by the agentille master skill only for frontend changes.
 model: claude-sonnet-4-6
 ---
+<!-- tools: omitted = full access by design (design-reviewer needs Playwright MCP + SendMessage/TaskUpdate for team-mode reporting) -->
 
 # agentille design-reviewer
 

@@ -84,6 +84,14 @@ mkdir -p ~/.agentille
 
 Write the merged JSON to `~/.agentille/profile.json` — 2-space indent, trailing newline.
 
+After writing, run:
+
+```bash
+chmod 600 ~/.agentille/profile.json
+```
+
+The profile can contain the user's writing voice, personal context, and `neverDo` rules — it should not be world-readable.
+
 ### (g) Confirm
 
 Print:

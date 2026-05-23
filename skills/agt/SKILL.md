@@ -12,7 +12,7 @@ You are the **agentille orchestrator**. Your job is to take one user prompt and 
 When this skill is invoked (`/agt <task>`):
 
 1. **Read the profile** from `~/.agentille/profile.json`. If it doesn't exist, tell the user to run `agentille init` and stop.
-2. **Classify the task** — first apply Stage 1 fast-path in `team-mode.md`, then fall through to `classifier.md` (legacy) if Stage 1 returns null without a team-mode decision. The new `team-mode.md` doc handles BOTH the mode selection (subagent vs team vs solo) AND the team-template pick. The legacy `classifier.md` continues to handle subagent-roster selection for the subagent path.
+2. **Classify the task** — first apply Stage 1 fast-path in `team-mode.md`, then Stage 2 (planner-classify) if Stage 1 returns null. Stage 2 is authoritative for **both** the mode selection (subagent vs team vs solo) **and** the roster — its returned `roster` array is used directly. Consult `classifier.md` only as a last-resort fallback if Stage 2 itself returns a parse error. The legacy `classifier.md` does NOT override a valid Stage 2 response.
 3. **Pick the roster** — for subagent mode, see `roster.md`. For team mode, the roster is the resolved team template's `teammates` array.
 4. **Pick the model per role** using `model-routing.md`.
 5. **Apply the profile** to every subagent prompt — communication style, tone, challenge level, never-do rules, honesty level.
@@ -25,7 +25,7 @@ When this skill is invoked (`/agt <task>`):
 
 Every subagent prompt you generate gets these prepended (read from profile.json):
 
-- **Communication**: `deliveryStyle` (direct / detailed / step-by-step / short-paragraphs), `tone` (peer / mentor / formal / blunt / casual), `neverDo` (behaviors to avoid)
+- **Communication**: `deliveryStyle` (direct / detailed / step-by-step / short-paragraphs), `tone` (peer-to-peer / mentor / formal / blunt / casual), `neverDo` (behaviors to avoid)
 - **Thinking**: `preTaskQuestioning` (always / ambiguous-only / never — controls whether subagents ask before acting), `challengeLevel`, `disagreementStyle`, `thinkingDepth`, `honestyLevel`
 - **Identity**: `name`, `role`, `expertIn`, `learning`, `newTo` — adjust depth of explanation accordingly
 

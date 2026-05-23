@@ -1,0 +1,13 @@
+name: review-team
+description: Parallel multi-pillar review (code + design + security) of a change set.
+lead: agentille-planner
+teammates:
+  - role: agentille-code-reviewer
+    count: 1
+  - role: agentille-design-reviewer
+    count: 1
+  - role: agentille-security-reviewer
+    count: 1
+display-mode: auto
+hooks:
+  task-completed: agentille-log.sh

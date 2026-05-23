@@ -18,14 +18,14 @@ The profile written to `~/.agentille/profile.json` matches this shape:
   "deliveryStyle": "direct | detailed | step-by-step | short-paragraphs",
   "neverDo": ["string", "..."],
   "customNeverDo": "string",
-  "tone": "peer | mentor | formal | blunt | casual",
+  "tone": "peer-to-peer | mentor | formal | blunt | casual",
   "writingSamples": "string",
 
   "preTaskQuestioning": "always | ambiguous-only | never",
-  "challengeLevel": "soft | balanced | hard",
-  "disagreementStyle": "defer | discuss | push-back",
-  "thinkingDepth": "quick | balanced | deep",
-  "honestyLevel": "diplomatic | direct | brutal",
+  "challengeLevel": "supportive | balanced | sparring | ruthless",
+  "disagreementStyle": "push-back | both-sides | defer",
+  "thinkingDepth": "always | complex-only | quick",
+  "honestyLevel": "diplomatic | brutal | default",
 
   "projects": [],
   "selectedPrompts": []

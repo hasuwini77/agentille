@@ -42,7 +42,7 @@
 12. **customNeverDo** — *Anything else Claude should never do? (free text, optional)*
 
 13. **tone** — *What tone should Claude use with you?*
-    - enum: `peer` / `mentor` / `formal` / `blunt` / `casual`
+    - enum: `peer-to-peer` / `mentor` / `formal` / `blunt` / `casual`
 
 14. **writingSamples** — *Paste a writing sample of yours (optional — Claude learns your voice).*
     - free text, optional
@@ -53,16 +53,16 @@
     - enum: `always` / `ambiguous-only` / `never`
 
 16. **challengeLevel** — *How hard should Claude challenge your ideas?*
-    - enum: `soft` / `balanced` / `hard`
+    - enum: `supportive` / `balanced` / `sparring` / `ruthless`
 
 17. **disagreementStyle** — *When Claude disagrees with you, how should it handle it?*
-    - enum: `defer` / `discuss` / `push-back`
+    - enum: `push-back` / `both-sides` / `defer`
 
 18. **thinkingDepth** — *How deep should Claude think before responding?*
-    - enum: `quick` / `balanced` / `deep`
+    - enum: `always` / `complex-only` / `quick`
 
 19. **honestyLevel** — *How honest should Claude be?*
-    - enum: `diplomatic` / `direct` / `brutal`
+    - enum: `diplomatic` / `brutal` / `default`
 
 ## Section 4 of 4 — Team mode (3 questions)
 

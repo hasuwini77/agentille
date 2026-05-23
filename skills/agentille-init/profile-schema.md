@@ -47,6 +47,26 @@ Integer. Current value: **2**.
 - On re-run with an absent or `1` profile: the wizard detects `team` keys are absent, asks only the 3 Section 4 questions, then re-stamps `schemaVersion: 2`.
 - When future schema versions add new fields, those fields will also be detected as absent via key-presence — `schemaVersion` alone is not the gating check.
 
+**Extending the schema (for maintainers):** when you add wizard fields, (1) add them to `WIZARD_KEYS` below, (2) add their questions to `questions.md`, and (3) bump `schemaVersion` (and this section's "current value") so existing profiles get a clean migration marker. Key-presence does the actual asking; the bump is for tooling and the "already complete" check.
+
+## WIZARD_KEYS
+
+The canonical set of wizard-owned keys. The init wizard checks presence against THIS list to decide what to ask — not against whatever happens to be in an existing profile. Keys not in this list (`schemaVersion`, `projects`, `selectedPrompts`) are system-owned and never asked.
+
+```json
+{
+  "flat": [
+    "name", "role", "responsibilities", "goals", "techStack",
+    "expertIn", "learning", "newTo", "useCases",
+    "deliveryStyle", "neverDo", "customNeverDo", "tone", "writingSamples",
+    "preTaskQuestioning", "challengeLevel", "disagreementStyle", "thinkingDepth", "honestyLevel"
+  ],
+  "team": ["enabled", "defaultMode", "maxTeammates"]
+}
+```
+
+19 flat keys + 3 `team.*` sub-keys = the 22 questions. `team.displayMode` and `team.dailySoftCap` are NOT in this list — they are written as defaults (`"auto"`, `10`) when the team section is created, never asked.
+
 ## Option arrays
 
 Notes on `projects` and `selectedPrompts`:

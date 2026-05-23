@@ -23,6 +23,8 @@ Do NOT auto-trigger on generic setup prompts.
 | _(none)_ | **Idempotent merge** — read the existing profile, ask only for fields whose keys are absent. If nothing is missing, print the "already complete" message and stop. |
 | `--reconfigure` | **Full re-ask** — re-ask all questions across all 4 sections, showing each existing value as the current default. User keeps or changes each answer. Always preserves `projects[]` and `selectedPrompts[]` — those are not wizard fields and must never be wiped. |
 
+The `--reconfigure` token is read from the skill's invocation arguments. If it appears anywhere in the invocation, use full re-ask mode; otherwise use the default idempotent mode.
+
 ## What to do
 
 ### (a) Read existing profile
@@ -42,21 +44,23 @@ Apply the **key-presence rule**: a field is "already answered" if its key exists
 
 Ask only fields whose keys are **absent** from EXISTING.
 
-Key consequence: a v1.0/v1.1 profile has all Section 1–3 keys but lacks the `team` object → ask **only** the 3 Section 4 team questions, then stamp `schemaVersion: 2`.
+Check presence against the canonical `WIZARD_KEYS` list in `profile-schema.md` — not against whatever happens to be in EXISTING. (`projects`, `selectedPrompts`, and `schemaVersion` are system-owned and are never "asked".)
 
-If EXISTING has all keys for all sections and `schemaVersion` is already `2`:
-- Print: *"Your profile is already complete (schemaVersion 2). Run `agentille-init --reconfigure` to redo it."*
-- Stop. Do not rewrite the file.
+Key-presence applies to the nested `team.*` fields too: if the `team` object is absent **or** present-but-missing a sub-field (`enabled`, `defaultMode`, `maxTeammates`), ask the missing team question(s). A v1.0/v1.1 profile lacks `team` entirely → ask **only** the 3 Section 4 team questions.
+
+**When nothing is missing:**
+- If every `WIZARD_KEYS` field is present AND `schemaVersion` already equals the current value (`2`) → print *"Your profile is already complete (schemaVersion 2). Run `agentille-init --reconfigure` to redo it."* and **stop without rewriting**.
+- If every field is present but `schemaVersion` is absent or older (e.g. a hand-crafted profile) → do a **migration-only write**: stamp `schemaVersion: 2` and save without asking anything. Report *"Profile already complete — stamped schemaVersion 2."* (This is the one case where a "complete" profile is still rewritten.)
 
 **`--reconfigure` flag:**
-Re-ask all questions in all 4 sections. Pre-fill each question with its current value from EXISTING as the suggested default. User keeps or changes each.
+Re-ask every question in all 4 sections, showing each existing value as the current default. "Keep" (the user presses enter or says "same") retains the existing value; to **clear** a field the user must say so explicitly ("clear" / "none") → record empty. Do not treat a bare "skip" as clear during reconfigure — when in doubt, keep. On a fresh install (EXISTING is `{}`) there are no defaults to show — run it as a normal first-time setup.
 
-Show section progress headers only for sections that actually have questions to ask (skip a section silently if it has nothing to ask in default mode).
+Show a section header only for sections that actually have questions. If just one section is being asked (e.g. only Section 4 on a v1.0 upgrade), use its plain title ("Team mode") **without** the "N of 4" counter — that counter implies prior sections the user never sees.
 
 ### (c) Ask the selected questions
 
 - Use Claude Code's natural conversation flow — one question at a time, or grouped 3–4 if the user prefers.
-- For multi-select fields (`techStack`, `useCases`, `neverDo`), present the option list and accept comma-separated answers or numbered picks.
+- For multi-select fields (`techStack`, `useCases`, `neverDo`), present the option list and accept comma-separated answers or numbered picks. **Store the option `id` for `useCases` and `neverDo`** — their options are `{ id, label }` objects, so store ids (`"coding"`, `"no-disclaimers"`), not labels. `techStack` options are plain strings — store them as-is.
 - For enum fields (`deliveryStyle`, `tone`, `honestyLevel`, etc.), show all options with their hints and ask the user to pick.
 - Validate enum picks — if the user picks a value not in the list, re-prompt. Do not silently accept invalid values.
 - If the user says "skip", record an empty string or empty array for that field.

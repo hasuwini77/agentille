@@ -19,7 +19,9 @@ LOCAL=""
 if [[ -f "$LOCAL_JSON" ]]; then
   LOCAL=$(grep -m1 '"version"' "$LOCAL_JSON" | sed -E 's/.*"version"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/')
 fi
-[[ -z "$LOCAL" ]] && exit 0
+# sed prints the whole line on no-match, so validate as a dotted-numeric
+# version. Rejects empty AND any garbage that would poison the cache.
+[[ "$LOCAL" =~ ^[0-9]+(\.[0-9]+)*$ ]] || exit 0
 
 # ── Cache logic ───────────────────────────────────────────────────────────────
 NOW=$(date +%s)
@@ -41,16 +43,21 @@ if [[ -f "$CACHE_FILE" ]]; then
 fi
 
 # ── Network fetch ─────────────────────────────────────────────────────────────
-REMOTE_JSON=$(curl -fsS --max-time 3 "$RAW_URL" 2>/dev/null)
+REMOTE_JSON=$(curl -fs --max-time 3 "$RAW_URL" 2>/dev/null)
 if [[ -z "$REMOTE_JSON" ]]; then
   exit 0
 fi
 
 REMOTE=$(echo "$REMOTE_JSON" | grep -m1 '"version"' | sed -E 's/.*"version"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/')
-[[ -z "$REMOTE" ]] && exit 0
+# Same no-match guard as LOCAL: a malformed/partial remote response must never
+# reach the cache or the printed message.
+[[ "$REMOTE" =~ ^[0-9]+(\.[0-9]+)*$ ]] || exit 0
 
 # ── Semver compare ────────────────────────────────────────────────────────────
-NEWEST=$(printf '%s\n%s\n' "$LOCAL" "$REMOTE" | sort -V | tail -n1)
+# `sort -V` is absent on BusyBox/Alpine — suppress its stderr and bail if empty
+# so the hook stays silent rather than leaking "invalid option" to the session.
+NEWEST=$(printf '%s\n%s\n' "$LOCAL" "$REMOTE" | sort -V 2>/dev/null | tail -n1)
+[[ -z "$NEWEST" ]] && exit 0
 UPDATE_AVAILABLE="false"
 MESSAGE=""
 if [[ "$REMOTE" != "$LOCAL" && "$NEWEST" == "$REMOTE" ]]; then
@@ -69,7 +76,7 @@ cat >"$CACHE_TMP" <<ENDJSON
   "message": "$MESSAGE"
 }
 ENDJSON
-mv "$CACHE_TMP" "$CACHE_FILE"
+mv "$CACHE_TMP" "$CACHE_FILE" 2>/dev/null || rm -f "$CACHE_TMP" 2>/dev/null
 
 # ── Notify if update available ────────────────────────────────────────────────
 if [[ "$UPDATE_AVAILABLE" == "true" ]]; then

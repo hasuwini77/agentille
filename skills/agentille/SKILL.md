@@ -12,8 +12,8 @@ You are the **agentille orchestrator**. Your job is to take one user prompt and 
 When this skill is invoked (`/agentille <task>`):
 
 1. **Read the profile** from `~/.agentille/profile.json`. If it doesn't exist, tell the user to run `agentille init` and stop.
-2. **Classify the task** using `classifier.md` decision tree.
-3. **Pick the roster** of subagents for that task category (see `roster.md`).
+2. **Classify the task** — first apply Stage 1 fast-path in `team-mode.md`, then fall through to `classifier.md` (legacy) if Stage 1 returns null without a team-mode decision. The new `team-mode.md` doc handles BOTH the mode selection (subagent vs team vs solo) AND the team-template pick. The legacy `classifier.md` continues to handle subagent-roster selection for the subagent path.
+3. **Pick the roster** — for subagent mode, see `roster.md`. For team mode, the roster is the resolved team template's `teammates` array.
 4. **Pick the model per role** using `model-routing.md`.
 5. **Apply the profile** to every subagent prompt — communication style, tone, challenge level, never-do rules, honesty level.
 6. **Dispatch in dependency order**, parallelizing independent steps where the task explicitly contains independent subtasks.
@@ -50,6 +50,15 @@ The `agentille-` prefix is intentional — it avoids collision with the user's o
 
 See `roster.md` for which combinations to dispatch per task category.
 
+## Team mode (new in v1.2)
+
+The orchestrator now supports Claude Code's experimental Agent Teams primitive in addition to subagent dispatch. See `team-mode.md` for the full protocol. Highlights:
+
+- **Auto-detection**: checks `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1` env var, Claude Code version, and `profile.team.defaultMode` to decide subagent vs team vs solo per task. Defaults to subagent — no behavior change for existing users.
+- **Three starter templates**: `feature-team`, `review-team`, `incident-team` (see `.claude-plugin/teams/`).
+- **Graceful degradation**: if team mode fails for any reason (env var missing, version too old, spawn error), the orchestrator silently falls back to subagent mode and logs a one-liner.
+- **Shipped log**: every completed run (subagent or team) appends one line to `./docs/agentille-log.md` via the registered hook in `.claude-plugin/hooks/`.
+
 ## Hard rules
 
 - **Never invent the profile.** If `~/.agentille/profile.json` is missing or malformed, stop and instruct the user to run `agentille init` instead of guessing defaults.
@@ -73,6 +82,8 @@ The user wants this to be **token-efficient**. Apply these defaults:
 - `agentille-executor/SKILL.md` — implementation subagent
 - `agentille-code-reviewer/SKILL.md` — bugs / security / quality subagent
 - `agentille-design-reviewer/SKILL.md` — UI quality subagent
+- `agentille-security-reviewer/SKILL.md` — severity-classified security review subagent
 - `classifier.md` — task-category decision tree
 - `roster.md` — task-category → subagent roster
 - `model-routing.md` — subagent role → model selection
+- `team-mode.md` — team-mode auto-detection, Stage 1/Stage 2 dispatch, pre-flight checks, cost transparency

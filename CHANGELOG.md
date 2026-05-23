@@ -2,6 +2,12 @@
 
 All notable changes to agentille are documented here.
 
+## [1.4.1] — 2026-05-23
+
+### Fixed
+
+- **`agentille-init` enum values now match the canonical option arrays.** The JSON-shape union types and `questions.md` hints disagreed with the `*_OPTIONS` arrays in `profile-schema.md` (which match real profiles), so the wizard would offer wrong values. Aligned `tone` (`peer-to-peer`), `challengeLevel` (`supportive/balanced/sparring/ruthless`), `disagreementStyle` (`push-back/both-sides/defer`), `thinkingDepth` (`always/complex-only/quick`), and `honestyLevel` (`diplomatic/brutal/default`).
+
 ## [1.4.0] — 2026-05-23
 
 ### Added

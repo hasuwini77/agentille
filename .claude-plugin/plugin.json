@@ -2,8 +2,8 @@
   "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
   "name": "agentille",
   "displayName": "Agentille",
-  "version": "1.4.2",
-  "description": "Personal AI coding orchestrator for Claude Code. Seven skills with smart model routing, parallel git worktrees, and code + design review built in.",
+  "version": "1.5.0",
+  "description": "Personal AI coding orchestrator for Claude Code (trigger: /agt). Three skills + five dispatchable agents with smart model routing, agent-team support, parallel git worktrees, and code + design review built in.",
   "author": {
     "name": "@hasuwini77",
     "url": "https://github.com/hasuwini77"

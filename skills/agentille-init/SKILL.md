@@ -94,7 +94,7 @@ Print:
   - *"Already complete — nothing to do."* (only printed in step b when stopping early)
 - Next steps:
   - *"Run `agentille-project` inside any repo to add it to your profile and generate its `./CLAUDE.md`."*
-  - *"Then use `/agentille <task>` in Claude Code to orchestrate work."*
+  - *"Then use `/agt <task>` in Claude Code to orchestrate work."*
 
 ## Hard rules
 

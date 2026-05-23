@@ -9,6 +9,7 @@ teammates:
     count: 1
   - role: agentille-design-reviewer
     count: 1
-display-mode: auto
-hooks:
-  task-completed: agentille-log.sh
+# Roles map to agents/agentille-*.md; the orchestrator spawns them as the
+# namespaced subagent_type `agentille:agentille-<role>`. Display mode (panes vs
+# in-process) is the user's `teammateMode` setting, not declared here. The log
+# line is written by the orchestrator, not a hook (see skills/agt/SKILL.md).

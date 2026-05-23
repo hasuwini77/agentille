@@ -9,6 +9,8 @@ Thumbs.db
 
 # Logs
 *.log
+# agentille's per-run shipped log is a runtime artifact, not source
+docs/agentille-log.md
 
 # Env / secrets (paranoia — there should be no env files in a markdown repo)
 .env

@@ -9,7 +9,7 @@
 
 > A personal AI coding orchestrator for Claude Code. Type **`/agt "task"`** and it classifies the work, dispatches a tailored team of agents, routes the right Claude model to each, and applies *your* voice to every prompt.
 
-One command instead of manually chaining skills. Planning runs on Opus, execution on Sonnet, and code + design review are built in. Optionally fan the work out across a real Claude Code **agent team**, one teammate per pane.
+One command instead of manually chaining skills. Planning and review run on Opus, execution on Sonnet, and code + design review are built in. Optionally fan the work out across a real Claude Code **agent team**, one teammate per pane.
 
 ---
 
@@ -36,7 +36,7 @@ That's it. `/agt` does the rest: classify → plan (if needed) → implement →
 ## What you get
 
 - **One-command orchestration.** `/agt "task"` routes work through planner, executor, and reviewers automatically — no manual skill-chaining.
-- **Right model for the job.** Opus for planning, Sonnet for execution and review, Haiku for cheap classification. Tokens go where they earn the most.
+- **Right model for the job.** Opus for planning and review, Sonnet for execution, Haiku for cheap classification. Tokens go where they earn the most.
 - **Parallel-safe by default.** Each chunk of work runs in its own git worktree (branched off your *current* branch — never assumed `main`) with atomic commits, then integrates adaptively: a PR where the repo supports it, otherwise a pushed or handed-off branch. Works whether you're solo on main or stuck on a locked-down team branch.
 - **Voice-aware.** Your profile shapes every prompt. Ask for brutal feedback once, and every agent is brutal.
 - **Review built in.** Code review (bugs/security/quality) on every change, plus a design review (screenshots at 3 viewports, axe-core, and a scan for the generic AI-design tells that make most AI UIs feel cheap) whenever UI is touched.
@@ -67,9 +67,9 @@ When you run `/agt "task"`, the orchestrator:
 |---|---|---|
 | `agentille-planner` | Goal-backward plan with parallelizable steps marked | Opus |
 | `agentille-executor` | Headless implementation — atomic commits, integrates adaptively (PR / push / local branch) | Sonnet |
-| `agentille-code-reviewer` | Read-only review for bugs, security, quality | Sonnet |
-| `agentille-design-reviewer` | 6-pillar visual review, axe-core, AI-design-tell scan | Sonnet |
-| `agentille-security-reviewer` | Severity-classified security review | Sonnet |
+| `agentille-code-reviewer` | Read-only review for bugs, security, quality | Opus |
+| `agentille-design-reviewer` | 6-pillar visual review, axe-core, AI-design-tell scan | Opus |
+| `agentille-security-reviewer` | Severity-classified security review | Opus |
 
 ## Team mode (optional)
 
@@ -102,13 +102,14 @@ One pane per teammate needs **tmux** (or iTerm2). Without it team mode still run
 
 ```bash
 brew install tmux            # or use iTerm2 for native panes
+tmux                         # start a session, then launch `claude` inside it
 ```
 ```jsonc
 // ~/.claude/settings.json
 { "teammateMode": "tmux" }   // or "auto"
 ```
 
-Smoothest native panes: **iTerm2 + `tmux -CC`**.
+On Warp (and any non-iTerm2 terminal) you must be **inside** a tmux session before launching Claude — that's what the panes attach to. Smoothest native panes: **iTerm2 + `tmux -CC`** (it manages the session for you).
 
 **Windows — WSL2 (Ubuntu 22)**
 

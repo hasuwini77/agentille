@@ -1,7 +1,0 @@
-{
-  "TaskCompleted": [
-    {
-      "args": ["${CLAUDE_PLUGIN_ROOT}/hooks/agentille-log.sh"]
-    }
-  ]
-}

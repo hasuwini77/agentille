@@ -2,6 +2,17 @@
 
 All notable changes to agentille are documented here.
 
+## [Unreleased]
+
+### Added
+
+- **SessionStart update-check hook** (`hooks/agentille-update-check.sh`): fires on every `startup` event, checks GitHub for a newer version once per day (TTL-cached in `~/.agentille/.update-check.json`), and prints `agentille <remote> available (you're on <local>) — run /plugin to update` when a newer semver is available. No-op on network failure or equal versions.
+
+### Fixed
+
+- **Hooks relocated to plugin root** (`hooks/`): Claude Code auto-loads plugin hooks only from `<plugin-root>/hooks/hooks.json`. The previous location (`.claude-plugin/hooks/`) was never loaded, making the shipped-log hook dormant since v1.0. Files moved with history preserved (`git mv`).
+- **hooks.json rewritten to canonical format**: old file used a non-standard `args` key and bare event keys. New format uses the documented `{ "hooks": { "<Event>": [ { "matcher": "...", "hooks": [ { "type": "command", "command": "..." } ] } ] } }` shape. Both `SessionStart` (update-check) and `TaskCompleted` (log) hooks are now correctly registered.
+
 ## [1.2.0] — 2026-05-23
 
 ### Added — Team mode

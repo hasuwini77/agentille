@@ -29,9 +29,10 @@ if [[ -f "$CACHE_FILE" ]]; then
   CACHED_LOCAL=$(grep -m1 '"local"' "$CACHE_FILE" | sed -E 's/.*"local"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/')
   CACHED_UPDATE=$(grep -m1 '"update_available"' "$CACHE_FILE" | sed -E 's/.*"update_available"[[:space:]]*:[[:space:]]*(true|false).*/\1/')
   CACHED_MSG=$(grep -m1 '"message"' "$CACHE_FILE" | sed -E 's/.*"message"[[:space:]]*:[[:space:]]*"(.*)".*/\1/')
-  AGE=$(( NOW - CHECKED_AT ))
 
-  if [[ -n "$CHECKED_AT" && "$AGE" -lt "$TTL" && "$CACHED_LOCAL" == "$LOCAL" ]]; then
+  # Only do arithmetic once checked_at is confirmed numeric — a corrupt/empty
+  # cache must never leak a bash "syntax error" to stderr at session start.
+  if [[ "$CHECKED_AT" =~ ^[0-9]+$ && $(( NOW - CHECKED_AT )) -lt "$TTL" && "$CACHED_LOCAL" == "$LOCAL" ]]; then
     if [[ "$CACHED_UPDATE" == "true" ]]; then
       echo "$CACHED_MSG"
     fi

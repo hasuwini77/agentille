@@ -37,7 +37,7 @@ That's it. `/agt` does the rest: classify → plan (if needed) → implement →
 
 - **One-command orchestration.** `/agt "task"` routes work through planner, executor, and reviewers automatically — no manual skill-chaining.
 - **Right model for the job.** Opus for planning, Sonnet for execution and review, Haiku for cheap classification. Tokens go where they earn the most.
-- **Parallel-safe by default.** Each chunk of work runs in its own git worktree with atomic commits and an auto-opened PR — ship multiple features without history conflicts.
+- **Parallel-safe by default.** Each chunk of work runs in its own git worktree (branched off your *current* branch — never assumed `main`) with atomic commits, then integrates adaptively: a PR where the repo supports it, otherwise a pushed or handed-off branch. Works whether you're solo on main or stuck on a locked-down team branch.
 - **Voice-aware.** Your profile shapes every prompt. Ask for brutal feedback once, and every agent is brutal.
 - **Review built in.** Code review (bugs/security/quality) on every change, plus a design review (screenshots at 3 viewports, axe-core, and a scan for the generic AI-design tells that make most AI UIs feel cheap) whenever UI is touched.
 

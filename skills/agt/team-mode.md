@@ -83,7 +83,7 @@ You (the orchestrator) are the **team lead**. Given a resolved template:
    - `subagent_type` = the **namespaced** agent def, e.g. `agentille:agentille-executor` (NOT bare `agentille-executor` — that resolves to nothing).
    - `team_name` = the team you just created; `run_in_background: true` so teammates run concurrently.
    - Spawn `count` instances per role. Give each a distinct `name` you can reference (e.g. `exec-1`, `exec-2`).
-   - Prompt = the user's task + the profile context block + which slice of the work this teammate owns. **Assign disjoint file sets** — two teammates editing the same file overwrite each other.
+   - Prompt = the user's task + the profile context block + which slice of the work this teammate owns. **Assign disjoint file sets** — two teammates editing the same file overwrite each other. Implementation teammates should each take their own git worktree (the executor does this when `isolated: true`, branching off the current branch) so they can't collide even by accident.
    - If the template marks `require-plan-approval: true`, tell the teammate to plan first in read-only mode and wait for your approval before implementing; you approve/reject as lead.
 
 4. **Coordinate.** Teammates message you automatically when they go idle. Use the shared task list (`TaskCreate` / `TaskList`) for dependencies. Don't do the work yourself — wait for teammates unless one is genuinely stuck, then steer or respawn it.

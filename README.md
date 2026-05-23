@@ -75,29 +75,67 @@ When you run `/agt "task"`, the orchestrator:
 
 Instead of in-session subagents, agentille can drive a real Claude Code **agent team**: each role becomes an independent Claude session with its own context window that messages peers and shares a task list. Best when parallel perspectives genuinely help — multi-pillar review, cross-layer features, or competing-hypothesis debugging.
 
-**Enable it** (requires Claude Code 2.1.32+):
+### The teams
+
+| Team | When to use | Teammates spawned |
+|---|---|---|
+| 🟩 `feature-team` | Cross-layer feature with review built in | 2 × executor + code-reviewer + design-reviewer (4) |
+| 🟦 `review-team` | Parallel multi-pillar review of a change set | code-reviewer + design-reviewer + security-reviewer (3) |
+| 🟥 `incident-team` | Hard bug with several possible causes | 3 × executor testing competing hypotheses (3) |
+
+> Colors are auto-assigned by Claude Code — each teammate spawns in its own color (you'll see e.g. one green, one blue) and it can differ run to run. The badges above are just README labels; agentille doesn't pin a color per team. You (the orchestrator) are always the lead — the planner is not a spawned teammate.
+
+### 1 · Enable it (both platforms)
+
+Requires Claude Code **2.1.32+**. Add the experimental flag:
 
 ```jsonc
 // ~/.claude/settings.json
 { "env": { "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1" } }
 ```
 
-**Trigger it** per command (overrides your profile's `team.defaultMode`):
+### 2 · Turn on split panes (the "wow")
+
+One pane per teammate needs **tmux** (or iTerm2). Without it team mode still runs — teammates just share one pane (Shift+Down to cycle).
+
+**macOS**
+
+```bash
+brew install tmux            # or use iTerm2 for native panes
+```
+```jsonc
+// ~/.claude/settings.json
+{ "teammateMode": "tmux" }   // or "auto"
+```
+
+Smoothest native panes: **iTerm2 + `tmux -CC`**.
+
+**Windows — WSL2 (Ubuntu 22)**
+
+Windows Terminal can't host Claude's split panes directly, so run inside tmux *in WSL*:
+
+```bash
+sudo apt install tmux
+tmux                         # start a session, then launch `claude` inside it
+```
+```jsonc
+// ~/.claude/settings.json   (the one inside WSL: ~/.claude, not the Windows one)
+{ "teammateMode": "auto" }   // auto-detects the tmux session → panes
+```
+
+Keep your repo on the **WSL filesystem** (`~/projects/…`), not `/mnt/c/…` — the Windows mount is slow and makes git worktrees janky.
+
+> No split-pane support (falls back to in-process): VS Code's integrated terminal, standalone Windows Terminal, Ghostty.
+
+### 3 · Run it
 
 ```bash
 /agt --team review-team "review the latest PR"
+/agt --team feature-team "add a CSV export to the reports page"
 /agt --team incident-team "debug the auth race"
 ```
 
-Starter templates:
-
-| Template | When to use | Roster |
-|---|---|---|
-| `feature-team` | Cross-layer feature with design review | planner + 2 executors + code + design reviewers |
-| `review-team` | Parallel multi-pillar review | code + design + security reviewers |
-| `incident-team` | Hard bug with several possible causes | 3 executors testing competing hypotheses |
-
-**Split panes (the "wow"):** one pane per teammate is *your* Claude Code setting, not agentille's. Set `"teammateMode": "tmux"` in `~/.claude/settings.json` and install tmux (or iTerm2). Otherwise teammates run in-process (Shift+Down to cycle). The smoothest experience is **iTerm2 + `tmux -CC`**; split panes aren't supported in VS Code's integrated terminal, Windows Terminal, or Ghostty.
+`--team` overrides your profile's `team.defaultMode` for that one run.
 
 **Cost:** team mode uses ~4× the tokens of subagent mode (each teammate is a full session). agentille warns once per session if you pass the daily soft cap (default 10, set in your profile).
 

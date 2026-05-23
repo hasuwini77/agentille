@@ -2,6 +2,19 @@
 
 All notable changes to agentille are documented here.
 
+## [1.4.0] — 2026-05-23
+
+### Added
+
+- **`agentille-init` is now idempotent.** Re-running reads the existing `~/.agentille/profile.json` and asks only for fields whose keys are absent (key-presence detection — a present-but-empty field counts as answered). A v1.0/v1.1 profile lacking the `team` object is asked **only** the 3 Section 4 team questions, then stamped.
+- **`--reconfigure` flag** re-asks every question across all 4 sections (current values shown as defaults), merging back onto the existing profile so `projects[]` and `selectedPrompts[]` are preserved.
+- **`schemaVersion` stamp** (integer, current `2`) as an explicit migration marker; `absent`/`1` = pre-team profile.
+
+### Fixed
+
+- `agentille-init` stops on a malformed existing profile instead of clobbering it; adds an "already complete" early exit.
+- Corrected the question count to **22** (9+5+5+3, was mislabeled "21"), fixed section headers ("of 4"), and renumbered Section 4 to Q20–Q22 (previously collided with Section 3).
+
 ## [1.3.1] — 2026-05-23
 
 ### Changed

@@ -57,7 +57,7 @@ The orchestrator now supports Claude Code's experimental Agent Teams primitive i
 - **Auto-detection**: checks `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1` env var, Claude Code version, and `profile.team.defaultMode` to decide subagent vs team vs solo per task. Defaults to subagent — no behavior change for existing users.
 - **Three starter templates**: `feature-team`, `review-team`, `incident-team` (see `.claude-plugin/teams/`).
 - **Graceful degradation**: if team mode fails for any reason (env var missing, version too old, spawn error), the orchestrator silently falls back to subagent mode and logs a one-liner.
-- **Shipped log**: every completed run (subagent or team) appends one line to `./docs/agentille-log.md` via the registered hook in `.claude-plugin/hooks/`.
+- **Shipped log**: every completed run (subagent or team) appends one line to `./docs/agentille-log.md` via the registered hook in `hooks/`.
 
 ## Hard rules
 

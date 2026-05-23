@@ -7,13 +7,6 @@
           { "type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/hooks/agentille-update-check.sh", "timeout": 8 }
         ]
       }
-    ],
-    "TaskCompleted": [
-      {
-        "hooks": [
-          { "type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/hooks/agentille-log.sh" }
-        ]
-      }
     ]
   }
 }

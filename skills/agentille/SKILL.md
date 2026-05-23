@@ -18,7 +18,8 @@ When this skill is invoked (`/agentille <task>`):
 5. **Apply the profile** to every subagent prompt — communication style, tone, challenge level, never-do rules, honesty level.
 6. **Dispatch in dependency order**, parallelizing independent steps where the task explicitly contains independent subtasks.
 7. **Stream progress** with one short status line per phase ("Planning…", "Executing 2 parallel tasks…", "Code review…", "Design review…", "Done.").
-8. **Return one final summary** matching the user's `deliveryStyle` preference.
+8. **Append the shipped-log line** to `./docs/agentille-log.md` — you write it directly as the final step (see "Shipped log" below). There is no log hook.
+9. **Return one final summary** matching the user's `deliveryStyle` preference.
 
 ## Profile fields you MUST apply
 
@@ -57,7 +58,7 @@ The orchestrator now supports Claude Code's experimental Agent Teams primitive i
 - **Auto-detection**: checks `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1` env var, Claude Code version, and `profile.team.defaultMode` to decide subagent vs team vs solo per task. Defaults to subagent — no behavior change for existing users.
 - **Three starter templates**: `feature-team`, `review-team`, `incident-team` (see `.claude-plugin/teams/`).
 - **Graceful degradation**: if team mode fails for any reason (env var missing, version too old, spawn error), the orchestrator silently falls back to subagent mode and logs a one-liner.
-- **Shipped log**: every completed run (subagent or team) appends one line to `./docs/agentille-log.md` via the registered hook in `hooks/`.
+- **Shipped log**: every completed run (subagent or team) appends one line to `./docs/agentille-log.md` — written directly by the orchestrator as its final step (no hook). See "Shipped log" below.
 
 ## Hard rules
 
@@ -74,6 +75,29 @@ The user wants this to be **token-efficient**. Apply these defaults:
 - Planner: only for tasks with ≥3 distinct steps. Single-step tasks skip planning and go straight to executor.
 - Design-reviewer: only for tasks that touch frontend code (heuristic: prompt mentions UI/UX/CSS/component/page/styling/responsive/animation, or files changed under `src/components/`, `src/app/`, `*.css`, `*.tsx`).
 - Code-reviewer: skip for refactors that are pure renames or moves with no logic changes.
+
+## Shipped log
+
+As the final step of every run, **you (the orchestrator) write one line** to `./docs/agentille-log.md` in the project. There is no hook — a hook can't tell a mid-run pause (e.g. a clarifying question) from true completion across multi-turn runs, and a model can't export env vars to a hook process anyway. So you write it yourself.
+
+- If the file or today's date section is missing, create it: a `## <YYYY-MM-DD>` heading for today, then append the entry under it.
+- Entry format: `- **<verb>:** <task, first line, ≤120 chars> — ` + a backtick-wrapped meta string.
+- Meta: `subagent · <N>m` for subagent runs, or `<team-name> (<count> teammates · <N>m)` for team runs, where `N` = run duration in minutes.
+- Optional sub-bullets when you know them:
+  - `  - Files: <space-separated changed paths>`
+  - `  - PR: #<number>`
+
+Example:
+
+```
+## 2026-05-23
+
+- **feat:** User profile wizard — `feature-team (4 teammates · 12m)`
+  - Files: src/wizard/ src/profile/
+  - PR: #42
+```
+
+If you can't write the file for any reason, skip silently — never let logging block the user's result.
 
 ## Files in this skill pack
 

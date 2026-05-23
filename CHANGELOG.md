@@ -2,6 +2,16 @@
 
 All notable changes to agentille are documented here.
 
+## [Unreleased]
+
+### Changed
+
+- **Shipped log is now written by the orchestrator, not a hook.** The `agentille-log.sh` hook (registered on `TaskCompleted`) is removed. Hooks fire on turn boundaries and can't distinguish a mid-run clarifying question from true run completion, and a model can't export the run-metadata env vars the hook depended on into a hook process. The orchestrator now appends the one-line entry to `./docs/agentille-log.md` directly as its final step. Same log format, same location.
+
+### Removed
+
+- `hooks/agentille-log.sh` and its `TaskCompleted` registration in `hooks/hooks.json` (only the `SessionStart` update-check hook remains).
+
 ## [1.3.0] — 2026-05-23
 
 ### Added

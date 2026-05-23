@@ -60,19 +60,14 @@ Before dispatching team mode:
 
 Given a resolved team template (loaded from `.claude-plugin/teams/<name>.yaml`):
 
-1. **Set env vars for the log hook** (before dispatch):
-   - `AGENTILLE_MODE=team`
-   - `AGENTILLE_TEAM=<template.name>`
-   - `AGENTILLE_TEAMMATE_COUNT=<sum of teammates[].count>`
-   - `AGENTILLE_VERB=<from classifier>`
-   - `AGENTILLE_RUN_START_TIME=<unix seconds>`
+1. **Record the run start** (capture mode, team name, teammate count, verb, and a start timestamp) so you can write the shipped-log line at the end. Keep this in your own working context — there is no log hook to feed.
 
 2. **Spawn the team.** For each teammate entry in the template:
    - Spawn `count` instances of `subagent_type = teammate.role`
    - If `require-plan-approval: true`, instruct the teammate to plan first and wait for the lead's approval before implementing
    - Pass the user's task as the prompt
 
-3. **Wait for completion.** Each teammate emits `TaskCompleted`, firing the log hook automatically. The orchestrator (lead) synthesizes the final response.
+3. **Wait for completion.** When all teammates finish, the orchestrator (lead) synthesizes the final response, then appends the shipped-log line itself (see SKILL.md "Shipped log").
 
 ### Incident-team special case
 

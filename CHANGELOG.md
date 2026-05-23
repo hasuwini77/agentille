@@ -2,6 +2,17 @@
 
 All notable changes to agentille are documented here.
 
+## [1.8.0] — 2026-05-24
+
+### Changed
+
+- **Review agents now run on Opus by default.** `agentille-code-reviewer`, `agentille-design-reviewer`, and `agentille-security-reviewer` moved from `claude-sonnet-4-6` → `claude-opus-4-7`. Review is judgment-heavy and read-only/single-pass (no write-loop), so the token premium is small while the payoff — catching subtle regressions, AI-design-tells, and auth-bypass/injection logic before merge — is high. Aligns the roster with the project's own model-routing rule ("Opus for plan and review, Sonnet for execution"). The executor stays Sonnet.
+- **`thinkingDepth = quick` now downgrades reviewers too.** `planner`, `code-reviewer`, and `security-reviewer` drop to Sonnet on a `quick` signal for speed/cost; `design-reviewer` stays pinned to Opus (vision + design judgment is the one role agentille never trades down). Replaces the now-redundant `thinkingDepth = always → upgrade to Opus` note. Updated in `SKILL.md`, `roster.md`, and `model-routing.md`.
+
+### Documentation
+
+- README macOS split-pane setup now tells Warp (and other non-iTerm2) users to actually start a `tmux` session before launching Claude — the panes need an existing session to attach to. Previously only the WSL block carried that instruction.
+
 ## [1.7.2] — 2026-05-24
 
 ### Changed

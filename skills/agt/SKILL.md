@@ -1,6 +1,7 @@
 ---
 name: agt
 description: Personal AI coding orchestrator (the trigger formerly known as /agentille). Reads the user's profile from ~/.agentille/profile.json, classifies the task, and dispatches a tailored roster of agent definitions (planner, executor, code-reviewer, design-reviewer) with the right model per role. Activate ONLY when the user explicitly types `/agt <task>` or directly asks for "agentille orchestration" — do not auto-trigger on generic multi-agent or coding prompts.
+argument-hint: [--team feature-team|review-team|incident-team] "<task>"
 ---
 
 # agentille — orchestrator master skill

@@ -1,6 +1,6 @@
 ---
-name: agentille
-description: Personal AI coding orchestrator. Reads the user's profile from ~/.agentille/profile.json, classifies the task, and dispatches a tailored roster of subagents (planner, executor, code-reviewer, design-reviewer) with the right model per role. Activate ONLY when the user explicitly types `/agentille <task>` or directly asks for "agentille orchestration" — do not auto-trigger on generic multi-agent or coding prompts.
+name: agt
+description: Personal AI coding orchestrator (the trigger formerly known as /agentille). Reads the user's profile from ~/.agentille/profile.json, classifies the task, and dispatches a tailored roster of agent definitions (planner, executor, code-reviewer, design-reviewer) with the right model per role. Activate ONLY when the user explicitly types `/agt <task>` or directly asks for "agentille orchestration" — do not auto-trigger on generic multi-agent or coding prompts.
 ---
 
 # agentille — orchestrator master skill
@@ -9,7 +9,7 @@ You are the **agentille orchestrator**. Your job is to take one user prompt and 
 
 ## The contract
 
-When this skill is invoked (`/agentille <task>`):
+When this skill is invoked (`/agt <task>`):
 
 1. **Read the profile** from `~/.agentille/profile.json`. If it doesn't exist, tell the user to run `agentille init` and stop.
 2. **Classify the task** — first apply Stage 1 fast-path in `team-mode.md`, then fall through to `classifier.md` (legacy) if Stage 1 returns null without a team-mode decision. The new `team-mode.md` doc handles BOTH the mode selection (subagent vs team vs solo) AND the team-template pick. The legacy `classifier.md` continues to handle subagent-roster selection for the subagent path.
@@ -38,25 +38,28 @@ Communicate: <deliveryStyle>, <tone>. Honesty: <honestyLevel>. Challenge level: 
 
 Keep this prefix concise — subagents have limited context.
 
-## Sub-skills
+## Worker agents
 
-This skill ships with companion skills that handle one role each. Invoke them via Claude Code's `Agent` tool (`Task` / `agent` dispatch) with `subagent_type` set to the matching skill name (always the `agentille-` prefixed form):
+This plugin ships five **agent definitions** (in the plugin's `agents/` dir), one per role. Dispatch them via Claude Code's `Agent` tool with `subagent_type` set to the **plugin-namespaced** name — these are registered agents (not skills), so the `agentille:` namespace is required or the dispatch fails with "Agent type not found":
 
-- **agentille-planner** — produces a goal-backward plan with parallelizable steps marked
-- **agentille-executor** — implements one logical chunk of work
-- **agentille-code-reviewer** — reviews changes for bugs, security, quality
-- **agentille-design-reviewer** — for UI work; screenshots + axe-core + visual critique
+- **agentille:agentille-planner** — produces a goal-backward plan with parallelizable steps marked
+- **agentille:agentille-executor** — implements one logical chunk of work (headless: implement → commit → push → PR)
+- **agentille:agentille-code-reviewer** — reviews changes for bugs, security, quality (read-only)
+- **agentille:agentille-design-reviewer** — for UI work; screenshots + axe-core + visual critique (read-only on source)
+- **agentille:agentille-security-reviewer** — severity-classified security review (read-only)
 
-The `agentille-` prefix is intentional — it avoids collision with the user's other installed `planner`/`code-reviewer`/etc. skills (e.g. superpowers, gsd).
+Each agent def carries its own default `model` and `tools` allowlist, but still pass an **explicit `model`** on every dispatch per `model-routing.md` — the static frontmatter default can't express the `thinkingDepth` overrides. The `agentille-` prefix avoids colliding with the user's other installed `planner`/`code-reviewer` agents (e.g. superpowers, gsd).
 
 See `roster.md` for which combinations to dispatch per task category.
 
-## Team mode (new in v1.2)
+## Team mode
 
-The orchestrator now supports Claude Code's experimental Agent Teams primitive in addition to subagent dispatch. See `team-mode.md` for the full protocol. Highlights:
+The orchestrator supports Claude Code's Agent Teams primitive in addition to subagent dispatch. See `team-mode.md` for the full protocol. Highlights:
 
-- **Auto-detection**: checks `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1` env var, Claude Code version, and `profile.team.defaultMode` to decide subagent vs team vs solo per task. Defaults to subagent — no behavior change for existing users.
-- **Three starter templates**: `feature-team`, `review-team`, `incident-team` (see `.claude-plugin/teams/`).
+- **Opt-in via `--team`**: `/agt --team <template> "<task>"` is the intended trigger and overrides `profile.team.defaultMode`. Without `--team`, auto-detection (Stage 1 in `team-mode.md`) decides subagent vs team vs solo and defaults to subagent.
+- **Teammates are the same agent defs**: each teammate is spawned from `agentille:agentille-*` (e.g. `agentille:agentille-executor`). This is why the workers MUST be agent definitions — teammate definitions ignore `skills`/`mcpServers` frontmatter, so a skill cannot act as a teammate.
+- **Three starter templates** (role manifests, see `.claude-plugin/teams/`): `feature-team`, `review-team`, `incident-team`.
+- **Split-pane "wow" is a user setting, not ours**: whether teammates appear in their own tmux/iTerm2 pane is controlled by the user's `teammateMode` in `~/.claude/settings.json` (`"tmux"` / `"auto"` / `"in-process"`) plus an installed tmux/iTerm2 — agentille does not control it.
 - **Graceful degradation**: if team mode fails for any reason (env var missing, version too old, spawn error), the orchestrator silently falls back to subagent mode and logs a one-liner.
 - **Shipped log**: every completed run (subagent or team) appends one line to `./docs/agentille-log.md` — written directly by the orchestrator as its final step (no hook). See "Shipped log" below.
 
@@ -101,13 +104,16 @@ If you can't write the file for any reason, skip silently — never let logging 
 
 ## Files in this skill pack
 
-- `agentille/SKILL.md` — this file (master orchestrator)
-- `agentille-planner/SKILL.md` — goal-backward planner subagent
-- `agentille-executor/SKILL.md` — implementation subagent
-- `agentille-code-reviewer/SKILL.md` — bugs / security / quality subagent
-- `agentille-design-reviewer/SKILL.md` — UI quality subagent
-- `agentille-security-reviewer/SKILL.md` — severity-classified security review subagent
-- `classifier.md` — task-category decision tree
-- `roster.md` — task-category → subagent roster
-- `model-routing.md` — subagent role → model selection
-- `team-mode.md` — team-mode auto-detection, Stage 1/Stage 2 dispatch, pre-flight checks, cost transparency
+- `agt/SKILL.md` — this file (master orchestrator)
+- `agt/classifier.md` — task-category decision tree
+- `agt/roster.md` — task-category → agent roster
+- `agt/model-routing.md` — agent role → model selection
+- `agt/team-mode.md` — team-mode auto-detection, Stage 1/Stage 2 dispatch, pre-flight checks, cost transparency
+
+The five worker roles live as **agent definitions** in the plugin's `agents/` dir (dispatched as `agentille:agentille-*`), not as skills:
+
+- `agents/agentille-planner.md` — goal-backward planner
+- `agents/agentille-executor.md` — implementation
+- `agents/agentille-code-reviewer.md` — bugs / security / quality
+- `agents/agentille-design-reviewer.md` — UI quality (+ `agents/references/` rubrics)
+- `agents/agentille-security-reviewer.md` — severity-classified security review

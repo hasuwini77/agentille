@@ -2,6 +2,19 @@
 
 All notable changes to agentille are documented here.
 
+## [1.5.0] — 2026-05-23
+
+### Changed
+
+- **Workers are now real agent definitions, not skills.** The orchestrator dispatched `planner`/`executor`/reviewers via `Agent({subagent_type:"agentille-executor"})`, but those were skills — the Agent tool rejected them ("Agent type not found"), so dispatch silently fell back to a generic agent and the roster was never truly used. The five worker roles now live in `agents/` and dispatch as `agentille:agentille-*`. This is also the only form that works as agent-team teammate definitions (teammates ignore `skills`/`mcpServers` frontmatter).
+- **Trigger renamed `/agentille` → `/agt`** — shorter, and no longer near-collides with `/agent`. Setup skills keep their names (`agentille-init`, `agentille-project`); the `~/.agentille/` profile path is unchanged.
+- **Team mode rewritten for the real Claude Code primitives.** `team-mode.md` now uses `TeamCreate` + namespaced `Agent` dispatch instead of abstract "spawn" language; documents that the split-pane display is the user's `teammateMode` setting (tmux/iTerm2), not agentille's; clarifies that `.claude-plugin/teams/*.yaml` are agentille role manifests while Claude Code owns the real per-team config.
+
+### Fixed
+
+- **Executor git scope trimmed.** Removed the dev-server/port/`ui-test` overlap with `/git-workflow`; the executor is now explicitly headless (implement → commit → push → PR). Hard git rules preserved.
+- Removed the dead `task-completed: agentille-log.sh` hook reference from all three team templates (the shipped-log has been orchestrator-written since v1.3.1).
+
 ## [1.4.2] — 2026-05-23
 
 ### Fixed

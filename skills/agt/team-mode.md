@@ -25,7 +25,7 @@ When Stage 1 returns null, dispatch the planner in classify mode by prepending `
 
 ```
 Agent({
-  subagent_type: "agentille-planner",
+  subagent_type: "agentille:agentille-planner",
   prompt: "CLASSIFY: <user task>",
   description: "Classify task for orchestrator"
 })
@@ -37,7 +37,7 @@ The planner returns a single JSON object:
 {
   "mode": "subagent | team | solo",
   "team_template": "feature-team | review-team | incident-team | null",
-  "roster": ["agentille-executor", "agentille-code-reviewer"],
+  "roster": ["agentille:agentille-executor", "agentille:agentille-code-reviewer"],
   "reasoning": "one-sentence why"
 }
 ```
@@ -56,18 +56,35 @@ Before dispatching team mode:
 
 3. Check daily soft cap (see below). If exceeded, prompt once per session.
 
+## Display mode (the split-pane "wow")
+
+Whether teammates appear in separate panes is the **user's** setting, not agentille's — never try to set it from the skill:
+
+- `teammateMode: "in-process"` (and the `"auto"` default outside tmux) → all teammates live in the lead's terminal; cycle with Shift+Down. Works in any terminal.
+- `teammateMode: "tmux"` (or `"auto"` while already inside a tmux session) → each teammate gets its own pane. Requires tmux **or** iTerm2 (`it2` CLI) installed.
+
+If the user asks "why no panes?", point them at `~/.claude/settings.json` → `teammateMode` plus installing tmux/iTerm2. Split panes are unsupported in VS Code's integrated terminal, Windows Terminal, and Ghostty.
+
 ## Team dispatch
 
-Given a resolved team template (loaded from `.claude-plugin/teams/<name>.yaml`):
+The `.claude-plugin/teams/<name>.yaml` files are **agentille's own role manifests** — they tell the orchestrator which roles/counts make up a template. They are NOT Claude Code team config: Claude Code auto-generates and owns `~/.claude/teams/<name>/config.json` (session IDs, pane IDs) and overwrites any hand-authored version, so never pre-author that file.
 
-1. **Record the run start** (capture mode, team name, teammate count, verb, and a start timestamp) so you can write the shipped-log line at the end. Keep this in your own working context — there is no log hook to feed.
+You (the orchestrator) are the **team lead**. Given a resolved template:
 
-2. **Spawn the team.** For each teammate entry in the template:
-   - Spawn `count` instances of `subagent_type = teammate.role`
-   - If `require-plan-approval: true`, instruct the teammate to plan first and wait for the lead's approval before implementing
-   - Pass the user's task as the prompt
+1. **Record the run start** (mode, team name, teammate count, verb, start timestamp) so you can write the shipped-log line at the end. Keep it in your own context — there is no log hook.
 
-3. **Wait for completion.** When all teammates finish, the orchestrator (lead) synthesizes the final response, then appends the shipped-log line itself (see SKILL.md "Shipped log").
+2. **Create the team** with `TeamCreate` (use the template name).
+
+3. **Spawn each teammate** with the `Agent` tool, into that team:
+   - `subagent_type` = the **namespaced** agent def, e.g. `agentille:agentille-executor` (NOT bare `agentille-executor` — that resolves to nothing).
+   - `team_name` = the team you just created; `run_in_background: true` so teammates run concurrently.
+   - Spawn `count` instances per role. Give each a distinct `name` you can reference (e.g. `exec-1`, `exec-2`).
+   - Prompt = the user's task + the profile context block + which slice of the work this teammate owns. **Assign disjoint file sets** — two teammates editing the same file overwrite each other.
+   - If the template marks `require-plan-approval: true`, tell the teammate to plan first in read-only mode and wait for your approval before implementing; you approve/reject as lead.
+
+4. **Coordinate.** Teammates message you automatically when they go idle. Use the shared task list (`TaskCreate` / `TaskList`) for dependencies. Don't do the work yourself — wait for teammates unless one is genuinely stuck, then steer or respawn it.
+
+5. **Synthesize + clean up.** When all teammates finish, synthesize the final response, append the shipped-log line (see SKILL.md "Shipped log"), then shut teammates down and ask the lead to clean up the team. A teammate must never run cleanup — its team context may not resolve.
 
 ### Incident-team special case
 

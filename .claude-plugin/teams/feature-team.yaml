@@ -1,13 +1,13 @@
 name: feature-team
 description: Cross-layer feature implementation with code + design review running in parallel.
-lead: agentille-planner
+lead: agentille:agentille-planner
 teammates:
-  - role: agentille-executor
+  - role: agentille:agentille-executor
     count: 2
     require-plan-approval: true
-  - role: agentille-code-reviewer
+  - role: agentille:agentille-code-reviewer
     count: 1
-  - role: agentille-design-reviewer
+  - role: agentille:agentille-design-reviewer
     count: 1
 # Roles map to agents/agentille-*.md; the orchestrator spawns them as the
 # namespaced subagent_type `agentille:agentille-<role>`. Display mode (panes vs

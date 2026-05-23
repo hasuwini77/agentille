@@ -38,7 +38,7 @@ After classifying, dispatch this combination. Read top-to-bottom — order matte
 
 ## review
 - **agentille-code-reviewer** (Sonnet) — the only subagent. No executor (user is asking for review, not changes).
-- **design-reviewer** (Sonnet) — IF the target is UI code
+- **agentille-design-reviewer** (Sonnet) — IF the target is UI code
 
 ## Hard cap
 

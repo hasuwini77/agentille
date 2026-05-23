@@ -73,7 +73,7 @@ Then run the one-time setup inside Claude Code:
 /agentille-init
 ```
 
-Eighteen questions about how you communicate. Writes `~/.agentille/profile.json`, which every other agentille skill reads.
+Twenty-two questions about how you communicate. Writes `~/.agentille/profile.json`, which every other agentille skill reads.
 
 ## Use it
 

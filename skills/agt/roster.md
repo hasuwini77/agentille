@@ -1,5 +1,7 @@
 # Subagent roster per task category
 
+> **Authority:** the dispatch decision table in `skills/agt/SKILL.md` is the tie-breaker. This doc is the detail/rationale — if it ever conflicts with that table, the table wins.
+
 After classifying, dispatch this combination. Read top-to-bottom — order matters.
 
 ## planning

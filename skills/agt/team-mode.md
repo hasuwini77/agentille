@@ -1,5 +1,7 @@
 # Team mode — when to use it and how to dispatch
 
+> **Authority:** the dispatch decision table in `skills/agt/SKILL.md` is the tie-breaker. This doc is the detail/rationale — if it ever conflicts with that table, the table wins.
+
 The orchestrator picks one of three execution modes per task:
 
 - **subagent** (default, always available) — dispatches roles via the `Agent` tool, results return to the orchestrator. The v1.0 path.

@@ -1,5 +1,7 @@
 # Task classifier — heuristic decision tree
 
+> **Authority:** the dispatch decision table in `skills/agt/SKILL.md` is the tie-breaker. This doc is the detail/rationale — if it ever conflicts with that table, the table wins.
+
 The agentille master skill uses this to classify the user's prompt into ONE of eight categories. Run heuristics in order; the first match wins. Don't call an LLM for classification unless ALL heuristics miss.
 
 ## Categories

@@ -2,6 +2,21 @@
 
 All notable changes to agentille are documented here.
 
+## [1.6.1] — 2026-05-23
+
+### Fixed
+
+- **[CRITICAL] `profile.team.enabled: false` now blocks team-mode auto-promotion.** A default install ships with `enabled: false` but `defaultMode: "auto"`, so verb-matched rules (`review` → team, `debug` → team) silently escalated tasks despite the user opting out. New Stage 1 rule at position 3 makes `enabled === false` authoritative for subagent mode — explicit `--team`/`--mode` flags above it still win.
+- **[HIGH] Security-reviewer diff base is now adaptive.** The hardcoded `git diff ... main` base produced a wrong delta on any non-main branch. Reviewer now prefers an orchestrator-provided base, falls back to `git merge-base HEAD <upstream>`, then finally `main`.
+- **[HIGH] Stage 2 is explicitly authoritative for both mode and roster.** `SKILL.md` step 2 was ambiguous about whether `classifier.md` or Stage 2's returned `roster` array wins. Clarified: Stage 2 is the authority; `classifier.md` is last-resort fallback on parse error only.
+- **[HIGH] `code-reviewer` required-on-refactor now has a carve-out** for pure renames/moves with zero logic delta, consistent with `SKILL.md`'s token-budget hint. Both docs now agree.
+- **[MEDIUM] Slug guard added to executor worktree setup.** A bash `[[ "$SLUG" =~ ^[a-z0-9][a-z0-9-]{0,50}$ ]]` guard immediately after SLUG assignment prevents path traversal injected via a crafted task name or `CLAUDE.md`.
+- **[LOW] `$PROJECT` variable quoted in `.env` copy.** `cp "../$PROJECT/".env*` correctly handles project names with spaces while preserving the glob.
+- **[LOW] `chmod 600 ~/.agentille/profile.json`** added to `agentille-init` after the Write step. The profile can contain writing voice and personal context; it should not be world-readable.
+- **[LOW] README executor table row** updated to "integrates adaptively (PR / push / local branch)" — the old "opens a PR" wording was stale since v1.6.0.
+- **[LOW] `tone` comment in `SKILL.md`** corrected from `"peer"` to `"peer-to-peer"` (matches the canonical schema value).
+- **[LOW] Intentional `tools:` omission documented** on `agentille-executor` and `agentille-design-reviewer` frontmatter so future readers don't add a restrictive allowlist.
+
 ## [1.6.0] — 2026-05-23
 
 ### Changed

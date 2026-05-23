@@ -2,6 +2,13 @@
 
 All notable changes to agentille are documented here.
 
+## [1.4.2] — 2026-05-23
+
+### Fixed
+
+- **Update-check hook hardened** (review follow-ups): validates local/remote versions as dotted-numeric (a malformed remote `plugin.json` can no longer poison the cache or the printed line), suppresses `sort -V`/`mv` stderr so the hook stays silent on minimal systems (BusyBox/Alpine), and drops the moot curl `-S`.
+- **Idempotent-init contract gaps closed** (review follow-ups): added a canonical `WIZARD_KEYS` list so absent-key detection is deterministic; a complete-but-unstamped profile now gets a migration-only write instead of limbo; key-presence recurses into `team.*` sub-fields; `useCases`/`neverDo` now specify storing the option `id`; `--reconfigure` keep-vs-clear, fresh-install, and flag-detection semantics defined; dropped the misleading "N of 4" header when only one section is asked.
+
 ## [1.4.1] — 2026-05-23
 
 ### Fixed

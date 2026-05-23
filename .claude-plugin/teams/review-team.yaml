@@ -1,12 +1,12 @@
 name: review-team
 description: Parallel multi-pillar review (code + design + security) of a change set.
-lead: agentille-planner
+lead: agentille:agentille-planner
 teammates:
-  - role: agentille-code-reviewer
+  - role: agentille:agentille-code-reviewer
     count: 1
-  - role: agentille-design-reviewer
+  - role: agentille:agentille-design-reviewer
     count: 1
-  - role: agentille-security-reviewer
+  - role: agentille:agentille-security-reviewer
     count: 1
 # Roles map to agents/agentille-*.md; the orchestrator spawns them as the
 # namespaced subagent_type `agentille:agentille-<role>`. Display mode (panes vs

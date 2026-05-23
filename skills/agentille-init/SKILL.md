@@ -1,6 +1,6 @@
 ---
 name: agentille-init
-description: Global setup for agentille — idempotent by default. Captures communication, thinking, and identity preferences in 22 questions across 4 sections, then writes ~/.agentille/profile.json. Re-running only asks for fields not yet set. Use --reconfigure to re-ask everything. The master orchestrator skill (`agentille`) reads the profile to dispatch subagents in the user's voice.
+description: Global setup for agentille — idempotent by default. Captures communication, thinking, and identity preferences in 22 questions across 4 sections, then writes ~/.agentille/profile.json. Re-running only asks for fields not yet set. Use --reconfigure to re-ask everything. The master orchestrator skill (`agt`) reads the profile to dispatch subagents in the user's voice.
 ---
 
 # agentille-init — global profile setup
@@ -10,7 +10,7 @@ Run this skill to capture the user's preferences. It writes `~/.agentille/profil
 ## When to invoke
 
 - User explicitly asks to "set up agentille", "run agentille init", or "configure my agentille profile"
-- The master `agentille` skill detected a missing profile and asked the user to run init
+- The master `agt` skill detected a missing profile and asked the user to run init
 - Profile exists but user wants to update specific answers (idempotent re-run, fills gaps only)
 - User passes `--reconfigure` to redo the full wizard
 

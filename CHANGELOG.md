@@ -2,6 +2,17 @@
 
 All notable changes to agentille are documented here.
 
+## [1.5.1] — 2026-05-23
+
+### Fixed
+
+Follow-ups from an `agentille:agentille-code-reviewer` pass on 1.5.0 (the first review run through the now-working dispatch):
+
+- **Team templates now namespace `lead`/`role`** as `agentille:agentille-*`, matching the dispatch contract — bare names would resolve to nothing.
+- `roster.md` review row referenced a bare `design-reviewer`; corrected to `agentille-design-reviewer`.
+- `agentille-init` docs called the orchestrator skill `agentille`; updated to the renamed `agt`.
+- README setup line said "Eighteen questions"; corrected to the actual 22.
+
 ## [1.5.0] — 2026-05-23
 
 ### Changed

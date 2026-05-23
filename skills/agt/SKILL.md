@@ -1,6 +1,7 @@
 ---
 name: agt
 description: Personal AI coding orchestrator (the trigger formerly known as /agentille). Reads the user's profile from ~/.agentille/profile.json, classifies the task, and dispatches a tailored roster of agent definitions (planner, executor, code-reviewer, design-reviewer) with the right model per role. Activate ONLY when the user explicitly types `/agt <task>` or directly asks for "agentille orchestration" — do not auto-trigger on generic multi-agent or coding prompts.
+argument-hint: [--team feature-team|review-team|incident-team] "<task>"
 ---
 
 # agentille — orchestrator master skill
@@ -12,7 +13,7 @@ You are the **agentille orchestrator**. Your job is to take one user prompt and 
 When this skill is invoked (`/agt <task>`):
 
 1. **Read the profile** from `~/.agentille/profile.json`. If it doesn't exist, tell the user to run `agentille init` and stop.
-2. **Classify the task** — first apply Stage 1 fast-path in `team-mode.md`, then Stage 2 (planner-classify) if Stage 1 returns null. Stage 2 is authoritative for **both** the mode selection (subagent vs team vs solo) **and** the roster — its returned `roster` array is used directly. Consult `classifier.md` only as a last-resort fallback if Stage 2 itself returns a parse error. The legacy `classifier.md` does NOT override a valid Stage 2 response.
+2. **Classify the task** — first apply Stage 1 fast-path in `team-mode.md`, then Stage 2 (planner-classify) if Stage 1 returns null. Stage 2 is authoritative for **both** the mode selection (subagent vs team vs solo) **and** the roster — its returned `roster` array is used directly. Consult `classifier.md` only as a last-resort fallback if Stage 2 itself returns a parse error. The legacy `classifier.md` does NOT override a valid Stage 2 response. (resolve via the Dispatch decision table below — authoritative)
 3. **Pick the roster** — for subagent mode, see `roster.md`. For team mode, the roster is the resolved team template's `teammates` array.
 4. **Pick the model per role** using `model-routing.md`.
 5. **Apply the profile** to every subagent prompt — communication style, tone, challenge level, never-do rules, honesty level.
@@ -20,6 +21,57 @@ When this skill is invoked (`/agt <task>`):
 7. **Stream progress** with one short status line per phase ("Planning…", "Executing 2 parallel tasks…", "Code review…", "Design review…", "Done.").
 8. **Append the shipped-log line** to `./docs/agentille-log.md` — you write it directly as the final step (see "Shipped log" below). There is no log hook.
 9. **Return one final summary** matching the user's `deliveryStyle` preference.
+
+## Dispatch decision table (authoritative)
+
+> This table is the single source of truth for how `/agt` resolves a task into a **mode**, **roster**, and **models**. Where `team-mode.md`, `classifier.md`, `roster.md`, or `model-routing.md` read differently, **this table wins** — those docs carry the detail and rationale, not the tie-breaker. Resolve in three steps, top to bottom.
+
+### Step 1 — Resolve MODE (first match wins)
+
+| # | Condition (check in order) | Mode | Template |
+|---|---|---|---|
+| 1 | `--team <name>` flag present | **team** | `<name>` |
+| 2 | `--mode <m>` flag present | **`<m>`** | — |
+| 3 | `profile.team.enabled === false` | **subagent** | — |
+| 4 | `profile.team.defaultMode === 'subagent'` | **subagent** | — |
+| 5 | `profile.team.defaultMode === 'solo'` | **solo** | — |
+| 6 | Trivial: exactly one file named AND no architectural verb (`refactor`/`design`/`architect`/`migrate`/`redesign`/`restructure`) | **solo** | — |
+| 7 | Task verb = `review` | **team** | review-team |
+| 8 | Task verb = `debug` | **team** | incident-team |
+| 9 | Otherwise | **Stage 2** (planner-classify) — its returned `{mode, template, roster}` is authoritative | per Stage 2 |
+
+Any team result must pass the team pre-flight (env flag `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1`, Claude Code ≥ 2.1.32, daily soft cap) — see `team-mode.md`. On any pre-flight or spawn failure, degrade to subagent mode.
+
+### Step 2 — Resolve ROSTER
+
+**Team mode** → roster = the resolved template's `teammates` array (`.claude-plugin/teams/<template>.yaml`). Drop any reviewer with nothing to review (e.g. design-reviewer when the change set has no UI/frontend surface).
+
+**Subagent mode** → classify into ONE category via `classifier.md`, then dispatch:
+
+| Category | planner | executor | code-reviewer | design-reviewer | security-reviewer |
+|---|---|---|---|---|---|
+| planning | ✓ | — | — | — | — |
+| research | ✓ (research prefix) | — | — | — | — |
+| feature | if multi-subtask | ✓ (≤3 parallel) | ✓ | if hasUI | if security-tagged |
+| bugfix | if ≥2 files | ✓ | ✓ | if hasUI | — |
+| refactor | if multi-subtask | ✓ | ✓ *(skip iff pure rename/move, zero logic delta)* | — | — |
+| design | — | ✓ | if logic changed | ✓ REQUIRED | — |
+| debug | — | ✓ (debug loop) | after a fix is applied only | — | — |
+| review | — | — | ✓ | if target is UI code | if security-tagged |
+
+### Step 3 — Resolve MODELS (per role)
+
+| Role | Default | Override |
+|---|---|---|
+| planner | Opus | → Sonnet if `thinkingDepth=quick` |
+| executor | Sonnet | never downgrade (broken code costs more than tokens) |
+| code-reviewer | Sonnet | → Opus if `thinkingDepth=always` **and** high-risk path (auth / payments / api routes) |
+| design-reviewer | Sonnet | never downgrade — native vision required |
+| security-reviewer | Sonnet | → Opus if `thinkingDepth=always` **and** high-risk path |
+| classifier | heuristic, no LLM | Haiku only if every heuristic misses |
+| final-summary | Haiku | — |
+
+Always declare the model explicitly on each dispatch — never let it default.
 
 ## Profile fields you MUST apply
 

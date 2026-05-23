@@ -1,6 +1,7 @@
 ---
 name: agentille-init
 description: Global setup for agentille — idempotent by default. Captures communication, thinking, and identity preferences in 22 questions across 4 sections, then writes ~/.agentille/profile.json. Re-running only asks for fields not yet set. Use --reconfigure to re-ask everything. The master orchestrator skill (`agt`) reads the profile to dispatch subagents in the user's voice.
+argument-hint: [--reconfigure]
 ---
 
 # agentille-init — global profile setup

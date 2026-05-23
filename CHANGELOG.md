@@ -2,6 +2,13 @@
 
 All notable changes to agentille are documented here.
 
+## [1.7.0] — 2026-05-23
+
+### Added
+
+- **Canonical Dispatch decision table** in `skills/agt/SKILL.md` — single authoritative source for mode/roster/model resolution, collapsing logic previously smeared across `team-mode.md`, `classifier.md`, `roster.md`, and `model-routing.md` into three sequential steps (resolve MODE → resolve ROSTER → resolve MODELS). Declares the table as the explicit tie-breaker; resolves the class of dispatch ambiguities found in the v1.6.1 review. Authority banners added to `team-mode.md`, `roster.md`, and `classifier.md` pointing back to the table.
+- **`argument-hint` on `/agt` and `agentille-init`** — greyed static hint after the slash command shows valid `--team` templates and flags. Static only; Claude Code has no interactive arg value-autocomplete for skills.
+
 ## [1.6.1] — 2026-05-23
 
 ### Fixed

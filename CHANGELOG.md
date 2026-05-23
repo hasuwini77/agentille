@@ -2,6 +2,12 @@
 
 All notable changes to agentille are documented here.
 
+## [1.7.1] — 2026-05-24
+
+### Documentation
+
+- README Team-mode section reworked — team badges + roster table, and concise cross-platform split-pane setup for macOS (tmux / iTerm2 `tmux -CC`) and Windows WSL2 Ubuntu (tmux-in-WSL, keep repo on the WSL filesystem).
+
 ## [1.7.0] — 2026-05-23
 
 ### Added

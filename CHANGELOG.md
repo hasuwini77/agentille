@@ -2,6 +2,20 @@
 
 All notable changes to agentille are documented here.
 
+## [1.6.0] — 2026-05-23
+
+### Changed
+
+- **Generic, adaptive worktree handling in the executor.** Isolation stays the core (each parallel/team executor gets its own worktree), but it no longer assumes a Next.js-on-`main`-with-PRs workflow:
+  - Worktrees branch off the **current** branch (`$BASE`), never a hardcoded `main`.
+  - Setup is stack-agnostic — installs only if a `package.json` exists (matching pnpm/bun/npm), skips otherwise (Python/Go/Rust/etc.).
+  - **Integration adapts** via an `integration: auto | pr | push | local` flag: open a PR against `$BASE` where a remote + `gh` exist; else just push the branch; else leave commits on a local branch and report how to merge. Never forces PRs or pushes to a protected/shared branch.
+  - Cleanup removes the worktree only when commits are safe elsewhere (PR'd or pushed) — local-only work keeps its worktree.
+- Verify step is stack-agnostic (no longer assumes `npm`).
+- Team dispatch doc: implementation teammates each take their own worktree to avoid file collisions.
+
+This keeps the plugin's worktree support universal (solo-on-main, locked-down team branch, no-remote) while the user's personal, opinionated `/git-workflow` skill (dev server + ports + `/ui-test`, Next.js + main) stays separate and unchanged.
+
 ## [1.5.2] — 2026-05-23
 
 ### Fixed

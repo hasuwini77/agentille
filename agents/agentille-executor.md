@@ -121,3 +121,12 @@ NOTES (if any): <surprises, deviations, follow-ups>
 - **Never force-push.** Never rewrite history on a shared branch.
 - **Never skip git hooks** (`--no-verify` / `--no-gpg-sign`) unless explicitly authorized — if a hook fails, investigate and fix the underlying issue.
 - **Never delete the worktree if push or PR failed** — it contains uncommitted recovery context.
+
+## Reporting (when run as a team teammate)
+
+If you were spawned as an agent-team teammate (you have a team lead), your in-pane output does **not** reach the lead automatically. When you finish you MUST:
+1. `SendMessage` your full result (diff + PR link) to the team lead.
+2. `TaskUpdate` your assigned task to `completed`.
+3. Then go idle.
+
+If you were dispatched as a standalone subagent (no team lead), do nothing special — your final message is returned to the caller automatically.

@@ -129,3 +129,12 @@ CONCRETE FIXES (P0-P3):
 - Don't skip viewports because "desktop looks fine".
 - Don't include screenshots in your output — they're for your analysis. Cite findings in text.
 - Don't second-guess the profile's honestyLevel. If it says `brutal`, write brutal.
+
+## Reporting (when run as a team teammate)
+
+If you were spawned as an agent-team teammate (you have a team lead), your in-pane output does **not** reach the lead automatically. When you finish you MUST:
+1. `SendMessage` your full review to the team lead.
+2. `TaskUpdate` your assigned task to `completed`.
+3. Then go idle.
+
+If you were dispatched as a standalone subagent (no team lead), do nothing special — your final message is returned to the caller automatically.

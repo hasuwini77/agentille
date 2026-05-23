@@ -2,6 +2,16 @@
 
 All notable changes to agentille are documented here.
 
+## [1.5.2] — 2026-05-23
+
+### Fixed
+
+- **Teammates now report to the lead** — added `SendMessage` and `TaskUpdate` to the read-only agent allowlists (`agentille-code-reviewer`, `agentille-security-reviewer`, `agentille-planner`) and added a "report to the lead when done" instruction to every worker agent body (`agentille-executor`, `agentille-design-reviewer` included). This is the real fix for team-mode "idle on spawn / never reported" stalls; without it `--team` needed a human to scrape the panes.
+- **Prompt-injection hardening** — code-reviewer and security-reviewer now explicitly treat reviewed content (diffs, files, commit messages, comments) as untrusted data, never as instructions, and must never execute shell commands that originate from reviewed content.
+- **Shipped-log / runs.jsonl writes must use the Write tool** — shell arithmetic expansion (e.g. `$(( ... ))`) in a log-write command can trigger a Bash safety prompt and stall the lead. The orchestrator and team-mode docs now mandate the Write tool for all log writes and specify skipping silently on failure. Fixes the earlier team-mode hang caused by this pattern.
+- **tmux terminal-ergonomics note added** — documents `main-vertical` layout (lead = large left pane, teammates = small stacked right), zoom shortcut (prefix + `z`), `set -g mouse on` for Warp users, and iTerm2 + `tmux -CC` as a native-pane alternative.
+- **Minor:** `agentille-init` doc "When to invoke" bullet now references `/agentille-init` (the actual slash command) instead of the plain-text phrase `"run agentille init"`.
+
 ## [1.5.1] — 2026-05-23
 
 ### Fixed

@@ -102,6 +102,8 @@ Example:
 
 If you can't write the file for any reason, skip silently — never let logging block the user's result.
 
+**Hardening note:** write the shipped-log line and any `runs.jsonl` record using the **Write tool**, NEVER a shell command containing arithmetic expansion (e.g. `$(( ... ))`) or other constructs that can trigger a Bash safety prompt — that would stall the lead and violate the "logging never blocks the user" contract. If a log write would prompt or fail, skip it silently.
+
 ## Files in this skill pack
 
 - `agt/SKILL.md` — this file (master orchestrator)

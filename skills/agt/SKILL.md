@@ -65,9 +65,9 @@ Any team result must pass the team pre-flight (env flag `CLAUDE_CODE_EXPERIMENTA
 |---|---|---|
 | planner | Opus | → Sonnet if `thinkingDepth=quick` |
 | executor | Sonnet | never downgrade (broken code costs more than tokens) |
-| code-reviewer | Sonnet | → Opus if `thinkingDepth=always` **and** high-risk path (auth / payments / api routes) |
-| design-reviewer | Sonnet | never downgrade — native vision required |
-| security-reviewer | Sonnet | → Opus if `thinkingDepth=always` **and** high-risk path |
+| code-reviewer | Opus | → Sonnet if `thinkingDepth=quick` |
+| design-reviewer | Opus | never downgrade — native vision + design judgment is agentille's differentiator |
+| security-reviewer | Opus | → Sonnet if `thinkingDepth=quick` |
 | classifier | heuristic, no LLM | Haiku only if every heuristic misses |
 | final-summary | Haiku | — |
 

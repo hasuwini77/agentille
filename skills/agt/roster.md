@@ -15,23 +15,23 @@ After classifying, dispatch this combination. Read top-to-bottom — order matte
 ## feature
 - **agentille-planner** (Opus) — IF hasMultipleSubtasks, else skip
 - **agentille-executor** (Sonnet) — one per parallel step from the plan, max 3 parallel
-- **agentille-code-reviewer** (Sonnet)
-- **agentille-design-reviewer** (Sonnet) — IF hasUIComponent
+- **agentille-code-reviewer** (Opus)
+- **agentille-design-reviewer** (Opus) — IF hasUIComponent
 
 ## bugfix
 - **debug-then-fix**: spawn a single agentille-executor (Sonnet) prefixed with "Reproduce → isolate → hypothesize → fix → regression test." Skip planner unless the bug is in ≥2 files.
-- **agentille-code-reviewer** (Sonnet)
-- **agentille-design-reviewer** (Sonnet) — IF hasUIComponent
+- **agentille-code-reviewer** (Opus)
+- **agentille-design-reviewer** (Opus) — IF hasUIComponent
 
 ## refactor
 - **agentille-planner** (Opus) — IF hasMultipleSubtasks, else skip
 - **agentille-executor** (Sonnet)
-- **agentille-code-reviewer** (Sonnet) — REQUIRED — except for pure renames/moves with zero logic delta (files renamed/moved only), where it may be skipped. Refactors with any logic change still require it — regressions hide here.
+- **agentille-code-reviewer** (Opus) — REQUIRED — except for pure renames/moves with zero logic delta (files renamed/moved only), where it may be skipped. Refactors with any logic change still require it — regressions hide here.
 - *No design-reviewer* (refactor by definition has no visible change; if visual change emerges, that's the code-reviewer's BLOCKER finding)
 
 ## design
 - **agentille-executor** (Sonnet) — implements the visual change
-- **agentille-design-reviewer** (Sonnet — vision is native) — REQUIRED
+- **agentille-design-reviewer** (Opus — native vision) — REQUIRED
 - *Code-reviewer optional* — only if the design change required logic changes (state, handlers). For pure CSS/markup tweaks, skip.
 
 ## debug
@@ -39,8 +39,8 @@ After classifying, dispatch this combination. Read top-to-bottom — order matte
 - *No reviewers until a fix is applied — at which point promote to bugfix flow.*
 
 ## review
-- **agentille-code-reviewer** (Sonnet) — the only subagent. No executor (user is asking for review, not changes).
-- **agentille-design-reviewer** (Sonnet) — IF the target is UI code
+- **agentille-code-reviewer** (Opus) — the only subagent. No executor (user is asking for review, not changes).
+- **agentille-design-reviewer** (Opus) — IF the target is UI code
 
 ## Hard cap
 

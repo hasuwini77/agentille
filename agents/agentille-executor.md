@@ -52,14 +52,16 @@ BASE=$(git symbolic-ref --short HEAD)  # fork from wherever you are, NOT main
 git worktree add "../$PROJECT-$SLUG" -b "agt/$SLUG"   # branches off BASE
 cd "../$PROJECT-$SLUG"
 cp "../$PROJECT/".env* . 2>/dev/null || true            # carry local env if present
-# Stack-agnostic setup — reuse the parent's deps when safe, else install.
-# A worktree just branched off $BASE has the SAME lockfile as the parent, so its
-# node_modules is already exactly correct — symlink it (O(1)) instead of a full
-# per-worktree reinstall (the per-agent install was the biggest time sink).
+# Stack-agnostic setup — reuse the parent's deps without a full reinstall.
+# Copy-on-write clone the parent's node_modules: instant on APFS/Btrfs, and each
+# worktree gets its OWN isolated tree — so (unlike a symlink) codegen + build-cache
+# writes never leak between parallel agents. Fall back to a real install when the
+# filesystem can't COW (e.g. ext4) or there's no parent node_modules to clone.
 if [ -f package.json ]; then
   PARENT_NM="../$PROJECT/node_modules"
-  if [ -d "$PARENT_NM" ]; then
-    ln -s "$PARENT_NM" node_modules        # identical deps → reuse instantly
+  if [ -d "$PARENT_NM" ] && { cp -c -R "$PARENT_NM" node_modules 2>/dev/null \
+        || cp --reflink=auto -a "$PARENT_NM" node_modules 2>/dev/null; }; then
+    :   # cloned the parent's deps (copy-on-write → instant + isolated)
   else
     command -v pnpm >/dev/null && pnpm install \
       || { command -v bun >/dev/null && bun install; } \
@@ -68,7 +70,7 @@ if [ -f package.json ]; then
 fi   # no package.json? skip — Python/Go/Rust/etc. manage their own deps
 ```
 
-**Safety caveat:** if your step changes deps OR triggers anything that writes into `node_modules` — codegen (`prisma generate` writes `node_modules/.prisma` + `@prisma/client`), build caches (`node_modules/.cache` from Next.js/webpack/vite), native module rebuilds, postinstall scripts — `rm node_modules` and run a real isolated install *before* proceeding, so parallel executors sharing the same symlink don't corrupt each other's generated client or race on cache dirs. When in doubt on a build-heavy step, use a hardlink clone instead (`cp -al "../$PROJECT/node_modules" node_modules`) — writes stay local, but the clone is still O(inodes) not O(bytes). pnpm users already get near-instant installs from the shared content-addressed store; the symlink mainly rescues npm/yarn users from the multi-minute per-worktree reinstall.
+**Why a clone, not a symlink:** a symlink shares one `node_modules` across worktrees, so parallel agents corrupt each other the instant anything writes into it — `prisma generate`, Next.js/`vite` `.cache`, native rebuilds. A copy-on-write clone gives each worktree its own tree, so you `npm install`/codegen into it normally with no special handling. pnpm users already get this isolation from the shared content-addressed store; the clone mainly rescues npm/yarn from the multi-minute per-worktree reinstall.
 
 Remember `$BASE` — it's your integration target in step 8, not `main`.
 

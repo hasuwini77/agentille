@@ -7,6 +7,7 @@ Encodes the user's existing rule (Opus for plan **and review**, Sonnet for execu
 | Role | Default | If `thinkingDepth = quick` | Notes |
 |---|---|---|---|
 | planner | **claude-opus-4-7** | claude-sonnet-4-6 | Plans set direction; pay for quality |
+| plan-reviewer | **claude-opus-4-7** | *skipped* | Catches a wrong/under-scoped plan before it wastes executors. On `quick`, skip the review entirely rather than downgrade |
 | executor | **claude-sonnet-4-6** | claude-sonnet-4-6 | No downgrade — broken code is more expensive than tokens |
 | code-reviewer | **claude-opus-4-7** | claude-sonnet-4-6 | Review is judgment-heavy and read-only/single-pass — Opus catches the subtle regressions Sonnet skims past, at a small token premium (no write-loop) |
 | design-reviewer | **claude-opus-4-7** | claude-opus-4-7 | Never downgrade — Opus 4.7 has native vision AND the strongest design judgment; design review is agentille's differentiator |
@@ -16,7 +17,7 @@ Encodes the user's existing rule (Opus for plan **and review**, Sonnet for execu
 
 ## Profile-driven overrides
 
-- **`thinkingDepth = quick`** → downgrade `planner`, `code-reviewer`, and `security-reviewer` to Sonnet (the user is signaling speed over depth). `design-reviewer` stays Opus — vision + design judgment is the one place agentille never trades down.
+- **`thinkingDepth = quick`** → downgrade `planner`, `code-reviewer`, and `security-reviewer` to Sonnet (the user is signaling speed over depth), and **skip the `plan-reviewer` step entirely** (quick = trust the plan and go). `design-reviewer` stays Opus — vision + design judgment is the one place agentille never trades down.
 - **`challengeLevel = ruthless`** → keep all models at default; the rigor comes from the prompt, not the model.
 
 ## When the profile says "minimize cost"

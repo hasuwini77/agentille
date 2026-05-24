@@ -52,13 +52,23 @@ BASE=$(git symbolic-ref --short HEAD)  # fork from wherever you are, NOT main
 git worktree add "../$PROJECT-$SLUG" -b "agt/$SLUG"   # branches off BASE
 cd "../$PROJECT-$SLUG"
 cp "../$PROJECT/".env* . 2>/dev/null || true            # carry local env if present
-# Stack-agnostic setup — only install if there's a manifest, match the tool:
+# Stack-agnostic setup — reuse the parent's deps when safe, else install.
+# A worktree just branched off $BASE has the SAME lockfile as the parent, so its
+# node_modules is already exactly correct — symlink it (O(1)) instead of a full
+# per-worktree reinstall (the per-agent install was the biggest time sink).
 if [ -f package.json ]; then
-  command -v pnpm >/dev/null && pnpm install \
-    || { command -v bun >/dev/null && bun install; } \
-    || npm install
+  PARENT_NM="../$PROJECT/node_modules"
+  if [ -d "$PARENT_NM" ]; then
+    ln -s "$PARENT_NM" node_modules        # identical deps → reuse instantly
+  else
+    command -v pnpm >/dev/null && pnpm install \
+      || { command -v bun >/dev/null && bun install; } \
+      || npm install
+  fi
 fi   # no package.json? skip — Python/Go/Rust/etc. manage their own deps
 ```
+
+**Safety caveat:** if your step adds, removes, or upgrades a dependency, the shared symlink is wrong — `rm node_modules` and run a real install *before* editing `package.json`, so you never mutate the parent's (and sibling worktrees') shared `node_modules`. Note that pnpm users already get near-instant installs from the shared content-addressed store; the symlink mainly rescues npm/yarn users from the multi-minute per-worktree reinstall.
 
 Remember `$BASE` — it's your integration target in step 8, not `main`.
 

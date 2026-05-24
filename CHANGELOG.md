@@ -2,6 +2,12 @@
 
 All notable changes to agentille are documented here.
 
+## [1.12.1] — 2026-05-24
+
+### Added
+
+- **Review findings are a hard gate** (`skills/agt/SKILL.md` hard rules). A code-review / security-review **BLOCKER** or **should-fix** must be resolved before the orchestrator declares the task done — re-dispatch the executor (or fix inline), then confirm; if it genuinely can't be fixed, surface it explicitly for the user, never bury it in the summary. Nits stay advisory. Closes a gap exposed by the v1.12.0 run, where catching the symlink race + ext4 claim depended on lead discretion rather than contract.
+
 ## [1.12.0] — 2026-05-24
 
 ### Added

@@ -2,6 +2,20 @@
 
 All notable changes to agentille are documented here.
 
+## [1.10.0] — 2026-05-24
+
+### Added
+
+- **Execution discipline internalized into the executor** (informed by [Jesse Vincent's superpowers](https://github.com/obra/superpowers), MIT — rewritten in agentille's voice, not bundled). Three native additions to `agents/agentille-executor.md`:
+  - **Debugging discipline** (debug & bugfix steps): root cause before any fix, find the pattern, one hypothesis tested minimally, fix the root + regression test, and a hard "3 fixes failed → stop and question the architecture" rule. Replaces the previously hand-waved "systematic-debugging prefix" referenced by `roster.md` — the discipline is now real and lives in the agent def.
+  - **Test-first discipline** (feature & bugfix logic): red→green→refactor, gated — TDD only when the repo already has a test suite or the profile opts in; never scaffolds a framework unasked, since agentille runs in arbitrary repos.
+  - **Sharper verification gate**: step 7 and the hard rules now require *fresh* verification output from the current run before any completion claim — confidence is not evidence.
+- `skills/agt/roster.md` debug/bugfix entries now point at the executor's built-in Debugging discipline. README gains an Acknowledgments section crediting superpowers and framing the dispatch-layer/session-layer split.
+
+### Rationale
+
+agentille stays self-contained: methodology is internalized, not depended on. Curated *assets* (design-system skills) are borrowed via graceful enhancement; core *discipline* is owned natively so the orchestrator's value prop doesn't live in another plugin.
+
 ## [1.9.0] — 2026-05-24
 
 ### Added

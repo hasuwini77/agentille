@@ -73,12 +73,14 @@ Produce the smallest correct change that satisfies the step. No drive-by refacto
 
 Types: `feat`, `fix`, `docs`, `style`, `refactor`, `perf`, `test`, `chore`. Subject under 70 chars, imperative mood. Body explains *why* (not *what* — the diff shows what).
 
-### 7. Verify before declaring done
+### 7. Verify before declaring done — evidence, not confidence
+**No completion claim without fresh verification output from THIS run.** "Should pass" / "looks correct" / "I'm confident" is not verification — confidence is not evidence. Run the FULL command, read the exit code and failure count, then report the real result.
+
 Run whatever the project uses to prove the step works — match the stack, don't assume npm:
 - Build / typecheck (e.g. `npm run build`, `tsc --noEmit`, `cargo build`, `go build`)
 - Tests, if they exist (`npm test`, `pytest`, `go test`, …)
 
-State explicitly what you ran and what passed.
+Paste the command and its actual result into the VERIFICATION block. If you didn't run it this session, you cannot claim it — say so instead.
 
 ### 8. If `isolated: true` — integrate adaptively
 
@@ -106,6 +108,28 @@ git worktree remove --force "../$PROJECT-$SLUG"   # the branch stays; only the w
 ```
 
 If the commits are **local-only** (`integration: local`, or push/PR failed): do NOT remove the worktree — it's the only copy of the work. Report the worktree path and branch so the user can integrate manually.
+
+## Debugging discipline (debug & bugfix steps)
+
+**Iron law: no fix without a root cause.** A symptom patch is a failure — it hides the bug and breeds new ones.
+
+1. **Root cause first.** Read the full error/stack trace — it often names the fix. Reproduce reliably; if you can't, gather more data, don't guess. Check what changed (`git diff`, recent commits, new deps/config). In a multi-component path (CI → build → sign, API → service → DB), add diagnostic logging at each boundary and run once to see *where* it breaks before editing anything.
+2. **Find the pattern.** Locate similar working code; list every difference between working and broken, however small — don't assume "that can't matter."
+3. **One hypothesis, tested minimally.** State "X is the cause because Y." Make the smallest change that tests it, one variable at a time. Wrong? Form a *new* hypothesis — never stack fixes on top of each other.
+4. **Fix the root, not the symptom.** Add a regression test first (see Test-first discipline), implement the single fix, verify the symptom is gone and nothing else broke.
+
+**Three fixes failed → stop and question the architecture.** Don't attempt fix #4. If each fix surfaces a new problem elsewhere, the pattern is wrong, not your hypothesis — surface that to the orchestrator/user instead of thrashing.
+
+## Test-first discipline (feature & bugfix logic)
+
+Write the test first **when the repo already has a test suite, or the profile opts into TDD** — watch it fail, then write the minimal code to pass. If you never watched it fail, you don't know it tests the right thing.
+
+- **Red:** one minimal test of the desired behavior. Run it; confirm it fails for the *right* reason (feature missing, not a typo). Already passes? It's testing existing behavior — fix the test.
+- **Green:** the smallest code that passes. No extra options, no drive-by refactors (YAGNI).
+- **Refactor:** tidy up only while staying green.
+- **Bugfix:** the failing test reproduces the bug — it proves the fix and locks out regression.
+
+**No test infrastructure in the repo and the profile doesn't require TDD?** Skip it and say so in your output. Never scaffold a whole test framework unasked — agentille runs in arbitrary repos.
 
 ## Graceful UI enhancement (subagent mode)
 
@@ -150,7 +174,7 @@ NOTES (if any): <surprises, deviations, follow-ups>
 
 ## Hard rules
 
-- **Never claim "done" if tests/build fail.** State the failure and ask for direction.
+- **Never claim "done" without fresh verification from this session.** Confidence is not evidence. If tests/build fail — or you didn't run them — state that and ask for direction; never imply success.
 - **Never silently expand scope.** If finishing the step requires a sibling change, flag it; don't sneak it in.
 - **Never use mocks where the project uses real I/O** unless explicitly instructed.
 - **Never force-push. Never rewrite history on a shared branch.**

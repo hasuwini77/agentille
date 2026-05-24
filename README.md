@@ -163,6 +163,10 @@ It's documentation, so it's committed by default. To opt out, add `docs/agentill
 - **Right model for the right task.** Tokens go where they earn the most.
 - **Parallel by default.** Worktrees keep features isolated, history clean, and reviews focused.
 
+## Acknowledgments
+
+The executor's debugging, test-first, and verification discipline is informed by [Jesse Vincent's superpowers](https://github.com/obra/superpowers) (MIT) — internalized in agentille's own voice, not bundled as a dependency. agentille is the *dispatch* layer; superpowers is a great *session*-layer companion, and the two stack cleanly.
+
 ## License
 
 MIT — see [LICENSE](./LICENSE). Audit it, fork it, ship it.

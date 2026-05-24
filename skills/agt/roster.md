@@ -19,7 +19,7 @@ After classifying, dispatch this combination. Read top-to-bottom — order matte
 - **agentille-design-reviewer** (Opus) — IF hasUIComponent
 
 ## bugfix
-- **debug-then-fix**: spawn a single agentille-executor (Sonnet) prefixed with "Reproduce → isolate → hypothesize → fix → regression test." Skip planner unless the bug is in ≥2 files.
+- **debug-then-fix**: spawn a single agentille-executor (Sonnet) running its built-in Debugging discipline (root cause → pattern → single hypothesis → root-cause fix + regression test — see `agents/agentille-executor.md`). Skip planner unless the bug is in ≥2 files.
 - **agentille-code-reviewer** (Opus)
 - **agentille-design-reviewer** (Opus) — IF hasUIComponent
 
@@ -35,7 +35,7 @@ After classifying, dispatch this combination. Read top-to-bottom — order matte
 - *Code-reviewer optional* — only if the design change required logic changes (state, handlers). For pure CSS/markup tweaks, skip.
 
 ## debug
-- **debug-loop** (agentille-executor with Sonnet, systematic-debugging prefix): reproduce → isolate → hypothesize → verify. Surface the root cause, propose a fix.
+- **debug-loop** (agentille-executor, Sonnet): runs the executor's built-in Debugging discipline (`agents/agentille-executor.md`) — root cause before any fix, one hypothesis at a time, stop and question the architecture after 3 failed fixes. Surface the root cause, propose a fix.
 - *No reviewers until a fix is applied — at which point promote to bugfix flow.*
 
 ## review

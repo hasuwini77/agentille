@@ -66,6 +66,7 @@ When you run `/agt "task"`, the orchestrator:
 | Agent | Role | Model |
 |---|---|---|
 | `agentille-planner` | Goal-backward plan with parallelizable steps marked | Opus |
+| `agentille-plan-reviewer` | Critiques the plan before execution — goal, coverage, parallel-safety, real verification | Opus |
 | `agentille-executor` | Headless implementation — atomic commits, integrates adaptively (PR / push / local branch) | Sonnet |
 | `agentille-code-reviewer` | Read-only review for bugs, security, quality | Opus |
 | `agentille-design-reviewer` | 6-pillar visual review, axe-core, AI-design-tell scan | Opus |

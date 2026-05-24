@@ -6,7 +6,8 @@ After classifying, dispatch this combination. Read top-to-bottom — order matte
 
 ## planning
 - **agentille-planner** (Opus)
-- *No executor, no reviewers.* Output is the plan itself.
+- **agentille-plan-reviewer** (Opus) — the plan IS the deliverable here, so review it before handing back. Skip on `thinkingDepth=quick`.
+- *No executor.* Output is the (reviewed) plan itself.
 
 ## research
 - **agentille-planner** with research-mode prefix (Opus): "Produce a comparison table with trade-offs. Do not implement."
@@ -14,6 +15,7 @@ After classifying, dispatch this combination. Read top-to-bottom — order matte
 
 ## feature
 - **agentille-planner** (Opus) — IF hasMultipleSubtasks, else skip
+- **agentille-plan-reviewer** (Opus) — IF the planner ran; critiques the plan before any executor starts. Skip on `thinkingDepth=quick`.
 - **agentille-executor** (Sonnet) — one per parallel step from the plan, max 3 parallel
 - **agentille-code-reviewer** (Opus)
 - **agentille-design-reviewer** (Opus) — IF hasUIComponent
@@ -25,6 +27,7 @@ After classifying, dispatch this combination. Read top-to-bottom — order matte
 
 ## refactor
 - **agentille-planner** (Opus) — IF hasMultipleSubtasks, else skip
+- **agentille-plan-reviewer** (Opus) — IF the planner ran. Skip on `thinkingDepth=quick`.
 - **agentille-executor** (Sonnet)
 - **agentille-code-reviewer** (Opus) — REQUIRED — except for pure renames/moves with zero logic delta (files renamed/moved only), where it may be skipped. Refactors with any logic change still require it — regressions hide here.
 - *No design-reviewer* (refactor by definition has no visible change; if visual change emerges, that's the code-reviewer's BLOCKER finding)

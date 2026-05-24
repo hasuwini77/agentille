@@ -2,6 +2,22 @@
 
 All notable changes to agentille are documented here.
 
+## [1.11.0] — 2026-05-24
+
+### Added
+
+- **Plan-reviewer agent** (`agents/agentille-plan-reviewer.md`, Opus, read-only). After the planner drafts a plan, the plan-reviewer critiques it *before any executor runs* — goal correctness, coverage (the unglamorous half: error states, migrations, tests, docs), parallelization safety (catches false-parallel steps that cause merge conflicts and lost work), real verification, and scope. Returns APPROVE or REVISE-with-specific-gaps; one revise round, then execution proceeds. Wired into the planning / feature / refactor flows; **skipped on `thinkingDepth=quick`**.
+- **"Clarify before planning" step** in the orchestrator contract (`skills/agt/SKILL.md`). When `preTaskQuestioning=always` (or `ambiguous-only` + genuine ambiguity), the lead resolves plan-changing unknowns with the user *up front* — explore the codebase to answer what it can, ask only what forks the plan, each question with a recommended default, and **stop once more questions wouldn't change a step**. Deliberately bounded (typically 2–5 questions), not a relentless interview.
+
+### Changed
+
+- `agents/agentille-planner.md`: replaced the "one clarifying question max" rule with a `preTaskQuestioning`-governed clarify approach (explore-first, recommended defaults, surface-don't-block when standalone) plus a "revise on plan-review feedback" rule.
+- `skills/agt/SKILL.md`, `roster.md`, `model-routing.md`: dispatch tables, rosters, and model routing updated for the plan-reviewer (Opus default, skipped on quick). Worker-agent count five → six.
+
+### Rationale
+
+The two cheapest places to prevent wasted executor runs are *before* the plan exists (ask the questions that actually fork it) and *before* it executes (review the plan). A wrong or under-scoped plan multiplies across every executor downstream — catching it at the plan stage is far cheaper than in review or in prod.
+
 ## [1.10.0] — 2026-05-24
 
 ### Added

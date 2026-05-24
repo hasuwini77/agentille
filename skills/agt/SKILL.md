@@ -17,10 +17,12 @@ When this skill is invoked (`/agt <task>`):
 3. **Pick the roster** — for subagent mode, see `roster.md`. For team mode, the roster is the resolved team template's `teammates` array.
 4. **Pick the model per role** using `model-routing.md`.
 5. **Apply the profile** to every subagent prompt — communication style, tone, challenge level, never-do rules, honesty level.
-6. **Dispatch in dependency order**, parallelizing independent steps where the task explicitly contains independent subtasks.
-7. **Stream progress** with one short status line per phase ("Planning…", "Executing 2 parallel tasks…", "Code review…", "Design review…", "Done.").
-8. **Append the shipped-log line** to `./docs/agentille-log.md` — you write it directly as the final step (see "Shipped log" below). There is no log hook.
-9. **Return one final summary** matching the user's `deliveryStyle` preference.
+6. **Clarify before planning** — when `preTaskQuestioning` is `always` (or `ambiguous-only` and the task is genuinely ambiguous), resolve the plan-changing unknowns with the user *before* building the plan. See "Clarify before planning" below. Explore the codebase to answer what you can; ask only what actually forks the plan.
+7. **Plan, then review the plan** — for multi-step tasks the planner drafts the plan and the **plan-reviewer** critiques it (goal correctness, coverage, parallel-safety, real verification) before any executor runs. One REVISE round, then proceed. Skip the review on `thinkingDepth=quick`.
+8. **Dispatch in dependency order**, parallelizing independent steps where the task explicitly contains independent subtasks.
+9. **Stream progress** with one short status line per phase ("Clarifying…", "Planning…", "Reviewing plan…", "Executing 2 parallel tasks…", "Code review…", "Design review…", "Done.").
+10. **Append the shipped-log line** to `./docs/agentille-log.md` — you write it directly as the final step (see "Shipped log" below). There is no log hook.
+11. **Return one final summary** matching the user's `deliveryStyle` preference.
 
 ## Dispatch decision table (authoritative)
 
@@ -48,22 +50,25 @@ Any team result must pass the team pre-flight (env flag `CLAUDE_CODE_EXPERIMENTA
 
 **Subagent mode** → classify into ONE category via `classifier.md`, then dispatch:
 
-| Category | planner | executor | code-reviewer | design-reviewer | security-reviewer |
-|---|---|---|---|---|---|
-| planning | ✓ | — | — | — | — |
-| research | ✓ (research prefix) | — | — | — | — |
-| feature | if multi-subtask | ✓ (≤3 parallel) | ✓ | if hasUI | if security-tagged |
-| bugfix | if ≥2 files | ✓ | ✓ | if hasUI | — |
-| refactor | if multi-subtask | ✓ | ✓ *(skip iff pure rename/move, zero logic delta)* | — | — |
-| design | — | ✓ | if logic changed | ✓ REQUIRED | — |
-| debug | — | ✓ (debug loop) | after a fix is applied only | — | — |
-| review | — | — | ✓ | if target is UI code | if security-tagged |
+| Category | planner | plan-reviewer | executor | code-reviewer | design-reviewer | security-reviewer |
+|---|---|---|---|---|---|---|
+| planning | ✓ | ✓ | — | — | — | — |
+| research | ✓ (research prefix) | — | — | — | — | — |
+| feature | if multi-subtask | if planner ran | ✓ (≤3 parallel) | ✓ | if hasUI | if security-tagged |
+| bugfix | if ≥2 files | if planner ran | ✓ | ✓ | if hasUI | — |
+| refactor | if multi-subtask | if planner ran | ✓ | ✓ *(skip iff pure rename/move, zero logic delta)* | — | — |
+| design | — | — | ✓ | if logic changed | ✓ REQUIRED | — |
+| debug | — | — | ✓ (debug loop) | after a fix is applied only | — | — |
+| review | — | — | — | ✓ | if target is UI code | if security-tagged |
+
+> **plan-reviewer** runs only when a planner ran, and is **skipped on `thinkingDepth=quick`** (quick = trust the plan and go). It reviews the plan *artifact* before any executor starts — see `agents/agentille-plan-reviewer.md`.
 
 ### Step 3 — Resolve MODELS (per role)
 
 | Role | Default | Override |
 |---|---|---|
 | planner | Opus | → Sonnet if `thinkingDepth=quick` |
+| plan-reviewer | Opus | **skip entirely** if `thinkingDepth=quick` (don't downgrade — just skip) |
 | executor | Sonnet | never downgrade (broken code costs more than tokens) |
 | code-reviewer | Opus | → Sonnet if `thinkingDepth=quick` |
 | design-reviewer | Opus | never downgrade — native vision + design judgment is agentille's differentiator |
@@ -72,6 +77,22 @@ Any team result must pass the team pre-flight (env flag `CLAUDE_CODE_EXPERIMENTA
 | final-summary | Haiku | — |
 
 Always declare the model explicitly on each dispatch — never let it default.
+
+## Clarify before planning
+
+A plan is only as good as the understanding behind it. Before you build or dispatch a plan, close the gaps that would actually change it — governed by the user's `preTaskQuestioning`:
+
+- **`never`** → ask nothing. State your assumptions and proceed.
+- **`ambiguous-only`** → ask only when the task is genuinely ambiguous, and only about what forks the plan.
+- **`always`** → run a focused clarifying pass with the user up front.
+
+The discipline (this is deliberately *not* a relentless interview):
+
+1. **Explore first, ask second.** Anything the codebase can answer — framework, file locations, existing test setup, conventions — you answer yourself (Read/Grep/Glob). Never ask the user what the repo already tells you.
+2. **Ask the plan-changing questions, each with a recommended default.** Use the question tool; batch related ones. Walk dependent decisions in order. Phrase every option so the user can just accept your recommendation.
+3. **Stop when more questions won't change a single step.** Typically 2–5 questions, not twenty. Over-asking burns the user's patience as surely as under-asking burns tokens on the wrong plan. Resolve the ambiguity that matters, then move.
+
+Then hand the resolved answers to the planner so it doesn't re-ask. (The planner can still surface a remaining question at the top of its plan, but the lead owns the clarifying round.)
 
 ## Profile fields you MUST apply
 
@@ -92,9 +113,10 @@ Keep this prefix concise — subagents have limited context.
 
 ## Worker agents
 
-This plugin ships five **agent definitions** (in the plugin's `agents/` dir), one per role. Dispatch them via Claude Code's `Agent` tool with `subagent_type` set to the **plugin-namespaced** name — these are registered agents (not skills), so the `agentille:` namespace is required or the dispatch fails with "Agent type not found":
+This plugin ships six **agent definitions** (in the plugin's `agents/` dir), one per role. Dispatch them via Claude Code's `Agent` tool with `subagent_type` set to the **plugin-namespaced** name — these are registered agents (not skills), so the `agentille:` namespace is required or the dispatch fails with "Agent type not found":
 
 - **agentille:agentille-planner** — produces a goal-backward plan with parallelizable steps marked
+- **agentille:agentille-plan-reviewer** — critiques the planner's draft plan before execution (goal, coverage, parallel-safety, real verification); returns APPROVE / REVISE (read-only)
 - **agentille:agentille-executor** — implements one logical chunk of work (headless: implement → commit → push → PR). For UI work in subagent mode it opportunistically invokes installed UI-build skills (`impeccable` / `ui-ux-pro-max` / `frontend-design`) and falls back to its own design competence when none are installed — never a hard dependency.
 - **agentille:agentille-code-reviewer** — reviews changes for bugs, security, quality (read-only)
 - **agentille:agentille-design-reviewer** — for UI work; screenshots + axe-core + visual critique (read-only on source)
@@ -164,9 +186,10 @@ If you can't write the file for any reason, skip silently — never let logging 
 - `agt/model-routing.md` — agent role → model selection
 - `agt/team-mode.md` — team-mode auto-detection, Stage 1/Stage 2 dispatch, pre-flight checks, cost transparency
 
-The five worker roles live as **agent definitions** in the plugin's `agents/` dir (dispatched as `agentille:agentille-*`), not as skills:
+The six worker roles live as **agent definitions** in the plugin's `agents/` dir (dispatched as `agentille:agentille-*`), not as skills:
 
 - `agents/agentille-planner.md` — goal-backward planner
+- `agents/agentille-plan-reviewer.md` — critiques the plan before execution
 - `agents/agentille-executor.md` — implementation
 - `agents/agentille-code-reviewer.md` — bugs / security / quality
 - `agents/agentille-design-reviewer.md` — UI quality (+ `agents/references/` rubrics)

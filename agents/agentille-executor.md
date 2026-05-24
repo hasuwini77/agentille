@@ -55,8 +55,9 @@ cp "../$PROJECT/".env* . 2>/dev/null || true            # carry local env if pre
 # Stack-agnostic setup — reuse the parent's deps without a full reinstall.
 # Copy-on-write clone the parent's node_modules: instant on APFS/Btrfs, and each
 # worktree gets its OWN isolated tree — so (unlike a symlink) codegen + build-cache
-# writes never leak between parallel agents. Fall back to a real install when the
-# filesystem can't COW (e.g. ext4) or there's no parent node_modules to clone.
+# writes never leak between parallel agents. On non-COW filesystems (ext4) this
+# degrades to a full copy — still isolated, just not instant. A real install runs
+# only when there's no parent node_modules to clone.
 if [ -f package.json ]; then
   PARENT_NM="../$PROJECT/node_modules"
   if [ -d "$PARENT_NM" ] && { cp -c -R "$PARENT_NM" node_modules 2>/dev/null \

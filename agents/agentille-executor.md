@@ -68,7 +68,7 @@ if [ -f package.json ]; then
 fi   # no package.json? skip — Python/Go/Rust/etc. manage their own deps
 ```
 
-**Safety caveat:** if your step adds, removes, or upgrades a dependency, the shared symlink is wrong — `rm node_modules` and run a real install *before* editing `package.json`, so you never mutate the parent's (and sibling worktrees') shared `node_modules`. Note that pnpm users already get near-instant installs from the shared content-addressed store; the symlink mainly rescues npm/yarn users from the multi-minute per-worktree reinstall.
+**Safety caveat:** if your step changes deps OR triggers anything that writes into `node_modules` — codegen (`prisma generate` writes `node_modules/.prisma` + `@prisma/client`), build caches (`node_modules/.cache` from Next.js/webpack/vite), native module rebuilds, postinstall scripts — `rm node_modules` and run a real isolated install *before* proceeding, so parallel executors sharing the same symlink don't corrupt each other's generated client or race on cache dirs. When in doubt on a build-heavy step, use a hardlink clone instead (`cp -al "../$PROJECT/node_modules" node_modules`) — writes stay local, but the clone is still O(inodes) not O(bytes). pnpm users already get near-instant installs from the shared content-addressed store; the symlink mainly rescues npm/yarn users from the multi-minute per-worktree reinstall.
 
 Remember `$BASE` — it's your integration target in step 8, not `main`.
 

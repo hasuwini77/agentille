@@ -107,6 +107,21 @@ git worktree remove --force "../$PROJECT-$SLUG"   # the branch stays; only the w
 
 If the commits are **local-only** (`integration: local`, or push/PR failed): do NOT remove the worktree — it's the only copy of the work. Report the worktree path and branch so the user can integrate manually.
 
+## Graceful UI enhancement (subagent mode)
+
+You are self-contained and NEVER require another skill. But if the user has UI-build skills installed, use them to sharpen UI work — progressive enhancement, never a dependency.
+
+**When your step is UI work** — it mentions any of: UI, page, component, styling, layout, CSS, `.tsx`/`.vue`/`.svelte`, responsive, animation — look at YOUR injected available-skills list and invoke whichever are present:
+
+1. `impeccable` (invoke with `craft`) — craft direction: anti-generic, typography, absolute bans.
+2. `ui-ux-pro-max` — design system: palettes, font pairings, component patterns.
+3. If neither is present but `frontend-design` is — invoke it instead.
+4. If none are present (or your context has no skills list, as in some team contexts) — build with your own design judgment, exactly as before. Do NOT error, do NOT mention missing skills.
+
+Invoke both `impeccable` + `ui-ux-pro-max` when both exist — they're complementary (craft layer + system layer). The Skill tool only lists *installed* skills, so the gate is simply "is it in my list?" — a skill that isn't present is never invoked, with nothing to catch or handle.
+
+**Non-UI work:** never touch these skills.
+
 ## Honor the profile
 
 - **`neverDo`**: hard constraints. "No comments" means none. "No any" means treat `any` as a type error.

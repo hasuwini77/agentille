@@ -95,7 +95,7 @@ Keep this prefix concise — subagents have limited context.
 This plugin ships five **agent definitions** (in the plugin's `agents/` dir), one per role. Dispatch them via Claude Code's `Agent` tool with `subagent_type` set to the **plugin-namespaced** name — these are registered agents (not skills), so the `agentille:` namespace is required or the dispatch fails with "Agent type not found":
 
 - **agentille:agentille-planner** — produces a goal-backward plan with parallelizable steps marked
-- **agentille:agentille-executor** — implements one logical chunk of work (headless: implement → commit → push → PR)
+- **agentille:agentille-executor** — implements one logical chunk of work (headless: implement → commit → push → PR). For UI work in subagent mode it opportunistically invokes installed UI-build skills (`impeccable` / `ui-ux-pro-max` / `frontend-design`) and falls back to its own design competence when none are installed — never a hard dependency.
 - **agentille:agentille-code-reviewer** — reviews changes for bugs, security, quality (read-only)
 - **agentille:agentille-design-reviewer** — for UI work; screenshots + axe-core + visual critique (read-only on source)
 - **agentille:agentille-security-reviewer** — severity-classified security review (read-only)

@@ -97,7 +97,7 @@ You (the orchestrator) are the **team lead**. Given a resolved template:
 
 Don't gate review behind "all executors done" — review each finished piece while the rest are still being built. It's the biggest wall-clock win in team mode and costs nothing extra in tokens: each piece is reviewed exactly once either way.
 
-Wire it with a **scoped peer channel** — the only direct teammate-to-teammate messaging agentille allows. Open chatter is banned: every message is context paid by both sender and receiver, so peers exchange exactly one structured handoff, nothing more.
+Wire it with a **scoped peer channel** — the sanctioned peer channel for build→review overlap (the incident-team adversarial debate is the other permitted case). Open chatter is banned: every message is context paid by both sender and receiver, so peers exchange exactly one structured handoff, nothing more.
 
 1. When you spawn the executors, tell each the **name of the code-reviewer** and the handoff format. On integrating its piece, an executor sends the reviewer ONE message:
    ```

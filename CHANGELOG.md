@@ -2,6 +2,12 @@
 
 All notable changes to agentille are documented here.
 
+## [1.9.0] — 2026-05-24
+
+### Added
+
+- **Graceful UI enhancement in the executor.** When `agentille-executor` runs a UI step in subagent mode, it now looks at its own injected available-skills list and opportunistically invokes installed UI-build skills — `impeccable` (craft), `ui-ux-pro-max` (design system), or `frontend-design` — to sharpen the work. If none are installed, it builds with its own design competence exactly as before. This is progressive enhancement, never a dependency: the gate is "is the skill in my list?", so an absent skill is simply never invoked (nothing to catch or handle). Non-UI work never touches these skills, and team mode is unaffected (teammate skill frontmatter is ignored by design; the list-presence gate handles that path too). Documented in `agents/agentille-executor.md` and `skills/agt/SKILL.md`.
+
 ## [1.8.0] — 2026-05-24
 
 ### Changed

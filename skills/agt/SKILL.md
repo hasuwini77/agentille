@@ -152,6 +152,8 @@ The user wants this to be **token-efficient**. Apply these defaults:
 - Planner: only for tasks with ≥3 distinct steps. Single-step tasks skip planning and go straight to executor.
 - Design-reviewer: only for tasks that touch frontend code (heuristic: prompt mentions UI/UX/CSS/component/page/styling/responsive/animation, or files changed under `src/components/`, `src/app/`, `*.css`, `*.tsx`).
 - Code-reviewer: skip for refactors that are pure renames or moves with no logic changes.
+- **Decomposition is a token trade.** Right-size chunks into disjoint, minimal file sets; never subdivide below the break-even where context-reload tokens exceed the work saved. The planner owns this (see `agents/agentille-planner.md` → "Right-size the chunks"). Applies to both team and subagent mode.
+- **Pipeline review over building.** Don't gate review behind all-executors-done. In team mode use the scoped peer handoff (see `team-mode.md` → "Pipelined review"); in subagent mode, dispatch the code-reviewer on each finished piece while later executors still run — same overlap, no peer messaging needed.
 
 ## Shipped log
 

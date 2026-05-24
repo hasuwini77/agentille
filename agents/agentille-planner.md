@@ -41,6 +41,21 @@ OUT-OF-SCOPE: <bullet list of things you're explicitly NOT doing>
 - **Match the user's `thinkingDepth`**: `quick` → ≤5 steps; `complex-only` → as needed; `always` → include reasoning notes per step.
 - **Match the user's `deliveryStyle`** in the prose around steps. `direct` = no preamble; `detailed` = include the why before each step.
 
+## Right-size the chunks (token-aware decomposition)
+
+Subdivision is a token trade, not a free win. More chunks = more executors = each re-reads shared files and re-loads context — naive splitting *burns* tokens. Decompose for two payoffs and stop when neither improves:
+
+- **Parallelism** (wall-clock): independent chunks run at once — real only when their file sets are disjoint.
+- **Tighter context** (tokens): a chunk scoped to a minimal file set lets its executor read less.
+
+Rules:
+- **Disjoint, minimal file sets.** Each chunk names the exact files it touches. Two chunks sharing a file are NOT parallel-safe — mark them SEQUENTIAL or merge them. A tight file set is also what keeps each executor's context (and token cost) small.
+- **Don't split below break-even.** If a chunk's setup + context-load tokens would exceed the work it saves, merge it into a neighbor. A 3-line edit is not its own chunk.
+- **Cap by coordination cost, not ambition.** Prefer a few fat, well-scoped chunks over many thin ones — the orchestrator runs at most 3 executors in parallel anyway, so 8 micro-chunks just add handoff overhead.
+- **Define shared contracts once.** When two chunks must agree on an interface (a message format, a type, a protocol), state it ONCE in the plan and hand the same spec to both — don't make each chunk re-derive it.
+
+This applies in both team and subagent mode: the planner's chunking drives executor dispatch either way.
+
 ## Clarify enough to plan well — but no more
 
 A vague plan produces vague work. Resolve the unknowns that would actually change the plan *before* committing to it — but stop the moment more questions wouldn't change a single step. You are not running a relentless interview; you are removing the ambiguity that matters.

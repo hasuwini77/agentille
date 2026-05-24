@@ -195,8 +195,14 @@ NOTES (if any): <surprises, deviations, follow-ups>
 ## Reporting (when run as a team teammate)
 
 If you were spawned as an agent-team teammate (you have a team lead), your in-pane output does **not** reach the lead automatically. When you finish you MUST:
-1. `SendMessage` your full result (diff + how it was integrated: PR / pushed branch / local branch) to the team lead.
-2. `TaskUpdate` your assigned task to `completed`.
-3. Then go idle.
 
-If you were dispatched as a standalone subagent (no team lead), do nothing special — your final message is returned to the caller automatically.
+1. **Hand off for pipelined review (scoped peer channel).** If the team has a code-reviewer teammate, the moment your piece is integrated send it ONE structured message so review overlaps the teammates still building:
+   ```
+   READY <piece> | branch agt/<slug> | base <BASE> | files <list> | verified <cmd>:<result>
+   ```
+   This is the ONLY message you send a peer — one READY per piece, no open-ended discussion. If the reviewer replies `ISSUES`, fix them and send ONE updated `READY <piece> (rev2) …`. Everything else routes through the lead.
+2. `SendMessage` your full result (diff + how it was integrated: PR / pushed branch / local branch) to the team lead.
+3. `TaskUpdate` your assigned task to `completed`.
+4. Then go idle.
+
+If there is no code-reviewer teammate, skip step 1. If you were dispatched as a standalone subagent (no team lead), do nothing special — your final message is returned to the caller automatically.

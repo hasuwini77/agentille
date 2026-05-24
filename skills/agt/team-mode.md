@@ -89,9 +89,27 @@ You (the orchestrator) are the **team lead**. Given a resolved template:
    - Prompt = the user's task + the profile context block + which slice of the work this teammate owns. **Assign disjoint file sets** — two teammates editing the same file overwrite each other. Implementation teammates should each take their own git worktree (the executor does this when `isolated: true`, branching off the current branch) so they can't collide even by accident.
    - If the template marks `require-plan-approval: true`, tell the teammate to plan first in read-only mode and wait for your approval before implementing; you approve/reject as lead.
 
-4. **Coordinate.** Teammates message you automatically when they go idle. Use the shared task list (`TaskCreate` / `TaskList`) for dependencies. Don't do the work yourself — wait for teammates unless one is genuinely stuck, then steer or respawn it.
+4. **Coordinate.** Teammates message you automatically when they go idle. Use the shared task list (`TaskCreate` / `TaskList`) for dependencies. Don't do the work yourself — wait for teammates unless one is genuinely stuck, then steer or respawn it. For build→review overlap, wire the scoped peer channel below (**Pipelined review**) rather than routing every finished piece through yourself.
 
 5. **Synthesize + clean up.** When all teammates finish, synthesize the final response, append the shipped-log line (see SKILL.md "Shipped log"), then shut teammates down and ask the lead to clean up the team. A teammate must never run cleanup — its team context may not resolve.
+
+### Pipelined review (overlap phases)
+
+Don't gate review behind "all executors done" — review each finished piece while the rest are still being built. It's the biggest wall-clock win in team mode and costs nothing extra in tokens: each piece is reviewed exactly once either way.
+
+Wire it with a **scoped peer channel** — the only direct teammate-to-teammate messaging agentille allows. Open chatter is banned: every message is context paid by both sender and receiver, so peers exchange exactly one structured handoff, nothing more.
+
+1. When you spawn the executors, tell each the **name of the code-reviewer** and the handoff format. On integrating its piece, an executor sends the reviewer ONE message:
+   ```
+   READY <piece> | branch agt/<slug> | base <BASE> | files <list> | verified <cmd>:<result>
+   ```
+2. Tell the reviewer to expect incoming `READY` pings and review each diff (`git diff <base>..agt/<slug>`) the moment it arrives — NOT to wait for all pieces. It replies to BOTH the executor (so fixes start immediately) and you (the lead):
+   ```
+   REVIEW <piece> | PASS        — or —        REVIEW <piece> | ISSUES: <numbered>
+   ```
+3. You (lead) synthesize only once every piece has a `PASS`. A late piece never stalls review of an early one.
+
+Scope guard: ONE `READY` per piece, ONE `REVIEW` back (plus one rev if `ISSUES`). Anything beyond the handoff routes through you — peers do not free-form chat.
 
 ### Incident-team special case
 

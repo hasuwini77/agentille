@@ -36,7 +36,7 @@ That's it. `/agt` does the rest: classify → plan (if needed) → implement →
 ## What you get
 
 - **One-command orchestration.** `/agt "task"` routes work through planner, executor, and reviewers automatically — no manual skill-chaining.
-- **Right model for the job.** Opus for planning and review, Sonnet for execution, Haiku for cheap classification. Tokens go where they earn the most.
+- **Right model for the job.** Opus plans and reviews, Sonnet writes the code, Haiku runs the cheap edges (task classification + the final summary). Tokens go where they earn the most.
 - **Parallel-safe by default.** Each chunk of work runs in its own git worktree (branched off your *current* branch — never assumed `main`) with atomic commits, then integrates adaptively: a PR where the repo supports it, otherwise a pushed or handed-off branch. Works whether you're solo on main or stuck on a locked-down team branch.
 - **Voice-aware.** Your profile shapes every prompt. Ask for brutal feedback once, and every agent is brutal.
 - **Review built in.** Code review (bugs/security/quality) on every change, plus a design review (screenshots at 3 viewports, axe-core, and a scan for the generic AI-design tells that make most AI UIs feel cheap) whenever UI is touched.
@@ -72,6 +72,8 @@ When you run `/agt "task"`, the orchestrator:
 | `agentille-design-reviewer` | 6-pillar visual review, axe-core, AI-design-tell scan | Opus |
 | `agentille-security-reviewer` | Severity-classified security review | Opus |
 
+> **Where Haiku runs:** two steps happen *inline* in the orchestrator, not as dispatched agents — **task classification** (picks which roster to run) and the **final summary**. Both are cheap, so they go to Haiku.
+
 ## Team mode (optional)
 
 Instead of in-session subagents, agentille can drive a real Claude Code **agent team**: each role becomes an independent Claude session with its own context window that messages peers and shares a task list. Best when parallel perspectives genuinely help — multi-pillar review, cross-layer features, or competing-hypothesis debugging.
@@ -80,9 +82,9 @@ Instead of in-session subagents, agentille can drive a real Claude Code **agent 
 
 | Team | When to use | Teammates spawned |
 |---|---|---|
-| 🟩 `feature-team` | Cross-layer feature with review built in | 2 × executor + code-reviewer + design-reviewer (4) |
-| 🟦 `review-team` | Parallel multi-pillar review of a change set | code-reviewer + design-reviewer + security-reviewer (3) |
-| 🟥 `incident-team` | Hard bug with several possible causes | 3 × executor testing competing hypotheses (3) |
+| 🟩 `feature-team` | Build a feature across UI + API — reviewed as it ships | 2 × executor + code-reviewer + design-reviewer (4) |
+| 🟦 `review-team` | Get a change fully checked before you merge | code-reviewer + design-reviewer + security-reviewer (3) |
+| 🟥 `incident-team` | Crack a bug that has several possible causes | 3 × executor testing competing hypotheses (3) |
 
 > Colors are auto-assigned by Claude Code — each teammate spawns in its own color (you'll see e.g. one green, one blue) and it can differ run to run. The badges above are just README labels; agentille doesn't pin a color per team. You (the orchestrator) are always the lead — the planner is not a spawned teammate.
 
@@ -97,7 +99,7 @@ Requires Claude Code **2.1.32+**. Add the experimental flag:
 
 ### 2 · Turn on split panes (the "wow")
 
-One pane per teammate needs **tmux** (or iTerm2). Without it team mode still runs — teammates just share one pane (Shift+Down to cycle).
+**Two ways to drive a team:** one agent **per pane** (live — needs tmux or iTerm2), or **in-process** (no panes; teammates share one pane, Shift+Down to cycle). Same team either way — panes are just the view.
 
 **macOS**
 
@@ -132,9 +134,9 @@ Keep your repo on the **WSL filesystem** (`~/projects/…`), not `/mnt/c/…` �
 ### 3 · Run it
 
 ```bash
-/agt --team review-team "review the latest PR"
-/agt --team feature-team "add a CSV export to the reports page"
-/agt --team incident-team "debug the auth race"
+/agt --team feature-team  "add Stripe checkout: pricing page + API route + success email"  # build it all, code & design reviewed
+/agt --team review-team   "audit PR #42 before we merge"                                   # code + design + security, in parallel
+/agt --team incident-team "users get randomly logged out — find why"                       # race 3 competing theories
 ```
 
 `--team` overrides your profile's `team.defaultMode` for that one run.

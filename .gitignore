@@ -23,3 +23,9 @@ build/
 
 # Local Claude Code state
 .claude/
+
+# Playwright MCP / QA review artifacts (screenshots saved to the working dir)
+.playwright-mcp/
+*-light.png
+*-dark.png
+review-*.png

@@ -2,6 +2,18 @@
 
 All notable changes to agentille are documented here.
 
+## [1.12.0] — 2026-05-24
+
+### Added
+
+- **Copy-on-write dependency reuse in the executor** (`agents/agentille-executor.md`). Worktree setup now COW-clones the parent's `node_modules` (`cp -c` on APFS, `cp --reflink` on Btrfs/XFS) instead of a full per-worktree `pnpm/npm install` — instant, and each worktree gets its own *isolated* tree so parallel agents can't race on `.cache`/`.prisma`/native rebuilds. On non-COW filesystems (ext4) it degrades to a full copy — still isolated, just not instant — and falls back to a real install only when there's no parent to clone. The single biggest wall-clock win for `/agt` runs on JS/TS repos.
+- **Scoped pipelined review (overlap phases)** (`skills/agt/team-mode.md`). In team mode, executors hand each finished piece straight to the code-reviewer via one structured `READY → REVIEW` message, so review overlaps the teammates still building instead of "all build, then all review." It is the one sanctioned peer channel — open agent-to-agent chatter stays banned because every message is context paid twice. Subagent mode gets the same overlap by dispatching the reviewer on finished pieces while later executors run (`skills/agt/SKILL.md`).
+- **Token-aware task subdivision** (`agents/agentille-planner.md`). New "Right-size the chunks" rules: decompose only for parallelism (disjoint file sets) or tighter per-agent context, never below the break-even where context-reload tokens exceed the work saved; define shared contracts once instead of making each chunk re-derive them. Applies to both team and subagent mode.
+
+### Rationale
+
+Three asks — kill the repeated install, let review overlap building, subdivide tasks — all aimed at the same target: more speed and output per token. The subdivision guidance is deliberately an *anti*-explosion guardrail: naive splitting multiplies context-reload cost, so the planner sizes chunks to the token break-even, not to maximal granularity.
+
 ## [1.11.0] — 2026-05-24
 
 ### Added

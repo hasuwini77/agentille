@@ -52,13 +52,26 @@ BASE=$(git symbolic-ref --short HEAD)  # fork from wherever you are, NOT main
 git worktree add "../$PROJECT-$SLUG" -b "agt/$SLUG"   # branches off BASE
 cd "../$PROJECT-$SLUG"
 cp "../$PROJECT/".env* . 2>/dev/null || true            # carry local env if present
-# Stack-agnostic setup — only install if there's a manifest, match the tool:
+# Stack-agnostic setup — reuse the parent's deps without a full reinstall.
+# Copy-on-write clone the parent's node_modules: instant on APFS/Btrfs, and each
+# worktree gets its OWN isolated tree — so (unlike a symlink) codegen + build-cache
+# writes never leak between parallel agents. On non-COW filesystems (ext4) this
+# degrades to a full copy — still isolated, just not instant. A real install runs
+# only when there's no parent node_modules to clone.
 if [ -f package.json ]; then
-  command -v pnpm >/dev/null && pnpm install \
-    || { command -v bun >/dev/null && bun install; } \
-    || npm install
+  PARENT_NM="../$PROJECT/node_modules"
+  if [ -d "$PARENT_NM" ] && { cp -c -R "$PARENT_NM" node_modules 2>/dev/null \
+        || cp --reflink=auto -a "$PARENT_NM" node_modules 2>/dev/null; }; then
+    :   # cloned the parent's deps (copy-on-write → instant + isolated)
+  else
+    command -v pnpm >/dev/null && pnpm install \
+      || { command -v bun >/dev/null && bun install; } \
+      || npm install
+  fi
 fi   # no package.json? skip — Python/Go/Rust/etc. manage their own deps
 ```
+
+**Why a clone, not a symlink:** a symlink shares one `node_modules` across worktrees, so parallel agents corrupt each other the instant anything writes into it — `prisma generate`, Next.js/`vite` `.cache`, native rebuilds. A copy-on-write clone gives each worktree its own tree, so you `npm install`/codegen into it normally with no special handling. pnpm users already get this isolation from the shared content-addressed store; the clone mainly rescues npm/yarn from the multi-minute per-worktree reinstall.
 
 Remember `$BASE` — it's your integration target in step 8, not `main`.
 
@@ -185,8 +198,14 @@ NOTES (if any): <surprises, deviations, follow-ups>
 ## Reporting (when run as a team teammate)
 
 If you were spawned as an agent-team teammate (you have a team lead), your in-pane output does **not** reach the lead automatically. When you finish you MUST:
-1. `SendMessage` your full result (diff + how it was integrated: PR / pushed branch / local branch) to the team lead.
-2. `TaskUpdate` your assigned task to `completed`.
-3. Then go idle.
 
-If you were dispatched as a standalone subagent (no team lead), do nothing special — your final message is returned to the caller automatically.
+1. **Hand off for pipelined review (scoped peer channel).** If the team has a code-reviewer teammate, the moment your piece is integrated send it ONE structured message so review overlaps the teammates still building:
+   ```
+   READY <piece> | branch agt/<slug> | base <BASE> | files <list> | verified <cmd>:<result>
+   ```
+   This is the ONLY message you send a peer — one READY per piece, no open-ended discussion. If the reviewer replies `ISSUES`, fix them and send ONE updated `READY <piece> (rev2) …`. Everything else routes through the lead.
+2. `SendMessage` your full result (diff + how it was integrated: PR / pushed branch / local branch) to the team lead.
+3. `TaskUpdate` your assigned task to `completed`.
+4. Then go idle.
+
+If there is no code-reviewer teammate, skip step 1. If you were dispatched as a standalone subagent (no team lead), do nothing special — your final message is returned to the caller automatically.

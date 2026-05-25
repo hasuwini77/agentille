@@ -170,7 +170,7 @@ It's documentation, so it's committed by default. To opt out, add `docs/agentill
 
 ## Acknowledgments
 
-The executor's debugging, test-first, and verification discipline is informed by [Jesse Vincent's superpowers](https://github.com/obra/superpowers) (MIT) — internalized in agentille's own voice, not bundled as a dependency. agentille is the *dispatch* layer; superpowers is a great *session*-layer companion, and the two stack cleanly.
+The executor's debugging, test-first, and verification discipline is informed by [Jesse Vincent's superpowers](https://github.com/obra/superpowers) (MIT) — internalized in agentille's own voice, not bundled as a dependency.
 
 ## License
 

@@ -33,6 +33,10 @@ After picking the primary category, also note:
 - **hasUIComponent**: true if prompt mentions UI/UX/styling/component/page/screen/responsive/animation OR explicitly lists a `.tsx/.css/.scss` file → triggers design-reviewer in roster
 - **hasMultipleSubtasks**: true if prompt contains "and ", "also", "plus", "as well as" connecting verbs, OR ≥3 distinct actionable nouns → triggers planner
 
+## Team vs subagent honesty
+
+Team mode is ~4× tokens (each teammate is a separate session). It only wins when there is **real disjoint parallelism** — ≥ 2 vertical slices with disjoint file sets that can build at once. For work where each piece depends on the last (sequential), or when only one slice exists, prefer **subagent mode + pipelined review**: cheaper, and each worker's context is discarded back to the lead so totals stay small. Don't pay the 4× team tax for parallelism that isn't there.
+
 ## Examples
 
 | Prompt | Category | hasUI | hasMulti |

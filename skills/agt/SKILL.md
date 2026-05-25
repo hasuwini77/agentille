@@ -145,6 +145,7 @@ The orchestrator supports Claude Code's Agent Teams primitive in addition to sub
 - **Honor `preTaskQuestioning`.** If `always`, every subagent should ask one clarifying question before starting. If `never`, no subagent asks — they proceed on best assumption.
 - **Honor `neverDo`.** These are absolute. Pass them verbatim into every subagent prompt.
 - **Review findings are a gate, not a memo.** A code-review or security-review finding marked **BLOCKER** or **should-fix** must be resolved before you declare the task done — re-dispatch an executor to fix it (or fix it inline if trivial), then confirm the fix landed. If you genuinely can't or shouldn't fix it (out of scope, needs a product decision), surface it **explicitly** to the user and let them decide — never bury a blocker in the final summary and call it shipped. Nits are advisory; blockers and should-fix are not. (This holds in both modes: in team mode the lead drives the fix via the reviewer's `REVIEW … ISSUES` reply; in subagent mode the orchestrator re-dispatches the executor.)
+- **Never auto-target `main`.** Worktrees fork from the current branch (`$BASE`) and the lead merges them back into `$BASE`, not `main`. When `$BASE` ≠ `main`, the default integration is to push `$BASE` only — never open a PR/merge into `main`, never push `agt/*` scaffolding branches. Opening anything against `main` requires an explicit `integration: pr` choice on a base meant for `main`. (See `team-mode.md` → "Consolidation".)
 
 ## Token budget hints
 
@@ -155,6 +156,7 @@ The user wants this to be **token-efficient**. Apply these defaults:
 - Code-reviewer: skip for refactors that are pure renames or moves with no logic changes.
 - **Decomposition is a token trade.** Right-size chunks into disjoint, minimal file sets; never subdivide below the break-even where context-reload tokens exceed the work saved. The planner owns this (see `agents/agentille-planner.md` → "Right-size the chunks"). Applies to both team and subagent mode.
 - **Pipeline review over building.** Don't gate review behind all-executors-done. In team mode use the scoped peer handoff (see `team-mode.md` → "Pipelined review"); in subagent mode, dispatch the code-reviewer on each finished piece while remaining executors still run (when pieces are dispatched in sequence) — same overlap pattern, no peer messaging needed.
+- **Discover once, reuse everywhere (context pack).** The planner already explores the repo. Persist that discovery once to a run-scoped temp file outside the repo (e.g. `~/.agentille/state/run-<id>/context-pack.md`), then hand each executor ONLY its slice (its files-to-touch, files-to-read, the conventions + shared contracts that bind it). Executors must not re-grep the whole repo — the discovery is done. This is what makes smaller chunks *net-negative* on tokens instead of paying an N× rediscovery tax. The pack is an optimization, never a hard dependency: if it's missing, the executor falls back to reading/grepping as needed.
 
 ## Shipped log
 

@@ -31,8 +31,8 @@ Isolation is the point and it's universal; **integration is adaptive and must no
 
 ## What you do, in order
 
-### 1. Read first
-Understand the existing code that will be touched. Don't blindly add files.
+### 1. Read first — from the context pack, not the whole repo
+If the orchestrator handed you a context-pack slice, read **that + the files it names** and stop there — discovery is already done, do NOT grep the repo broadly. Escape hatch: if a named file imports something you genuinely need, read that too, but start from the pack. With no pack (standalone run), understand the existing code that will be touched — but still read narrowly; don't blindly scan or add files.
 
 ### 2. Reuse before creating
 If a function/component/utility already does what you need, use it. Search `src/` and any shared packages before writing new code.
@@ -62,16 +62,22 @@ if [ -f package.json ]; then
   PARENT_NM="../$PROJECT/node_modules"
   if [ -d "$PARENT_NM" ] && { cp -c -R "$PARENT_NM" node_modules 2>/dev/null \
         || cp --reflink=auto -a "$PARENT_NM" node_modules 2>/dev/null; }; then
-    :   # cloned the parent's deps (copy-on-write → instant + isolated)
+    echo "deps: COW clone (instant + isolated)"
+  elif [ -d "$PARENT_NM" ] && cp -al "$PARENT_NM" node_modules 2>/dev/null; then
+    echo "deps: hardlink clone (instant on ext4/non-COW; ~0 extra space)"
+    # Safe: installed packages are immutable, and build tools replace-on-write
+    # (new inode) rather than edit in place — so the parent tree is never mutated.
   else
-    command -v pnpm >/dev/null && pnpm install \
-      || { command -v bun >/dev/null && bun install; } \
-      || npm install
+    { command -v pnpm >/dev/null && pnpm install \
+        || { command -v bun >/dev/null && bun install; } \
+        || npm install; } > /tmp/agt-$SLUG-install.log 2>&1 \
+      && echo "deps: fresh install (see /tmp/agt-$SLUG-install.log)" \
+      || { echo "deps FAILED — see /tmp/agt-$SLUG-install.log"; tail -n 20 /tmp/agt-$SLUG-install.log; }
   fi
 fi   # no package.json? skip — Python/Go/Rust/etc. manage their own deps
 ```
 
-**Why a clone, not a symlink:** a symlink shares one `node_modules` across worktrees, so parallel agents corrupt each other the instant anything writes into it — `prisma generate`, Next.js/`vite` `.cache`, native rebuilds. A copy-on-write clone gives each worktree its own tree, so you `npm install`/codegen into it normally with no special handling. pnpm users already get this isolation from the shared content-addressed store; the clone mainly rescues npm/yarn from the multi-minute per-worktree reinstall.
+**Why a clone, not a symlink:** a symlink shares one `node_modules` across worktrees, so parallel agents corrupt each other the instant anything writes into it — `prisma generate`, Next.js/`vite` `.cache`, native rebuilds. A copy-on-write clone gives each worktree its own tree, so you `npm install`/codegen into it normally with no special handling. pnpm users already get this isolation from the shared content-addressed store; the clone mainly rescues npm/yarn from the multi-minute per-worktree reinstall. On non-COW filesystems (ext4, common on WSL2) the reflink clone fails, so we fall back to `cp -al` — a hardlink tree, which is instant and near-zero-space because it links inodes rather than copying data. It's safe for `node_modules` specifically: installed packages are immutable and tools replace-on-write (new inode), so the parent's tree is never mutated; a full copy remains the final fallback.
 
 Remember `$BASE` — it's your integration target in step 8, not `main`.
 
@@ -93,7 +99,15 @@ Run whatever the project uses to prove the step works — match the stack, don't
 - Build / typecheck (e.g. `npm run build`, `tsc --noEmit`, `cargo build`, `go build`)
 - Tests, if they exist (`npm test`, `pytest`, `go test`, …)
 
-Paste the command and its actual result into the VERIFICATION block. If you didn't run it this session, you cannot claim it — say so instead.
+**Capture, don't flood.** Redirect the full output to a log and keep only the result in your context:
+
+```bash
+<verify-cmd> > /tmp/agt-$SLUG-verify.log 2>&1; echo "exit=$?"; tail -n 20 /tmp/agt-$SLUG-verify.log
+```
+
+Read the **full** log ONLY if it failed, and even then only the failing section (`grep -nE "error|fail|✗" /tmp/agt-$SLUG-verify.log`). A green build's 20k-line output is pure context waste — the exit code and last lines are the evidence.
+
+Paste the command + its real result (exit code, pass/fail counts) into the VERIFICATION block. If you didn't run it this session, you cannot claim it — say so instead.
 
 ### 8. If `isolated: true` — integrate adaptively
 
@@ -104,10 +118,11 @@ Resolve the `integration` mode (honor the flag; for `auto`, detect):
   git push -u origin "agt/$SLUG"
   gh pr create --base "$BASE" --title "<≤70-char summary>" --body "<summary + test plan>"
   ```
-- **`push`** — or `auto` when there's a remote but no `gh`/PR workflow. Push the branch and report it; let the human integrate however their team requires:
+- **`push`** — or `auto` when there's a remote but no GitHub `gh` workflow, OR `$BASE` is not `main`/`master`. Do NOT push the throwaway `agt/$SLUG` branch in this case — the lead consolidates it into `$BASE` (see team-mode "Consolidation") and pushes only `$BASE`. If you are a standalone (non-team) executor, push your branch and report it; the human integrates as their team requires:
   ```bash
-  git push -u origin "agt/$SLUG"
+  git push -u origin "agt/$SLUG"   # standalone only; in a team, hand off to the lead instead
   ```
+  **Never open a PR into `main` when `$BASE` is a feature branch** — integrate to `$BASE`, never assume `main`.
 - **`local`** — or `auto` when there's no remote, or pushing is restricted. Leave the commits on the local `agt/$SLUG` branch. Report the branch + how to integrate (`git merge agt/$SLUG` into `$BASE`, cherry-pick, or push when able). Do **not** force anything.
 
 Hand-off body: 1-3 bullet summary + the test plan (what you ran, what passed) + a link to the parent orchestration if one was given.
@@ -188,6 +203,7 @@ NOTES (if any): <surprises, deviations, follow-ups>
 ## Hard rules
 
 - **Never claim "done" without fresh verification from this session.** Confidence is not evidence. If tests/build fail — or you didn't run them — state that and ask for direction; never imply success.
+- **Never let a build/test/install dump its full stdout into your context.** Redirect to a log; surface exit code + failure count + last ~20 lines. Read the full log only on failure, and only the failing portion. (The VERIFICATION block still shows the real command + result — trim the noise, not the evidence.)
 - **Never silently expand scope.** If finishing the step requires a sibling change, flag it; don't sneak it in.
 - **Never use mocks where the project uses real I/O** unless explicitly instructed.
 - **Never force-push. Never rewrite history on a shared branch.**

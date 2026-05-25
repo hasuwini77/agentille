@@ -2,6 +2,16 @@
 
 All notable changes to agentille are documented here.
 
+## [1.13.1] — 2026-05-25
+
+### Fixed
+
+- **Split panes silently fail when `teammateMode` is unset** (`skills/agt/team-mode.md`). The most common team-mode footgun: a user inside tmux (WSL2 or macOS) spawns a team and sees no panes, because Claude Code defaults `teammateMode` to in-process and nothing flags it. The team-mode pre-flight now adds a **non-blocking display-readiness check** — it reads `$TMUX`, the OS, installed `tmux`/`it2`, and `teammateMode` from `~/.claude/settings.json`, then hints (once) with the exact fix when panes are *possible* but not *configured*. Verified across both edge cases: WSL2-in-tmux and macOS-with-iTerm2. Guidance only — it never writes settings, never blocks, and never degrades the team (panes are cosmetic; the team still runs).
+
+### Changed
+
+- **Killed the `displayMode` vs `teammateMode` confusion.** The agentille profile's `team.displayMode` looked like it controlled split panes but never did. Documented loudly that it is **informational only** — Claude Code's top-level `teammateMode` is the sole driver (`skills/agentille-init/profile-schema.md`, `skills/agt/team-mode.md`, `README.md`). Added the canonical "recipe that actually opens panes" (tmux/iTerm2 → `teammateMode: tmux` → spawn) to `team-mode.md`.
+
 ## [1.13.0] — 2026-05-25
 
 ### Added

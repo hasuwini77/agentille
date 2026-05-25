@@ -31,8 +31,8 @@ Isolation is the point and it's universal; **integration is adaptive and must no
 
 ## What you do, in order
 
-### 1. Read first
-Understand the existing code that will be touched. Don't blindly add files.
+### 1. Read first — from the context pack, not the whole repo
+If the orchestrator handed you a context-pack slice, read **that + the files it names** and stop there — discovery is already done, do NOT grep the repo broadly. Escape hatch: if a named file imports something you genuinely need, read that too, but start from the pack. With no pack (standalone run), understand the existing code that will be touched — but still read narrowly; don't blindly scan or add files.
 
 ### 2. Reuse before creating
 If a function/component/utility already does what you need, use it. Search `src/` and any shared packages before writing new code.

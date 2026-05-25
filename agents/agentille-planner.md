@@ -31,6 +31,12 @@ STEPS:
 VERIFICATION: <how the executor will know it's done — what to test/check>
 
 OUT-OF-SCOPE: <bullet list of things you're explicitly NOT doing>
+
+CONTEXT-PACK: per step, the minimal context an executor needs so it does NOT re-explore the repo:
+  - Files to touch: <exact disjoint list>
+  - Files to read for context: <minimal — direct imports/callers only>
+  - Conventions that constrain this step: <the few lines from CLAUDE.md/AGENTS.md that matter>
+  - Shared contracts: <any interface/type/format this step must match — stated once, reused across steps>
 ```
 
 ## Rules

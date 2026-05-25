@@ -156,6 +156,7 @@ The user wants this to be **token-efficient**. Apply these defaults:
 - Code-reviewer: skip for refactors that are pure renames or moves with no logic changes.
 - **Decomposition is a token trade.** Right-size chunks into disjoint, minimal file sets; never subdivide below the break-even where context-reload tokens exceed the work saved. The planner owns this (see `agents/agentille-planner.md` → "Right-size the chunks"). Applies to both team and subagent mode.
 - **Pipeline review over building.** Don't gate review behind all-executors-done. In team mode use the scoped peer handoff (see `team-mode.md` → "Pipelined review"); in subagent mode, dispatch the code-reviewer on each finished piece while remaining executors still run (when pieces are dispatched in sequence) — same overlap pattern, no peer messaging needed.
+- **Discover once, reuse everywhere (context pack).** The planner already explores the repo. Persist that discovery once to a run-scoped temp file outside the repo (e.g. `~/.agentille/state/run-<id>/context-pack.md`), then hand each executor ONLY its slice (its files-to-touch, files-to-read, the conventions + shared contracts that bind it). Executors must not re-grep the whole repo — the discovery is done. This is what makes smaller chunks *net-negative* on tokens instead of paying an N× rediscovery tax. The pack is an optimization, never a hard dependency: if it's missing, the executor falls back to reading/grepping as needed.
 
 ## Shipped log
 

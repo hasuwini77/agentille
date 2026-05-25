@@ -55,10 +55,12 @@ Subdivision is a token trade, not a free win. More chunks = more executors = eac
 - **Tighter context** (tokens): a chunk scoped to a minimal file set lets its executor read less.
 
 Rules:
-- **Disjoint, minimal file sets.** Each chunk names the exact files it touches. Two chunks sharing a file are NOT parallel-safe — mark them SEQUENTIAL or merge them. A tight file set is also what keeps each executor's context (and token cost) small.
-- **Don't split below break-even.** If a chunk's setup + context-load tokens would exceed the work it saves, merge it into a neighbor. A 3-line edit is not its own chunk.
-- **Cap by coordination cost, not ambition.** Prefer a few fat, well-scoped chunks over many thin ones — the orchestrator runs at most 3 executors in parallel anyway, so 8 micro-chunks just add handoff overhead.
-- **Define shared contracts once.** When two chunks must agree on an interface (a message format, a type, a protocol), state it ONCE in the plan and hand the same spec to both — don't make each chunk re-derive it.
+- **Slice vertically, not by layer.** Each chunk owns one thin end-to-end capability + its test, with a disjoint file set — NOT "all the UI" / "all the backend". A vertical slice has a naturally small, self-contained context; a horizontal layer drags in a whole subtree.
+- **Disjoint, minimal file sets.** Each chunk names the exact files it touches. Two chunks sharing a file are NOT parallel-safe — mark them SEQUENTIAL or merge them. A tight file set is what keeps each executor's context (and token cost) small.
+- **Budget the context: ≤ ~30% per chunk.** If a chunk's expected context (files to read + edit + verify) would exceed ~30%, split it further. The break-even for splitting is now low because the context pack (handed to each executor) removes the per-chunk rediscovery cost — so prefer more small vertical slices over few fat ones.
+- **But never split below true break-even.** A 3-line edit with no independent test is not its own chunk — merge it into its natural neighbor.
+- **Adaptive count.** Emit as many slices as the work has natural vertical seams, capped at `profile.team.maxTeammates`. The orchestrator still runs at most 3 executors in parallel (batching the rest), so seams beyond that improve context size, not wall-clock.
+- **Define shared contracts once.** When two chunks must agree on an interface (a message format, a type, a protocol), state it ONCE (in the CONTEXT-PACK shared-contracts field) and hand the same spec to both — don't make each chunk re-derive it.
 
 This applies in both team and subagent mode: the planner's chunking drives executor dispatch either way.
 

@@ -2,6 +2,8 @@ name: feature-team
 description: Cross-layer feature implementation with code + design review running in parallel.
 lead: agentille:agentille-planner
 teammates:
+  # count is a DEFAULT — the lead spawns one executor per vertical slice the
+  # planner emits (capped at profile.team.maxTeammates, batched 3 at a time).
   - role: agentille:agentille-executor
     count: 2
     require-plan-approval: true

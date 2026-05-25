@@ -145,6 +145,7 @@ The orchestrator supports Claude Code's Agent Teams primitive in addition to sub
 - **Honor `preTaskQuestioning`.** If `always`, every subagent should ask one clarifying question before starting. If `never`, no subagent asks — they proceed on best assumption.
 - **Honor `neverDo`.** These are absolute. Pass them verbatim into every subagent prompt.
 - **Review findings are a gate, not a memo.** A code-review or security-review finding marked **BLOCKER** or **should-fix** must be resolved before you declare the task done — re-dispatch an executor to fix it (or fix it inline if trivial), then confirm the fix landed. If you genuinely can't or shouldn't fix it (out of scope, needs a product decision), surface it **explicitly** to the user and let them decide — never bury a blocker in the final summary and call it shipped. Nits are advisory; blockers and should-fix are not. (This holds in both modes: in team mode the lead drives the fix via the reviewer's `REVIEW … ISSUES` reply; in subagent mode the orchestrator re-dispatches the executor.)
+- **Never auto-target `main`.** Worktrees fork from the current branch (`$BASE`) and the lead merges them back into `$BASE`, not `main`. When `$BASE` ≠ `main`, the default integration is to push `$BASE` only — never open a PR/merge into `main`, never push `agt/*` scaffolding branches. Opening anything against `main` requires an explicit `integration: pr` choice on a base meant for `main`. (See `team-mode.md` → "Consolidation".)
 
 ## Token budget hints
 

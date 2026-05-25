@@ -131,6 +131,23 @@ Wire it with a **scoped peer channel** — the sanctioned peer channel for build
 
 Scope guard: ONE `READY` per piece, ONE `REVIEW` back (plus one rev if `ISSUES`). Anything beyond the handoff routes through you — peers do not free-form chat.
 
+### Consolidation — merge back to the current branch, never `main`
+
+Worktrees fork from `$BASE = $(git symbolic-ref --short HEAD)` — the user's *current* branch, which may be `main` or a feature branch. The lead consolidates finished work back onto `$BASE`; it NEVER assumes `main`.
+
+1. Once a teammate's piece has a `PASS`, merge its branch into `$BASE` **locally and sequentially** (one at a time — disjoint file sets make these clean, and serializing avoids index races):
+   ```bash
+   git checkout "$BASE" && git merge --no-ff "agt/<slug>" -m "merge: <piece>"
+   git branch -D "agt/<slug>"        # delete scaffolding; never push agt/* branches
+   ```
+2. Resolve the **integration target** for `$BASE` (precedence: `--integration` flag → repo `.agentille/config.json` `{"integration": …}` → profile `projects[].integration` → `auto`):
+   - `pr` — open a PR from `$BASE` (only when `$BASE` is meant for `main`). Never `--base main` unless explicitly chosen.
+   - `push` — push `$BASE` to its own remote tracking branch and stop. **Default when `$BASE` ≠ `main`.**
+   - `local` — leave consolidated work on `$BASE`; no remote.
+   - `auto` — `$BASE` is `main`/`master` → today's behavior (PR if `gh`+GitHub, else push). `$BASE` is any other branch → **push `$BASE` only**, never scaffolding, never `main`.
+
+This keeps the parallel split-pane build on any branch while respecting "work on my own branch, don't merge to main yet."
+
 ### Incident-team special case
 
 For `incident-team`, override the executor prompts with adversarial framing. Generate 3 distinct hypotheses by reading the failing symptom, then assign one per executor:

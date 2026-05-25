@@ -118,10 +118,11 @@ Resolve the `integration` mode (honor the flag; for `auto`, detect):
   git push -u origin "agt/$SLUG"
   gh pr create --base "$BASE" --title "<≤70-char summary>" --body "<summary + test plan>"
   ```
-- **`push`** — or `auto` when there's a remote but no `gh`/PR workflow. Push the branch and report it; let the human integrate however their team requires:
+- **`push`** — or `auto` when there's a remote but no GitHub `gh` workflow, OR `$BASE` is not `main`/`master`. Do NOT push the throwaway `agt/$SLUG` branch in this case — the lead consolidates it into `$BASE` (see team-mode "Consolidation") and pushes only `$BASE`. If you are a standalone (non-team) executor, push your branch and report it; the human integrates as their team requires:
   ```bash
-  git push -u origin "agt/$SLUG"
+  git push -u origin "agt/$SLUG"   # standalone only; in a team, hand off to the lead instead
   ```
+  **Never open a PR into `main` when `$BASE` is a feature branch** — integrate to `$BASE`, never assume `main`.
 - **`local`** — or `auto` when there's no remote, or pushing is restricted. Leave the commits on the local `agt/$SLUG` branch. Report the branch + how to integrate (`git merge agt/$SLUG` into `$BASE`, cherry-pick, or push when able). Do **not** force anything.
 
 Hand-off body: 1-3 bullet summary + the test plan (what you ran, what passed) + a link to the parent orchestration if one was given.

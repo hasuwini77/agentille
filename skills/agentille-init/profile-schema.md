@@ -256,7 +256,7 @@ Notes on `projects` and `selectedPrompts`:
 | `enabled` | bool | `false` | Master switch for team mode |
 | `defaultMode` | enum | `subagent` | One of: `auto`, `subagent`, `team`, `solo` |
 | `maxTeammates` | int | `4` | Cap on teammates per team |
-| `displayMode` | enum | `auto` | One of: `auto`, `tmux`, `in-process` (set by detection, not user) |
+| `displayMode` | enum | `auto` | One of: `auto`, `tmux`, `in-process`. **Informational only — does NOT control split panes.** Pane display is driven solely by Claude Code's own top-level `teammateMode` in `~/.claude/settings.json` (see `skills/agt/team-mode.md`). |
 | `dailySoftCap` | int | `10` | Soft cap on team-mode runs per 24h; 0 disables warning |
 
 Example:

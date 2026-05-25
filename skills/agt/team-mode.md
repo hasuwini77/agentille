@@ -59,6 +59,19 @@ Before dispatching team mode:
 
 3. Check daily soft cap (see below). If exceeded, prompt once per session.
 
+4. **Display-readiness (non-blocking — hint only, never degrades team mode).** Split panes are driven by Claude Code's own `teammateMode` setting — NOT by anything agentille sets, and NOT by the agentille profile's `team.displayMode` (which is informational only; see below). Detect a mismatch, guide the user **once per session**, then continue regardless:
+
+   - Read four signals: `$TMUX` (inside a tmux session?), `uname -s` (`Darwin` = macOS), whether `tmux` / `it2` are installed, and `teammateMode` from `~/.claude/settings.json`. Panes are *possible* when inside tmux, **or** on macOS with iTerm2's `it2` CLI.
+
+   | Panes possible? | `teammateMode` | Action |
+   |---|---|---|
+   | yes | `tmux`, or `auto` while inside tmux | **Ready** — say nothing. |
+   | yes | unset / `in-process` / `auto` outside tmux | **Hint:** *"Teammates will run in-process (no split panes). To get one pane per teammate, add `\"teammateMode\": \"tmux\"` to `~/.claude/settings.json` — or launch `claude --teammate-mode tmux`."* |
+   | no (tmux session absent) | `tmux` | **Hint:** *"`teammateMode: tmux` is set but there's no tmux session — start `tmux` (or use iTerm2 on macOS) before launching Claude so panes can attach."* |
+   | no (Windows Terminal / VS Code terminal / Ghostty) | any | **No nag** — panes are unsupported there; teammates run in the lead's terminal (Shift+Down to cycle). |
+
+   Guidance only: never write to `settings.json` yourself, never block, and skip silently if the file can't be read. This is the one pre-flight check that does **not** degrade team mode on failure — pane display is cosmetic, the team still runs.
+
 ## Display mode (the split-pane "wow")
 
 Whether teammates appear in separate panes is the **user's** setting, not agentille's — never try to set it from the skill:
@@ -66,7 +79,14 @@ Whether teammates appear in separate panes is the **user's** setting, not agenti
 - `teammateMode: "in-process"` (and the `"auto"` default outside tmux) → all teammates live in the lead's terminal; cycle with Shift+Down. Works in any terminal.
 - `teammateMode: "tmux"` (or `"auto"` while already inside a tmux session) → each teammate gets its own pane. Requires tmux **or** iTerm2 (`it2` CLI) installed.
 
-If the user asks "why no panes?", point them at `~/.claude/settings.json` → `teammateMode` plus installing tmux/iTerm2. Split panes are unsupported in VS Code's integrated terminal, Windows Terminal, and Ghostty.
+> **Two settings, don't confuse them.** Claude Code's top-level **`teammateMode`** (in `~/.claude/settings.json`) is the *only* thing that drives panes. The agentille profile's **`team.displayMode`** is informational metadata — it does **not** control Claude Code's display. A user who sets `team.displayMode: "tmux"` and expects panes will be disappointed; always point them at `teammateMode`.
+
+**The recipe that actually opens panes** (macOS or Linux/WSL2):
+1. Be **inside a tmux session** (`tmux`, then launch `claude` within it) — or on macOS, use iTerm2 with the `it2` CLI.
+2. Set `"teammateMode": "tmux"` in `~/.claude/settings.json`, or launch `claude --teammate-mode tmux`.
+3. Spawn the team normally — each teammate opens in its own split pane.
+
+The pre-flight display-readiness check (step 4 above) detects when steps 1–2 are missing and hints automatically, so the user is told at dispatch time rather than left wondering. If they still ask "why no panes?", walk them through the recipe. Split panes are unsupported in VS Code's integrated terminal, standalone Windows Terminal, and Ghostty — there teammates run in-process, which is fully functional, just single-pane.
 
 ## Terminal ergonomics (tmux)
 

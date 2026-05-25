@@ -2,6 +2,22 @@
 
 All notable changes to agentille are documented here.
 
+## [1.14.0] — 2026-05-25
+
+### Changed
+
+- **Lean Teams — token-efficiency & speed overhaul.** A six-part pass to keep each executor's context small (target ≤ ~30%), lower total tokens, cut wall-clock, and preserve the parallel `--team` experience on any branch — without breaking existing behavior.
+  - **Executor output discipline** (`agents/agentille-executor.md`): build/test/install output is redirected to a log; only the exit code, failure count, and last ~20 lines enter context, with the full log read only on failure. Closes the biggest context sink — a green build's full stdout was previously held for the rest of the run.
+  - **Hardlink dependency clone** (`agents/agentille-executor.md`): adds a `cp -al` tier between the copy-on-write clone and the full-copy/install fallback. On ext4 (common on WSL2), where reflink is unsupported and v1.12.0 silently degraded to a full multi-GB `node_modules` copy per worktree, setup is now instant and near-zero-space. Safe because installed packages are immutable and build tools replace-on-write.
+  - **Isolation decoupled from integration target** (`skills/agt/SKILL.md`, `skills/agt/team-mode.md`, `skills/agentille-project/SKILL.md`, `agents/agentille-executor.md`): worktrees stay the default on any branch (preserving the parallel split-pane build); the lead consolidates each worktree branch back into the *current* branch and never auto-targets `main`. A per-repo integration setting (`pr`/`push`/`local`, captured at registration into `.agentille/config.json`) drives where the consolidated branch lands.
+  - **Context pack** (`agents/agentille-planner.md`, `skills/agt/SKILL.md`, `agents/agentille-executor.md`): the planner emits a per-step pack (files to touch, minimal files to read, binding conventions, shared contracts); executors read their slice instead of re-grepping the repo, eliminating the N× cold-start rediscovery tax.
+  - **Vertical, context-budgeted decomposition** (`agents/agentille-planner.md`, `.claude-plugin/teams/feature-team.yaml`): work is sliced into thin end-to-end vertical capabilities sized to a ~30% context budget instead of horizontal layers; executor count is adaptive to the number of slices.
+  - **No redundant per-executor approval; team only for real parallelism** (`.claude-plugin/teams/feature-team.yaml`, `skills/agt/classifier.md`): `feature-team` no longer forces each executor to plan-and-wait (the master plan is already plan-reviewed); the classifier documents that team mode's ~4× token cost is only justified by ≥2 disjoint parallel slices.
+
+### Rationale
+
+A field run showed executors at 60–70% context — caused by full build logs persisting in context, horizontal layer-splits, and cold-start rediscovery, not by reasoning. The fix targets *what enters each context* (output trimming + context pack) and *how work is sliced* (vertical, budgeted), with the confirmed ext4 full-copy regression fixed by hardlinking. Worktrees were also untangled from `main`-centric integration so the parallel experience works for "work on my own branch, don't merge to main yet" repos.
+
 ## [1.13.1] — 2026-05-25
 
 ### Fixed

@@ -2,6 +2,21 @@
 
 All notable changes to agentille are documented here.
 
+## [1.13.0] — 2026-05-25
+
+### Added
+
+- **Transit Rail progress display** (`skills/agt/display.md`, new). `/agt` now surfaces its orchestration as a top-to-bottom "transit line" — each phase is a station, the line forks when work runs in parallel — so the user can track what the lead is doing *before* any agent is dispatched. Two pillars: the **TodoWrite spine** (seeded before the first spawn — the live "what's left until we send the agents") and the **rail frames** (a drawn-once Mission Brief, one thin colored-LED ping per phase, a fanout block when the build forks, diff-fence review verdicts, and a compact Debrief). Works identically in subagent and team mode. Presentation only — it changes no classification, roster, model-routing, or dispatch logic, and never blocks the result.
+
+### Changed
+
+- `skills/agt/SKILL.md`: contract step 9 ("stream progress") now points at `display.md` and requires seeding the TodoWrite spine *before* the first dispatch; `display.md` added to the file manifest.
+- `skills/agt/team-mode.md`: the ~4× token cost line folds into the Mission Brief header instead of a standalone spawn line.
+
+### Rationale
+
+Token-disciplined by design: the full rail is drawn once, then only one-line pings stream per phase. Color comes from emoji LEDs and ` ```diff ` verdict fences (no raw ANSI — terminals strip it), and the aligned rail stays pure ASCII because emoji are double-width and would break the columns. The user gains visibility into the pre-dispatch work without a board redrawn on every phase.
+
 ## [1.12.1] — 2026-05-24
 
 ### Added

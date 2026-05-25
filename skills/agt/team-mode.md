@@ -136,8 +136,8 @@ Suppressible with `--yes` or by setting `dailySoftCap: 0`. After execution, appe
 
 ## Cost transparency
 
-Team mode uses ~4× the tokens of subagent mode (each teammate is a separate Claude session with its own context). Print one informational line at spawn time:
+Team mode uses ~4× the tokens of subagent mode (each teammate is a separate Claude session with its own context). Surface this in the **Mission Brief header** (see `display.md`) rather than as a standalone line — the header carries the squad and the cost together:
 
-> *"Spawning <template>: <list of teammates>. Team mode uses ~4× tokens vs subagent mode."*
+> `agentille ▸ team · <template> ▸ ~<est>m · ~4× tokens`
 
 Do NOT prompt the user for confirmation per spawn — friction with no signal. The daily soft cap is the only friction by design.

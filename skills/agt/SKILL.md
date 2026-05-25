@@ -20,7 +20,7 @@ When this skill is invoked (`/agt <task>`):
 6. **Clarify before planning** — when `preTaskQuestioning` is `always` (or `ambiguous-only` and the task is genuinely ambiguous), resolve the plan-changing unknowns with the user *before* building the plan. See "Clarify before planning" below. Explore the codebase to answer what you can; ask only what actually forks the plan.
 7. **Plan, then review the plan** — for multi-step tasks the planner drafts the plan and the **plan-reviewer** critiques it (goal correctness, coverage, parallel-safety, real verification) before any executor runs. One REVISE round, then proceed. Skip the review on `thinkingDepth=quick`.
 8. **Dispatch in dependency order**, parallelizing independent steps where the task explicitly contains independent subtasks.
-9. **Stream progress** with one short status line per phase ("Clarifying…", "Planning…", "Reviewing plan…", "Executing 2 parallel tasks…", "Code review…", "Design review…", "Done.").
+9. **Stream progress via the Transit Rail** (see `display.md`) — *before* the first dispatch, seed the TodoWrite spine (one todo per resolved phase: the user's live "what's left until we send the agents"). Then render: a drawn-once Mission Brief rail, one thin colored-LED ping per phase transition, a fanout block when the build forks into parallel workers, diff-fence review verdicts, and a final Debrief. Presentation only — it never changes dispatch and never blocks the result; if a frame can't render, drop the field, not the run.
 10. **Append the shipped-log line** to `./docs/agentille-log.md` — you write it directly as the final step (see "Shipped log" below). There is no log hook.
 11. **Return one final summary** matching the user's `deliveryStyle` preference.
 
@@ -188,6 +188,7 @@ If you can't write the file for any reason, skip silently — never let logging 
 - `agt/roster.md` — task-category → agent roster
 - `agt/model-routing.md` — agent role → model selection
 - `agt/team-mode.md` — team-mode auto-detection, Stage 1/Stage 2 dispatch, pre-flight checks, cost transparency
+- `agt/display.md` — the Transit Rail: progress display (TodoWrite spine + drawn-once brief, thin pings, parallel fanout, diff-fence verdicts, debrief)
 
 The six worker roles live as **agent definitions** in the plugin's `agents/` dir (dispatched as `agentille:agentille-*`), not as skills:
 

@@ -131,6 +131,8 @@ Keep your repo on the **WSL filesystem** (`~/projects/…`), not `/mnt/c/…` �
 
 > No split-pane support (falls back to in-process): VS Code's integrated terminal, standalone Windows Terminal, Ghostty.
 
+> Heads-up: your agentille profile's `team.displayMode` does **not** drive panes — the `teammateMode` setting above is the one that matters. `/agt` also detects a missing/mismatched `teammateMode` at launch and tells you how to fix it.
+
 ### 3 · Run it
 
 ```bash

@@ -62,16 +62,22 @@ if [ -f package.json ]; then
   PARENT_NM="../$PROJECT/node_modules"
   if [ -d "$PARENT_NM" ] && { cp -c -R "$PARENT_NM" node_modules 2>/dev/null \
         || cp --reflink=auto -a "$PARENT_NM" node_modules 2>/dev/null; }; then
-    :   # cloned the parent's deps (copy-on-write → instant + isolated)
+    echo "deps: COW clone (instant + isolated)"
+  elif [ -d "$PARENT_NM" ] && cp -al "$PARENT_NM" node_modules 2>/dev/null; then
+    echo "deps: hardlink clone (instant on ext4/non-COW; ~0 extra space)"
+    # Safe: installed packages are immutable, and build tools replace-on-write
+    # (new inode) rather than edit in place — so the parent tree is never mutated.
   else
-    command -v pnpm >/dev/null && pnpm install \
-      || { command -v bun >/dev/null && bun install; } \
-      || npm install
+    { command -v pnpm >/dev/null && pnpm install \
+        || { command -v bun >/dev/null && bun install; } \
+        || npm install; } > /tmp/agt-$SLUG-install.log 2>&1 \
+      && echo "deps: fresh install (see /tmp/agt-$SLUG-install.log)" \
+      || { echo "deps FAILED — see /tmp/agt-$SLUG-install.log"; tail -n 20 /tmp/agt-$SLUG-install.log; }
   fi
 fi   # no package.json? skip — Python/Go/Rust/etc. manage their own deps
 ```
 
-**Why a clone, not a symlink:** a symlink shares one `node_modules` across worktrees, so parallel agents corrupt each other the instant anything writes into it — `prisma generate`, Next.js/`vite` `.cache`, native rebuilds. A copy-on-write clone gives each worktree its own tree, so you `npm install`/codegen into it normally with no special handling. pnpm users already get this isolation from the shared content-addressed store; the clone mainly rescues npm/yarn from the multi-minute per-worktree reinstall.
+**Why a clone, not a symlink:** a symlink shares one `node_modules` across worktrees, so parallel agents corrupt each other the instant anything writes into it — `prisma generate`, Next.js/`vite` `.cache`, native rebuilds. A copy-on-write clone gives each worktree its own tree, so you `npm install`/codegen into it normally with no special handling. pnpm users already get this isolation from the shared content-addressed store; the clone mainly rescues npm/yarn from the multi-minute per-worktree reinstall. On non-COW filesystems (ext4, common on WSL2) the reflink clone fails, so we fall back to `cp -al` — a hardlink tree, which is instant and near-zero-space because it links inodes rather than copying data. It's safe for `node_modules` specifically: installed packages are immutable and tools replace-on-write (new inode), so the parent's tree is never mutated; a full copy remains the final fallback.
 
 Remember `$BASE` — it's your integration target in step 8, not `main`.
 

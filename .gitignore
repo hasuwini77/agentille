@@ -24,6 +24,15 @@ build/
 # Local Claude Code state
 .claude/
 
+# Personal / local Claude instructions (the committed CLAUDE.md is the shared one)
+CLAUDE.local.md
+
+# Planning & working docs — local-only, never committed.
+# Anything that references private or external context must live here (or
+# outside the repo in ~/.agentille/), never in tracked files. See CLAUDE.md.
+docs/superpowers/
+docs/agentille/
+
 # Playwright MCP / QA review artifacts (screenshots saved to the working dir)
 .playwright-mcp/
 *-light.png

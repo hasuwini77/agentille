@@ -6,7 +6,10 @@ teammates:
   # planner emits (capped at profile.team.maxTeammates, batched 3 at a time).
   - role: agentille:agentille-executor
     count: 2
-    require-plan-approval: true
+    # false: the master plan is already plan-reviewed before any executor runs,
+    # so a per-executor plan→approve round-trip is redundant latency. Set true
+    # only for explicitly risky/destructive work.
+    require-plan-approval: false
   - role: agentille:agentille-code-reviewer
     count: 1
   - role: agentille:agentille-design-reviewer

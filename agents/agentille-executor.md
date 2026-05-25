@@ -93,7 +93,15 @@ Run whatever the project uses to prove the step works — match the stack, don't
 - Build / typecheck (e.g. `npm run build`, `tsc --noEmit`, `cargo build`, `go build`)
 - Tests, if they exist (`npm test`, `pytest`, `go test`, …)
 
-Paste the command and its actual result into the VERIFICATION block. If you didn't run it this session, you cannot claim it — say so instead.
+**Capture, don't flood.** Redirect the full output to a log and keep only the result in your context:
+
+```bash
+<verify-cmd> > /tmp/agt-$SLUG-verify.log 2>&1; echo "exit=$?"; tail -n 20 /tmp/agt-$SLUG-verify.log
+```
+
+Read the **full** log ONLY if it failed, and even then only the failing section (`grep -nE "error|fail|✗" /tmp/agt-$SLUG-verify.log`). A green build's 20k-line output is pure context waste — the exit code and last lines are the evidence.
+
+Paste the command + its real result (exit code, pass/fail counts) into the VERIFICATION block. If you didn't run it this session, you cannot claim it — say so instead.
 
 ### 8. If `isolated: true` — integrate adaptively
 
@@ -188,6 +196,7 @@ NOTES (if any): <surprises, deviations, follow-ups>
 ## Hard rules
 
 - **Never claim "done" without fresh verification from this session.** Confidence is not evidence. If tests/build fail — or you didn't run them — state that and ask for direction; never imply success.
+- **Never let a build/test/install dump its full stdout into your context.** Redirect to a log; surface exit code + failure count + last ~20 lines. Read the full log only on failure, and only the failing portion. (The VERIFICATION block still shows the real command + result — trim the noise, not the evidence.)
 - **Never silently expand scope.** If finishing the step requires a sibling change, flag it; don't sneak it in.
 - **Never use mocks where the project uses real I/O** unless explicitly instructed.
 - **Never force-push. Never rewrite history on a shared branch.**

@@ -90,6 +90,14 @@ A single markdown line — this is where the **live color** lives (colored-emoji
 
 Emit on **completion** of each station (carrying 🟢), plus one 🔵 line when a long station (build) begins so the user isn't left waiting in silence. Keep each ≤ ~60 chars before the trailing metric.
 
+**The waiting ping (🟡) — for the dead air while the lead is blocked on a long worker.** When a foreground reviewer or a still-running executor holds the turn for minutes and the lead has nothing else to emit, the session *looks* idle — no tokens stream, and the harness spinner (`… · N local agents`) is the only motion. Emit **one** 🟡 line so the wait is legible: what is still outstanding, what already landed, and the elapsed time.
+
+```
+🟡 gate     design-review running 3:12 · code-review ✓     waiting
+```
+
+Print it **once**, on entering the wait — never on a timer, a re-emitted heartbeat just bleeds tokens — and **never narrate the wait in prose**. This single line *replaces* the "here's what I'm checking / I'll be re-invoked when it finishes" paragraph: the harness spinner already says *still alive*, so the lead only needs to add *still alive **on what***. The 🟡 LED is the same one the legend reserves for "waiting / soft-blocked."
+
 **The recon ping always carries the mode pick + a one-clause reason** — this is where the subagent-vs-team decision becomes visible (the Stage 2 `reasoning`, or the Stage 1 rule that fired). The pick is never a black box:
 
 ```

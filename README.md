@@ -36,10 +36,10 @@ That's it. `/agt` does the rest: classify → plan (if needed) → implement →
 ## What you get
 
 - **One-command orchestration.** `/agt "task"` routes work through planner, executor, and reviewers automatically — no manual skill-chaining.
-- **Right model for the job.** Opus plans and reviews, Sonnet writes the code, Haiku runs the cheap edges (task classification + the final summary). Tokens go where they earn the most.
+- **Right model for the job.** Opus sets direction (planning) and handles the heavy reviews; Sonnet writes the code and clears the routine reviews (plan-review, and code-review on small diffs); Opus steps in only for large or cross-cutting reviews. Haiku runs the cheap edges (task classification + the final summary). Tokens go where they earn the most.
 - **Parallel-safe by default.** Each chunk of work runs in its own git worktree (branched off your *current* branch — never assumed `main`) with atomic commits, then integrates adaptively: a PR where the repo supports it, otherwise a pushed or handed-off branch. Works whether you're solo on main or stuck on a locked-down team branch.
 - **Voice-aware.** Your profile shapes every prompt. Ask for brutal feedback once, and every agent is brutal.
-- **Review built in.** Code review (bugs/security/quality) on every change, plus a design review (screenshots at 3 viewports, axe-core, and a scan for the generic AI-design tells that make most AI UIs feel cheap) whenever UI is touched.
+- **Review built in.** Code review (bugs/security/quality) on every change, plus a design review (it asks which viewports actually matter, then screenshots only those, runs axe-core, and scans for the generic AI-design tells that make most AI UIs feel cheap) whenever UI is touched.
 
 ## How it works
 
@@ -67,10 +67,10 @@ When you run `/agt "task"`, the orchestrator:
 | Agent | Role | Model |
 |---|---|---|
 | `agentille-planner` | Goal-backward plan with parallelizable steps marked | Opus |
-| `agentille-plan-reviewer` | Critiques the plan before execution — goal, coverage, parallel-safety, real verification | Opus |
+| `agentille-plan-reviewer` | Critiques the plan before execution — goal, coverage, parallel-safety, real verification | Sonnet · Opus for large plans |
 | `agentille-executor` | Headless implementation — atomic commits, integrates adaptively (PR / push / local branch) | Sonnet |
-| `agentille-code-reviewer` | Read-only review for bugs, security, quality | Opus |
-| `agentille-design-reviewer` | 6-pillar visual review, axe-core, AI-design-tell scan | Opus |
+| `agentille-code-reviewer` | Read-only review for bugs, security, quality | Sonnet · Opus for large/cross-cutting diffs |
+| `agentille-design-reviewer` | Visual review (scored design pillars), axe-core, AI-design-tell scan, at the viewports that matter | Opus |
 | `agentille-security-reviewer` | Severity-classified security review | Opus |
 
 > **Where Haiku runs:** two steps happen *inline* in the orchestrator, not as dispatched agents — **task classification** (picks which roster to run) and the **final summary**. Both are cheap, so they go to Haiku.

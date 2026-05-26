@@ -26,7 +26,7 @@ Each pillar scored 1-10. Score <8 requires a 1-line concrete fix.
    - Rhythm feels intentional, not random padding?
    - <8 if visible inconsistency in margins/padding between sibling sections.
 
-5. **Responsive integrity (1-10)**
+5. **Responsive integrity (1-10)** — *score only when ≥2 viewports are in scope; mark "n/a (desktop-only scope)" and exclude from the average when the orchestrator scoped a desktop-only review.*
    - No overflow, no clipped content, no horizontal scroll?
    - Tap targets ≥44×44px on mobile?
    - Hero readable on 375px? Nav usable on 375px?

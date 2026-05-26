@@ -2,6 +2,27 @@
 
 All notable changes to agentille are documented here.
 
+## [1.17.0] — 2026-05-26
+
+### Changed
+
+- **Review roles now tier their model by the size of the work instead of defaulting to Opus.** Two of the three Opus reviewers were paying the premium on work Sonnet clears cleanly:
+  - **plan-reviewer → Sonnet by default** (was Opus). A plan critique is a structured checklist — goal correct? coverage? parallel-safe? real verification? Sonnet handles it. It **upgrades to Opus** only for a *large/cross-cutting* plan (≥6 steps, or any step touching shared contracts/architecture). Still skipped entirely on `thinkingDepth=quick`.
+  - **code-reviewer → tiered** (was flat Opus). **Sonnet** for a small diff (single file *or* ≤~150 LoC, no cross-cutting/security surface); **Opus** for a large/cross-cutting diff (multi-file logic, public/exported API, or auth/sessions/data-flow/money). Most diffs are small — Sonnet clears them; Opus is reserved for where subtle regressions actually hide.
+  - **Unchanged:** `planner` (Opus — direction), `executor` (Sonnet — never downgrade), `security-reviewer` (Opus — costliest miss, and rare), `design-reviewer` (Opus — see below).
+  - Synced across `model-routing.md` (new "Tiering the review roles by size" section with exact thresholds), `SKILL.md` Step 3 + token-budget hints, `roster.md`, and `README.md`.
+
+### Added
+
+- **The design-reviewer now reviews only the viewports that matter.** When a task touches frontend and `preTaskQuestioning` permits, `/agt` asks one question up front — desktop only / desktop + mobile / all three — and passes the chosen set to the design-reviewer as `viewports: [...]`. The agent captures a full-page screenshot (and scores the Responsive pillar) **only** for the viewports in scope; a desktop-only review skips two full-page screenshot + vision passes, the single heaviest cost in a UI run. The Responsive pillar is marked `n/a (desktop-only scope)` and excluded from the average when only desktop is in scope.
+  - **Safe fallback:** when `/agt` *cannot* ask (`preTaskQuestioning: never`, or no UI surface visible yet) it defaults to **all three** — it never silently *reduces* coverage, because a dropped viewport can hide a regression the user cared about. Narrowing is always the user's explicit call; expanding to full coverage is the safe default.
+  - Touches `SKILL.md` (new "Clarify the viewport scope for UI work"), `agentille-design-reviewer.md` (new `viewports` input, scoped capture, conditional Responsive pillar), and the six-pillars rubric.
+  - **design-reviewer stays Opus.** Native vision + design judgment is agentille's differentiator; the savings come from *scope*, not from trading down the model.
+
+### Rationale
+
+Anthropic's own cost guidance — reserve Opus for genuine architecture/multi-step reasoning, use Sonnet for the rest — exposed that a typical UI feature run was carrying **four Opus contexts** (planner, plan-reviewer, code-reviewer, design-reviewer) where two were doing checklist-grade work Sonnet does well. Tiering those two by size halves the Opus spend on the priciest runs without touching execution quality or the design differentiator. Separately, always screenshotting three viewports — even for desktop-only apps — was burning the heaviest token line item (full-page vision passes) on output nobody asked for; one clarifying question removes that waste while the all-three fallback keeps coverage safe whenever the user isn't asked.
+
 ## [1.16.2] — 2026-05-26
 
 ### Fixed

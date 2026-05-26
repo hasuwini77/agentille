@@ -6,7 +6,7 @@ After classifying, dispatch this combination. Read top-to-bottom — order matte
 
 ## planning
 - **agentille-planner** (Opus)
-- **agentille-plan-reviewer** (Opus) — the plan IS the deliverable here, so review it before handing back. Skip on `thinkingDepth=quick`.
+- **agentille-plan-reviewer** (Sonnet; → Opus for a large/cross-cutting plan) — the plan IS the deliverable here, so review it before handing back. Skip on `thinkingDepth=quick`.
 - *No executor.* Output is the (reviewed) plan itself.
 
 ## research
@@ -15,35 +15,35 @@ After classifying, dispatch this combination. Read top-to-bottom — order matte
 
 ## feature
 - **agentille-planner** (Opus) — IF hasMultipleSubtasks, else skip
-- **agentille-plan-reviewer** (Opus) — IF the planner ran; critiques the plan before any executor starts. Skip on `thinkingDepth=quick`.
+- **agentille-plan-reviewer** (Sonnet; → Opus for a large/cross-cutting plan) — IF the planner ran; critiques the plan before any executor starts. Skip on `thinkingDepth=quick`.
 - **agentille-executor** (Sonnet) — one per parallel step from the plan, max 3 parallel
-- **agentille-code-reviewer** (Opus)
-- **agentille-design-reviewer** (Opus) — IF hasUIComponent
+- **agentille-code-reviewer** (tiered: Sonnet for a small diff / Opus for large/cross-cutting)
+- **agentille-design-reviewer** (Opus) — IF hasUIComponent. Pass the clarified `viewports: [...]` (see SKILL.md → "Clarify the viewport scope for UI work").
 
 ## bugfix
 - **debug-then-fix**: spawn a single agentille-executor (Sonnet) running its built-in Debugging discipline (root cause → pattern → single hypothesis → root-cause fix + regression test — see `agents/agentille-executor.md`). Skip planner unless the bug is in ≥2 files.
-- **agentille-code-reviewer** (Opus)
-- **agentille-design-reviewer** (Opus) — IF hasUIComponent
+- **agentille-code-reviewer** (tiered: Sonnet for a small diff / Opus for large/cross-cutting)
+- **agentille-design-reviewer** (Opus) — IF hasUIComponent. Pass the clarified `viewports: [...]`.
 
 ## refactor
 - **agentille-planner** (Opus) — IF hasMultipleSubtasks, else skip
-- **agentille-plan-reviewer** (Opus) — IF the planner ran. Skip on `thinkingDepth=quick`.
+- **agentille-plan-reviewer** (Sonnet; → Opus for a large/cross-cutting plan) — IF the planner ran. Skip on `thinkingDepth=quick`.
 - **agentille-executor** (Sonnet)
-- **agentille-code-reviewer** (Opus) — REQUIRED — except for pure renames/moves with zero logic delta (files renamed/moved only), where it may be skipped. Refactors with any logic change still require it — regressions hide here.
+- **agentille-code-reviewer** (tiered: Sonnet for a small diff / Opus for large/cross-cutting) — REQUIRED — except for pure renames/moves with zero logic delta (files renamed/moved only), where it may be skipped. Refactors with any logic change still require it — regressions hide here.
 - *No design-reviewer* (refactor by definition has no visible change; if visual change emerges, that's the code-reviewer's BLOCKER finding)
 
 ## design
 - **agentille-executor** (Sonnet) — implements the visual change
-- **agentille-design-reviewer** (Opus — native vision) — REQUIRED
-- *Code-reviewer optional* — only if the design change required logic changes (state, handlers). For pure CSS/markup tweaks, skip.
+- **agentille-design-reviewer** (Opus — native vision) — REQUIRED. Pass the clarified `viewports: [...]` (see SKILL.md → "Clarify the viewport scope for UI work").
+- *Code-reviewer optional* — only if the design change required logic changes (state, handlers). For pure CSS/markup tweaks, skip. When run, it's tiered (Sonnet for a small diff / Opus for large).
 
 ## debug
 - **debug-loop** (agentille-executor, Sonnet): runs the executor's built-in Debugging discipline (`agents/agentille-executor.md`) — root cause before any fix, one hypothesis at a time, stop and question the architecture after 3 failed fixes. Surface the root cause, propose a fix.
 - *No reviewers until a fix is applied — at which point promote to bugfix flow.*
 
 ## review
-- **agentille-code-reviewer** (Opus) — the only subagent. No executor (user is asking for review, not changes).
-- **agentille-design-reviewer** (Opus) — IF the target is UI code
+- **agentille-code-reviewer** (tiered: Sonnet for a small diff / Opus for large/cross-cutting) — the only subagent. No executor (user is asking for review, not changes).
+- **agentille-design-reviewer** (Opus) — IF the target is UI code. Pass the clarified `viewports: [...]`.
 
 ## Hard cap
 

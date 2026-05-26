@@ -56,7 +56,7 @@ Header in plain markdown, rail in a fenced code block (alignment only holds in m
 agentille ▸ <mode> · <template-or-category> ▸ ~<est>m
 <task, first line, ≤ 60 chars>
 
- ◉ recon    classified: <category>
+ ◉ recon    <category> · mode: <mode>
  │
  ◐ plan     <model>  · drafting
  │
@@ -78,14 +78,26 @@ agentille ▸ <mode> · <template-or-category> ▸ ~<est>m
 A single markdown line — this is where the **live color** lives (colored-emoji LEDs render reliably in any theme; aligned columns do not matter here):
 
 ```
-🟢 plan     5 steps · 3 parallel · opus           0:14
-🟢 review   plan APPROVED · opus                  0:31
-🔵 build    exec-1 ▸  exec-2 ▸  spawned           0/2
-🟢 build    exec-1 ✓  exec-2 ▸                    1/2
-🟢 gate     code-review · 1 should-fix → patched  2:47
+🟢 recon    subagent · sequential, 1 slice          0:03
+🟢 plan     5 steps · 3 parallel · opus              0:14
+🟢 review   plan APPROVED · opus                     0:31
+🔵 build    exec-1 ▸  exec-2 ▸  spawned              0/2
+🟢 build    exec-1 ✓  exec-2 ▸                       1/2
+🟢 gate     code-review · 1 should-fix → patched     2:47
 ```
 
 Emit on **completion** of each station (carrying 🟢), plus one 🔵 line when a long station (build) begins so the user isn't left waiting in silence. Keep each ≤ ~60 chars before the trailing metric.
+
+**The recon ping always carries the mode pick + a one-clause reason** — this is where the subagent-vs-team decision becomes visible (the Stage 2 `reasoning`, or the Stage 1 rule that fired). The pick is never a black box:
+
+```
+🟢 recon    subagent · sequential, no disjoint slices    0:03
+🟢 recon    team · feature-team — 2 disjoint slices       0:04
+🟢 recon    subagent · downgraded from forced team        0:06
+🟡 recon    team (forced) · overkill, ran as asked        0:03
+```
+
+The last two lines are the **forced-team overkill outcomes** (see `team-mode.md` → "Honesty on a forced team"): the user passed `--team` with no real parallel work. When `preTaskQuestioning` permits, `/agt` *asks* first (downgrade to subagent, or force the team) and the recon ping shows whichever the user chose — `subagent · downgraded from forced team` or `team (forced)`. When questioning is off, it flags the trade (🟡) and runs the team. `honestyLevel`-gated; on the most hands-off honesty level, fall back to the plain 🟢 recon line. The ask never loops, and nothing here blocks.
 
 ### Frame 3 — the parallel fanout (drawn ONCE when build forks)
 

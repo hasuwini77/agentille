@@ -44,6 +44,8 @@ When this skill is invoked (`/agt <task>`):
 
 Any team result must pass the team pre-flight (env flag `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1`, Claude Code ≥ 2.1.32, daily soft cap) — see `team-mode.md`. On any pre-flight or spawn failure, degrade to subagent mode.
 
+Rows #1–2 are a **force** (the user typed `--team`/`--mode team`). Run the inline disjoint-parallelism heuristic first: real parallel work → spawn the team. **Overkill** (no ≥2 disjoint slices) → don't obey blindly — when `preTaskQuestioning` permits, **ask once** whether to downgrade to subagent (recommended, ~¼ the tokens) or force the team anyway; when `preTaskQuestioning: never`, honor the force and emit the `honestyLevel`-gated heads-up instead (see `team-mode.md` → "Honesty on a forced team"). **Always surface the resolved mode + a one-clause reason** on the recon ping — for Stage 2 that's its `reasoning` string; for a Stage 1 rule it's the rule itself (e.g. "forced", "review verb → review-team", "single file, no architectural verb → solo"). The pick is never a black box (see `display.md`).
+
 ### Step 2 — Resolve ROSTER
 
 **Team mode** → roster = the resolved template's `teammates` array (`.claude-plugin/teams/<template>.yaml`). Drop any reviewer with nothing to review (e.g. design-reviewer when the change set has no UI/frontend surface).
@@ -91,6 +93,8 @@ The discipline (this is deliberately *not* a relentless interview):
 1. **Explore first, ask second.** Anything the codebase can answer — framework, file locations, existing test setup, conventions — you answer yourself (Read/Grep/Glob). Never ask the user what the repo already tells you.
 2. **Ask the plan-changing questions, each with a recommended default.** Use the question tool; batch related ones. Walk dependent decisions in order. Phrase every option so the user can just accept your recommendation.
 3. **Stop when more questions won't change a single step.** Typically 2–5 questions, not twenty. Over-asking burns the user's patience as surely as under-asking burns tokens on the wrong plan. Resolve the ambiguity that matters, then move.
+
+**Clarify can decide the execution mode.** Team vs subagent turns on exactly one thing: are there ≥2 independent slices that can build at once? When that's genuinely unknowable from the prompt (and `preTaskQuestioning` permits), the parallelism question *is* a plan-changing question — e.g. *"Are the API and UI independent enough to build in parallel, or must the API land first?"* Its answer re-resolves the mode (re-run the Dispatch decision table, Step 1). Don't finalize team vs subagent on a guess when one question settles it. (A `--team` force skips this — the user already decided; see `team-mode.md` → "Honesty on a forced team".)
 
 Then hand the resolved answers to the planner so it doesn't re-ask. (The planner can still surface a remaining question at the top of its plan, but the lead owns the clarifying round.)
 
@@ -142,6 +146,8 @@ The orchestrator supports Claude Code's Agent Teams primitive in addition to sub
 - **Never invent the profile.** If `~/.agentille/profile.json` is missing or malformed, stop and instruct the user to run `agentille init` instead of guessing defaults.
 - **Never run more than 3 executor subagents in parallel.** If the planner produces 5 parallel chunks, batch them: 3 then 2.
 - **Always classify before dispatching.** Skipping the classifier produces wrong rosters (e.g. design-reviewer on a non-UI task wastes tokens).
+- **Always surface the mode pick.** Every run tells the user which mode it chose (subagent / team / solo) and a one-clause reason, on the recon ping. The decision is never silent — see `display.md`.
+- **A forced team is honored, but never blindly.** When `--team`/`--mode team` carries real parallel work, run the team. When it'd be **overkill** (no ≥2 disjoint slices): if `preTaskQuestioning` permits, **ask once** whether to downgrade to subagent (recommended) or force the team anyway, and honor the choice; if `never`, honor the force and emit one `honestyLevel`-gated heads-up. Never loop or nag — one question, then do what the user chose. See `team-mode.md` → "Honesty on a forced team".
 - **Honor `preTaskQuestioning`.** If `always`, every subagent should ask one clarifying question before starting. If `never`, no subagent asks — they proceed on best assumption.
 - **Honor `neverDo`.** These are absolute. Pass them verbatim into every subagent prompt.
 - **Review findings are a gate, not a memo.** A code-review or security-review finding marked **BLOCKER** or **should-fix** must be resolved before you declare the task done — re-dispatch an executor to fix it (or fix it inline if trivial), then confirm the fix landed. If you genuinely can't or shouldn't fix it (out of scope, needs a product decision), surface it **explicitly** to the user and let them decide — never bury a blocker in the final summary and call it shipped. Nits are advisory; blockers and should-fix are not. (This holds in both modes: in team mode the lead drives the fix via the reviewer's `REVIEW … ISSUES` reply; in subagent mode the orchestrator re-dispatches the executor.)

@@ -2,6 +2,16 @@
 
 All notable changes to agentille are documented here.
 
+## [1.16.1] — 2026-05-26
+
+### Fixed
+
+- **The "is it waiting or stalled?" dead air.** While the lead is blocked on a long foreground worker (a slow design review, a still-running executor), no tokens stream and only the harness spinner moves — the run *looks* idle, and the lead used to fill the silence with improvised prose ("waiting on the round-3 design review… I'll be re-invoked when it finishes"). `display.md` Frame 2 now defines a **single 🟡 waiting ping** for that window: one line stating what is still outstanding, what already landed, and the elapsed time — printed once on entering the wait, never on a timer, and never narrated in prose.
+
+### Rationale
+
+The ping cadence covered a station *beginning* (🔵) and *completing* (🟢) but not the multi-minute gap in between, which is the most anxious part of a run. The `🟡 = waiting / soft-blocked` LED already existed in the legend but was only wired to the forced-team case. This closes the gap with the vocabulary already in the contract: the harness spinner says *still alive*; the 🟡 line adds *still alive on what* — replacing an expensive, terminal-looking paragraph with one cheap, legible line.
+
 ## [1.16.0] — 2026-05-26
 
 ### Changed

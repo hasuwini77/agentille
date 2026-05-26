@@ -22,6 +22,27 @@ Before dispatching, check in order. First match wins:
 8. Task verb = `debug` → team, `incident-team` template.
 9. Else → fall through to Stage 2 (planner-classify).
 
+## Honesty on a forced team (`--team` / `--mode team`)
+
+A `--team`/`--mode team` flag is a **force** — the user explicitly asked for a team, and that intent is respected. But forcing skips the judgment that would have told them whether a team is actually *warranted*. So before spawning a forced team, run the **disjoint-parallelism heuristic inline** (no LLM, no Stage 2 spawn): does the task decompose into **≥ 2 vertical slices with disjoint file sets that can build at once**? (Same criterion as `classifier.md` → "Team vs subagent honesty"; a competing-hypothesis debug or a multi-pillar review also count as warranted.)
+
+- **Heuristic passes** (real parallelism, or an adversarial debug / multi-pillar review) → the force matched the work. Spawn the team, say nothing extra.
+- **Heuristic fails** (sequential work, or a single slice — a team would be *overkill*) → don't obey blindly, but don't override silently either. What happens next is governed by `preTaskQuestioning`:
+
+  - **`always` / `ambiguous-only`** → **ask once** (the question tool). Recommend the downgrade, give the reason, and make forcing the team a one-tap choice. The user decides:
+
+    > *"`--team <template>` here looks like overkill — I don't see ≥2 disjoint slices to build in parallel, so subagent mode would do the same work for ~¼ the tokens. **Downgrade to subagent** (recommended), or **force the team anyway**?"*
+
+    Downgrade → run subagent mode. Force → spawn the team as asked. One question, honor the answer, never loop.
+
+  - **`never`** → the user opted out of questions; honor the force, spawn the team, and emit ONE `honestyLevel`-gated heads-up line instead of asking (never blocks):
+
+    > `team (forced) · <template> — no ≥2 disjoint slices here; subagent mode would've matched this for ~¼ the tokens. Running the team as you asked.`
+
+    `honestyLevel` gating: emit on candid / blunt / high honesty (the default); suppress only when the profile sets the most hands-off honesty level (the user has opted out of advisories too).
+
+This is the deliberate counterpart to auto-mode honesty: in **auto** mode `/agt` *won't* pay the ~4× team tax for parallelism that isn't there; in **forced** mode it surfaces the trade — *asking* when questions are on, *flagging* when they're off — then does exactly what the user chooses. The downgrade prompt is the **one** sanctioned friction on a forced team because it carries real signal (detected overkill); never add per-spawn confirmation beyond it. Surface the resolved outcome on the recon ping (`display.md`).
+
 ## Stage 2 — planner-classify (Opus)
 
 When Stage 1 returns null, dispatch the planner in classify mode by prepending `CLASSIFY:` to the user's task:
@@ -46,6 +67,8 @@ The planner returns a single JSON object:
 ```
 
 Parse the JSON. If parsing fails, fall back to `mode: "subagent"` and log a one-line note. Never crash on a malformed classifier response.
+
+**When the mode hinges on a question, ask it.** Team vs subagent turns on one thing: are there ≥2 independent slices that can build at once? If that's genuinely unknowable from the prompt and the profile's `preTaskQuestioning` permits, don't guess — the lead resolves it in the clarify round (see SKILL.md → "Clarify before planning"), and the answer re-resolves the mode. Default the provisional `mode` to `subagent` until clarified; promote to `team` only once the parallelism is confirmed. A borderline team guess that turns out sequential is the exact ~4× waste this orchestrator exists to avoid.
 
 ## Pre-flight check (team mode only)
 
@@ -177,4 +200,4 @@ Team mode uses ~4× the tokens of subagent mode (each teammate is a separate Cla
 
 > `agentille ▸ team · <template> ▸ ~<est>m · ~4× tokens`
 
-Do NOT prompt the user for confirmation per spawn — friction with no signal. The daily soft cap is the only friction by design.
+Do NOT prompt the user for confirmation per spawn — friction with no signal. Only two frictions are sanctioned, both because they carry real signal: the **daily soft cap**, and the **forced-overkill downgrade prompt** (see "Honesty on a forced team"). Nothing else.

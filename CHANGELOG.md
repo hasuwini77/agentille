@@ -2,6 +2,22 @@
 
 All notable changes to agentille are documented here.
 
+## [1.15.0] — 2026-05-26
+
+### Added
+
+- **The mode pick is now visible on every run.** `/agt` already smart-picked subagent vs team vs solo; now it *shows* the pick plus a one-clause reason (the classifier's `reasoning`, or the Stage 1 rule that fired) on the recon ping (`skills/agt/display.md`, `skills/agt/SKILL.md`). The subagent-vs-team decision is transparent instead of implicit.
+- **Forced-team honesty + downgrade prompt** (`skills/agt/team-mode.md`, `skills/agt/SKILL.md`). Passing `--team`/`--mode team` is a force. Before spawning, an inline disjoint-parallelism heuristic checks for ≥2 independent slices. With real parallel work the team spawns. When a team would be **overkill** (sequential / single slice), `/agt` no longer obeys blindly: if `preTaskQuestioning` permits it **asks once** whether to downgrade to subagent (recommended, ~¼ the tokens) or force the team anyway, and honors the choice; if questioning is off it honors the force and emits one `honestyLevel`-gated heads-up. One question, no loop — the user always has the final say. The counterpart to auto-mode's 4× honesty rule: in auto mode `/agt` won't overspend on absent parallelism; in forced mode it surfaces the trade before spending.
+- **Clarify can decide the mode** (`skills/agt/SKILL.md`, `skills/agt/team-mode.md`). When team-vs-subagent genuinely hinges on whether slices are independent and `preTaskQuestioning` permits, the parallelism question becomes the plan-changing question the clarify pass resolves — its answer re-resolves the mode rather than the orchestrator guessing.
+
+### Changed
+
+- **README and manifest now lead with the smart-pick.** New "Subagents vs teams — `/agt` smart-picks" section mirrors Claude Code's subagent-vs-team distinction (workers report back vs. message each other; ~4× cost), documents how `/agt` chooses, and explains forcing with `--team` plus the honest-override. Tagline, "How it works", and the `plugin.json` description updated (`README.md`, `.claude-plugin/plugin.json`).
+
+### Rationale
+
+Claude Code's agent-teams docs draw a sharp line — subagents report back to the lead; teammates message each other and share a task list — and team mode costs ~4×. agentille already routed by that line, but two things were off: the decision was invisible to the user, and a forced `--team` was obeyed silently even when no parallel work existed. The `--team` flag is intentionally **kept** (not renamed to `--force`): it is self-documenting and already *is* the override; the "you may not need this" intent belongs in the system's honest response, not the flag name. This release makes the pick transparent and keeps `/agt` honest even when the user overrides it — you can always force a team, and if it'd be overkill `/agt` asks before overspending rather than obeying blindly (or, with questioning off, flags the trade in one line).
+
 ## [1.14.0] — 2026-05-25
 
 ### Changed

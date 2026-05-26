@@ -7,9 +7,9 @@
 ╚═╝  ╚═╝ ╚═════╝ ╚══════╝╚═╝  ╚═══╝   ╚═╝   ╚═╝╚══════╝╚══════╝╚══════╝
 ```
 
-> A personal AI coding orchestrator for Claude Code. Type **`/agt "task"`** and it classifies the work, dispatches a tailored team of agents, routes the right Claude model to each, and applies *your* voice to every prompt.
+> A personal AI coding orchestrator for Claude Code. Type **`/agt "task"`** and it classifies the work, **smart-picks subagents or a full agent team**, routes the right Claude model to each, and applies *your* voice to every prompt.
 
-One command instead of manually chaining skills. Planning and review run on Opus, execution on Sonnet, and code + design review are built in. Optionally fan the work out across a real Claude Code **agent team**, one teammate per pane.
+One command instead of manually chaining skills. Planning and review run on Opus, execution on Sonnet, and code + design review are built in. `/agt` decides on its own whether the work needs a real Claude Code **agent team** (independent sessions that talk to each other) or cheaper in-session **subagents** — and tells you which it picked and why.
 
 ---
 
@@ -47,9 +47,10 @@ When you run `/agt "task"`, the orchestrator:
 
 1. **Reads your profile** (`~/.agentille/profile.json`) for communication style, tone, and rules.
 2. **Classifies the task** — feature, bugfix, refactor, design, review, debug, research, or planning.
-3. **Picks a roster** — only the agents that task needs (e.g. no design reviewer on a backend change).
-4. **Routes a model per role** and **applies your voice** to every dispatched prompt.
-5. **Runs in dependency order**, parallelizing independent work (max 3 executors at once), then returns one summary.
+3. **Smart-picks the execution mode** — in-session **subagents** (default) or a real **agent team**, based on whether the work has ≥2 independent slices that can build at once. It shows you the pick and a one-line reason every run.
+4. **Picks a roster** — only the agents that task needs (e.g. no design reviewer on a backend change).
+5. **Routes a model per role** and **applies your voice** to every dispatched prompt.
+6. **Runs in dependency order**, parallelizing independent work (max 3 executors at once), then returns one summary.
 
 ## What's inside
 
@@ -74,9 +75,28 @@ When you run `/agt "task"`, the orchestrator:
 
 > **Where Haiku runs:** two steps happen *inline* in the orchestrator, not as dispatched agents — **task classification** (picks which roster to run) and the **final summary**. Both are cheap, so they go to Haiku.
 
+## Subagents vs teams — `/agt` smart-picks
+
+Claude Code gives you two ways to parallelize, and they're genuinely different:
+
+| | **Subagents** (default) | **Agent team** (`--team`) |
+|---|---|---|
+| Workers | Dispatched helpers that report results **back to the lead** | Independent Claude sessions that **message each other** |
+| Coordination | The lead manages all work | Shared task list + scoped peer handoffs |
+| Best for | Sequential work, a single slice, focused tasks | ≥2 independent slices, multi-pillar review, competing-hypothesis debugging |
+| Token cost | **Lower** — each worker's context returns to the lead | **~4×** — every teammate is a full, separate session |
+
+**You don't pick — `/agt` does.** It classifies the task and checks for *real* disjoint parallelism: ≥2 vertical slices with separate file sets that can build at the same time. Real parallelism (or a competing-hypothesis debug, or a multi-pillar review) → it reaches for a team. Otherwise → subagents, which do the same work for roughly a quarter of the tokens. Every run prints the pick and a one-line reason, so the decision is never a black box.
+
+**Forcing a team.** Pass `--team <template>` to override the pick for one run. If the work genuinely has parallel slices, `/agt` spawns the team. If a team would be **overkill** (sequential, single slice), `/agt` doesn't obey blindly — it explains why subagent mode fits better and **asks** whether to downgrade or force the team anyway:
+
+> *"`--team feature-team` here looks like overkill — no ≥2 independent slices to build in parallel, so subagent mode does the same work for ~¼ the tokens. Downgrade to subagent (recommended), or force the team?"*
+
+You always get the final say — downgrade and save the tokens, or force the team and `/agt` runs it without another word. (If you've set `preTaskQuestioning` to `never`, it skips the question, honors the force, and notes the trade in one line instead.)
+
 ## Team mode (optional)
 
-Instead of in-session subagents, agentille can drive a real Claude Code **agent team**: each role becomes an independent Claude session with its own context window that messages peers and shares a task list. Best when parallel perspectives genuinely help — multi-pillar review, cross-layer features, or competing-hypothesis debugging.
+When `/agt` picks a team — or you force one with `--team` — each role becomes an independent Claude session with its own context window that messages peers and shares a task list. Best when parallel perspectives genuinely help — multi-pillar review, cross-layer features, or competing-hypothesis debugging.
 
 ### The teams
 
@@ -141,7 +161,7 @@ Keep your repo on the **WSL filesystem** (`~/projects/…`), not `/mnt/c/…` �
 /agt --team incident-team "users get randomly logged out — find why"                       # race 3 competing theories
 ```
 
-`--team` overrides your profile's `team.defaultMode` for that one run.
+`--team` overrides both the auto-pick and your profile's `team.defaultMode` for that one run. If the task has no real parallel work, `/agt` asks whether to downgrade to subagent (~¼ the tokens) or force the team anyway — you decide — see [Subagents vs teams](#subagents-vs-teams--agt-smart-picks).
 
 **Cost:** team mode uses ~4× the tokens of subagent mode (each teammate is a full session). agentille warns once per session if you pass the daily soft cap (default 10, set in your profile).
 

@@ -2,6 +2,20 @@
 
 All notable changes to agentille are documented here.
 
+## [1.16.2] — 2026-05-26
+
+### Fixed
+
+- **The Mission Brief rendered as an uncolored hand-drawn box, and the mode pick as a prose paragraph.** v1.16.0 colorized the rail, but in practice the orchestrator would fall back to improvising a `╔══ MISSION BRIEF ══╗` box-rail and a *"Decisions locked. This is a complex feature+refactor — subagent mode…"* prose paragraph — abandoning the colored channels entirely. Neither form was ever in the spec; the agent invented them (often after seeing `TodoWrite` was unavailable and deciding to "render the brief inline"). `display.md` Frame 1 and the recon-ping section now **forbid** both fallbacks explicitly: the brief is *always* the ` ```yaml ` card, and the decision is *never* narrated in prose. `SKILL.md` is synced to match.
+
+### Added
+
+- **A colored `mode:` row in the Mission Brief card.** The resolved mode (`subagent` / `team` / `solo`) plus its one-clause reason or spine shape now render as a dedicated `mode: <mode>  # <reason>` row inside the yaml card — so the subagent-vs-team decision lands in the richest color channel (key / value / `#` comment = three hues), not buried in the header comment or spilled into prose.
+
+### Rationale
+
+The v1.16.0 spec *described* the colored frames but never *prohibited* the prose-and-box improvisation, and the "skip silently if rendering would block" escape hatch plus an unavailable `TodoWrite` gave the orchestrator room to abandon them. The fix separates the two pillars cleanly — losing the `TodoWrite` spine (Pillar 1) never downgrades the rail frames (Pillar 2) to prose — and promotes the mode decision from a header comment to its own colored row, satisfying both "the brief should actually be colored" and "highlight the mode choice better" in one change.
+
 ## [1.16.1] — 2026-05-26
 
 ### Fixed

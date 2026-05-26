@@ -61,6 +61,7 @@ The brief is a **config-highlight card** — a ` ```yaml ` fence. The terminal's
 ```yaml
 # agentille ▸ <mode> · <template-or-category> ▸ ~<est>m
 task:    <task, first line, ≤ 60 chars>
+mode:    <mode>      # <one-clause reason / spine shape>
 recon:   ◉ done      # classified: <category>
 plan:    ◐ active    # <model> · drafting
 review:  ○ pending   # plan-reviewer · <model>
@@ -70,8 +71,10 @@ ship:    ○ pending   # PR + debrief
 ```
 
 - **Key = station, value = `<glyph> <status>`, comment = the detail.** Three token classes → three colors, theme-independent. Omit any station that won't run (a solo card has only `recon` / `build` / `ship`).
+- **The `mode:` row is the decision, in color.** Value = the resolved mode (`subagent` / `team` / `solo`); comment = the one-clause reason or spine shape (e.g. `# sequential spine → parallel fan-out (4 views)`, `# 2 disjoint slices`, `# single file, no architectural verb`). This is where the subagent-vs-team pick becomes visible at full color — it is **not** a black box and is **never** explained in a separate prose paragraph. The recon *ping* (Frame 2) echoes the same pick as the run starts.
 - **Glyphs `◉ ◐ ○` are single-width geometric chars — safe inside the fence.** They are *not* emoji; never put a double-width colored-emoji LED (`🟢`) inside a fence — those live in ping lines (Frame 2).
-- **No box border** (`╔══╗`). The highlighter colors by *token*, not column, so a drawn border renders as an unstyled string and fights alignment — the fence's own background is the card.
+- **No box border** (`╔══╗`). The highlighter colors by *token*, not column, so a drawn border renders as an unstyled string and fights alignment — the fence's own background is the card. **Never hand-draw a box-rail brief and never replace the card with a prose sentence** ("I'll render the brief inline…"): the brief is *always* this ` ```yaml ` fence. The card is the only sanctioned form, in either mode.
+- **TodoWrite unavailable ≠ render in prose.** The spine (Pillar 1) and the rail frames (Pillar 2) are independent. If `TodoWrite` can't be seeded, skip the spine **silently** and still draw this yaml card — losing the spine never downgrades the brief to a hand-drawn box or a prose paragraph.
 - `~<est>m` is your honest rough estimate, omit if you have none.
 - In team mode, append the cost to the header comment: `# agentille ▸ team · feature-team ▸ ~12m · ~4× tokens`. (This replaces the standalone cost-transparency line.)
 
@@ -98,7 +101,7 @@ Emit on **completion** of each station (carrying 🟢), plus one 🔵 line when 
 
 Print it **once**, on entering the wait — never on a timer, a re-emitted heartbeat just bleeds tokens — and **never narrate the wait in prose**. This single line *replaces* the "here's what I'm checking / I'll be re-invoked when it finishes" paragraph: the harness spinner already says *still alive*, so the lead only needs to add *still alive **on what***. The 🟡 LED is the same one the legend reserves for "waiting / soft-blocked."
 
-**The recon ping always carries the mode pick + a one-clause reason** — this is where the subagent-vs-team decision becomes visible (the Stage 2 `reasoning`, or the Stage 1 rule that fired). The pick is never a black box:
+**The recon ping always carries the mode pick + a one-clause reason** — this is where the subagent-vs-team decision becomes visible (the Stage 2 `reasoning`, or the Stage 1 rule that fired). It echoes the brief's `mode:` row as the run starts. **Never narrate the decision as a prose paragraph** ("Decisions locked. This is a complex feature+refactor — subagent mode with a sequential spine…"): that content belongs in the `mode:` row comment and this colored ping, not an uncolored block above them. The pick is never a black box — and never a wall of prose:
 
 ```
 🟢 recon    subagent · sequential, no disjoint slices    0:03

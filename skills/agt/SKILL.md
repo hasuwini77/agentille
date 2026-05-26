@@ -70,15 +70,15 @@ Rows #1–2 are a **force** (the user typed `--team`/`--mode team`). Run the inl
 | Role | Default | Override |
 |---|---|---|
 | planner | Opus | → Sonnet if `thinkingDepth=quick` |
-| plan-reviewer | Opus | **skip entirely** if `thinkingDepth=quick` (don't downgrade — just skip) |
+| plan-reviewer | **Sonnet** | → Opus for a large/cross-cutting plan (≥6 steps, or any step touching shared contracts/architecture); **skip entirely** if `thinkingDepth=quick` (don't downgrade — just skip) |
 | executor | Sonnet | never downgrade (broken code costs more than tokens) |
-| code-reviewer | Opus | → Sonnet if `thinkingDepth=quick` |
-| design-reviewer | Opus | never downgrade — native vision + design judgment is agentille's differentiator |
+| code-reviewer | **tiered** | **Sonnet** for a small diff (single file *or* ≤~150 LoC, no cross-cutting/security surface); **Opus** for a large/cross-cutting diff (multi-file logic, public API, auth/data-flow); → Sonnet if `thinkingDepth=quick` |
+| design-reviewer | Opus | never downgrade — native vision + design judgment is agentille's differentiator (savings come from **viewport scope**, not the model) |
 | security-reviewer | Opus | → Sonnet if `thinkingDepth=quick` |
 | classifier | heuristic, no LLM | Haiku only if every heuristic misses |
 | final-summary | Haiku | — |
 
-Always declare the model explicitly on each dispatch — never let it default.
+Two review roles tier their model by the size of the work — see `model-routing.md` → "Tiering the review roles by size" for the exact thresholds. Always declare the model explicitly on each dispatch — never let it default.
 
 ## Clarify before planning
 
@@ -95,6 +95,8 @@ The discipline (this is deliberately *not* a relentless interview):
 3. **Stop when more questions won't change a single step.** Typically 2–5 questions, not twenty. Over-asking burns the user's patience as surely as under-asking burns tokens on the wrong plan. Resolve the ambiguity that matters, then move.
 
 **Clarify can decide the execution mode.** Team vs subagent turns on exactly one thing: are there ≥2 independent slices that can build at once? When that's genuinely unknowable from the prompt (and `preTaskQuestioning` permits), the parallelism question *is* a plan-changing question — e.g. *"Are the API and UI independent enough to build in parallel, or must the API land first?"* Its answer re-resolves the mode (re-run the Dispatch decision table, Step 1). Don't finalize team vs subagent on a guess when one question settles it. (A `--team` force skips this — the user already decided; see `team-mode.md` → "Honesty on a forced team".)
+
+**Clarify the viewport scope for UI work.** When the task touches frontend (the design-reviewer's hasUI heuristic fires) and `preTaskQuestioning` permits, ask one question *before* dispatching the design-reviewer: **which viewports actually matter** — desktop only / desktop + mobile / all three (desktop + tablet + mobile)? The design-reviewer captures a full-page screenshot per viewport and scores a Responsive pillar; capturing viewports the user doesn't care about is the single heaviest waste in a UI run (vision tokens dominate). Pass the chosen set into the design-reviewer dispatch as `viewports: [...]`. **Fallback when you cannot ask** (`preTaskQuestioning: never`, or no UI surface yet visible): default to **all three** — never silently *reduce* coverage, because a dropped viewport can hide a regression the user did care about. Reducing the set is a user decision; expanding to full coverage is the safe default.
 
 Then hand the resolved answers to the planner so it doesn't re-ask. (The planner can still surface a remaining question at the top of its plan, but the lead owns the clarifying round.)
 
@@ -158,8 +160,9 @@ The orchestrator supports Claude Code's Agent Teams primitive in addition to sub
 The user wants this to be **token-efficient**. Apply these defaults:
 - Classification step: do it inline (heuristic from `classifier.md`), don't spawn a sub-agent for it
 - Planner: only for tasks with ≥3 distinct steps. Single-step tasks skip planning and go straight to executor.
-- Design-reviewer: only for tasks that touch frontend code (heuristic: prompt mentions UI/UX/CSS/component/page/styling/responsive/animation, or files changed under `src/components/`, `src/app/`, `*.css`, `*.tsx`).
-- Code-reviewer: skip for refactors that are pure renames or moves with no logic changes.
+- Design-reviewer: only for tasks that touch frontend code (heuristic: prompt mentions UI/UX/CSS/component/page/styling/responsive/animation, or files changed under `src/components/`, `src/app/`, `*.css`, `*.tsx`). **Scope its viewports** — ask once which viewports matter and pass `viewports: [...]`; a desktop-only review skips two full-page screenshot+vision passes (the heaviest single cost in a UI run). See "Clarify the viewport scope for UI work" above.
+- Code-reviewer: skip for refactors that are pure renames or moves with no logic changes. Otherwise it's **tiered** — Sonnet clears a small single-file diff; reserve Opus for large/cross-cutting/security-adjacent diffs (see `model-routing.md`).
+- Plan-reviewer: **Sonnet by default** — the plan critique is a structured checklist. Upgrade to Opus only for a large/cross-cutting plan; skip entirely on `thinkingDepth=quick`.
 - **Decomposition is a token trade.** Right-size chunks into disjoint, minimal file sets; never subdivide below the break-even where context-reload tokens exceed the work saved. The planner owns this (see `agents/agentille-planner.md` → "Right-size the chunks"). Applies to both team and subagent mode.
 - **Pipeline review over building.** Don't gate review behind all-executors-done. In team mode use the scoped peer handoff (see `team-mode.md` → "Pipelined review"); in subagent mode, dispatch the code-reviewer on each finished piece while remaining executors still run (when pieces are dispatched in sequence) — same overlap pattern, no peer messaging needed.
 - **Discover once, reuse everywhere (context pack).** The planner already explores the repo. Persist that discovery once to a run-scoped temp file outside the repo (e.g. `~/.agentille/state/run-<id>/context-pack.md`), then hand each executor ONLY its slice (its files-to-touch, files-to-read, the conventions + shared contracts that bind it). Executors must not re-grep the whole repo — the discovery is done. This is what makes smaller chunks *net-negative* on tokens instead of paying an N× rediscovery tax. The pack is an optimization, never a hard dependency: if it's missing, the executor falls back to reading/grepping as needed.

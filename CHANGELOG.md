@@ -2,6 +2,18 @@
 
 All notable changes to agentille are documented here.
 
+## [1.16.0] — 2026-05-26
+
+### Changed
+
+- **Colorized the Transit Rail — config-highlight cards.** The Mission Brief, parallel fanout, and Debrief now render as ` ```yaml ` config-highlight fences instead of plain monospace blocks (`skills/agt/display.md`). The terminal's syntax highlighter paints keys, values, and `#` comments in distinct hues, so the static frames carry real multi-color with no ANSI and no theme dependency. The parallel-build fanout — the most-watched moment of a run — gets the richest frame: one colored row per worker.
+  - Three complementary color channels, each used where it is strongest: **config-highlight yaml cards** for the static frames (Brief / fanout / Debrief), **`diff` fences** for pass/fail verdicts (green/red audit trail, unchanged), **colored-emoji LEDs** for live progress pings (unchanged).
+  - Station glyphs `◉ ◐ ○ ✓` are single-width geometric chars — alignment-safe inside a fence; colored-emoji LEDs stay in ping lines (double-width). Box borders (`╔══╗`) are explicitly dropped: the highlighter colors by token, not column, so a drawn border renders unstyled and fights alignment — the fence's own background is the card.
+
+### Rationale
+
+Purely aesthetic. The rail already used colored-emoji LEDs and `diff`-fence verdicts, but the Brief/fanout/Debrief were uncolored monospace. Claude Code's renderer honors exactly three color mechanisms in assistant output — emoji, code-fence syntax highlighting, and theme accents — never arbitrary ANSI. Config-highlight yaml fences exploit the second to give the static cards a multi-hue palette for free, theme-independent, without breaking the token-discipline cadence (each frame is still drawn once).
+
 ## [1.15.0] — 2026-05-26
 
 ### Added

@@ -2,7 +2,7 @@
 
 > **Presentation only.** Nothing in this file changes classification, roster, model routing, or dispatch. It governs *how the orchestrator surfaces what it is already doing* so the user can track the run — especially the work the lead does **before** any agent is spawned. If rendering would ever block, error, or prompt, **skip it silently** — the display never gates the user's result.
 
-The orchestrator speaks in one visual language: the **Transit Rail**. A run reads top-to-bottom like a transit line — each station is a phase, the line **forks** when work runs in parallel. Two pillars carry it:
+The orchestrator speaks in one visual language: the **Transit Rail**. A run reads top-to-bottom like a transit line — each station is a phase; the build station **fans out** into a multi-worker card when work runs in parallel. Two pillars carry it:
 
 1. **The TodoWrite spine** — the native, live "what's left" list. Seeded *before* the first spawn.
 2. **The Transit Rail frames** — a drawn-once brief, thin per-phase pings, and a compact debrief.
@@ -21,6 +21,12 @@ A rich board redrawn every phase bleeds output tokens. The cadence is fixed:
 - **One compact Debrief** at the end.
 
 Never re-render the full rail mid-run. The streaming color comes from the ping lines, not from redrawing the rail.
+
+Three color channels, each used where it is strongest — all theme-independent, none need ANSI:
+
+- **config-highlight `yaml` cards** → the static frames (Brief, fanout, Debrief): the highlighter paints keys, values, and `#` comments in distinct hues (richest palette).
+- **`diff` fences** → pass/fail verdicts: green `+`, red `-`.
+- **colored-emoji LEDs** → live progress pings.
 
 ---
 
@@ -50,28 +56,24 @@ Map roster → stations: planner ⇒ `plan`, plan-reviewer ⇒ `review`, executo
 
 ### Frame 1 — Mission Brief (drawn ONCE, after classification, before dispatch)
 
-Header in plain markdown, rail in a fenced code block (alignment only holds in monospace):
+The brief is a **config-highlight card** — a ` ```yaml ` fence. The terminal's syntax highlighter colors keys, values, and `#` comments in distinct hues, so the card carries real multi-color with no ANSI. One row per station that will run:
 
-```
-agentille ▸ <mode> · <template-or-category> ▸ ~<est>m
-<task, first line, ≤ 60 chars>
-
- ◉ recon    <category> · mode: <mode>
- │
- ◐ plan     <model>  · drafting
- │
- ○ review   plan-reviewer · <model>
- │
- ○ build    <N> executor(s) · <model>
- │
- ○ gate     <reviewers, space-sep>
- │
- ○ ship     PR + debrief
+```yaml
+# agentille ▸ <mode> · <template-or-category> ▸ ~<est>m
+task:    <task, first line, ≤ 60 chars>
+recon:   ◉ done      # classified: <category>
+plan:    ◐ active    # <model> · drafting
+review:  ○ pending   # plan-reviewer · <model>
+build:   ○ pending   # <N> executor(s) · <model>
+gate:    ○ pending   # <reviewers, space-sep>
+ship:    ○ pending   # PR + debrief
 ```
 
-- The rail uses **ASCII fill glyphs only** (see legend) — no emoji inside the code block; emoji are double-width and shatter column alignment.
+- **Key = station, value = `<glyph> <status>`, comment = the detail.** Three token classes → three colors, theme-independent. Omit any station that won't run (a solo card has only `recon` / `build` / `ship`).
+- **Glyphs `◉ ◐ ○` are single-width geometric chars — safe inside the fence.** They are *not* emoji; never put a double-width colored-emoji LED (`🟢`) inside a fence — those live in ping lines (Frame 2).
+- **No box border** (`╔══╗`). The highlighter colors by *token*, not column, so a drawn border renders as an unstyled string and fights alignment — the fence's own background is the card.
 - `~<est>m` is your honest rough estimate, omit if you have none.
-- In team mode, append the cost line to the header: `agentille ▸ team · feature-team ▸ ~12m · ~4× tokens`. (This replaces the standalone cost-transparency line.)
+- In team mode, append the cost to the header comment: `# agentille ▸ team · feature-team ▸ ~12m · ~4× tokens`. (This replaces the standalone cost-transparency line.)
 
 ### Frame 2 — thin ping (one per phase transition)
 
@@ -101,17 +103,18 @@ The last two lines are the **forced-team overkill outcomes** (see `team-mode.md`
 
 ### Frame 3 — the parallel fanout (drawn ONCE when build forks)
 
-When ≥2 workers run in parallel (team executors, or subagent chunks dispatched together, ≤3), redraw **only the build branch** so the fork is visible:
+When ≥2 workers run in parallel (team executors, or subagent chunks dispatched together, ≤3), draw the fork as its own **config-highlight card** so every worker line is colored — this is the most-watched moment of a run, so it earns the richest frame:
 
-```
- ◐ build    ┌─ exec-1   ▸  sonnet   auth-api
- │          ├─ exec-2   ▸  sonnet   auth-ui
- │          └─ exec-3   ▸  sonnet   auth-tests
+```yaml
+# build ▸ <N> executors · <model> · parallel
+exec-1:  ◐ running   # <slice-name> · <files or dir>
+exec-2:  ◐ running   # <slice-name> · <files or dir>
+exec-3:  ◐ running   # <slice-name> · <files or dir>
 ```
 
-- Team mode: label each branch by callsign (`exec-1`…) + its file-slice.
-- Subagent mode: label by chunk name. The fork visualizes the dispatch fan-out — the exact moment the user said is hard to track.
-- Update worker glyphs via thin pings (Frame 2), not by redrawing this block.
+- Team mode: key = callsign (`exec-1`…), comment = its file-slice.
+- Subagent mode: key = chunk name. The card visualizes the dispatch fan-out — the moment parallel work begins, which is otherwise hard to track.
+- Flip each worker's glyph (`◐ running` → `◉ done`) via thin LED pings (Frame 2), not by redrawing this card.
 
 ### Frame 4 — review verdicts (diff fence = free green/red)
 
@@ -127,24 +130,33 @@ Keep a `-` line for any BLOCKER/should-fix even after it's patched (append `→ 
 
 ### Frame 5 — Debrief (drawn ONCE, at the end)
 
-```
-✓ ship   <N> files · PR #<n> · <runtime>m
+A **config-highlight card** mirroring the brief — one row per station that produced a result, so the run closes on the same colored visual language it opened with:
+
+```yaml
+# DEBRIEF ▸ /agt · <task, one line>
+build:    ✓ <what landed — e.g. ProfileWizard · 3 files>
+gate:     ✓ <review outcome — e.g. code-review clean · design axe 0>
+result:   ✓ <N> files · PR #<n> · <runtime>m
 ```
 
-If no PR was opened, state what landed instead (`branch agt/<slug>`, `local`, etc.). This is the only end-of-run frame — the final prose summary follows the user's `deliveryStyle` and is separate.
+- One row per station that ran (drop `gate` if nothing was reviewed). The `✓` reads green-ish under most themes; detail goes in the value or its comment.
+- If no PR was opened, state what landed instead on `result:` (`branch agt/<slug>`, `local`, etc.).
+- Unresolved blockers are **not** hidden here — they belong in the Frame 4 diff verdict as a red `-` line. The debrief card is the success ledger; the diff fence is the honest audit trail.
+
+This is the only end-of-run frame — the final prose summary follows the user's `deliveryStyle` and is separate.
 
 ---
 
 ## The LED + glyph legend
 
-**Rail glyphs (ASCII, inside code blocks — monospace, no color):**
+**Card glyphs (single-width Unicode — alignment-safe inside fences; the highlighter colors the surrounding value):**
 
 | Glyph | Meaning |
 |---|---|
 | `◉` | station complete |
 | `◐` | station active |
 | `○` | station pending |
-| `│ ┌ ├ └ ─` | the line / a parallel fork |
+| `✓` | result landed (Debrief) |
 
 **LEDs (colored emoji, in ping lines only — reliable color, never inside an aligned block):**
 
@@ -160,11 +172,12 @@ If no PR was opened, state what landed instead (`branch agt/<slug>`, `local`, et
 
 ## Color rules (what the terminal actually honors)
 
-- **Colored-emoji LEDs** are the only color the orchestrator fully controls — theme-independent. Use them in ping lines.
-- **` ```diff ` fences** give green (`+`) / red (`-`) for verdicts, free.
+- **Config-highlight fences** (` ```yaml `) are the richest color the orchestrator controls — the highlighter paints keys, values, and `#` comments in distinct hues, theme-independent, no ANSI. Use them for the static cards (Brief, fanout, Debrief). Color is per *token*, not per column, so write `key: value # comment` rows — never a box border, which renders unstyled and fights alignment.
+- **` ```diff ` fences** give green (`+`) / red (`-`) for verdicts, free. Use them for pass/fail audit lines.
+- **Colored-emoji LEDs** (`🟢🔵🟡🔴⚪`) are theme-independent too — use them in the live ping lines (Frame 2), the one place a double-width glyph belongs.
 - **Theme accents** (`code spans`, **bold**, headings, `>` bars) get colored by the *user's* theme — consistent, but not a color you pick. Fine to lean on, don't depend on a specific hue.
 - **NEVER emit raw ANSI escape codes** (`\033[…m`). They are stripped or printed literally in assistant markdown and look broken.
-- **Emoji are double-width** → they break monospace alignment. LEDs live in markdown ping lines; the code-block rail stays pure ASCII.
+- **Mind glyph width.** Geometric glyphs `◉ ◐ ○ ✓` are single-width — safe to align inside any fence. Colored-emoji LEDs are double-width — they break monospace alignment, so they stay in ping lines, never inside an aligned card.
 
 ---
 

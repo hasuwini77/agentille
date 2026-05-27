@@ -159,7 +159,10 @@ Keep your repo on the **WSL filesystem** (`~/projects/…`), not `/mnt/c/…` �
 /agt --team feature-team  "add Stripe checkout: pricing page + API route + success email"  # build it all, code & design reviewed
 /agt --team review-team   "audit PR #42 before we merge"                                   # code + design + security, in parallel
 /agt --team incident-team "users get randomly logged out — find why"                       # race 3 competing theories
+/agt --plan "refactor the auth module into smaller files"                                  # preview plan + cost, then stop for your "go"
 ```
+
+**`--plan` (dry-run).** Stops after the plan + plan-review — before any executor or teammate spawns — so you approve the *shape and cost* first; a plain "go" then runs that exact plan. Pairs with any mode (`/agt --plan --team feature-team "…"` previews the team roster + ~4× cost without spawning). The cheapest guard against building the wrong thing.
 
 `--team` overrides both the auto-pick and your profile's `team.defaultMode` for that one run. If the task has no real parallel work, `/agt` asks whether to downgrade to subagent (~¼ the tokens) or force the team anyway — you decide — see [Subagents vs teams](#subagents-vs-teams--agt-smart-picks).
 

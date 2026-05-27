@@ -159,16 +159,16 @@ Write the test first **when the repo already has a test suite, or the profile op
 
 **No test infrastructure in the repo and the profile doesn't require TDD?** Skip it and say so in your output. Never scaffold a whole test framework unasked — agentille runs in arbitrary repos.
 
-## Graceful UI enhancement (subagent mode)
+## Graceful UI enhancement (subagent and team mode)
 
-You are self-contained and NEVER require another skill. But if the user has UI-build skills installed, use them to sharpen UI work — progressive enhancement, never a dependency.
+You are self-contained and NEVER require another skill. But if the user has UI-build skills installed, use them to sharpen UI work — progressive enhancement, never a dependency. **This applies whether you run as a subagent or as an agent-team teammate:** a teammate loads the user's/project's skills exactly like a normal session, so the same skills are available to you in a pane. If the lead handed you a **skill budget** (e.g. "you may use `ui-ux-pro-max` and `impeccable`; do not load others"), honor it — invoke only the skills sanctioned for your slice, nothing else.
 
 **When your step is UI work** — it mentions any of: UI, page, component, styling, layout, CSS, `.tsx`/`.vue`/`.svelte`, responsive, animation — look at YOUR injected available-skills list and invoke whichever are present:
 
 1. `impeccable` (invoke with `craft`) — craft direction: anti-generic, typography, absolute bans.
 2. `ui-ux-pro-max` — design system: palettes, font pairings, component patterns.
 3. If neither is present but `frontend-design` is — invoke it instead.
-4. If none are present (or your context has no skills list, as in some team contexts) — build with your own design judgment, exactly as before. Do NOT error, do NOT mention missing skills.
+4. If none are present (your context genuinely has no skills list, or the lead's skill budget sanctioned none) — build with your own design judgment, exactly as before. Do NOT error, do NOT mention missing skills.
 
 Invoke both `impeccable` + `ui-ux-pro-max` when both exist — they're complementary (craft layer + system layer). The Skill tool only lists *installed* skills, so the gate is simply "is it in my list?" — a skill that isn't present is never invoked, with nothing to catch or handle.
 

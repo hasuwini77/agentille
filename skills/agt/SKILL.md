@@ -130,7 +130,7 @@ This plugin ships six **agent definitions** (in the plugin's `agents/` dir), one
 
 - **agentille:agentille-planner** — produces a goal-backward plan with parallelizable steps marked
 - **agentille:agentille-plan-reviewer** — critiques the planner's draft plan before execution (goal, coverage, parallel-safety, real verification); returns APPROVE / REVISE (read-only)
-- **agentille:agentille-executor** — implements one logical chunk of work (headless: implement → commit → push → PR). For UI work (subagent **or** team mode) it opportunistically invokes installed UI-build skills (`impeccable` / `ui-ux-pro-max` / `frontend-design`) within the **skill budget** the lead hands it, and falls back to its own design competence when none are installed — never a hard dependency.
+- **agentille:agentille-executor** — implements one logical chunk of work (headless: implement → commit → push → PR). For UI work (subagent **or** team mode) it opportunistically invokes installed skills in two layers — design (`impeccable` / `ui-ux-pro-max` / `frontend-design`) plus stack best-practices gated on the detected stack (`vercel-react-best-practices` / `next-best-practices` on React/Next, `vercel-react-native-skills` on RN) — within the **skill budget** the lead hands it, and falls back to its own competence when none are installed — never a hard dependency.
 - **agentille:agentille-code-reviewer** — reviews changes for bugs, security, quality (read-only)
 - **agentille:agentille-design-reviewer** — for UI work; screenshots + axe-core + visual critique (read-only on source)
 - **agentille:agentille-security-reviewer** — severity-classified security review (read-only)

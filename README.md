@@ -50,7 +50,7 @@ When you run `/agt "task"`, the orchestrator:
 3. **Smart-picks the execution mode** — in-session **subagents** (default) or a real **agent team**, based on whether the work has ≥2 independent slices that can build at once. It shows you the pick and a one-line reason every run.
 4. **Picks a roster** — only the agents that task needs (e.g. no design reviewer on a backend change).
 5. **Routes a model per role** and **applies your voice** to every dispatched prompt.
-6. **Runs in dependency order**, parallelizing independent work (max 3 executors at once), then returns one summary.
+6. **Runs in dependency order**, parallelizing independent work (max 3 executors at once), then returns one summary. When a plan is involved, the repo is explored **once** and each executor gets only its slice — so splitting work saves tokens instead of paying an N× rediscovery tax.
 
 ## What's inside
 
@@ -70,10 +70,22 @@ When you run `/agt "task"`, the orchestrator:
 | `agentille-plan-reviewer` | Critiques the plan before execution — goal, coverage, parallel-safety, real verification | Sonnet · Opus for large plans |
 | `agentille-executor` | Headless implementation — atomic commits, integrates adaptively (PR / push / local branch) | Sonnet |
 | `agentille-code-reviewer` | Read-only review for bugs, security, quality | Sonnet · Opus for large/cross-cutting diffs |
-| `agentille-design-reviewer` | Visual review (scored design pillars), axe-core, AI-design-tell scan, at the viewports that matter | Opus |
+| `agentille-design-reviewer` | Visual review (scored design pillars), axe-core (+ Web Interface Guidelines), AI-design-tell scan, at the viewports that matter | Opus |
 | `agentille-security-reviewer` | Severity-classified security review | Opus |
 
 > **Where Haiku runs:** two steps happen *inline* in the orchestrator, not as dispatched agents — **task classification** (picks which roster to run) and the **final summary**. Both are cheap, so they go to Haiku.
+
+### Skills it uses (if you have them)
+
+agentille **bundles none of these** — it *reaches for* skills you've already installed and falls back to its own judgment when they're absent (never a hard dependency, never an error on a missing skill). When a slice is UI work, the executor pulls from two complementary layers, and the design-reviewer adds a static accessibility pass at the gate:
+
+| Layer | Skills | Used by |
+|---|---|---|
+| **Design** — how it looks | `impeccable`, `ui-ux-pro-max`, `frontend-design` | executor, build-time |
+| **Framework** — how it's built | `vercel-react-best-practices` + `next-best-practices` (React/Next), `vercel-react-native-skills` (RN) — gated on the *detected stack* | executor, build-time |
+| **Accessibility** | `axe-core` (runtime scan) + `web-design-guidelines` (static Web Interface Guidelines review) | design-reviewer, at the gate |
+
+The two build layers don't overlap — design is *aesthetics*, framework is *correctness + performance* — and a framework skill is never loaded for a stack it doesn't match. In **team mode** the lead hands each teammate a **skill budget** (which of these it may use for its slice), so capability lands where it helps without every teammate loading heavy skills and inflating the ~4× token cost. The design micro-skills (`polish`, `delight`, `colorize`, `typeset`, …) stay yours to invoke on demand — agentille doesn't auto-load them.
 
 ## Subagents vs teams — `/agt` smart-picks
 

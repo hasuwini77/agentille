@@ -59,7 +59,7 @@ Map roster → stations: planner ⇒ `plan`, plan-reviewer ⇒ `review`, executo
 The brief is a **config-highlight card** — a ` ```yaml ` fence. The terminal's syntax highlighter colors keys, values, and `#` comments in distinct hues, so the card carries real multi-color with no ANSI. One row per station that will run:
 
 ```yaml
-# agentille ▸ <mode> · <template-or-category> ▸ ~<est>m
+# agentille v<version> ▸ <mode> · <template-or-category> ▸ ~<est>m
 task:    <task, first line, ≤ 60 chars>
 mode:    <mode>      # <one-clause reason / spine shape>
 recon:   ◉ done      # classified: <category>
@@ -76,7 +76,8 @@ ship:    ○ pending   # PR + debrief
 - **No box border** (`╔══╗`). The highlighter colors by *token*, not column, so a drawn border renders as an unstyled string and fights alignment — the fence's own background is the card. **Never hand-draw a box-rail brief and never replace the card with a prose sentence** ("I'll render the brief inline…"): the brief is *always* this ` ```yaml ` fence. The card is the only sanctioned form, in either mode.
 - **TodoWrite unavailable ≠ render in prose.** The spine (Pillar 1) and the rail frames (Pillar 2) are independent. If `TodoWrite` can't be seeded, skip the spine **silently** and still draw this yaml card — losing the spine never downgrades the brief to a hand-drawn box or a prose paragraph.
 - `~<est>m` is your honest rough estimate, omit if you have none.
-- In team mode, append the cost to the header comment: `# agentille ▸ team · feature-team ▸ ~12m · ~4× tokens`. (This replaces the standalone cost-transparency line.)
+- **`v<version>` is the loaded plugin version** — derive it from your skill base directory path (`.../agentille/<version>/skills/agt`) and print it verbatim in the header. It doubles as the **stale-session tell**: a Claude Code session resolves the plugin version once at startup and holds it for its lifetime, so a user on an old session sees the old version here and knows to `/plugin update` (or restart) before trusting the run. If the path is unparseable, omit the `v<version>` token entirely — never guess or hard-code a version.
+- In team mode, append the cost to the header comment: `# agentille v<version> ▸ team · feature-team ▸ ~12m · ~4× tokens`. (This replaces the standalone cost-transparency line.)
 
 ### Frame 2 — thin ping (one per phase transition)
 
@@ -147,10 +148,12 @@ A **config-highlight card** mirroring the brief — one row per station that pro
 # DEBRIEF ▸ /agt · <task, one line>
 build:    ✓ <what landed — e.g. ProfileWizard · 3 files>
 gate:     ✓ <review outcome — e.g. code-review clean · design axe 0>
+cost:     ✓ <dispatch shape — e.g. subagent · 2 exec + 1 review · or · team ~4× · 4 teammates + 2 reviews>
 result:   ✓ <N> files · PR #<n> · <runtime>m
 ```
 
 - One row per station that ran (drop `gate` if nothing was reviewed). The `✓` reads green-ish under most themes; detail goes in the value or its comment.
+- **`cost:` states the dispatch shape — NEVER a fabricated token count.** You cannot read your own consumed tokens mid-run, so a precise integer here would be invented; don't print one. State what actually drove the cost: the mode + how many agents ran (`subagent · 2 exec + 1 review`, or `team ~4× · 4 teammates + 2 reviews`). The `~4×` band is the honest team-mode multiplier from `team-mode.md`. Omit the row only if even the shape is unknown.
 - If no PR was opened, state what landed instead on `result:` (`branch agt/<slug>`, `local`, etc.).
 - Unresolved blockers are **not** hidden here — they belong in the Frame 4 diff verdict as a red `-` line. The debrief card is the success ledger; the diff fence is the honest audit trail.
 

@@ -1,7 +1,7 @@
 ---
 name: agt
 description: Personal AI coding orchestrator (the trigger formerly known as /agentille). Reads the user's profile from ~/.agentille/profile.json, classifies the task, and dispatches a tailored roster of agent definitions (planner, executor, code-reviewer, design-reviewer) with the right model per role. Activate ONLY when the user explicitly types `/agt <task>` or directly asks for "agentille orchestration" — do not auto-trigger on generic multi-agent or coding prompts.
-argument-hint: [--team feature-team|review-team|incident-team] "<task>"
+argument-hint: [--team feature-team|review-team|incident-team] [--plan] "<task>"
 ---
 
 # agentille — orchestrator master skill
@@ -19,7 +19,7 @@ When this skill is invoked (`/agt <task>`):
 5. **Apply the profile** to every subagent prompt — communication style, tone, challenge level, never-do rules, honesty level.
 6. **Clarify before planning** — when `preTaskQuestioning` is `always` (or `ambiguous-only` and the task is genuinely ambiguous), resolve the plan-changing unknowns with the user *before* building the plan. See "Clarify before planning" below. Explore the codebase to answer what you can; ask only what actually forks the plan.
 7. **Plan, then review the plan** — for multi-step tasks the planner drafts the plan and the **plan-reviewer** critiques it (goal correctness, coverage, parallel-safety, real verification) before any executor runs. One REVISE round, then proceed. Skip the review on `thinkingDepth=quick`.
-8. **Dispatch in dependency order**, parallelizing independent steps where the task explicitly contains independent subtasks.
+8. **Persist the context pack, then dispatch in dependency order.** When a planner ran, write its `CONTEXT-PACK` to a run-scoped file (`~/.agentille/state/run-<id>/context-pack.md`, via the Write tool) and dispatch each executor with **only its slice** — never the whole pack, never "re-explore the repo." Parallelize independent steps only where the task contains genuinely disjoint file sets (≤3 executors at a time). See "Discover once, reuse everywhere" below.
 9. **Stream progress via the Transit Rail** (see `display.md`) — *before* the first dispatch, seed the TodoWrite spine (one todo per resolved phase: the user's live "what's left until we send the agents"). Then render: a drawn-once Mission Brief rail, one thin colored-LED ping per phase transition, a fanout block when the build forks into parallel workers, diff-fence review verdicts, and a final Debrief. Presentation only — it never changes dispatch and never blocks the result; if a frame can't render, drop the field, not the run.
 10. **Append the shipped-log line** to `./docs/agentille-log.md` — you write it directly as the final step (see "Shipped log" below). There is no log hook.
 11. **Return one final summary** matching the user's `deliveryStyle` preference.
@@ -80,6 +80,13 @@ Rows #1–2 are a **force** (the user typed `--team`/`--mode team`). Run the inl
 
 Two review roles tier their model by the size of the work — see `model-routing.md` → "Tiering the review roles by size" for the exact thresholds. Always declare the model explicitly on each dispatch — never let it default.
 
+### Run modifier: `--plan` (dry-run — stop after the plan)
+
+`--plan` is **orthogonal to mode** — it doesn't pick subagent/team/solo, it sets a **stop point**. With `--plan` present, run recon → plan → plan-review and then **HALT before any executor or teammate spawns.** Emit the Mission Brief (with `build`/`gate`/`ship` shown as `○ pending`), the planner's plan, the plan-review verdict, and the resolved mode/roster/cost — then stop and wait. A plain "go" / "proceed" resumes the full run with that exact plan (no re-planning); any other reply revises the plan first.
+
+- The point is to let the user approve the *shape and cost* before paying for the build — the cheapest guard against "it built the wrong thing." It pairs with any mode: `/agt --plan --team feature-team "<task>"` previews the team roster + ~4× cost without spawning the team.
+- On a task with no planner (solo/trivial), `--plan` degrades to one honest line — *"nothing to pre-plan — this is a single-step `<category>`; re-run without `--plan` to execute"* — and never spawns an executor.
+
 ## Clarify before planning
 
 A plan is only as good as the understanding behind it. Before you build or dispatch a plan, close the gaps that would actually change it — governed by the user's `preTaskQuestioning`:
@@ -123,7 +130,7 @@ This plugin ships six **agent definitions** (in the plugin's `agents/` dir), one
 
 - **agentille:agentille-planner** — produces a goal-backward plan with parallelizable steps marked
 - **agentille:agentille-plan-reviewer** — critiques the planner's draft plan before execution (goal, coverage, parallel-safety, real verification); returns APPROVE / REVISE (read-only)
-- **agentille:agentille-executor** — implements one logical chunk of work (headless: implement → commit → push → PR). For UI work in subagent mode it opportunistically invokes installed UI-build skills (`impeccable` / `ui-ux-pro-max` / `frontend-design`) and falls back to its own design competence when none are installed — never a hard dependency.
+- **agentille:agentille-executor** — implements one logical chunk of work (headless: implement → commit → push → PR). For UI work (subagent **or** team mode) it opportunistically invokes installed skills in two layers — design (`impeccable` / `ui-ux-pro-max` / `frontend-design`) plus stack best-practices gated on the detected stack (`vercel-react-best-practices` / `next-best-practices` on React/Next, `vercel-react-native-skills` on RN) — within the **skill budget** the lead hands it, and falls back to its own competence when none are installed — never a hard dependency.
 - **agentille:agentille-code-reviewer** — reviews changes for bugs, security, quality (read-only)
 - **agentille:agentille-design-reviewer** — for UI work; screenshots + axe-core + visual critique (read-only on source)
 - **agentille:agentille-security-reviewer** — severity-classified security review (read-only)
@@ -137,7 +144,7 @@ See `roster.md` for which combinations to dispatch per task category.
 The orchestrator supports Claude Code's Agent Teams primitive in addition to subagent dispatch. See `team-mode.md` for the full protocol. Highlights:
 
 - **Opt-in via `--team`**: `/agt --team <template> "<task>"` is the intended trigger and overrides `profile.team.defaultMode`. Without `--team`, auto-detection (Stage 1 in `team-mode.md`) decides subagent vs team vs solo and defaults to subagent.
-- **Teammates are the same agent defs**: each teammate is spawned from `agentille:agentille-*` (e.g. `agentille:agentille-executor`). This is why the workers MUST be agent definitions — teammate definitions ignore `skills`/`mcpServers` frontmatter, so a skill cannot act as a teammate.
+- **Teammates are the same agent defs**: each teammate is spawned from `agentille:agentille-*` (e.g. `agentille:agentille-executor`). This is why the workers MUST be agent definitions — teammate definitions ignore `skills`/`mcpServers` frontmatter, so a skill cannot *act as* a teammate. **But a teammate still loads skills from the user's/project's settings** (the same as any session) — so a teammate executor *can* invoke installed UI-build skills (`impeccable` / `ui-ux-pro-max`) on its slice. The lead passes each teammate a **skill budget** in its spawn prompt — which skills it may use for its slice — so capability lands where it helps without every teammate auto-loading heavy skills. See `team-mode.md` → "Skill budget".
 - **Three starter templates** (role manifests, see `.claude-plugin/teams/`): `feature-team`, `review-team`, `incident-team`.
 - **Split-pane "wow" is a user setting, not ours**: whether teammates appear in their own tmux/iTerm2 pane is controlled by the user's `teammateMode` in `~/.claude/settings.json` (`"tmux"` / `"auto"` / `"in-process"`) plus an installed tmux/iTerm2 — agentille does not control it.
 - **Graceful degradation**: if team mode fails for any reason (env var missing, version too old, spawn error), the orchestrator silently falls back to subagent mode and logs a one-liner.
@@ -165,7 +172,7 @@ The user wants this to be **token-efficient**. Apply these defaults:
 - Plan-reviewer: **Sonnet by default** — the plan critique is a structured checklist. Upgrade to Opus only for a large/cross-cutting plan; skip entirely on `thinkingDepth=quick`.
 - **Decomposition is a token trade.** Right-size chunks into disjoint, minimal file sets; never subdivide below the break-even where context-reload tokens exceed the work saved. The planner owns this (see `agents/agentille-planner.md` → "Right-size the chunks"). Applies to both team and subagent mode.
 - **Pipeline review over building.** Don't gate review behind all-executors-done. In team mode use the scoped peer handoff (see `team-mode.md` → "Pipelined review"); in subagent mode, dispatch the code-reviewer on each finished piece while remaining executors still run (when pieces are dispatched in sequence) — same overlap pattern, no peer messaging needed.
-- **Discover once, reuse everywhere (context pack).** The planner already explores the repo. Persist that discovery once to a run-scoped temp file outside the repo (e.g. `~/.agentille/state/run-<id>/context-pack.md`), then hand each executor ONLY its slice (its files-to-touch, files-to-read, the conventions + shared contracts that bind it). Executors must not re-grep the whole repo — the discovery is done. This is what makes smaller chunks *net-negative* on tokens instead of paying an N× rediscovery tax. The pack is an optimization, never a hard dependency: if it's missing, the executor falls back to reading/grepping as needed.
+- **Discover once, reuse everywhere (context pack).** The planner already explores the repo. Persist that discovery once to a run-scoped temp file outside the repo (e.g. `~/.agentille/state/run-<id>/context-pack.md`), then hand each executor ONLY its slice (its files-to-touch, files-to-read, the conventions + shared contracts that bind it). Executors must not re-grep the whole repo — the discovery is done. This is what makes smaller chunks *net-negative* on tokens instead of paying an N× rediscovery tax. **When a planner ran, persisting the pack and handing each executor only its slice is required, not optional** — it is the mechanism that pays for decomposition. The reading/grepping fallback is *only* for a standalone, no-planner run where there is no pack to hand; never skip the persist step on a planned run just because the executor *could* re-explore.
 
 ## Shipped log
 

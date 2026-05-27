@@ -119,6 +119,8 @@ For readability when the lead is talking to you, make the lead the dominant pane
 
 The `.claude-plugin/teams/<name>.yaml` files are **agentille's own role manifests** — they tell the orchestrator which roles/counts make up a template. They are NOT Claude Code team config: Claude Code auto-generates and owns `~/.claude/teams/<name>/config.json` (session IDs, pane IDs) and overwrites any hand-authored version, so never pre-author that file.
 
+> **`--plan` halts here.** If `--plan` is set, preview the resolved template's roster + the `~4×` cost in the Mission Brief and **STOP** — do not run `TeamCreate` or spawn anyone. The user approves the shape first. See `SKILL.md` → "Run modifier: `--plan`".
+
 You (the orchestrator) are the **team lead**. Given a resolved template:
 
 1. **Record the run start** (mode, team name, teammate count, verb, start timestamp) so you can write the shipped-log line at the end. Keep it in your own context — there is no log hook.
@@ -135,6 +137,16 @@ You (the orchestrator) are the **team lead**. Given a resolved template:
 4. **Coordinate.** Teammates message you automatically when they go idle. Use the shared task list (`TaskCreate` / `TaskList`) for dependencies. Don't do the work yourself — wait for teammates unless one is genuinely stuck, then steer or respawn it. For build→review overlap, wire the scoped peer channel below (**Pipelined review**) rather than routing every finished piece through yourself.
 
 5. **Synthesize + clean up.** When all teammates finish, synthesize the final response, append the shipped-log line (see SKILL.md "Shipped log"), then shut teammates down and ask the lead to clean up the team. A teammate must never run cleanup — its team context may not resolve.
+
+### Skill budget — capability without token blowup
+
+A teammate loads skills from the user's/project's settings exactly like a normal session — its agent-def `skills` frontmatter is ignored when it runs as a teammate (Anthropic's agent-teams doc). So a teammate executor **can** invoke installed UI-build skills (`impeccable`, `ui-ux-pro-max`, `frontend-design`) on its slice — but if every teammate auto-reaches for heavy skills, the `~4×` team tax balloons further. So the lead **scopes each teammate's skill use in its spawn prompt**:
+
+- **UI-slice executor** → *"You may use `ui-ux-pro-max` and `impeccable` for this frontend slice; do not load other skills."*
+- **Backend / non-UI executor** → *"Do not load UI-build skills."*
+- **Reviewers** → no build skills; they review.
+
+This is the team-mode counterpart to the executor's "Graceful UI enhancement" rule (`agents/agentille-executor.md`): capability lands on the slice that needs it, silence everywhere else. The budget is guidance in the prompt, never a hard gate — a teammate with no UI work simply never reaches for a UI skill, and a teammate whose context carries no skills list builds with its own design judgment.
 
 ### Pipelined review (overlap phases)
 

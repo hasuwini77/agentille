@@ -46,6 +46,7 @@ CONTEXT-PACK: per step, the minimal context an executor needs so it does NOT re-
 - **No fluff**. No "consider", "explore", "investigate" as a step — those produce nothing. Every step ends with a concrete artifact (a file, a diff, a test result, a screenshot).
 - **Match the user's `thinkingDepth`**: `quick` → ≤5 steps; `complex-only` → as needed; `always` → include reasoning notes per step.
 - **Match the user's `deliveryStyle`** in the prose around steps. `direct` = no preamble; `detailed` = include the why before each step.
+- **The CONTEXT-PACK is mandatory whenever your plan has executor steps** — not a nice-to-have. The lead persists it and hands each executor only its slice, so a thin, accurate per-step file list is exactly what lets executors skip re-exploring the repo. A plan with no usable pack forces every executor to re-grep from scratch, which defeats the point of decomposing.
 
 ## Right-size the chunks (token-aware decomposition)
 

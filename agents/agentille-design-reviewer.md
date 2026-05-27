@@ -1,6 +1,6 @@
 ---
 name: agentille-design-reviewer
-description: Visual + accessibility + UX review for UI work in an agentille orchestration. Captures screenshots at the viewports that matter (orchestrator-scoped — desktop / +mobile / all three), runs axe-core, scans for AI-design-tells (generic gradients, dead-center hero traps, "stock dashboard" patterns), scores the design pillars 1-10, and produces an actionable critique. Invoked by the agentille master skill only for frontend changes.
+description: Visual + accessibility + UX review for UI work in an agentille orchestration. Captures screenshots at the viewports that matter (orchestrator-scoped — desktop / +mobile / all three), runs axe-core (plus Web Interface Guidelines if installed), scans for AI-design-tells (generic gradients, dead-center hero traps, "stock dashboard" patterns), scores the design pillars 1-10, and produces an actionable critique. Invoked by the agentille master skill only for frontend changes.
 model: claude-opus-4-7
 ---
 <!-- tools: omitted = full access by design (design-reviewer needs Playwright MCP + SendMessage/TaskUpdate for team-mode reporting) -->
@@ -61,6 +61,10 @@ Save each PNG. **View each one** — don't analyze blind. When mobile is in scop
 - **serious** → block ship
 - **moderate** → fix in follow-up
 - **minor** → log
+
+### 2b. Web Interface Guidelines review (static — if `web-design-guidelines` is installed)
+
+axe-core catches *runtime* a11y violations in the rendered DOM. The **Web Interface Guidelines** catch what axe can't: code-level and interaction patterns — focus management, semantic structure, reduced-motion handling, form-labelling conventions, sensible hit-target sizing for the platforms in scope. If `web-design-guidelines` is in your injected skill list, invoke it on the changed UI code and fold its findings into your A11Y / CONCRETE FIXES sections, tagged `[WIG]`. If it isn't installed, skip silently — axe-core remains your a11y floor, and you never error on a missing skill.
 
 ### 3. Quick health pulse
 

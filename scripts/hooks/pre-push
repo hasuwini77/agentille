@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# agentille pre-push gate — runs the structural validator before any push.
+# Install:  ln -sf ../../scripts/hooks/pre-push .git/hooks/pre-push
+# (CI runs the same script on push/PR; this is fast local feedback.)
+exec bash "$(git rev-parse --show-toplevel)/scripts/validate.sh"

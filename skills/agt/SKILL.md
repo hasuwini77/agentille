@@ -22,7 +22,8 @@ When this skill is invoked (`/agt <task>`):
 8. **Persist the context pack, then dispatch in dependency order.** When a planner ran, write its `CONTEXT-PACK` to a run-scoped file (`~/.agentille/state/run-<id>/context-pack.md`, via the Write tool) and dispatch each executor with **only its slice** — never the whole pack, never "re-explore the repo." Parallelize independent steps only where the task contains genuinely disjoint file sets (≤3 executors at a time). See "Discover once, reuse everywhere" below.
 9. **Stream progress via the Transit Rail** (see `display.md`) — *before* the first dispatch, seed the TodoWrite spine (one todo per resolved phase: the user's live "what's left until we send the agents"). Then render: a drawn-once Mission Brief rail, one thin colored-LED ping per phase transition, a fanout block when the build forks into parallel workers, diff-fence review verdicts, and a final Debrief. Presentation only — it never changes dispatch and never blocks the result; if a frame can't render, drop the field, not the run.
 10. **Append the shipped-log line** to `./docs/agentille-log.md` — you write it directly as the final step (see "Shipped log" below). There is no log hook.
-11. **Return one final summary** matching the user's `deliveryStyle` preference.
+11. **Tear down a team before declaring done (team mode only).** Teammates never self-terminate and `TeamDelete` does not close their tmux panes — the lead must capture pane IDs, shut each teammate down, `TeamDelete`, then `tmux kill-pane` each captured pane so the screen collapses back to the lead alone. A pane left idling after the run is a teardown miss, not the resting state. See `team-mode.md` → "Teardown". (No-op in subagent/solo mode.)
+12. **Return one final summary** matching the user's `deliveryStyle` preference.
 
 ## Dispatch decision table (authoritative)
 

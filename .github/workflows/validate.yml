@@ -1,0 +1,20 @@
+name: validate
+
+# Structural lint for the agentille plugin — version drift, a versioned
+# marketplace.json, broken agent-namespace refs, dangling doc cross-refs,
+# a missing hook script, and PII leaks. NOT a behavioral test of /agt's
+# dispatch (that lives in the model). See scripts/validate.sh + CLAUDE.md.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # jq is preinstalled on ubuntu-latest runners; no setup needed.
+      - name: Run structural validator
+        run: bash scripts/validate.sh

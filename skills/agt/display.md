@@ -155,6 +155,7 @@ result:   ✓ <N> files · PR #<n> · <runtime>m
 - One row per station that ran (drop `gate` if nothing was reviewed). The `✓` reads green-ish under most themes; detail goes in the value or its comment.
 - **`cost:` states the dispatch shape — NEVER a fabricated token count.** You cannot read your own consumed tokens mid-run, so a precise integer here would be invented; don't print one. State what actually drove the cost: the mode + how many agents ran (`subagent · 2 exec + 1 review`, or `team ~4× · 4 teammates + 2 reviews`). The `~4×` band is the honest team-mode multiplier from `team-mode.md`. Omit the row only if even the shape is unknown.
 - If no PR was opened, state what landed instead on `result:` (`branch agt/<slug>`, `local`, etc.).
+- **Team mode adds a `team:` row** confirming teardown — e.g. `team:     ✓ 3 teammates shut down · panes collapsed to lead`. This is the user's positive signal that the team is gone and the lingering panes are closed (see `team-mode.md` → "Teardown"); without it, a quiet screen full of idle panes reads as "did it actually finish?". If a pane couldn't be closed, say so here (`team: ⚠ exec-2 pane left open — close manually`) rather than omitting the row.
 - Unresolved blockers are **not** hidden here — they belong in the Frame 4 diff verdict as a red `-` line. The debrief card is the success ledger; the diff fence is the honest audit trail.
 
 This is the only end-of-run frame — the final prose summary follows the user's `deliveryStyle` and is separate.
@@ -198,5 +199,5 @@ This is the only end-of-run frame — the final prose summary follows the user's
 ## Mode notes
 
 - **Subagent mode:** the lead prints every frame inline (results return to the lead). The fanout block visualizes parallel `Agent` dispatches; pings update as each returns.
-- **Team mode:** the lead still prints the rail in its own pane. Teammate panes (the user's `teammateMode`) are *not* ours to style — the rail is the lead's connective narration above them, not a replacement.
+- **Team mode:** the lead still prints the rail in its own pane. Teammate panes (the user's `teammateMode`) are *not* ours to style — the rail is the lead's connective narration above them, not a replacement. At run end the lead runs teardown (`team-mode.md` → "Teardown") and closes those panes, then prints the Debrief `team:` row confirming the collapse — so the screen the user is left with is the lead alone, not a wall of idle teammates.
 - **Degrade:** if a frame can't render (e.g. a station's metadata is unknown), drop that field, never the run. Logging and display both follow the same law: they never block the user's result.

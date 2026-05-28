@@ -2,6 +2,23 @@
 
 All notable changes to agentille are documented here.
 
+## [1.19.0] — 2026-05-28
+
+### Added
+
+- **Mandatory team teardown — the run now collapses back to a single pane.** Previously the lead's final step was hand-waved as "shut teammates down and ask the lead to clean up the team," and `team-mode.md` even documented the symptom as accepted behavior ("teammate panes do not auto-minimize when idle"). The result: the lead finished and wrote the shipped-log, but N teammate Claude sessions sat alive idling in their tmux panes — some mid-`forging`, some parked at a permissions prompt — leaving the user staring at a wall of open panes wondering whether the run actually finished. The new **Teardown sequence** (`team-mode.md` → "Teardown") makes it concrete and mandatory before the lead declares done: capture each teammate's `tmuxPaneId` from `~/.claude/teams/<team>/config.json` **first** (TeamDelete removes that file), shut each teammate down (shutdown is conversational — no tool unilaterally kills a teammate), `TeamDelete`, then `tmux kill-pane -t <id>` each captured pane so the screen collapses to the lead alone.
+- **A `team:` row in the Debrief** confirming the collapse (`team: ✓ 3 teammates shut down · panes collapsed to lead`, or `⚠ exec-2 pane left open — close manually`) — positive confirmation the team is gone, since a quiet screen of idle panes otherwise reads as "did it finish?".
+- **Structural validator + CI** (`scripts/validate.sh`, `.github/workflows/validate.yml`, installable `pre-push` hook). A linter — *not* a behavioral test of dispatch — for the failure classes a markdown-prompt plugin actually ships: version drift (plugin.json ↔ CHANGELOG), an accidentally-versioned `marketplace.json`, broken `agentille:agentille-*` references, dangling doc `→ "Section"` cross-refs, a missing/non-executable hook script, and PII leaks (absolute paths, emails) into a public repo. The PII scan is pattern-based by design — it never hardcodes the private names it guards against, since the script itself is world-readable. CLAUDE.md's verification rule is split accordingly: behavioral checks stay "run a task through `/agt`"; structural checks are now enforced.
+
+### Changed
+
+- **Pane teardown targets panes by ID, never `tmux kill-session`.** In split-pane mode teammates are panes in the lead's *own* tmux session, so the documented generic remedy (`tmux kill-session`) would kill the lead. Teardown kills panes surgically by ID, guards on `$TMUX` (no-op in in-process mode), and never touches `$TMUX_PANE` or the empty-paneId lead entry.
+- **Idle ≠ close.** Codified that an idle teammate mid-run is *not* a teardown trigger — it's usually still needed (a later message from the lead, pipelined review, a respawn). The lead may opportunistically reclaim a pane only once a teammate's slice is fully merged + `PASS` with no dependent work left; otherwise panes close at end-of-run teardown. The `TeammateIdle` hook is explicitly rejected as the auto-close mechanism because it fires on every idle, including teammates parked waiting for the lead.
+
+### Rationale
+
+Confirmed against Claude Code's agent-teams docs: teammates never self-terminate, no tool kills a single teammate (shutdown is conversational), and `TeamDelete` does not close tmux panes (orphaned panes are a documented gotcha). So the only correct fix is a lead-driven teardown that the orchestrator actually runs — turning the half-specified "clean up the team" into the explicit, guarded sequence it always needed, with a Debrief line so the user *sees* the team is gone rather than guessing from a screen full of idle panes.
+
 ## [1.18.0] — 2026-05-27
 
 ### Added

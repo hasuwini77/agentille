@@ -29,14 +29,15 @@ Auto-detection is the **default**. Stage 1 checks a fast-path table (first match
 - **Commits:** Conventional Commits (`feat:`, `fix:`, `perf:`, `docs:`, `chore:` …), imperative subject ≤ 70 chars, body explains *why*.
 - **Changelog:** record every notable change in `CHANGELOG.md` (`## [x.y.z] — YYYY-MM-DD`, with `### Added/Changed/Fixed/Rationale`). Do **not** add a `PROGRESS.md`.
 - **Versioning:** bump `.claude-plugin/plugin.json` — feature → minor, fix → patch.
-- **Verification is behavioral.** There is no unit-test framework and one will not be added. Validate changes by running a representative task through `/agt` and observing the result; describe what you ran.
+- **Verification has two layers.** *Behavioral* — there is no behavioral test framework for dispatch decisions (mode/roster/model selection live in the model, not in code) and one will not be added; validate those by running a representative task through `/agt` and describing what you ran. *Structural* — run `bash scripts/validate.sh` before every push (a `pre-push` hook and CI both run it). It is a linter, not a behavioral test: it checks version consistency (plugin.json ↔ CHANGELOG), that `marketplace.json` stays unversioned, that every `agentille:agentille-*` reference resolves to an agent file, that doc `→ "Section"` cross-refs point at real headings, that the hook script exists, and scans tracked files for PII (paths, emails). Install the local hook once: `ln -sf ../../scripts/hooks/pre-push .git/hooks/pre-push`.
 
 ## Release recipe
 
 1. Bump the `version` field in `.claude-plugin/plugin.json` (feature → minor, fix → patch). `marketplace.json` has no version field — do not touch it.
 2. Update `CHANGELOG.md` with a dated `## [x.y.z]` section.
-3. Commit: `chore: release vx.y.z`.
-4. Push `main`. Users re-run `/plugin install agentille` to pick up the new version.
+3. Run `bash scripts/validate.sh` — it catches the classic release mistakes (CHANGELOG/plugin.json version drift, an accidental `marketplace.json` version). The `pre-push` hook + CI run it too, but checking here saves a round-trip.
+4. Commit: `chore: release vx.y.z`.
+5. Push `main`. Users re-run `/plugin install agentille` to pick up the new version.
 
 ## Hooks-test recipe
 

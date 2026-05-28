@@ -89,6 +89,20 @@ The two build layers don't overlap — design is *aesthetics*, framework is *cor
 
 ## Subagents vs teams — `/agt` smart-picks
 
+**Auto-detection is the default.** You don't pick a mode — `/agt` picks for you, prints the decision and a one-line reason every run, and defaults to the cheaper option when there's no clear reason to pay more.
+
+### What to type for each outcome
+
+| What you type | What you get |
+|---|---|
+| `/agt "task"` (no flags) | Auto: solo if trivial; subagent if sequential/single-slice; review-team if verb is "review"; incident-team if verb is "debug"; Opus classify for everything else |
+| `/agt "review …"` | Auto → `review-team` (verb fast-path) |
+| `/agt "debug …"` | Auto → `incident-team` (verb fast-path) |
+| `/agt --team <template> "task"` | Force a named team — overrides auto; `/agt` flags overkill if there are no ≥2 disjoint slices |
+| `/agt --mode subagent "task"` | Force subagent mode for one run |
+
+Stage 2 (Opus classify) only fires when Stage 1 fast-paths all miss. It promotes to `team` only when ≥2 genuinely disjoint slices can build in parallel — it won't pay ~4× tokens for sequential work.
+
 Claude Code gives you two ways to parallelize, and they're genuinely different:
 
 | | **Subagents** (default) | **Agent team** (`--team`) |
@@ -97,8 +111,6 @@ Claude Code gives you two ways to parallelize, and they're genuinely different:
 | Coordination | The lead manages all work | Shared task list + scoped peer handoffs |
 | Best for | Sequential work, a single slice, focused tasks | ≥2 independent slices, multi-pillar review, competing-hypothesis debugging |
 | Token cost | **Lower** — each worker's context returns to the lead | **~4×** — every teammate is a full, separate session |
-
-**You don't pick — `/agt` does.** It classifies the task and checks for *real* disjoint parallelism: ≥2 vertical slices with separate file sets that can build at the same time. Real parallelism (or a competing-hypothesis debug, or a multi-pillar review) → it reaches for a team. Otherwise → subagents, which do the same work for roughly a quarter of the tokens. Every run prints the pick and a one-line reason, so the decision is never a black box.
 
 **Forcing a team.** Pass `--team <template>` to override the pick for one run. If the work genuinely has parallel slices, `/agt` spawns the team. If a team would be **overkill** (sequential, single slice), `/agt` doesn't obey blindly — it explains why subagent mode fits better and **asks** whether to downgrade or force the team anyway:
 

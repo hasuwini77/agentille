@@ -18,7 +18,10 @@ Each pillar scored 1-10. Score <8 requires a 1-line concrete fix.
    - WCAG AA 4.5:1 for body, 3:1 for large + UI?
    - Palette is intentional (3-5 colors with clear roles), not random spice?
    - Brand colors used with restraint?
-   - <8 if grayscale-with-blue-accent (generic AI default), 7+ unrelated colors, or contrast borderline.
+   - Meaning never carried by hue *alone* — state (error/success/warning/disabled) and chart/data series stay distinguishable for color-blind users and in grayscale, backed by an icon, label, or shape (WCAG 1.4.1)?
+   - Interactive states (hover / focus-visible / active / disabled) are each visually distinct — not a cursor change alone — and the focus ring meets 3:1 against its background?
+   - If a dark mode ships, contrast + palette roles hold there too (not just a CSS `invert`)?
+   - <8 if grayscale-with-blue-accent (generic AI default), 7+ unrelated colors, contrast borderline, or state is signalled by color only.
 
 4. **Spacing + rhythm (1-10)**
    - Consistent scale (4/8/12/16/24/32/48...)?

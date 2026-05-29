@@ -104,6 +104,7 @@ Print:
 - Next steps:
   - *"Run `agentille-project` inside any repo to add it to your profile and generate its `./CLAUDE.md`."*
   - *"Then use `/agt <task>` in Claude Code to orchestrate work."*
+- Then ask once (opt-in, only if `~/.claude/CLAUDE.md` exists): *"Want me to tune up your global `~/.claude/CLAUDE.md` now? (y/n)"* — on `y`, hand off to the `agentille-claude-md` skill. This is a plain prompt, not a wizard field; it does not touch `profile.json` or `schemaVersion`.
 
 ## Hard rules
 

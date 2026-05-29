@@ -2,6 +2,17 @@
 
 All notable changes to agentille are documented here.
 
+## [1.20.0] — 2026-05-29
+
+### Added
+
+- **`agentille-claude-md` — a CLAUDE.md tune-up skill.** Reads a CLAUDE.md, applies a fixed "less is more" rubric, and proposes a leaner rewrite with a per-line cut-list (each cut tagged `vague` / `inferable` / `duplicate` / `default-restated`). Non-destructive by contract: it shows the rewrite + cut-list + before→after line counts, backs the original up to `<file>.bak`, and writes only on explicit approval. Defaults to the global `~/.claude/CLAUDE.md`; pass a path to tune a project `./CLAUDE.md`. Runs entirely locally — it never transmits the file. The rubric's point 7 preserves identity/personal context verbatim, so trimming targets bloat, never the person.
+- **`agentille-init` now offers the tune-up.** After writing `profile.json`, init asks once (opt-in, only when a global CLAUDE.md exists) whether to tune it up, then hands off to `agentille-claude-md`. It's a plain prompt — no new wizard field, no `schemaVersion` bump.
+
+### Rationale
+
+The init wizard captures a rich voice profile, but that only ever benefits `/agt`. Meanwhile users accumulate bloated global CLAUDE.md files that every session reads. `agentille-claude-md` is the missing piece: a safe, opinionated way to get any CLAUDE.md to a lean, high-signal state. It deliberately "improves what's there" rather than generating from the profile, and it never overwrites without a diff + backup + approval.
+
 ## [1.19.0] — 2026-05-28
 
 ### Added

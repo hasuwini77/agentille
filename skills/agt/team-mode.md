@@ -10,17 +10,9 @@ The orchestrator picks one of three execution modes per task:
 
 ## Auto-detection (Stage 1)
 
-Before dispatching, check in order. First match wins:
-
-1. User passed `--team <name>` → team mode, named template, skip Stage 2.
-2. User passed `--mode <mode>` → respect, skip Stage 2.
-3. `profile.team.enabled === false` → subagent, authoritative. Blocks all auto-promotion below. (Sits below the explicit-flag rules so a per-run `--team`/`--mode` can still override the profile default intentionally.)
-4. `profile.team.defaultMode === 'subagent'` → subagent (authoritative, even if verb matches).
-5. `profile.team.defaultMode === 'solo'` → solo (authoritative).
-6. Trivial: task mentions exactly one file (e.g. `utils.ts`) AND no architectural verb (`refactor`, `design`, `architect`, `migrate`, `redesign`, `restructure`) → solo.
-7. Task verb = `review` → team, `review-team` template.
-8. Task verb = `debug` → team, `incident-team` template.
-9. Else → fall through to Stage 2 (planner-classify).
+> The full Stage 1 fast-path table (rows 1–9, first match wins) is the authoritative source at `SKILL.md` → "Dispatch decision table" Step 1. Reproduce the decision logic inline when dispatching — do not re-read that table at runtime, it is embedded here for reference only.
+>
+> Short form: flags first (--team/--mode), then profile blocks (enabled=false, defaultMode), then solo heuristic, then verb shortcuts (review/debug), then Stage 2.
 
 ## Honesty on a forced team (`--team` / `--mode team`)
 
@@ -41,21 +33,13 @@ A `--team`/`--mode team` flag is a **force** — the user explicitly asked for a
 
     `honestyLevel` gating: emit on candid / blunt / high honesty (the default); suppress only when the profile sets the most hands-off honesty level (the user has opted out of advisories too).
 
-This is the deliberate counterpart to auto-mode honesty: in **auto** mode `/agt` *won't* pay the ~4× team tax for parallelism that isn't there; in **forced** mode it surfaces the trade — *asking* when questions are on, *flagging* when they're off — then does exactly what the user chooses. The downgrade prompt is the **one** sanctioned friction on a forced team because it carries real signal (detected overkill); never add per-spawn confirmation beyond it. Surface the resolved outcome on the recon ping (`display.md`).
+This is the deliberate counterpart to auto-mode honesty: in **auto** mode `/agt` *won't* pay the ~4× team tax for parallelism that isn't there; in **forced** mode it surfaces the trade — *asking* when questions are on, *flagging* when they're off — then does exactly what the user chooses. The downgrade prompt is the **one** sanctioned friction on a forced team because it carries real signal (detected overkill); never add per-spawn confirmation beyond it. Surface the resolved outcome on the recon ping (`display.md` → "Frame 2").
 
-## Stage 2 — planner-classify (Opus)
+## Stage 2 — lightweight Haiku classify
 
-When Stage 1 returns null, dispatch the planner in classify mode by prepending `CLASSIFY:` to the user's task:
+When Stage 1 falls through (row 9), run an inline Haiku call with a tight classification prompt — do NOT spawn the full Opus planner just to get a mode decision. Reserve the planner for actual plan generation.
 
-```
-Agent({
-  subagent_type: "agentille:agentille-planner",
-  prompt: "CLASSIFY: <user task>",
-  description: "Classify task for orchestrator"
-})
-```
-
-The planner returns a single JSON object:
+Send Haiku a short prompt containing the user's task and ask it to return ONLY this JSON:
 
 ```json
 {
@@ -66,9 +50,9 @@ The planner returns a single JSON object:
 }
 ```
 
-Parse the JSON. If parsing fails, fall back to `mode: "subagent"` and log a one-line note. Never crash on a malformed classifier response.
+Parse the JSON. If parsing fails, fall back to `mode: "subagent"` and log a one-line note. Never crash on a malformed classifier response. When Stage 2 returns a valid response, use its `roster` directly — do not re-run `classifier.md` on top of it (see `SKILL.md` → "Dispatch decision table" Step 2).
 
-**When the mode hinges on a question, ask it.** Team vs subagent turns on one thing: are there ≥2 independent slices that can build at once? If that's genuinely unknowable from the prompt and the profile's `preTaskQuestioning` permits, don't guess — the lead resolves it in the clarify round (see SKILL.md → "Clarify before planning"), and the answer re-resolves the mode. Default the provisional `mode` to `subagent` until clarified; promote to `team` only once the parallelism is confirmed. A borderline team guess that turns out sequential is the exact ~4× waste this orchestrator exists to avoid.
+**When the mode hinges on a question, ask it.** Team vs subagent turns on one thing: are there ≥2 independent slices that can build at once? If that's genuinely unknowable from the prompt and the profile's `preTaskQuestioning` permits, don't guess — the lead resolves it in the clarify round (see `SKILL.md` → "Clarify before planning"), and the answer re-resolves the mode. Default the provisional `mode` to `subagent` until clarified; promote to `team` only once the parallelism is confirmed. A borderline team guess that turns out sequential is the exact ~4× waste this orchestrator exists to avoid.
 
 ## Pre-flight check (team mode only)
 
@@ -134,7 +118,7 @@ You (the orchestrator) are the **team lead**. Given a resolved template:
    - Prompt = the user's task + the profile context block + which slice of the work this teammate owns. **Assign disjoint file sets** — two teammates editing the same file overwrite each other. Implementation teammates should each take their own git worktree (the executor does this when `isolated: true`, branching off the current branch) so they can't collide even by accident.
    - If the template marks `require-plan-approval: true`, tell the teammate to plan first in read-only mode and wait for your approval before implementing; you approve/reject as lead.
 
-4. **Coordinate.** Teammates message you automatically when they go idle. Use the shared task list (`TaskCreate` / `TaskList`) for dependencies. Don't do the work yourself — wait for teammates unless one is genuinely stuck, then steer or respawn it. For build→review overlap, wire the scoped peer channel below (**Pipelined review**) rather than routing every finished piece through yourself.
+4. **Coordinate.** **The lead writes zero implementation code in team mode — see `SKILL.md` → "Hard rules".** Teammates message you automatically when they go idle. Use the shared task list (`TaskCreate` / `TaskList`) for dependencies. Wait for teammates; if one is genuinely stuck, steer or respawn it — never implement the work yourself. For build→review overlap, wire the scoped peer channel below (**Pipelined review**) rather than routing every finished piece through yourself.
 
 5. **Synthesize + tear down.** When all teammates finish, synthesize the final response, append the shipped-log line (see SKILL.md "Shipped log"), then run the **Teardown sequence** below. A teammate must never run cleanup — its team context may not resolve. Teardown is **mandatory and runs before you declare the task done**: leaving live teammate sessions idling in their panes is the single most common "is it actually finished?" confusion (the lead is done but N panes sit open, some mid-`forging`, some at a permissions prompt). The run is not over until the panes are collapsed back to the lead alone.
 
@@ -144,7 +128,7 @@ Teammates **never self-terminate** — an idle teammate stays alive in its pane 
 
 1. **Capture pane IDs first — before anything is deleted.** Read `~/.claude/teams/<team>/config.json` and collect every `members[].tmuxPaneId` that is non-empty and is **not** the lead's (the lead's own pane is the one running this session — its entry has an empty `tmuxPaneId`, and at minimum never kill `$TMUX_PANE`). `TeamDelete` removes this file, so you cannot read the pane IDs afterward. If the file is unreadable or every `tmuxPaneId` is empty, there are no panes to collapse (in-process mode) — skip to step 5 silently.
 
-2. **Shut each teammate down.** There is no tool that unilaterally kills a single teammate — shutdown is conversational: `SendMessage` each teammate a shutdown request ("finish up and shut down") and wait for it to go idle/exit. `TeamDelete` *fails if any teammate is still running*, so this step must complete first.
+2. **Shut all teammates down in parallel.** Send the shutdown message (`SendMessage` "finish up and shut down") to **every** teammate without waiting between sends — dispatch all of them first, then wait for all to confirm idle/exit. This turns O(N) sequential shutdown into O(1)+wait-for-slowest. `TeamDelete` *fails if any teammate is still running*, so all must confirm before moving on. (Guards: never kill `$TMUX_PANE` or the empty-paneId lead entry; skip silently for in-process teammates with no pane to shut.)
 
 3. **Delete the team** with `TeamDelete` once every teammate is down. This releases the shared team resources.
 

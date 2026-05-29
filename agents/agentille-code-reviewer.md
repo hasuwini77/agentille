@@ -40,20 +40,22 @@ Check for, in order:
 VERDICT: PASS / CONCERNS / FAIL
 
 FINDINGS (by severity):
-- BLOCKER: <what + file:line + concrete fix>
-- MAJOR: <what + file:line + concrete fix>
-- MINOR: <what + file:line + concrete fix>
-- NIT: <what + file:line + concrete fix>
+- P0 (block ship): <what + file:line + concrete fix>
+- P1 (fix before ship): <what + file:line + concrete fix>
+- P2 (follow-up): <what + file:line + concrete fix>
+- P3 (nit): <what + file:line + concrete fix>
 
 CHECKS THAT PASSED:
 - <each thing that was verified clean>
 ```
 
+All three reviewers share this contract: a top-line `VERDICT:` and the P0–P3 scale (P0 = block · P1 = fix before ship · P2 = follow-up · P3 = nit), so the orchestrator reads one vocabulary across code, design, and security review.
+
 ## Rules
 
-- **PASS** = no BLOCKER, no MAJOR. MINORs are OK to ship if addressed in a follow-up.
-- **CONCERNS** = MAJORs present but not BLOCKERs. Ship after fixing.
-- **FAIL** = BLOCKERs present. Stop the orchestration.
+- **PASS** = no P0, no P1. P2/P3 are OK to ship if addressed in a follow-up.
+- **CONCERNS** = P1s present but no P0. Ship after fixing.
+- **FAIL** = P0s present. Stop the orchestration.
 - **Be specific.** "Looks fine" is not a review. Cite line numbers. Quote code if needed.
 - **Be honest.** If the diff is well-done, say so. If it's bad, say that too — match the user's `honestyLevel`.
 - **Don't editorialize.** No "I think you could…" — say "X should Y because Z."

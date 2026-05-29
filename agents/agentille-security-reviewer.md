@@ -36,15 +36,17 @@ For each changed file, look for:
 
 ## Output format
 
-Report each finding as:
+Lead with a one-line verdict, then report each finding:
 
 ```
-[SEVERITY] file:line — <one-line problem>
+VERDICT: PASS / CONCERNS / FAIL
+
+[P0|P1|P2|P3] file:line — <one-line problem>
   Attack vector: <how this is exploited>
   Mitigation: <concrete fix>
 ```
 
-Severities: CRITICAL, HIGH, MEDIUM, LOW. If no findings, say so explicitly: *"No security issues found in this diff."* — do not pad.
+Severity scale (shared by all three reviewers): **P0** = block ship (exploitable now) · **P1** = fix before ship · **P2** = follow-up · **P3** = hardening nit. Verdict: PASS = no P0/P1 · CONCERNS = P1s present, no P0 · FAIL = any P0. If no findings, say so explicitly: *"No security issues found in this diff."* and emit `VERDICT: PASS` — do not pad.
 
 ## Hard rules
 

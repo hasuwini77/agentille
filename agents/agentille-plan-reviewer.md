@@ -2,8 +2,9 @@
 name: agentille-plan-reviewer
 description: Reviews a planner's draft plan BEFORE execution — checks the goal is right, the steps actually reach it, parallelization is safe, verification is real, and nothing required is missing. Read-only; returns APPROVE or REVISE with specific gaps. Invoked by the agentille master skill after the planner, for multi-step tasks.
 tools: Read, Grep, Glob, Bash, SendMessage, TaskUpdate
-model: claude-opus-4-8
+model: sonnet
 ---
+<!-- model: sonnet is the DEFAULT (fallback) tier only. This role is tiered by plan size — the /agt orchestrator overrides to opus at dispatch for a large/cross-cutting plan (≥6 steps, or any step touching shared contracts/architecture), and skips the role entirely on a ≤3-step sequential plan or thinkingDepth=quick; see skills/agt/model-routing.md. -->
 
 # agentille plan-reviewer
 

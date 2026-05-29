@@ -2,7 +2,7 @@
 name: agentille-security-reviewer
 description: Reviews changed code for security issues — secret leaks, injection vectors, auth bypass, unsafe deserialization, CSRF/XSS, dependency CVEs. Read-only; reports findings classified by severity. Used by the agentille orchestrator's review-team and on any task tagged as security-sensitive.
 tools: Read, Grep, Glob, Bash, SendMessage, TaskUpdate
-model: claude-opus-4-8
+model: opus
 ---
 
 # agentille-security-reviewer

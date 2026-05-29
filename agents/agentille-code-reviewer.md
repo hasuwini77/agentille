@@ -2,8 +2,9 @@
 name: agentille-code-reviewer
 description: Read-only code review for an agentille execution. Reviews the diff produced by executors for bugs, security issues, and code-quality regressions. Produces severity-classified findings — no fixes. Invoked by the agentille master skill after executor(s) finish, before merge.
 tools: Read, Grep, Glob, Bash, SendMessage, TaskUpdate
-model: claude-opus-4-8
+model: sonnet
 ---
+<!-- model: sonnet is the DEFAULT (fallback) tier only. This role is tiered by diff size — the /agt orchestrator overrides to opus at dispatch for a large or cross-cutting diff (multi-file logic, public API, auth/data-flow); see skills/agt/model-routing.md. Most diffs are small, so Sonnet is the right default. -->
 
 # agentille code-reviewer
 

@@ -2,6 +2,23 @@
 
 All notable changes to agentille are documented here.
 
+## [1.23.0] — 2026-05-29
+
+### Added
+
+- **New worker agent: `agentille-ui-prototyper` (seventh agent).** A design specialist that runs **before** the executor on UI build work and frames the component design up front — design tokens (palette / type scale / spacing / radii / shadow / motion), component anatomy, every interactive state (hover / focus-visible / active / disabled / loading / empty / error), responsive + a11y intent, and explicit anti-generic guardrails — emitted as a **UI Prototype Blueprint** that the executor builds against. This closes a craft-led **design → build → review** loop: the prototyper conceives the components, the executor implements them faithfully, the design-reviewer scores against a deliberate intent instead of whatever the executor improvised. Read-only on source (`Read, Grep, Glob, Bash, SendMessage, TaskUpdate, Skill`) — it never edits files or commits; the executor owns every source write. Runs on **opus** (the blueprint sets the UI direction — pay for taste; `quick` → sonnet), `color: orange`.
+- **Both the prototyper and the executor are skill-graceful.** Each uses `ui-ux-pro-max` / `impeccable` / `frontend-design` when installed (the prototyper to *imagine* the components, the executor to *apply* them) and falls back to its own design competence when none are — silently, never an error, never a hard dependency. The prototyper owns the **design layer** only; the **framework layer** (stack best-practices) stays the executor's at build time.
+
+### Changed
+
+- **`hasUIComponent` now also dispatches the ui-prototyper** (before the executor) on build categories — `design` (REQUIRED) and `feature` (when hasUI). No new classifier signal: every UI role keys off the one existing flag. A UI *bugfix*/*review* still gets only the design-reviewer (no new design to frame). Synced across `classifier.md`, `roster.md`, `SKILL.md` (dispatch table + model table + agent lists), and `model-routing.md`.
+- **`feature-team` gains a `ui-prototyper` role** (`count: 1`) — spawned by the lead only when the feature has a UI surface. `review-team` and `incident-team` are unchanged (no UI build).
+- **Executor builds against the Blueprint when present.** `agentille-executor.md`'s UI section now treats a provided Prototype Blueprint as the design contract (implement its tokens/anatomy/states faithfully, don't redesign); with no blueprint it designs as it builds, exactly as before.
+
+### Rationale
+
+The executor previously improvised UI mid-build with no craft-led conception step, so design quality was a coin-flip the design-reviewer graded after the fact. The ui-prototyper makes the design deliberate up front. It's deliberately narrower than the still-deferred `agentille-design-architect` (an abstract UX/IA/flow brief) — the prototyper produces *concrete component design* (tokens + snippets) and reuses the existing `hasUI` signal, so it wires in without the new classification logic the design-architect needs.
+
 ## [1.22.2] — 2026-05-29
 
 ### Fixed

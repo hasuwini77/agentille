@@ -6,7 +6,7 @@ agentille is a **public, MIT-licensed Claude Code plugin** — the `/agt` orches
 
 - `skills/agt/` — the orchestrator skill: `SKILL.md` (contract + dispatch table), `classifier.md`, `roster.md`, `model-routing.md`, `team-mode.md`, `display.md`.
 - `skills/agentille-init/`, `skills/agentille-project/` — setup skills (global profile, per-repo registration).
-- `agents/agentille-*.md` — the six worker agent definitions (planner, plan-reviewer, executor, code-reviewer, design-reviewer, security-reviewer).
+- `agents/agentille-*.md` — the seven worker agent definitions (planner, plan-reviewer, ui-prototyper, executor, code-reviewer, design-reviewer, security-reviewer).
 - `.claude-plugin/` — `plugin.json` (version, bumped on every release), `marketplace.json` (listing metadata — no version field, do not version-bump it), and `teams/*.yaml` (team role manifests: `feature-team`, `review-team`, `incident-team`).
 - `hooks/` — `hooks.json` (hook declarations), `agentille-update-check.sh` (version-check script, run by the hook), `agentille-log.md` (auto-appended by the script; gitignored if present).
 

@@ -30,7 +30,7 @@ The agentille master skill uses this to classify the user's prompt into ONE of e
 
 After picking the primary category, also note:
 
-- **hasUIComponent**: true if prompt mentions UI/UX/styling/component/page/screen/responsive/animation OR explicitly lists a `.tsx/.css/.scss` file → triggers design-reviewer in roster
+- **hasUIComponent**: true if prompt mentions UI/UX/styling/component/page/screen/responsive/animation OR explicitly lists a `.tsx/.css/.scss` file → triggers the **design-reviewer** after the build, and on **build categories** (`design`, `feature`) prepends the **ui-prototyper** before the executor to frame the component design it builds against. A UI *bugfix*/*review* gets the design-reviewer but no prototyper — there's no new design to frame. No new signal — every UI role keys off this one flag; see `SKILL.md` dispatch table for the authoritative per-category roster.
 - **hasMultipleSubtasks**: true if prompt contains "and ", "also", "plus", "as well as" connecting verbs, OR ≥3 distinct actionable nouns → triggers planner
 
 ## Team vs subagent honesty

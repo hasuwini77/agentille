@@ -16,7 +16,8 @@ After classifying, dispatch this combination. Read top-to-bottom — order matte
 ## feature
 - **agentille-planner** — IF hasMultipleSubtasks, else skip
 - **agentille-plan-reviewer** — IF the planner ran; critiques the plan before any executor starts. Skip on `thinkingDepth=quick` or when the plan is ≤3 steps and fully sequential (no parallel slices).
-- **agentille-executor** — one per parallel step from the plan, max 3 parallel
+- **agentille-ui-prototyper** — IF hasUIComponent. Runs **before** the executor and frames the component design (the UI Prototype Blueprint); the executor builds against it. Model per `model-routing.md`. Skip when there's no UI to frame.
+- **agentille-executor** — one per parallel step from the plan, max 3 parallel. When a ui-prototyper Blueprint exists, pass it in the executor's dispatch prompt as the design contract.
 - **agentille-code-reviewer** — tiered by diff size; see `model-routing.md` → "Tiering the review roles by size"
 - **agentille-design-reviewer** — IF hasUIComponent. Pass the clarified `viewports: [...]` (see `SKILL.md` → "Clarify before planning").
 
@@ -33,7 +34,8 @@ After classifying, dispatch this combination. Read top-to-bottom — order matte
 - *No design-reviewer* (refactor by definition has no visible change; if visual change emerges, that's the code-reviewer's BLOCKER finding)
 
 ## design
-- **agentille-executor** — implements the visual change
+- **agentille-ui-prototyper** — REQUIRED. Frames the component design first (UI Prototype Blueprint) so the executor builds a deliberate, anti-generic design instead of improvising. Model per `model-routing.md`.
+- **agentille-executor** — implements the visual change, building against the prototyper's Blueprint (passed in its dispatch prompt).
 - **agentille-design-reviewer** — REQUIRED. Pass the clarified `viewports: [...]` (see `SKILL.md` → "Clarify before planning"). Model per `model-routing.md` — never downgrade.
 - *Code-reviewer optional* — only if the design change required logic changes (state, handlers). For pure CSS/markup tweaks, skip. Tiered by diff size when run.
 

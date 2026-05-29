@@ -9,7 +9,7 @@
 
 > A personal AI coding orchestrator for Claude Code. Type **`/agt "task"`** and it classifies the work, **smart-picks subagents or a full agent team**, routes the right Claude model to each, and applies *your* voice to every prompt.
 
-One command instead of manually chaining skills. Planning and review run on Opus, execution on Sonnet, and code + design review are built in. `/agt` decides on its own whether the work needs a real Claude Code **agent team** (independent sessions that talk to each other) or cheaper in-session **subagents** — and tells you which it picked and why.
+One command instead of manually chaining skills. Planning and review run on Opus, execution on Sonnet, and UI prototyping + code + design review are built in. `/agt` decides on its own whether the work needs a real Claude Code **agent team** (independent sessions that talk to each other) or cheaper in-session **subagents** — and tells you which it picked and why.
 
 ---
 
@@ -75,7 +75,8 @@ When you run `/agt "task"`, the orchestrator:
 |---|---|---|
 | `agentille-planner` | Goal-backward plan with parallelizable steps marked | Opus |
 | `agentille-plan-reviewer` | Critiques the plan before execution — goal, coverage, parallel-safety, real verification | Sonnet · Opus for large plans |
-| `agentille-executor` | Headless implementation — atomic commits, integrates adaptively (PR / push / local branch) | Sonnet |
+| `agentille-ui-prototyper` | Frames the UI design *before* the build — tokens, component anatomy, states, a11y, anti-generic guardrails — as a Prototype Blueprint the executor builds against. Uses `impeccable` / `ui-ux-pro-max` / `frontend-design` when installed; own taste when not | Opus |
+| `agentille-executor` | Headless implementation — atomic commits, integrates adaptively (PR / push / local branch). Builds against the prototyper's Blueprint on UI work | Sonnet |
 | `agentille-code-reviewer` | Read-only review for bugs, security, quality | Sonnet · Opus for large/cross-cutting diffs |
 | `agentille-design-reviewer` | Visual review (scored design pillars), axe-core (+ Web Interface Guidelines), AI-design-tell scan, at the viewports that matter | Opus |
 | `agentille-security-reviewer` | Severity-classified security review | Opus |

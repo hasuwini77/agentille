@@ -71,7 +71,7 @@ Do NOT auto-trigger.
    - `./CLAUDE.md` (rendered)
    - `./.agentille/config.json` — `{ "integration": "<chosen>" }` (repo-local; authoritative for this repo's runs, travels with the repo)
 
-7. **Confirm** with the user: print all three paths.
+7. **Confirm** with the user: print all three paths. Also suggest: *"If you don't want `.agentille/` committed, add it to this repo's `.gitignore`."*
 
 ## Hard rules
 

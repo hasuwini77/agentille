@@ -8,7 +8,7 @@
   "plugins": [
     {
       "name": "agentille",
-      "description": "Personal AI coding orchestrator for Claude Code (trigger: /agt). Three skills + six dispatchable agents with smart model routing, agent-team support, parallel git worktrees, plan review, and code + design review built in.",
+      "description": "Personal AI coding orchestrator for Claude Code (trigger: /agt). Four skills + six dispatchable agents with smart model routing, agent-team support, parallel git worktrees, plan review, and code + design review built in.",
       "author": {
         "name": "@hasuwini77"
       },

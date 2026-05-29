@@ -23,9 +23,10 @@ One command instead of manually chaining skills. Planning and review run on Opus
 # 2. One-time setup — teaches agentille your voice (writes ~/.agentille/profile.json)
 /agentille-init
 
-# 3. Register a repo, then dispatch work
+# 3. Dispatch work
 cd ~/your/repo
-/agentille-project          # writes ./CLAUDE.md with project context
+/agentille-project          # optional but recommended — seeds ./CLAUDE.md with project context
+                            # /agt works from the global profile alone without it
 /agt "refactor the dashboard sidebar to be collapsible"
 
 # Optional: slim a bloated CLAUDE.md (global, or pass a path)
@@ -33,6 +34,8 @@ cd ~/your/repo
 ```
 
 That's it. `/agt` does the rest: classify → plan (if needed) → implement → review → summarize.
+
+> **Team mode (split panes) requires two things:** Claude Code **2.1.32+**, and `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1` set in `~/.claude/settings.json` under the `env` key (see [Team mode](#team-mode-optional) below). Subagent mode — the default — works on any recent version with no extra config.
 
 ---
 
@@ -196,6 +199,8 @@ Keep your repo on the **WSL filesystem** (`~/projects/…`), not `/mnt/c/…` �
 
 **Cost:** team mode uses ~4× the tokens of subagent mode (each teammate is a full session). agentille warns once per session if you pass the daily soft cap (default 10, set in your profile).
 
+**What to expect in practice.** A typical subagent feature run costs roughly tens of thousands of tokens total — Opus plans, Sonnet builds. Team mode multiplies that ~4× and adds ~2–4 min of fixed overhead (plan + spawn + teardown) before the actual build starts. That overhead only pays off when the parallel slices are each long enough that building them simultaneously beats the sequential total. For a small single-slice task, subagent mode gets you there faster and cheaper every time.
+
 ## Shipped log
 
 Every completed `/agt` run appends one line to `./docs/agentille-log.md` in the target project — a lightweight, reverse-chronological record:
@@ -208,6 +213,46 @@ Every completed `/agt` run appends one line to `./docs/agentille-log.md` in the 
 
 It's documentation, so it's committed by default. To opt out, add `docs/agentille-log.md` to that project's `.gitignore`.
 
+## What a run looks like
+
+Here's what you see in the terminal when you run `/agt "add a search filter to the dashboard"`:
+
+```yaml
+# agentille v1.20.0 ▸ subagent · feature ▸ ~8m
+task:    add a search filter to the dashboard
+mode:    subagent    # sequential spine · 1 slice, no disjoint work
+recon:   ◉ done      # classified: feature
+plan:    ◉ done      # opus · 4 steps, 1 parallel
+review:  ◉ done      # plan-reviewer · approved · sonnet
+build:   ◐ active    # 1 executor · sonnet
+gate:    ○ pending   # code-reviewer
+ship:    ○ pending   # branch + debrief
+```
+
+```
+🟢 recon    subagent · sequential, 1 slice              0:03
+🟢 plan     4 steps · opus                              0:17
+🟢 review   plan APPROVED · sonnet                      0:29
+🔵 build    exec-1 ▸ search-filter spawned              0/1
+🟢 build    exec-1 ✓  3 files · branch agt/search-filter  1:42
+```
+
+```diff
++ code-review    clean — no issues
+```
+
+```yaml
+# DEBRIEF ▸ /agt · add a search filter to the dashboard
+build:    ✓ SearchFilter component · 3 files · agt/search-filter
+gate:     ✓ code-review clean
+cost:     ✓ subagent · 1 exec + 1 code-review
+result:   ✓ 3 files · branch agt/search-filter · 2m 11s
+```
+
+The recon line always shows the mode pick and reason. The `cost:` row states the dispatch shape — never a fabricated token count. If team mode runs, a `team:` teardown row confirms all panes closed.
+
+---
+
 ## Requirements
 
 - Claude Code (any recent version for subagent mode; **2.1.32+** for team mode).
@@ -215,7 +260,7 @@ It's documentation, so it's committed by default. To opt out, add `docs/agentill
 
 ## Philosophy
 
-- **Opinionated, not generic.** The agents encode how I actually want to work.
+- **Opinionated, not generic.** The agents encode a way of working — and because every prompt runs through your voice profile, that way of working becomes *yours*.
 - **Right model for the right task.** Tokens go where they earn the most.
 - **Parallel by default.** Worktrees keep features isolated, history clean, and reviews focused.
 

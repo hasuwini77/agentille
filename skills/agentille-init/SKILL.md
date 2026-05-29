@@ -38,6 +38,58 @@ cat ~/.agentille/profile.json 2>/dev/null
 - If present and valid JSON → parse it as EXISTING.
 - If present but **malformed JSON** → tell the user ("Profile file exists but is not valid JSON — fix or delete `~/.agentille/profile.json` before re-running.") and **STOP immediately. Never clobber a corrupt-but-present profile.**
 
+### (a2) Quick vs Full — offer the branch on a fresh install
+
+On a **fresh install only** (EXISTING is `{}`), before asking any questions, present the setup mode choice:
+
+> **agentille setup — ~22 questions / a few minutes.**
+>
+> **Quick setup** (~5 questions): name, role, tech stack, primary use-cases, delivery style + tone. Fills the rest with sensible defaults — you can expand any field later via `agentille-init --reconfigure`.
+>
+> **Full setup**: all 22 questions, full voice profile.
+>
+> Which would you like? (**quick** / **full**)
+
+If the user picks **Quick setup**:
+1. Ask only these 5 questions (from the full script): `name`, `role`, `techStack`, `useCases`, `deliveryStyle` + `tone` (ask as one grouped question: "Delivery style and tone?").
+2. After collecting answers, merge them onto `{}` and fill every other `WIZARD_KEYS` field with these defaults:
+
+   ```json
+   {
+     "responsibilities": "",
+     "goals": "",
+     "expertIn": "",
+     "learning": "",
+     "newTo": "",
+     "neverDo": [],
+     "customNeverDo": "",
+     "writingSamples": "",
+     "preTaskQuestioning": "ambiguous-only",
+     "challengeLevel": "balanced",
+     "disagreementStyle": "both-sides",
+     "thinkingDepth": "complex-only",
+     "honestyLevel": "default",
+     "team": {
+       "enabled": false,
+       "defaultMode": "auto",
+       "maxTeammates": 4,
+       "displayMode": "auto",
+       "dailySoftCap": 10
+     }
+   }
+   ```
+
+   Note: `thinkingDepth: "complex-only"` means extended thinking fires only on complex tasks — the sensible default for new users.
+
+3. Proceed directly to step (e) — stamp schemaVersion — then (f) write, then (g) confirm. Skip steps (b) and (c) entirely for this path.
+4. In the (g) confirm message, add: *"Run `agentille-init --reconfigure` any time to fill in or change any field."*
+
+If the user picks **Full setup** (or types anything other than "quick"), proceed normally through steps (b)–(g) as a first-time full wizard run.
+
+Do **not** show this choice on an idempotent re-run (EXISTING has keys) or on `--reconfigure` — those modes have their own defined behavior.
+
+> Type **'skip'** at any question to leave it blank (records empty string or empty array).
+
 ### (b) Decide which questions to ask
 
 **Default (no flag):**
@@ -61,6 +113,7 @@ Show a section header only for sections that actually have questions. If just on
 ### (c) Ask the selected questions
 
 - Use Claude Code's natural conversation flow — one question at a time, or grouped 3–4 if the user prefers.
+- Remind the user at the start of each section: **type 'skip' to skip any question** (records empty string or empty array for that field).
 - For multi-select fields (`techStack`, `useCases`, `neverDo`), present the option list and accept comma-separated answers or numbered picks. **Store the option `id` for `useCases` and `neverDo`** — their options are `{ id, label }` objects, so store ids (`"coding"`, `"no-disclaimers"`), not labels. `techStack` options are plain strings — store them as-is.
 - For enum fields (`deliveryStyle`, `tone`, `honestyLevel`, etc.), show all options with their hints and ask the user to pick.
 - Validate enum picks — if the user picks a value not in the list, re-prompt. Do not silently accept invalid values.

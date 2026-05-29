@@ -2,6 +2,13 @@
 
 All notable changes to agentille are documented here.
 
+## [1.21.1] — 2026-05-29
+
+### Fixed
+
+- **README said "Opus classify" where v1.21.0 shipped Haiku.** The public-surface and orchestrator-contract changes landed in parallel; the README's "Subagents vs teams" section still described Stage 2 as an Opus classify in two places (and contradicted its own "What you get" line, which already credited Haiku with task classification). Corrected both to the lightweight inline Haiku classify that actually runs.
+- **README polish:** the "What a run looks like" example was stamped `v1.20.0` (now `v1.21.0`) with an `~8m` header estimate against a `2m 11s` result (aligned to `~3m`); the shipped-log note now says the line is *written to the working tree* (commit or gitignore) rather than "committed by default", which the orchestrator doesn't do on the user's behalf.
+
 ## [1.21.0] — 2026-05-29
 
 ### Added

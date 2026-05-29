@@ -2,6 +2,24 @@
 
 All notable changes to agentille are documented here.
 
+## [1.22.2] — 2026-05-29
+
+### Fixed
+
+- **design-reviewer was over-privileged.** It omitted its `tools:` frontmatter, which Claude Code reads as full access — so a reviewer that documents a READ-ONLY CONSTRAINT could in fact `Edit`/`Write` source and spawn `Agent`s. Replaced the implicit grant with an explicit least-privilege allowlist (`Read, Grep, Glob, Bash, SendMessage, TaskUpdate` + the Playwright `browser_*` tools it uses for screenshots and the axe-core pass; no `Write` — `browser_take_screenshot` writes the PNGs itself). Now matches the read-only pattern of the other reviewers.
+- **The design-reviewer rubric registered as phantom agents and read by a fragile path.** The two rubric files lived under `agents/`, so the loader registered them as dispatchable agents (`agentille:references:agentille-design-reviewer:*`), and the agent read them by a CWD-relative path that breaks once installed (CWD = the user's project, not the plugin dir). Inlined the full rubric (six pillars + AI-design-tells) into the agent definition and deleted `agents/references/` — no phantom agents, no path to resolve; the rubric travels with the agent on any install.
+- **Frontmatter model contradicted the routing doc (both tiered reviewers).** `code-reviewer` and `plan-reviewer` pinned `opus` in frontmatter while `model-routing.md` tiers them to `sonnet` by default — a public reader would read both and be confused. Set both frontmatter defaults to `sonnet` (the documented fallback) with an inline comment noting the `/agt` orchestrator owns the per-dispatch tier (upgrading to `opus` for large/cross-cutting work).
+
+### Changed
+
+- **Agent model IDs → aliases (`opus` / `sonnet` / `haiku`).** All six agent definitions and `model-routing.md` now dispatch by alias instead of pinned exact IDs (`claude-opus-4-8`, etc.). Aliases resolve to the latest model in each tier at dispatch time, so a rotated or unavailable exact ID can't hard-fail a dispatch on an OSS user's machine. The exact tier identity (`opus` = Opus 4.8, etc.) is kept in `model-routing.md` as rationale.
+- **Reviewers share one output contract.** All three reviewers now emit a top-line `VERDICT: PASS / CONCERNS / FAIL` and classify findings on the house `P0–P3` scale (P0 = block · P1 = fix before ship · P2 = follow-up · P3 = nit). Previously code-reviewer used `BLOCKER/MAJOR/MINOR/NIT`, security-reviewer used `CRITICAL/HIGH/MEDIUM/LOW` with no verdict line, and only design-reviewer used `P0–P3`. axe-core keeps its native impact names in the A11Y block (they're axe's, not ours). The orchestrator now reads one vocabulary across code, design, and security review.
+- **Per-agent `color:` frontmatter.** Each agent declares a named color so Claude Code tints its live team pane distinctly: planner=blue, plan-reviewer=cyan, executor=green, code-reviewer=yellow, design-reviewer=purple, security-reviewer=red.
+
+### Rationale
+
+Pre-launch hardening of the agent definitions ahead of the public OSS launch. All items are polish/consistency fixes surfaced by the agent-definition audit — least-privilege, install-path robustness, OSS-resilient model selection, and a single predictable reviewer contract — none are behavioral changes to dispatch/mode selection. The upfront design-architect agent proposed in the audit remains deferred to a future v1.x feature.
+
 ## [1.22.1] — 2026-05-29
 
 ### Fixed

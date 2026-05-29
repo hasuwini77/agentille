@@ -218,7 +218,7 @@ It's written to your repo's working tree — commit it as a lightweight history,
 Here's what you see in the terminal when you run `/agt "add a search filter to the dashboard"`:
 
 ```yaml
-# agentille v1.21.0 ▸ subagent · feature ▸ ~3m
+# agentille v1.22.0 ▸ subagent · feature ▸ ~3m
 task:    add a search filter to the dashboard
 mode:    subagent    # sequential spine · 1 slice, no disjoint work
 recon:   ◉ done      # classified: feature

@@ -2,6 +2,12 @@
 
 All notable changes to agentille are documented here.
 
+## [1.22.1] — 2026-05-29
+
+### Fixed
+
+- **README "What a run looks like" sample banner showed `v1.22.0`'s predecessor.** The illustrative `/agt` run output was still stamped `v1.21.0`; bumped to `v1.22.0` to match the current line. Docs-only — no behavioral change.
+
 ## [1.22.0] — 2026-05-29
 
 ### Changed

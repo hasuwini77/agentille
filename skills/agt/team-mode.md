@@ -50,7 +50,7 @@ Send Haiku a short prompt containing the user's task and ask it to return ONLY t
 }
 ```
 
-Parse the JSON. If parsing fails, fall back to `mode: "subagent"` and log a one-line note. Never crash on a malformed classifier response. When Stage 2 returns a valid response, use its `roster` directly — do not re-run `classifier.md` on top of it (see `SKILL.md` → "Dispatch decision table" Step 2).
+Parse the JSON. If parsing fails, fall back to `mode: "subagent"` and log a one-line note. Never crash on a malformed classifier response. When Stage 2 returns a valid response, use its `roster` directly — do not re-run the heuristic classifier on top of it (authority: `SKILL.md` → "Dispatch decision table" Step 2).
 
 **When the mode hinges on a question, ask it.** Team vs subagent turns on one thing: are there ≥2 independent slices that can build at once? If that's genuinely unknowable from the prompt and the profile's `preTaskQuestioning` permits, don't guess — the lead resolves it in the clarify round (see `SKILL.md` → "Clarify before planning"), and the answer re-resolves the mode. Default the provisional `mode` to `subagent` until clarified; promote to `team` only once the parallelism is confirmed. A borderline team guess that turns out sequential is the exact ~4× waste this orchestrator exists to avoid.
 

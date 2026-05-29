@@ -18,7 +18,7 @@ After classifying, dispatch this combination. Read top-to-bottom — order matte
 - **agentille-plan-reviewer** — IF the planner ran; critiques the plan before any executor starts. Skip on `thinkingDepth=quick` or when the plan is ≤3 steps and fully sequential (no parallel slices).
 - **agentille-executor** — one per parallel step from the plan, max 3 parallel
 - **agentille-code-reviewer** — tiered by diff size; see `model-routing.md` → "Tiering the review roles by size"
-- **agentille-design-reviewer** — IF hasUIComponent. Pass the clarified `viewports: [...]` (see `SKILL.md` → "Clarify the viewport scope for UI work").
+- **agentille-design-reviewer** — IF hasUIComponent. Pass the clarified `viewports: [...]` (see `SKILL.md` → "Clarify before planning").
 
 ## bugfix
 - **debug-then-fix**: spawn a single agentille-executor running its built-in Debugging discipline (root cause → pattern → single hypothesis → root-cause fix + regression test — see `agents/agentille-executor.md`). Skip planner unless the bug is in ≥2 files.
@@ -34,7 +34,7 @@ After classifying, dispatch this combination. Read top-to-bottom — order matte
 
 ## design
 - **agentille-executor** — implements the visual change
-- **agentille-design-reviewer** — REQUIRED. Pass the clarified `viewports: [...]` (see `SKILL.md` → "Clarify the viewport scope for UI work"). Model per `model-routing.md` — never downgrade.
+- **agentille-design-reviewer** — REQUIRED. Pass the clarified `viewports: [...]` (see `SKILL.md` → "Clarify before planning"). Model per `model-routing.md` — never downgrade.
 - *Code-reviewer optional* — only if the design change required logic changes (state, handlers). For pure CSS/markup tweaks, skip. Tiered by diff size when run.
 
 ## debug

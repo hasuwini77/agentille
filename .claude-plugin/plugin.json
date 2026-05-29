@@ -3,7 +3,7 @@
   "name": "agentille",
   "displayName": "agentille",
   "version": "1.20.0",
-  "description": "Personal AI coding orchestrator for Claude Code (trigger: /agt). Three skills + six dispatchable agents with smart model routing, automatic subagent-vs-team selection (force a team with --team), parallel git worktrees, plan review, and code + design review built in.",
+  "description": "Personal AI coding orchestrator for Claude Code (trigger: /agt). Four skills + six dispatchable agents with smart model routing, automatic subagent-vs-team selection (force a team with --team), parallel git worktrees, plan review, and code + design review built in.",
   "author": {
     "name": "@hasuwini77",
     "url": "https://github.com/hasuwini77"

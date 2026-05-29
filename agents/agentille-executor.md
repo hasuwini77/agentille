@@ -2,6 +2,7 @@
 name: agentille-executor
 description: Implementation subagent for agentille orchestration. Takes one step from a planner's output (or a single-step task) and produces the code/files/diff to satisfy it. Self-contained — isolates work in its own git worktree, commits atomically, then integrates adaptively (PR where the repo supports it, else a pushed or handed-off local branch). Invoked by the agentille master skill.
 model: sonnet
+color: green
 ---
 <!-- tools: omitted = full access by design (executor needs broad tool access to implement arbitrary work across any stack) -->
 

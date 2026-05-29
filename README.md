@@ -27,6 +27,9 @@ One command instead of manually chaining skills. Planning and review run on Opus
 cd ~/your/repo
 /agentille-project          # writes ./CLAUDE.md with project context
 /agt "refactor the dashboard sidebar to be collapsible"
+
+# Optional: slim a bloated CLAUDE.md (global, or pass a path)
+/agentille-claude-md
 ```
 
 That's it. `/agt` does the rest: classify → plan (if needed) → implement → review → summarize.
@@ -61,6 +64,7 @@ When you run `/agt "task"`, the orchestrator:
 | `/agt` | Master orchestrator — reads profile, classifies the task, picks and dispatches the roster |
 | `/agentille-init` | One-time global setup; captures your voice into `~/.agentille/profile.json` |
 | `/agentille-project` | Per-repo registration; writes a `./CLAUDE.md` that inherits your global voice |
+| `/agentille-claude-md` | Tune up an existing CLAUDE.md — applies a "less is more" rubric, shows a per-line cut-list, backs up and rewrites only on approval. Global by default; pass a path for a project file |
 
 **Agents** — the orchestrator dispatches these (as `agentille:agentille-*`); they also work as agent-team teammates:
 

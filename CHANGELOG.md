@@ -2,6 +2,17 @@
 
 All notable changes to agentille are documented here.
 
+## [1.23.1] — 2026-05-30
+
+### Changed
+
+- **Per-phase rail pings now carry the acting agent's pinned color** (`display.md`). The Transit Rail's live LEDs were status-only (🟢 done / 🔵 active), so a clean run was almost entirely green. Each per-phase ping now uses the agent's frontmatter `color:` — 🔵 planner/plan-reviewer · 🟠 ui-prototyper · 🟢 executor · 🟡 code-reviewer · 🟣 design-reviewer · 🔴 security-reviewer — the *same* hue Claude Code tints that agent's team pane, so the rail and the panes (and the deck / site) speak one color language. Status (done/active/waiting) moved to the glyph + trailing text. The two warm hues double up on purpose: 🟡 = the code gate *or* a caution, 🔴 = the security gate *or* a stop. Added a `design` station (the ui-prototyper) to the canonical station list + roster→station map.
+- **README polish + accuracy.** Documented the real per-agent colors (the old note wrongly said agentille "doesn't pin a color per team" — it has since v1.22.2). The `feature-team` row now lists the **ui-prototyper** (5 teammates). The `--team` cheatsheet row is spelled out per team (`feature-team` / `review-team` / `incident-team`) instead of `<template>`. The "What a run looks like" example is now the UI feature run it actually is under v1.23.0 — it shows the `design` station, the ui-prototyper ping (🟠), and a design-review verdict, recolored to the new per-agent rail. Trimmed redundant prose (What you get / How it works / Forcing a team / Cost) to keep the page tight despite the added content.
+
+### Rationale
+
+Cosmetic + docs only — no dispatch/mode/roster behavior changed. Makes the run output (and its README depiction) visibly multi-color and self-explaining, and brings every public surface in line with the seventh agent shipped in v1.23.0.
+
 ## [1.23.0] — 2026-05-29
 
 ### Added

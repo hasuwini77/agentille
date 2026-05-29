@@ -41,11 +41,11 @@ That's it. `/agt` does the rest: classify → plan (if needed) → implement →
 
 ## What you get
 
-- **One-command orchestration.** `/agt "task"` routes work through planner, executor, and reviewers automatically — no manual skill-chaining.
-- **Right model for the job.** Opus sets direction (planning) and handles the heavy reviews; Sonnet writes the code and clears the routine reviews (plan-review, and code-review on small diffs); Opus steps in only for large or cross-cutting reviews. Haiku runs the cheap edges (task classification + the final summary). Tokens go where they earn the most.
-- **Parallel-safe by default.** Each chunk of work runs in its own git worktree (branched off your *current* branch — never assumed `main`) with atomic commits, then integrates adaptively: a PR where the repo supports it, otherwise a pushed or handed-off branch. Works whether you're solo on main or stuck on a locked-down team branch.
+- **One-command orchestration.** `/agt "task"` routes work through the right agents automatically — no manual skill-chaining.
+- **Right model per role.** Opus plans and runs the heavy reviews, Sonnet writes the code and clears routine reviews, Haiku runs the cheap edges (classify + summary). Tokens go where they earn the most.
+- **Parallel-safe by default.** Each chunk runs in its own git worktree (branched off your *current* branch, never assumed `main`), atomic commits, then integrates adaptively — PR, push, or local branch.
 - **Voice-aware.** Your profile shapes every prompt. Ask for brutal feedback once, and every agent is brutal.
-- **Review built in.** Code review (bugs/security/quality) on every change, plus a design review (it asks which viewports actually matter, then screenshots only those, runs axe-core, and scans for the generic AI-design tells that make most AI UIs feel cheap) whenever UI is touched.
+- **Design as a contract.** On UI work the ui-prototyper frames the components up front (tokens, states, a11y), the executor builds against that, and a design review screenshots the result + runs axe-core — alongside code review on every change.
 
 ## How it works
 
@@ -54,9 +54,8 @@ When you run `/agt "task"`, the orchestrator:
 1. **Reads your profile** (`~/.agentille/profile.json`) for communication style, tone, and rules.
 2. **Classifies the task** — feature, bugfix, refactor, design, review, debug, research, or planning.
 3. **Smart-picks the execution mode** — in-session **subagents** (default) or a real **agent team**, based on whether the work has ≥2 independent slices that can build at once. It shows you the pick and a one-line reason every run.
-4. **Picks a roster** — only the agents that task needs (e.g. no design reviewer on a backend change).
-5. **Routes a model per role** and **applies your voice** to every dispatched prompt.
-6. **Runs in dependency order**, parallelizing independent work (max 3 executors at once), then returns one summary. When a plan is involved, the repo is explored **once** and each executor gets only its slice — so splitting work saves tokens instead of paying an N× rediscovery tax.
+4. **Builds the roster** — only the agents the task needs (no design reviewer on a backend change), routes a model per role, and applies your voice to every prompt.
+5. **Runs in dependency order**, parallelizing independent work (max 3 executors). The repo is explored **once** and each executor gets only its slice — so splitting work saves tokens instead of paying an N× rediscovery tax.
 
 ## What's inside
 
@@ -85,15 +84,15 @@ When you run `/agt "task"`, the orchestrator:
 
 ### Skills it uses (if you have them)
 
-agentille **bundles none of these** — it *reaches for* skills you've already installed and falls back to its own judgment when they're absent (never a hard dependency, never an error on a missing skill). When a slice is UI work, the executor pulls from two complementary layers, and the design-reviewer adds a static accessibility pass at the gate:
+agentille **bundles none of these** — it *reaches for* skills you've already installed and falls back to its own judgment when they're absent (never a hard dependency, never an error on a missing skill). On UI work the **ui-prototyper** and **executor** both pull from these layers, and the design-reviewer adds a static accessibility pass at the gate:
 
 | Layer | Skills | Used by |
 |---|---|---|
-| **Design** — how it looks | `impeccable`, `ui-ux-pro-max`, `frontend-design` | executor, build-time |
-| **Framework** — how it's built | `vercel-react-best-practices` + `next-best-practices` (React/Next), `vercel-react-native-skills` (RN) — gated on the *detected stack* | executor, build-time |
-| **Accessibility** | `axe-core` (runtime scan) + `web-design-guidelines` (static Web Interface Guidelines review) | design-reviewer, at the gate |
+| **Design** — how it looks | `impeccable`, `ui-ux-pro-max`, `frontend-design` | ui-prototyper + executor |
+| **Framework** — how it's built | `vercel-react-best-practices` + `next-best-practices` (React/Next), `vercel-react-native-skills` (RN) — gated on the *detected stack* | executor |
+| **Accessibility** | `axe-core` (runtime) + `web-design-guidelines` (static) | design-reviewer, at the gate |
 
-The two build layers don't overlap — design is *aesthetics*, framework is *correctness + performance* — and a framework skill is never loaded for a stack it doesn't match. In **team mode** the lead hands each teammate a **skill budget** (which of these it may use for its slice), so capability lands where it helps without every teammate loading heavy skills and inflating the ~4× token cost. The design micro-skills (`polish`, `delight`, `colorize`, `typeset`, …) stay yours to invoke on demand — agentille doesn't auto-load them.
+The two build layers don't overlap (aesthetics vs correctness), and a framework skill is never loaded for a stack it doesn't match. In **team mode** the lead hands each teammate a **skill budget** so capability lands where it helps without inflating the ~4× cost. The design micro-skills (`polish`, `delight`, `typeset`, …) stay yours to invoke — agentille doesn't auto-load them.
 
 ## Subagents vs teams — `/agt` smart-picks
 
@@ -106,8 +105,12 @@ The two build layers don't overlap — design is *aesthetics*, framework is *cor
 | `/agt "task"` (no flags) | Auto: solo if trivial; subagent if sequential/single-slice; review-team if verb is "review"; incident-team if verb is "debug"; Haiku classify for everything else |
 | `/agt "review …"` | Auto → `review-team` (verb fast-path) |
 | `/agt "debug …"` | Auto → `incident-team` (verb fast-path) |
-| `/agt --team <template> "task"` | Force a named team — overrides auto; `/agt` flags overkill if there are no ≥2 disjoint slices |
+| `/agt --team feature-team "task"` | Force the build team (ui-prototyper + executors + code/design review) |
+| `/agt --team review-team "task"` | Force the audit team (code + design + security review) |
+| `/agt --team incident-team "task"` | Force the debug team (3 executors race competing theories) |
 | `/agt --mode subagent "task"` | Force subagent mode for one run |
+
+Any `--team` overrides the auto-pick; if the work has no ≥2 disjoint slices, `/agt` flags it as overkill and asks whether to downgrade (see below).
 
 Stage 2 (a lightweight inline Haiku classify) only fires when Stage 1 fast-paths all miss. It promotes to `team` only when ≥2 genuinely disjoint slices can build in parallel — it won't pay ~4× tokens for sequential work.
 
@@ -120,11 +123,11 @@ Claude Code gives you two ways to parallelize, and they're genuinely different:
 | Best for | Sequential work, a single slice, focused tasks | ≥2 independent slices, multi-pillar review, competing-hypothesis debugging |
 | Token cost | **Lower** — each worker's context returns to the lead | **~4×** — every teammate is a full, separate session |
 
-**Forcing a team.** Pass `--team <template>` to override the pick for one run. If the work genuinely has parallel slices, `/agt` spawns the team. If a team would be **overkill** (sequential, single slice), `/agt` doesn't obey blindly — it explains why subagent mode fits better and **asks** whether to downgrade or force the team anyway:
+**Forcing a team.** `--team <template>` overrides the pick. If a team would be **overkill** (sequential, single slice), `/agt` doesn't obey blindly — it says so and asks before spending ~4×:
 
-> *"`--team feature-team` here looks like overkill — no ≥2 independent slices to build in parallel, so subagent mode does the same work for ~¼ the tokens. Downgrade to subagent (recommended), or force the team?"*
+> *"`--team feature-team` here looks like overkill — no ≥2 independent slices, so subagent mode does the same work for ~¼ the tokens. Downgrade (recommended), or force the team?"*
 
-You always get the final say — downgrade and save the tokens, or force the team and `/agt` runs it without another word. (If you've set `preTaskQuestioning` to `never`, it skips the question, honors the force, and notes the trade in one line instead.)
+You decide. (`preTaskQuestioning: never` skips the ask, honors the force, and notes the trade in one line.)
 
 ## Team mode (optional)
 
@@ -134,11 +137,11 @@ When `/agt` picks a team — or you force one with `--team` — each role become
 
 | Team | When to use | Teammates spawned |
 |---|---|---|
-| 🟩 `feature-team` | Build a feature across UI + API — reviewed as it ships | 2 × executor + code-reviewer + design-reviewer (4) |
-| 🟦 `review-team` | Get a change fully checked before you merge | code-reviewer + design-reviewer + security-reviewer (3) |
-| 🟥 `incident-team` | Crack a bug that has several possible causes | 3 × executor testing competing hypotheses (3) |
+| `feature-team` | Build a feature across UI + API — designed up front, reviewed as it ships | ui-prototyper *(when UI)* + 2 × executor + code-reviewer + design-reviewer (5) |
+| `review-team` | Get a change fully checked before you merge | code-reviewer + design-reviewer + security-reviewer (3) |
+| `incident-team` | Crack a bug that has several possible causes | 3 × executor testing competing hypotheses (3) |
 
-> Colors are auto-assigned by Claude Code — each teammate spawns in its own color (you'll see e.g. one green, one blue) and it can differ run to run. The badges above are just README labels; agentille doesn't pin a color per team. You (the orchestrator) are always the lead — the planner is not a spawned teammate.
+> **Each agent has a pinned color** (set in its `agents/agentille-*.md` frontmatter) — Claude Code tints that teammate's pane with it, and the run rail uses the same hue, so panes and progress speak one language: 🔵 planner · plan-reviewer · 🟠 ui-prototyper · 🟢 executor · 🟡 code-reviewer · 🟣 design-reviewer · 🔴 security-reviewer. You (the orchestrator) are always the lead — the planner is not a spawned teammate.
 
 ### 1 · Enable it (both platforms)
 
@@ -196,11 +199,9 @@ Keep your repo on the **WSL filesystem** (`~/projects/…`), not `/mnt/c/…` �
 
 **`--plan` (dry-run).** Stops after the plan + plan-review — before any executor or teammate spawns — so you approve the *shape and cost* first; a plain "go" then runs that exact plan. Pairs with any mode (`/agt --plan --team feature-team "…"` previews the team roster + ~4× cost without spawning). The cheapest guard against building the wrong thing.
 
-`--team` overrides both the auto-pick and your profile's `team.defaultMode` for that one run. If the task has no real parallel work, `/agt` asks whether to downgrade to subagent (~¼ the tokens) or force the team anyway — you decide — see [Subagents vs teams](#subagents-vs-teams--agt-smart-picks).
+`--team` also overrides your profile's `team.defaultMode` for that run. (Overkill handling — the downgrade ask — is covered in [Subagents vs teams](#subagents-vs-teams--agt-smart-picks).)
 
-**Cost:** team mode uses ~4× the tokens of subagent mode (each teammate is a full session). agentille warns once per session if you pass the daily soft cap (default 10, set in your profile).
-
-**What to expect in practice.** A typical subagent feature run costs roughly tens of thousands of tokens total — Opus plans, Sonnet builds. Team mode multiplies that ~4× and adds ~2–4 min of fixed overhead (plan + spawn + teardown) before the actual build starts. That overhead only pays off when the parallel slices are each long enough that building them simultaneously beats the sequential total. For a small single-slice task, subagent mode gets you there faster and cheaper every time.
+**Cost.** A typical subagent feature run is tens of thousands of tokens (Opus plans, Sonnet builds). Team mode multiplies that ~4× and adds ~2–4 min of fixed overhead (plan + spawn + teardown) — only worth it when the parallel slices are each long enough that building them at once beats the sequential total. For a small single-slice task, subagent mode is faster and cheaper every time. agentille warns once per session past the daily soft cap (default 10, in your profile).
 
 ## Shipped log
 
@@ -219,35 +220,43 @@ It's written to your repo's working tree — commit it as a lightweight history,
 Here's what you see in the terminal when you run `/agt "add a search filter to the dashboard"`:
 
 ```yaml
-# agentille v1.22.0 ▸ subagent · feature ▸ ~3m
+# agentille v1.23.0 ▸ subagent · feature ▸ ~3m
 task:    add a search filter to the dashboard
 mode:    subagent    # sequential spine · 1 slice, no disjoint work
-recon:   ◉ done      # classified: feature
+recon:   ◉ done      # classified: feature · hasUI
 plan:    ◉ done      # opus · 4 steps, 1 parallel
 review:  ◉ done      # plan-reviewer · approved · sonnet
-build:   ◐ active    # 1 executor · sonnet
-gate:    ○ pending   # code-reviewer
+design:  ◉ done      # ui-prototyper · blueprint · opus
+build:   ◐ active    # 1 executor · sonnet · builds the blueprint
+gate:    ○ pending   # code-reviewer · design-reviewer
 ship:    ○ pending   # branch + debrief
 ```
 
+Then live pings stream below it — **each LED is the agent working that phase** (the same color as its team pane):
+
 ```
-🟢 recon    subagent · sequential, 1 slice              0:03
-🟢 plan     4 steps · opus                              0:17
-🟢 review   plan APPROVED · sonnet                      0:29
-🔵 build    exec-1 ▸ search-filter spawned              0/1
-🟢 build    exec-1 ✓  3 files · branch agt/search-filter  1:42
+🟢 recon    subagent · feature · 1 slice, hasUI         0:03
+🔵 plan     4 steps · 1 parallel · opus                 0:17
+🔵 review   plan APPROVED · sonnet                       0:29
+🟠 design   ui-prototyper ✓ tokens · states · a11y       0:55
+🟢 build    exec-1 ▸ search-filter spawned               0/1
+🟢 build    exec-1 ✓  3 files · agt/search-filter        1:58
+🟡 gate     code-review ✓ clean                          2:20
+🟣 gate     design-review ✓ 3 viewports · axe clean      3:05
 ```
 
 ```diff
-+ code-review    clean — no issues
++ code-review     clean — no issues
++ design-review   PASS — hierarchy / type / contrast all ≥8, 0 AI-tells
 ```
 
 ```yaml
 # DEBRIEF ▸ /agt · add a search filter to the dashboard
+design:   ✓ ui-prototyper blueprint · tokens + states + a11y
 build:    ✓ SearchFilter component · 3 files · agt/search-filter
-gate:     ✓ code-review clean
-cost:     ✓ subagent · 1 exec + 1 code-review
-result:   ✓ 3 files · branch agt/search-filter · 2m 11s
+gate:     ✓ code-review clean · design-review PASS (3 viewports)
+cost:     ✓ subagent · ui-prototyper + 1 exec + 2 reviews
+result:   ✓ 3 files · branch agt/search-filter · 3m 12s
 ```
 
 The recon line always shows the mode pick and reason. The `cost:` row states the dispatch shape — never a fabricated token count. If team mode runs, a `team:` teardown row confirms all panes closed.

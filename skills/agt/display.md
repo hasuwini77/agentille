@@ -35,7 +35,7 @@ Three color channels, each used where it is strongest — all theme-independent,
 The instant the mode + roster are resolved (and **before** the first `Agent`/`TeamCreate` call), seed one todo per phase that will actually run. This is the user's live "steps left until we send the agents."
 
 - One todo per resolved phase only — omit stations with no agent (a solo task has no `review`/`gate`; a review-team has no `build`).
-- `activeForm` is the present-participle station name: `Classifying`, `Planning`, `Reviewing plan`, `Building`, `Reviewing`, `Shipping`.
+- `activeForm` is the present-participle station name: `Classifying`, `Planning`, `Reviewing plan`, `Designing`, `Building`, `Reviewing`, `Shipping`.
 - Mark each `completed` the moment its phase produces a result. Exactly one `in_progress` at a time.
 - The spine is the source of truth for "what's left"; the rail is the source of truth for "how it's shaped." Keep them consistent.
 
@@ -45,14 +45,15 @@ The instant the mode + roster are resolved (and **before** the first `Agent`/`Te
 
 ### The phases (build from the resolved roster — never a fixed six)
 
-Canonical stations, in order: `recon → plan → review → build → gate → ship`. **Only render the stations that will run.** Examples:
+Canonical stations, in order: `recon → plan → review → design → build → gate → ship`. **Only render the stations that will run** — `design` only when the work has UI (the ui-prototyper ran). Examples:
 
 - solo: `recon → build → ship`
 - subagent feature w/ planner: `recon → plan → review → build → gate → ship`
+- subagent UI feature: `recon → plan → review → design → build → gate → ship` (`design` = the ui-prototyper's blueprint)
 - review-team: `recon → review → ship`
 - incident-team: `recon → build → ship` (build = the adversarial hypothesis race)
 
-Map roster → stations: planner ⇒ `plan`, plan-reviewer ⇒ `review`, executor(s) ⇒ `build`, code/design/security-reviewer ⇒ `gate`, PR + shipped-log ⇒ `ship`. `recon` is always present (your classification step).
+Map roster → stations: planner ⇒ `plan`, plan-reviewer ⇒ `review`, ui-prototyper ⇒ `design`, executor(s) ⇒ `build`, code/design/security-reviewer ⇒ `gate`, PR + shipped-log ⇒ `ship`. `recon` is always present (your classification step).
 
 ### Frame 1 — Mission Brief (drawn ONCE, after classification, before dispatch)
 
@@ -85,28 +86,30 @@ A single markdown line — this is where the **live color** lives (colored-emoji
 
 ```
 🟢 recon    subagent · sequential, 1 slice          0:03
-🟢 plan     5 steps · 3 parallel · opus              0:14
-🟢 review   plan APPROVED · opus                     0:31
-🔵 build    exec-1 ▸  exec-2 ▸  spawned              0/2
+🔵 plan     5 steps · 3 parallel · opus              0:14
+🔵 review   plan APPROVED · opus                     0:31
+🟠 design   ui-prototyper ✓ blueprint · tokens·states  0:52
+🟢 build    exec-1 ▸  exec-2 ▸  spawned              0/2
 🟢 build    exec-1 ✓  exec-2 ▸                       1/2
-🟢 gate     code-review · 1 should-fix → patched     2:47
+🟡 gate     code-review · 1 should-fix → patched     2:47
+🟣 gate     design-review · 3 viewports · axe clean  3:20
 ```
 
-Emit on **completion** of each station (carrying 🟢), plus one 🔵 line when a long station (build) begins so the user isn't left waiting in silence. Keep each ≤ ~60 chars before the trailing metric.
+Each ping carries the **acting agent's color** (see the legend) — so a clean run is naturally multi-colored, one hue per agent, matching its team-pane tint. Emit one per phase transition; for a long station (build) emit a line when it begins (`▸` / `spawned`) and one when it lands (`✓`). Status rides in the glyph + trailing text, not the LED. Keep each ≤ ~60 chars before the trailing metric.
 
 **Pre-spawn planning window — the "lead doing stuff" before panes open.** In team mode, recon → classify → plan → plan-review all run before `TeamCreate`. That pre-spawn window is invisible without a signal. Emit one 🔵 ping when the lead enters it and one 🟢 ping when it exits (team spawns):
 
 ```
 🔵 planning   classifying · plan drafting · plan-review                   0:04
-🟢 planning   done · team spawning now — <N> teammates                     1:32
+🔵 planning   done · team spawning now — <N> teammates                     1:32
 ```
 
-This is the **only** pre-spawn signal — never narrate the planning work in prose or emit per-step pings while planning. A single 🔵 line sets the expectation; the 🟢 line closes the window. If no plan-review ran (skip-tier or `quick`), say so in the 🟢 line: `plan-review skipped · team spawning now`.
+This is the **only** pre-spawn signal — never narrate the planning work in prose or emit per-step pings while planning. Both lines are 🔵 (the planner's color); the second's `done · team spawning now` text closes the window. If no plan-review ran (skip-tier or `quick`), say so in the 🟢 line: `plan-review skipped · team spawning now`.
 
-**The waiting ping (🟡) — for dead air while the lead is blocked on a long worker.** Emit **one** 🟡 line on entering the wait — never on a timer:
+**The waiting ping — for dead air while the lead is blocked on a long worker.** Emit **one** line on entering the wait (never on a timer), carrying the color of the agent you're waiting on, with `waiting` in the text:
 
 ```
-🟡 gate     design-review running 3:12 · code-review ✓     waiting
+🟣 gate     design-review running 3:12 · code-review ✓     waiting
 ```
 
 Never narrate the wait in prose; the harness spinner already says *still alive*, so this line only needs to add *still alive **on what***.
@@ -182,15 +185,19 @@ This is the only end-of-run frame — the final prose summary follows the user's
 | `○` | station pending |
 | `✓` | result landed (Debrief) |
 
-**LEDs (colored emoji, in ping lines only — reliable color, never inside an aligned block):**
+**LEDs (colored emoji, in ping lines only — reliable color, never inside an aligned block).** Each per-phase ping carries the **acting agent's pinned color** — the same hue Claude Code tints that agent's team pane (set in its `agents/agentille-*.md` `color:` frontmatter) — so the rail and the panes speak one color language, and a clean run is naturally multi-colored:
 
-| LED | Meaning |
+| LED | Agent / phase |
 |---|---|
-| 🟢 | done |
-| 🔵 | active now |
-| ⚪ | pending |
-| 🟡 | waiting / soft-blocked (awaiting approval, retry) |
-| 🔴 | hard blocker / issue found |
+| 🟢 | executor (build) · recon / ship — orchestrator lifecycle |
+| 🔵 | planner · plan-reviewer (plan + plan-review) |
+| 🟠 | ui-prototyper (the UI design blueprint) |
+| 🟡 | code-reviewer (gate) — doubles as caution / soft-wait |
+| 🟣 | design-reviewer (visual gate) |
+| 🔴 | security-reviewer — doubles as a hard blocker / stop |
+| ⚪ | pending / not started |
+
+Status (done / active / waiting) rides in the **glyph + trailing text** — `✓` landed, `▸` / `spawned` / `running` active, `waiting` soft-blocked — not the LED. The two warm hues double up on purpose: 🟡 = the code gate *or* a caution, 🔴 = the security gate *or* a stop — both read as *attention*.
 
 ---
 
@@ -198,7 +205,7 @@ This is the only end-of-run frame — the final prose summary follows the user's
 
 - **Config-highlight fences** (` ```yaml `) are the richest color the orchestrator controls — the highlighter paints keys, values, and `#` comments in distinct hues, theme-independent, no ANSI. Use them for the static cards (Brief, fanout, Debrief). Color is per *token*, not per column, so write `key: value # comment` rows — never a box border, which renders unstyled and fights alignment.
 - **` ```diff ` fences** give green (`+`) / red (`-`) for verdicts, free. Use them for pass/fail audit lines.
-- **Colored-emoji LEDs** (`🟢🔵🟡🔴⚪`) are theme-independent too — use them in the live ping lines (Frame 2), the one place a double-width glyph belongs.
+- **Colored-emoji LEDs** (`🟢🔵🟠🟡🟣🔴⚪`) are theme-independent too — use them in the live ping lines (Frame 2), the one place a double-width glyph belongs. The per-phase LED = the acting agent's color (see the legend), matching its team-pane tint.
 - **Theme accents** (`code spans`, **bold**, headings, `>` bars) get colored by the *user's* theme — consistent, but not a color you pick. Fine to lean on, don't depend on a specific hue.
 - **NEVER emit raw ANSI escape codes** (`\033[…m`). They are stripped or printed literally in assistant markdown and look broken.
 - **Mind glyph width.** Geometric glyphs `◉ ◐ ○ ✓` are single-width — safe to align inside any fence. Colored-emoji LEDs are double-width — they break monospace alignment, so they stay in ping lines, never inside an aligned card.

@@ -2,7 +2,7 @@
 name: agentille-plan-reviewer
 description: Reviews a planner's draft plan BEFORE execution — checks the goal is right, the steps actually reach it, parallelization is safe, verification is real, and nothing required is missing. Read-only; returns APPROVE or REVISE with specific gaps. Invoked by the agentille master skill after the planner, for multi-step tasks.
 tools: Read, Grep, Glob, Bash, SendMessage, TaskUpdate
-model: claude-opus-4-7
+model: claude-opus-4-8
 ---
 
 # agentille plan-reviewer

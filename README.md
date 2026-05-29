@@ -102,13 +102,13 @@ The two build layers don't overlap — design is *aesthetics*, framework is *cor
 
 | What you type | What you get |
 |---|---|
-| `/agt "task"` (no flags) | Auto: solo if trivial; subagent if sequential/single-slice; review-team if verb is "review"; incident-team if verb is "debug"; Opus classify for everything else |
+| `/agt "task"` (no flags) | Auto: solo if trivial; subagent if sequential/single-slice; review-team if verb is "review"; incident-team if verb is "debug"; Haiku classify for everything else |
 | `/agt "review …"` | Auto → `review-team` (verb fast-path) |
 | `/agt "debug …"` | Auto → `incident-team` (verb fast-path) |
 | `/agt --team <template> "task"` | Force a named team — overrides auto; `/agt` flags overkill if there are no ≥2 disjoint slices |
 | `/agt --mode subagent "task"` | Force subagent mode for one run |
 
-Stage 2 (Opus classify) only fires when Stage 1 fast-paths all miss. It promotes to `team` only when ≥2 genuinely disjoint slices can build in parallel — it won't pay ~4× tokens for sequential work.
+Stage 2 (a lightweight inline Haiku classify) only fires when Stage 1 fast-paths all miss. It promotes to `team` only when ≥2 genuinely disjoint slices can build in parallel — it won't pay ~4× tokens for sequential work.
 
 Claude Code gives you two ways to parallelize, and they're genuinely different:
 
@@ -211,14 +211,14 @@ Every completed `/agt` run appends one line to `./docs/agentille-log.md` in the 
   - PR: #42
 ```
 
-It's documentation, so it's committed by default. To opt out, add `docs/agentille-log.md` to that project's `.gitignore`.
+It's written to your repo's working tree — commit it as a lightweight history, or add `docs/agentille-log.md` to that project's `.gitignore` to keep it local.
 
 ## What a run looks like
 
 Here's what you see in the terminal when you run `/agt "add a search filter to the dashboard"`:
 
 ```yaml
-# agentille v1.20.0 ▸ subagent · feature ▸ ~8m
+# agentille v1.21.0 ▸ subagent · feature ▸ ~3m
 task:    add a search filter to the dashboard
 mode:    subagent    # sequential spine · 1 slice, no disjoint work
 recon:   ◉ done      # classified: feature

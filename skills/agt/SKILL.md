@@ -12,13 +12,13 @@ You are the **agentille orchestrator**. Your job is to take one user prompt and 
 
 When this skill is invoked (`/agt <task>`):
 
-1. **Read the profile** from `~/.agentille/profile.json`. If it doesn't exist, tell the user to run `agentille init` and stop.
-2. **Classify the task** — first apply Stage 1 fast-path in `team-mode.md`, then Stage 2 (planner-classify) if Stage 1 returns null. Stage 2 is authoritative for **both** the mode selection (subagent vs team vs solo) **and** the roster — its returned `roster` array is used directly. Consult `classifier.md` only as a last-resort fallback if Stage 2 itself returns a parse error. The legacy `classifier.md` does NOT override a valid Stage 2 response. (resolve via the Dispatch decision table below — authoritative)
+1. **Read the profile** from `~/.agentille/profile.json`. If it doesn't exist, tell the user to run `/agentille-init` and stop.
+2. **Classify the task** — resolve via the Dispatch decision table below (authoritative). Stage 1 fast-path (rows 1–8) is inline; Stage 2 runs only when row 9 fires. If Stage 1 resolved the mode, use `classifier.md` for the subagent roster. If Stage 2 ran, its returned `{mode, roster}` is used directly — do not re-run `classifier.md` on top of it. Consult `classifier.md` as a last-resort parse-error fallback only if Stage 2 itself errors.
 3. **Pick the roster** — for subagent mode, see `roster.md`. For team mode, the roster is the resolved team template's `teammates` array.
 4. **Pick the model per role** using `model-routing.md`.
 5. **Apply the profile** to every subagent prompt — communication style, tone, challenge level, never-do rules, honesty level.
 6. **Clarify before planning** — when `preTaskQuestioning` is `always` (or `ambiguous-only` and the task is genuinely ambiguous), resolve the plan-changing unknowns with the user *before* building the plan. See "Clarify before planning" below. Explore the codebase to answer what you can; ask only what actually forks the plan.
-7. **Plan, then review the plan** — for multi-step tasks the planner drafts the plan and the **plan-reviewer** critiques it (goal correctness, coverage, parallel-safety, real verification) before any executor runs. One REVISE round, then proceed. Skip the review on `thinkingDepth=quick`.
+7. **Plan, then review the plan** — for multi-step tasks the planner drafts the plan and the **plan-reviewer** critiques it (goal correctness, coverage, parallel-safety, real verification) before any executor runs. One REVISE round, then proceed. Skip the review on `thinkingDepth=quick`. **Skip-tier:** also skip even in team mode when the plan is ≤3 steps AND all steps are sequential (no parallel slices) — there is no parallel-safety risk to catch; see Step 3 model table and `model-routing.md` → "Default routing".
 8. **Persist the context pack, then dispatch in dependency order.** When a planner ran, write its `CONTEXT-PACK` to a run-scoped file (`~/.agentille/state/run-<id>/context-pack.md`, via the Write tool) and dispatch each executor with **only its slice** — never the whole pack, never "re-explore the repo." Parallelize independent steps only where the task contains genuinely disjoint file sets (≤3 executors at a time). See "Discover once, reuse everywhere" below.
 9. **Stream progress via the Transit Rail** (see `display.md`) — *before* the first dispatch, seed the TodoWrite spine (one todo per resolved phase: the user's live "what's left until we send the agents"). Then render: a drawn-once Mission Brief rail, one thin colored-LED ping per phase transition, a fanout block when the build forks into parallel workers, diff-fence review verdicts, and a final Debrief. Presentation only — it never changes dispatch and never blocks the result; if a frame can't render, drop the field, not the run.
 10. **Append the shipped-log line** to `./docs/agentille-log.md` — you write it directly as the final step (see "Shipped log" below). There is no log hook.
@@ -41,17 +41,17 @@ When this skill is invoked (`/agt <task>`):
 | 6 | Trivial: exactly one file named AND no architectural verb (`refactor`/`design`/`architect`/`migrate`/`redesign`/`restructure`) | **solo** | — |
 | 7 | Task verb = `review` | **team** | review-team |
 | 8 | Task verb = `debug` | **team** | incident-team |
-| 9 | Otherwise | **Stage 2** (planner-classify) — its returned `{mode, template, roster}` is authoritative | per Stage 2 |
+| 9 | Otherwise | **Stage 2** (inline Haiku classify) — its returned `{mode, template, roster}` is authoritative | per Stage 2 |
 
 Any team result must pass the team pre-flight (env flag `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1`, Claude Code ≥ 2.1.32, daily soft cap) — see `team-mode.md`. On any pre-flight or spawn failure, degrade to subagent mode.
 
-Rows #1–2 are a **force** (the user typed `--team`/`--mode team`). Run the inline disjoint-parallelism heuristic first: real parallel work → spawn the team. **Overkill** (no ≥2 disjoint slices) → don't obey blindly — when `preTaskQuestioning` permits, **ask once** whether to downgrade to subagent (recommended, ~¼ the tokens) or force the team anyway; when `preTaskQuestioning: never`, honor the force and emit the `honestyLevel`-gated heads-up instead (see `team-mode.md` → "Honesty on a forced team"). **Always surface the resolved mode + a one-clause reason** in the brief's `mode:` row and on the recon ping — for Stage 2 that's its `reasoning` string; for a Stage 1 rule it's the rule itself (e.g. "forced", "review verb → review-team", "single file, no architectural verb → solo"). The pick is never a black box and never a prose paragraph (see `display.md`).
+Rows #1–2 are a **force** (the user typed `--team`/`--mode team`). Run the inline disjoint-parallelism heuristic first: real parallel work → spawn the team. **Overkill** (no ≥2 disjoint slices) → don't obey blindly — when `preTaskQuestioning` permits, **ask once** whether to downgrade to subagent (recommended, ~¼ the tokens) or force the team anyway; when `preTaskQuestioning: never`, honor the force and emit the `honestyLevel`-gated heads-up instead (see `team-mode.md` → "Honesty on a forced team"). **Always surface the resolved mode + a one-clause reason** in the brief's `mode:` row and on the recon ping — for Stage 2 that's its `reasoning` string; for a Stage 1 rule it's the rule itself (e.g. "forced", "review verb → review-team", "single file, no architectural verb → solo"). The pick is never a black box and never a prose paragraph (see `display.md` → "Frame 2").
 
 ### Step 2 — Resolve ROSTER
 
 **Team mode** → roster = the resolved template's `teammates` array (`.claude-plugin/teams/<template>.yaml`). Drop any reviewer with nothing to review (e.g. design-reviewer when the change set has no UI/frontend surface).
 
-**Subagent mode** → classify into ONE category via `classifier.md`, then dispatch:
+**Subagent mode** → classify into ONE category. If Step 1 resolved via rows 1–8 (fast-path), run the inline heuristics from `classifier.md`. If Step 1 resolved via row 9 (Stage 2 Haiku classify), use the `roster` returned by that call directly — do not re-classify. Then dispatch:
 
 | Category | planner | plan-reviewer | executor | code-reviewer | design-reviewer | security-reviewer |
 |---|---|---|---|---|---|---|
@@ -71,7 +71,7 @@ Rows #1–2 are a **force** (the user typed `--team`/`--mode team`). Run the inl
 | Role | Default | Override |
 |---|---|---|
 | planner | Opus | → Sonnet if `thinkingDepth=quick` |
-| plan-reviewer | **Sonnet** | → Opus for a large/cross-cutting plan (≥6 steps, or any step touching shared contracts/architecture); **skip entirely** if `thinkingDepth=quick` (don't downgrade — just skip) |
+| plan-reviewer | **Sonnet** | → Opus for a large/cross-cutting plan (≥6 steps, or any step touching shared contracts/architecture); **skip entirely** if `thinkingDepth=quick` (don't downgrade — just skip); **also skip** for a ≤3-step fully sequential plan — no parallel-safety risk (see `model-routing.md` → "Default routing") |
 | executor | Sonnet | never downgrade (broken code costs more than tokens) |
 | code-reviewer | **tiered** | **Sonnet** for a small diff (single file *or* ≤~150 LoC, no cross-cutting/security surface); **Opus** for a large/cross-cutting diff (multi-file logic, public API, auth/data-flow); → Sonnet if `thinkingDepth=quick` |
 | design-reviewer | Opus | never downgrade — native vision + design judgment is agentille's differentiator (savings come from **viewport scope**, not the model) |
@@ -153,15 +153,16 @@ The orchestrator supports Claude Code's Agent Teams primitive in addition to sub
 
 ## Hard rules
 
-- **Never invent the profile.** If `~/.agentille/profile.json` is missing or malformed, stop and instruct the user to run `agentille init` instead of guessing defaults.
-- **Never run more than 3 executor subagents in parallel.** If the planner produces 5 parallel chunks, batch them: 3 then 2.
+- **Never invent the profile.** If `~/.agentille/profile.json` is missing or malformed, stop and instruct the user to run `/agentille-init` instead of guessing defaults.
+- **In TEAM mode, the lead writes ZERO implementation code.** The lead's job is recon → classify → plan → spawn → coordinate → consolidate → teardown. All implementation is delegated to executor teammates. If the lead is about to edit a source file in team mode, that is a bug — dispatch or steer a teammate instead. (Subagent and solo mode are unaffected — there the orchestrator acts directly.)
+- **Never run more than 3 executor subagents in parallel.** See `roster.md` → "Hard cap".
 - **Always classify before dispatching.** Skipping the classifier produces wrong rosters (e.g. design-reviewer on a non-UI task wastes tokens).
-- **Always surface the mode pick — in color, never in prose.** Every run tells the user which mode it chose (subagent / team / solo) and a one-clause reason via the brief's `mode:` row and the recon ping (`display.md`). The decision is never silent — and never a standalone prose paragraph ("Decisions locked…"); it lives in the colored frames.
-- **A forced team is honored, but never blindly.** When `--team`/`--mode team` carries real parallel work, run the team. When it'd be **overkill** (no ≥2 disjoint slices): if `preTaskQuestioning` permits, **ask once** whether to downgrade to subagent (recommended) or force the team anyway, and honor the choice; if `never`, honor the force and emit one `honestyLevel`-gated heads-up. Never loop or nag — one question, then do what the user chose. See `team-mode.md` → "Honesty on a forced team".
+- **Always surface the mode pick — in color, never in prose.** See `display.md` → "Frame 2" for the canonical recon ping format.
+- **A forced team is honored, but never blindly.** See `team-mode.md` → "Honesty on a forced team" for the full protocol.
 - **Honor `preTaskQuestioning`.** If `always`, every subagent should ask one clarifying question before starting. If `never`, no subagent asks — they proceed on best assumption.
 - **Honor `neverDo`.** These are absolute. Pass them verbatim into every subagent prompt.
 - **Review findings are a gate, not a memo.** A code-review or security-review finding marked **BLOCKER** or **should-fix** must be resolved before you declare the task done — re-dispatch an executor to fix it (or fix it inline if trivial), then confirm the fix landed. If you genuinely can't or shouldn't fix it (out of scope, needs a product decision), surface it **explicitly** to the user and let them decide — never bury a blocker in the final summary and call it shipped. Nits are advisory; blockers and should-fix are not. (This holds in both modes: in team mode the lead drives the fix via the reviewer's `REVIEW … ISSUES` reply; in subagent mode the orchestrator re-dispatches the executor.)
-- **Never auto-target `main`.** Worktrees fork from the current branch (`$BASE`) and the lead merges them back into `$BASE`, not `main`. When `$BASE` ≠ `main`, the default integration is to push `$BASE` only — never open a PR/merge into `main`, never push `agt/*` scaffolding branches. Opening anything against `main` requires an explicit `integration: pr` choice on a base meant for `main`. (See `team-mode.md` → "Consolidation".)
+- **Never auto-target `main`.** Worktrees fork from the current branch (`$BASE`) and the lead merges them back into `$BASE`. See `team-mode.md` → "Consolidation".
 
 ## Token budget hints
 

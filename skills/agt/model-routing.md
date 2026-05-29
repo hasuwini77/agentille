@@ -7,7 +7,7 @@ Pay Opus only where its reasoning is load-bearing — direction-setting and judg
 | Role | Default | If `thinkingDepth = quick` | Notes |
 |---|---|---|---|
 | planner | **claude-opus-4-7** | claude-sonnet-4-6 | Plans set direction; pay for quality |
-| plan-reviewer | **claude-sonnet-4-6** | *skipped* | Structured checklist over the plan artifact (goal correct? coverage? parallel-safe? real verification?) — Sonnet handles it. **Upgrade to Opus** only for a *large/cross-cutting* plan (≥6 steps, or any step that touches shared contracts / architecture). On `quick`, skip the review entirely. |
+| plan-reviewer | **claude-sonnet-4-6** | *skipped* | Structured checklist over the plan artifact (goal correct? coverage? parallel-safe? real verification?) — Sonnet handles it. **Upgrade to Opus** only for a *large/cross-cutting* plan (≥6 steps, or any step that touches shared contracts / architecture). On `quick`, skip entirely. **Also skip** for a ≤3-step fully sequential plan (no parallel slices, even in team mode) — no parallel-safety risk to catch. |
 | executor | **claude-sonnet-4-6** | claude-sonnet-4-6 | No downgrade — broken code is more expensive than tokens |
 | code-reviewer | **tiered** (see below) | claude-sonnet-4-6 | **Sonnet for a small diff** (single file *or* ≤~150 LoC changed, no cross-cutting/security surface); **Opus for a large or cross-cutting diff** (multi-file logic, public API, auth/data-flow). Most diffs are small — Sonnet clears them; Opus is reserved for where subtle regressions actually hide. |
 | design-reviewer | **claude-opus-4-7** | claude-opus-4-7 | Never downgrade — Opus 4.7 has native vision AND the strongest design judgment; design review is agentille's differentiator. The savings lever for design is **viewport scope** (capture only the viewports that matter — see `agentille-design-reviewer.md`), not the model. |
@@ -20,7 +20,7 @@ Pay Opus only where its reasoning is load-bearing — direction-setting and judg
 Two roles pick their model from the size of the work, not a flat default. Resolve at dispatch time:
 
 - **code-reviewer** → **Opus** if *any* of: more than one file with logic changes, total changed LoC > ~150, a public/exported API or schema changed, or the diff touches auth / sessions / data-flow / money. Otherwise **Sonnet**. (A `quick` thinkingDepth forces Sonnet regardless.)
-- **plan-reviewer** → **Opus** if the plan has ≥6 steps OR any step modifies shared contracts / architecture / a public interface. Otherwise **Sonnet**. (A `quick` thinkingDepth skips it entirely — don't downgrade, skip.)
+- **plan-reviewer** → **Opus** if the plan has ≥6 steps OR any step modifies shared contracts / architecture / a public interface. Otherwise **Sonnet**. Skip entirely on `thinkingDepth=quick` (don't downgrade — skip). Also skip for a ≤3-step fully sequential plan — no parallel-safety risk regardless of mode.
 
 When in genuine doubt about which tier a diff falls in, prefer Opus for the *review* (a missed regression costs more than the token delta) — but do not reflexively reach for Opus on a clearly small, single-file change.
 
@@ -28,15 +28,6 @@ When in genuine doubt about which tier a diff falls in, prefer Opus for the *rev
 
 - **`thinkingDepth = quick`** → downgrade `planner`, `code-reviewer`, and `security-reviewer` to Sonnet (the user is signaling speed over depth), and **skip the `plan-reviewer` step entirely** (quick = trust the plan and go). `design-reviewer` stays Opus — vision + design judgment is the one place agentille never trades down.
 - **`challengeLevel = ruthless`** → keep all models at default; the rigor comes from the prompt, not the model.
-
-## When the profile says "minimize cost"
-
-(Not a current profile field but mentally available — for solo developers paying their own bills.)
-
-- Use heuristic classifier (no LLM)
-- Skip planner for single-step tasks
-- Skip code-reviewer for trivial diffs (≤5 LoC changed, no logic shift)
-- Always use Haiku for final-summary
 
 ## Hard rules
 

@@ -94,13 +94,22 @@ A single markdown line — this is where the **live color** lives (colored-emoji
 
 Emit on **completion** of each station (carrying 🟢), plus one 🔵 line when a long station (build) begins so the user isn't left waiting in silence. Keep each ≤ ~60 chars before the trailing metric.
 
-**The waiting ping (🟡) — for the dead air while the lead is blocked on a long worker.** When a foreground reviewer or a still-running executor holds the turn for minutes and the lead has nothing else to emit, the session *looks* idle — no tokens stream, and the harness spinner (`… · N local agents`) is the only motion. Emit **one** 🟡 line so the wait is legible: what is still outstanding, what already landed, and the elapsed time.
+**Pre-spawn planning window — the "lead doing stuff" before panes open.** In team mode, recon → classify → plan → plan-review all run before `TeamCreate`. That pre-spawn window is invisible without a signal. Emit one 🔵 ping when the lead enters it and one 🟢 ping when it exits (team spawns):
+
+```
+🔵 planning   classifying · plan drafting · plan-review                   0:04
+🟢 planning   done · team spawning now — <N> teammates                     1:32
+```
+
+This is the **only** pre-spawn signal — never narrate the planning work in prose or emit per-step pings while planning. A single 🔵 line sets the expectation; the 🟢 line closes the window. If no plan-review ran (skip-tier or `quick`), say so in the 🟢 line: `plan-review skipped · team spawning now`.
+
+**The waiting ping (🟡) — for dead air while the lead is blocked on a long worker.** Emit **one** 🟡 line on entering the wait — never on a timer:
 
 ```
 🟡 gate     design-review running 3:12 · code-review ✓     waiting
 ```
 
-Print it **once**, on entering the wait — never on a timer, a re-emitted heartbeat just bleeds tokens — and **never narrate the wait in prose**. This single line *replaces* the "here's what I'm checking / I'll be re-invoked when it finishes" paragraph: the harness spinner already says *still alive*, so the lead only needs to add *still alive **on what***. The 🟡 LED is the same one the legend reserves for "waiting / soft-blocked."
+Never narrate the wait in prose; the harness spinner already says *still alive*, so this line only needs to add *still alive **on what***.
 
 **The recon ping always carries the mode pick + a one-clause reason** — this is where the subagent-vs-team decision becomes visible (the Stage 2 `reasoning`, or the Stage 1 rule that fired). It echoes the brief's `mode:` row as the run starts. **Never narrate the decision as a prose paragraph** ("Decisions locked. This is a complex feature+refactor — subagent mode with a sequential spine…"): that content belongs in the `mode:` row comment and this colored ping, not an uncolored block above them. The pick is never a black box — and never a wall of prose:
 

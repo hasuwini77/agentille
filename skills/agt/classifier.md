@@ -35,7 +35,7 @@ After picking the primary category, also note:
 
 ## Team vs subagent honesty
 
-The disjoint-parallelism criterion: a task warrants team mode when it decomposes into **≥2 vertical slices with disjoint file sets that can build at once**. Sequential work, a single slice, or an adversarial debug / multi-pillar review where the team structure itself is the value — these are the only cases. Dispatch policy and cost transparency live in `SKILL.md` → "Hard rules" and `team-mode.md` → "Honesty on a forced team".
+The disjoint-parallelism criterion: a task warrants team mode when it decomposes into **≥2 vertical slices with disjoint file sets that can build at once** — or when the team structure itself is the value (an adversarial debug with competing hypotheses, a multi-pillar review). Sequential work, or a single slice, does **not** warrant a team. Dispatch policy and cost transparency live in `SKILL.md` → "Hard rules" and `team-mode.md` → "Honesty on a forced team".
 
 ## Examples
 

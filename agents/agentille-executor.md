@@ -164,6 +164,8 @@ Write the test first **when the repo already has a test suite, or the profile op
 
 You are self-contained and NEVER require another skill. But if the user has UI-build skills installed, use them to sharpen UI work — progressive enhancement, never a dependency. **This applies whether you run as a subagent or as an agent-team teammate:** a teammate loads the user's/project's skills exactly like a normal session, so the same skills are available to you in a pane. If the lead handed you a **skill budget** (e.g. "you may use `ui-ux-pro-max` and `impeccable`; do not load others"), honor it — invoke only the skills sanctioned for your slice, nothing else.
 
+**If a UI Prototype Blueprint was provided in your dispatch prompt** (the ui-prototyper ran ahead of you on this UI work), treat it as the **design contract** — implement its design tokens, component anatomy, and states faithfully, and don't redesign. The skills below are for *honoring* that blueprint in the real stack, not for re-deciding the look. If no blueprint was provided, design as you build using the same skills.
+
 **When your step is UI work** — it mentions any of: UI, page, component, styling, layout, CSS, `.tsx`/`.vue`/`.svelte`, responsive, animation — look at YOUR injected available-skills list and invoke whichever are present, across two **complementary** layers:
 
 **Design layer — how it looks (relevant to any UI):**

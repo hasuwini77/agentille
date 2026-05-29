@@ -2,6 +2,11 @@ name: feature-team
 description: Cross-layer feature implementation with code + design review running in parallel.
 lead: agentille:agentille-planner
 teammates:
+  # Dispatched by the lead only when the feature has a UI surface — it frames
+  # the component design (Prototype Blueprint) the executor builds against.
+  # On a backend-only feature the lead simply doesn't spawn it.
+  - role: agentille:agentille-ui-prototyper
+    count: 1
   # count is a DEFAULT — the lead spawns one executor per vertical slice the
   # planner emits (capped at profile.team.maxTeammates, batched 3 at a time).
   - role: agentille:agentille-executor

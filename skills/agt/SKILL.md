@@ -53,16 +53,18 @@ Rows #1–2 are a **force** (the user typed `--team`/`--mode team`). Run the inl
 
 **Subagent mode** → classify into ONE category. If Step 1 resolved via rows 1–8 (fast-path), run the inline heuristics from `classifier.md`. If Step 1 resolved via row 9 (Stage 2 Haiku classify), use the `roster` returned by that call directly — do not re-classify. Then dispatch:
 
-| Category | planner | plan-reviewer | executor | code-reviewer | design-reviewer | security-reviewer |
-|---|---|---|---|---|---|---|
-| planning | ✓ | ✓ | — | — | — | — |
-| research | ✓ (research prefix) | — | — | — | — | — |
-| feature | if multi-subtask | if planner ran | ✓ (≤3 parallel) | ✓ | if hasUI | if security-tagged |
-| bugfix | if ≥2 files | if planner ran | ✓ | ✓ | if hasUI | — |
-| refactor | if multi-subtask | if planner ran | ✓ | ✓ *(skip iff pure rename/move, zero logic delta)* | — | — |
-| design | — | — | ✓ | if logic changed | ✓ REQUIRED | — |
-| debug | — | — | ✓ (debug loop) | after a fix is applied only | — | — |
-| review | — | — | — | ✓ | if target is UI code | if security-tagged |
+| Category | planner | plan-reviewer | ui-prototyper | executor | code-reviewer | design-reviewer | security-reviewer |
+|---|---|---|---|---|---|---|---|
+| planning | ✓ | ✓ | — | — | — | — | — |
+| research | ✓ (research prefix) | — | — | — | — | — | — |
+| feature | if multi-subtask | if planner ran | if hasUI (before executor) | ✓ (≤3 parallel) | ✓ | if hasUI | if security-tagged |
+| bugfix | if ≥2 files | if planner ran | — | ✓ | ✓ | if hasUI | — |
+| refactor | if multi-subtask | if planner ran | — | ✓ | ✓ *(skip iff pure rename/move, zero logic delta)* | — | — |
+| design | — | — | ✓ REQUIRED | ✓ | if logic changed | ✓ REQUIRED | — |
+| debug | — | — | — | ✓ (debug loop) | after a fix is applied only | — | — |
+| review | — | — | — | — | ✓ | if target is UI code | if security-tagged |
+
+> **ui-prototyper** runs only on build categories with UI (`design` always, `feature` when hasUI) and **before** the executor — it frames the component design (a UI Prototype Blueprint) that the executor then builds against, passed into the executor's dispatch prompt. A UI *bugfix*/*review* skips it (no new design to frame). See `agents/agentille-ui-prototyper.md`.
 
 > **plan-reviewer** runs only when a planner ran, and is **skipped on `thinkingDepth=quick`** (quick = trust the plan and go). It reviews the plan *artifact* before any executor starts — see `agents/agentille-plan-reviewer.md`.
 
@@ -72,6 +74,7 @@ Rows #1–2 are a **force** (the user typed `--team`/`--mode team`). Run the inl
 |---|---|---|
 | planner | Opus | → Sonnet if `thinkingDepth=quick` |
 | plan-reviewer | **Sonnet** | → Opus for a large/cross-cutting plan (≥6 steps, or any step touching shared contracts/architecture); **skip entirely** if `thinkingDepth=quick` (don't downgrade — just skip); **also skip** for a ≤3-step fully sequential plan — no parallel-safety risk (see `model-routing.md` → "Default routing") |
+| ui-prototyper | Opus | → Sonnet if `thinkingDepth=quick`; the blueprint sets the UI direction — pay for taste at default depth |
 | executor | Sonnet | never downgrade (broken code costs more than tokens) |
 | code-reviewer | **tiered** | **Sonnet** for a small diff (single file *or* ≤~150 LoC, no cross-cutting/security surface); **Opus** for a large/cross-cutting diff (multi-file logic, public API, auth/data-flow); → Sonnet if `thinkingDepth=quick` |
 | design-reviewer | Opus | never downgrade — native vision + design judgment is agentille's differentiator (savings come from **viewport scope**, not the model) |
@@ -127,11 +130,12 @@ Keep this prefix concise — subagents have limited context.
 
 ## Worker agents
 
-This plugin ships six **agent definitions** (in the plugin's `agents/` dir), one per role. Dispatch them via Claude Code's `Agent` tool with `subagent_type` set to the **plugin-namespaced** name — these are registered agents (not skills), so the `agentille:` namespace is required or the dispatch fails with "Agent type not found":
+This plugin ships seven **agent definitions** (in the plugin's `agents/` dir), one per role. Dispatch them via Claude Code's `Agent` tool with `subagent_type` set to the **plugin-namespaced** name — these are registered agents (not skills), so the `agentille:` namespace is required or the dispatch fails with "Agent type not found":
 
 - **agentille:agentille-planner** — produces a goal-backward plan with parallelizable steps marked
 - **agentille:agentille-plan-reviewer** — critiques the planner's draft plan before execution (goal, coverage, parallel-safety, real verification); returns APPROVE / REVISE (read-only)
-- **agentille:agentille-executor** — implements one logical chunk of work (headless: implement → commit → push → PR). For UI work (subagent **or** team mode) it opportunistically invokes installed skills in two layers — design (`impeccable` / `ui-ux-pro-max` / `frontend-design`) plus stack best-practices gated on the detected stack (`vercel-react-best-practices` / `next-best-practices` on React/Next, `vercel-react-native-skills` on RN) — within the **skill budget** the lead hands it, and falls back to its own competence when none are installed — never a hard dependency.
+- **agentille:agentille-ui-prototyper** — for UI build work; runs **before** the executor and frames the component design — design tokens, anatomy, states, a11y, anti-generic guardrails — as a UI Prototype Blueprint the executor builds against. Uses `impeccable` / `ui-ux-pro-max` / `frontend-design` when installed, falls back to its own taste when absent. Read-only on source.
+- **agentille:agentille-executor** — implements one logical chunk of work (headless: implement → commit → push → PR). For UI work (subagent **or** team mode) it opportunistically invokes installed skills in two layers — design (`impeccable` / `ui-ux-pro-max` / `frontend-design`) plus stack best-practices gated on the detected stack (`vercel-react-best-practices` / `next-best-practices` on React/Next, `vercel-react-native-skills` on RN) — within the **skill budget** the lead hands it, and falls back to its own competence when none are installed — never a hard dependency. When a ui-prototyper Blueprint was produced, it builds against that design contract.
 - **agentille:agentille-code-reviewer** — reviews changes for bugs, security, quality (read-only)
 - **agentille:agentille-design-reviewer** — for UI work; screenshots + axe-core + visual critique (read-only on source)
 - **agentille:agentille-security-reviewer** — severity-classified security review (read-only)
@@ -210,11 +214,12 @@ If you can't write the file for any reason, skip silently — never let logging 
 - `agt/team-mode.md` — team-mode auto-detection, Stage 1/Stage 2 dispatch, pre-flight checks, cost transparency
 - `agt/display.md` — the Transit Rail: progress display (TodoWrite spine + drawn-once brief, thin pings, parallel fanout, diff-fence verdicts, debrief)
 
-The six worker roles live as **agent definitions** in the plugin's `agents/` dir (dispatched as `agentille:agentille-*`), not as skills:
+The seven worker roles live as **agent definitions** in the plugin's `agents/` dir (dispatched as `agentille:agentille-*`), not as skills:
 
 - `agents/agentille-planner.md` — goal-backward planner
 - `agents/agentille-plan-reviewer.md` — critiques the plan before execution
+- `agents/agentille-ui-prototyper.md` — frames the UI component design before the build (Prototype Blueprint)
 - `agents/agentille-executor.md` — implementation
 - `agents/agentille-code-reviewer.md` — bugs / security / quality
-- `agents/agentille-design-reviewer.md` — UI quality (+ `agents/references/` rubrics)
+- `agents/agentille-design-reviewer.md` — UI quality (inlined six-pillar + AI-design-tells rubric)
 - `agents/agentille-security-reviewer.md` — severity-classified security review

@@ -2,6 +2,29 @@
 
 > The wizard asks only for fields whose keys are absent from the existing profile (idempotent by default). Pass `--reconfigure` to re-ask all 22 questions. Total: **22 questions across 4 sections** (9 + 5 + 5 + 3).
 
+## Opening — Quick vs Full (fresh install only)
+
+On a fresh install (no existing profile), present this before any questions:
+
+> agentille setup — 22 questions / a few minutes.
+>
+> **Quick setup** (~5 questions): name, role, tech stack, primary use-cases, delivery style + tone. Sensible defaults fill the rest — expand any field later via `agentille-init --reconfigure`.
+>
+> **Full setup**: all 22 questions, full voice profile.
+>
+> Which would you like? (**quick** / **full**)
+
+**Quick setup questions** (asked in order, all others filled with defaults per SKILL.md → step a2):
+1. What's your name (or how should Claude refer to you)? *(Q1 — name)*
+2. What's your role / title? *(Q2 — role)*
+3. Pick your tech stack: *(Q5 — techStack)*
+4. Which use-cases matter most to you? *(Q9 — useCases)*
+5. Delivery style and tone? *(Q10 + Q13 combined)* — show options for both and accept two picks.
+
+**Skip affordance (Full setup):** remind the user at the start of each section — "Type 'skip' to skip any question."
+
+---
+
 ## Section 1 of 4 — Identity (9 questions)
 
 1. **name** — *What's your name (or how should Claude refer to you)?*

@@ -2,6 +2,30 @@
 
 All notable changes to agentille are documented here.
 
+## [1.21.0] — 2026-05-29
+
+### Added
+
+- **Lead-never-implements is now a hard rule (team mode).** The only guard against the lead writing code itself was a buried half-sentence in `team-mode.md` step 4. In practice the lead would do solo work before any teammate spawned. `SKILL.md` → "Hard rules" now states it outright: in team mode the lead does recon → classify → plan → spawn → coordinate → consolidate → teardown and writes **zero** implementation code — all of it is delegated to executor teammates. `team-mode.md` step 4 elevates the rule from an aside to a bolded leading sentence.
+- **A pre-spawn planning signal on the Transit Rail** (`display.md`). The lead runs recon + classify + plan + plan-review *before* `TeamCreate`, so the user saw the lead "doing stuff for a while" with no panes. The rail now signals that window explicitly (🔵 planning → 🟢 team spawns once slices are defined) so it reads as planning, not the lead soloing the build.
+- **README now shows a real run.** A "What a run looks like" section with a full terminal example (Mission Brief → LED pings → diff-fence review verdict → Debrief), a team-mode env/version Quickstart callout, and an honest cost/speed line. Previously the README only *described* a run.
+- **Init quick-setup path.** `agentille-init` now offers **Quick** (≈5 essentials + sane defaults, expandable later via `--reconfigure`) vs **Full** (all 22) on a fresh install, with a length estimate and a per-question skip affordance — the 22-question wall was a first-run bail point.
+
+### Changed
+
+- **Stage 2 classification moved to inline Haiku** (was a full Opus `agentille-planner` spawn). Every task that fell through the Stage 1 fast-path paid an Opus cold-start just to return a `{mode, roster}` JSON — violating `model-routing.md`'s own "classifier: heuristic/Haiku, no Opus" rule. The Opus planner is now reserved for actual plan generation. Synced across `team-mode.md`, `model-routing.md`, `SKILL.md`.
+- **Plan-review skip-tier.** A ≤3-step, all-sequential plan (no parallel slices to coordinate) now skips plan-review even in team mode — there is no parallel-safety risk for it to catch. Cuts a full review round-trip off the critical path on simple runs. Still runs for ≥4 steps or any parallel/cross-cutting plan; still skipped on `thinkingDepth=quick`.
+- **Parallel teardown.** Teammate shutdowns are now sent to all teammates at once, then awaited together before `TeamDelete` — O(N) serial conversations → O(1) + wait-for-slowest. All existing guards (capture pane IDs first, never kill `$TMUX_PANE`/lead, skip silently in-process) preserved.
+- **Documentation collapsed to single sources of truth.** The Stage 1 dispatch table lived in both `SKILL.md` and `team-mode.md` (already drifting); `team-mode.md` now cross-refs SKILL.md's authoritative table. The `classifier.md` "Team vs subagent honesty" section is trimmed to just the disjoint-parallelism criterion (policy lives in SKILL.md/team-mode.md). `roster.md` no longer re-states model names (owned solely by `model-routing.md`). The `SKILL.md` classifier-authority contradiction (Stage 2 roster vs `classifier.md`) is reconciled. Hard rules that were fully specced elsewhere collapse to one-sentence + cross-ref. Dead `model-routing.md` "minimize cost" section (a non-existent profile field) removed.
+
+### Fixed
+
+- **`/agentille-init` command string.** Two places in `SKILL.md` told users to run `agentille init` — wrong on two counts (no slash, no hyphen). A user copying the error got a shell error. Now `/agentille-init`.
+
+### Rationale
+
+Launch-hardening pass before open-sourcing. Three threads: (1) close the lead-implements gap the user hit directly — the lead is a coordinator in team mode, full stop; (2) cut the avoidable team-mode latency (Opus-classify, always-on plan-review, serial teardown) while being honest that session-startup + plan-before-build + ~4× tokens are inherent and only pay off when parallel slices are long; (3) make the public surface legible to a stranger — a README that *shows* a run, a marketplace listing that matches reality, a first-run that doesn't open with a 22-question wall, and a contract a cold reader can follow without hitting a self-contradiction.
+
 ## [1.20.0] — 2026-05-29
 
 ### Added

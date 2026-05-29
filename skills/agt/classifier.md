@@ -35,7 +35,7 @@ After picking the primary category, also note:
 
 ## Team vs subagent honesty
 
-Team mode is ~4× tokens (each teammate is a separate session). It only wins when there is **real disjoint parallelism** — ≥ 2 vertical slices with disjoint file sets that can build at once. For work where each piece depends on the last (sequential), or when only one slice exists, prefer **subagent mode + pipelined review**: cheaper, and each worker's context is discarded back to the lead so totals stay small. Don't pay the 4× team tax for parallelism that isn't there.
+The disjoint-parallelism criterion: a task warrants team mode when it decomposes into **≥2 vertical slices with disjoint file sets that can build at once** — or when the team structure itself is the value (an adversarial debug with competing hypotheses, a multi-pillar review). Sequential work, or a single slice, does **not** warrant a team. Dispatch policy and cost transparency live in `SKILL.md` → "Hard rules" and `team-mode.md` → "Honesty on a forced team".
 
 ## Examples
 

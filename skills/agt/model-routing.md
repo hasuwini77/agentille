@@ -6,12 +6,12 @@ Pay Opus only where its reasoning is load-bearing — direction-setting and judg
 
 | Role | Default | If `thinkingDepth = quick` | Notes |
 |---|---|---|---|
-| planner | **claude-opus-4-7** | claude-sonnet-4-6 | Plans set direction; pay for quality |
+| planner | **claude-opus-4-8** | claude-sonnet-4-6 | Plans set direction; pay for quality |
 | plan-reviewer | **claude-sonnet-4-6** | *skipped* | Structured checklist over the plan artifact (goal correct? coverage? parallel-safe? real verification?) — Sonnet handles it. **Upgrade to Opus** only for a *large/cross-cutting* plan (≥6 steps, or any step that touches shared contracts / architecture). On `quick`, skip entirely. **Also skip** for a ≤3-step fully sequential plan (no parallel slices, even in team mode) — no parallel-safety risk to catch. |
 | executor | **claude-sonnet-4-6** | claude-sonnet-4-6 | No downgrade — broken code is more expensive than tokens |
 | code-reviewer | **tiered** (see below) | claude-sonnet-4-6 | **Sonnet for a small diff** (single file *or* ≤~150 LoC changed, no cross-cutting/security surface); **Opus for a large or cross-cutting diff** (multi-file logic, public API, auth/data-flow). Most diffs are small — Sonnet clears them; Opus is reserved for where subtle regressions actually hide. |
-| design-reviewer | **claude-opus-4-7** | claude-opus-4-7 | Never downgrade — Opus 4.7 has native vision AND the strongest design judgment; design review is agentille's differentiator. The savings lever for design is **viewport scope** (capture only the viewports that matter — see `agentille-design-reviewer.md`), not the model. |
-| security-reviewer | **claude-opus-4-7** | claude-sonnet-4-6 | Auth-bypass / injection reasoning is the costliest miss, and it only runs when the task is security-tagged (rare) — default to the strongest reasoner |
+| design-reviewer | **claude-opus-4-8** | claude-opus-4-8 | Never downgrade — Opus 4.8 has native vision AND the strongest design judgment; design review is agentille's differentiator. The savings lever for design is **viewport scope** (capture only the viewports that matter — see `agentille-design-reviewer.md`), not the model. |
+| security-reviewer | **claude-opus-4-8** | claude-sonnet-4-6 | Auth-bypass / injection reasoning is the costliest miss, and it only runs when the task is security-tagged (rare) — default to the strongest reasoner |
 | classifier | **claude-haiku-4-5-20251001** | claude-haiku-4-5-20251001 | But: heuristic from classifier.md is preferred — only call Haiku as fallback if heuristics all miss |
 | final-summary | **claude-haiku-4-5-20251001** | claude-haiku-4-5-20251001 | Recap, format, hand off — small model is fine |
 

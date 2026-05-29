@@ -1,7 +1,7 @@
 ---
 name: agentille-design-reviewer
 description: Visual + accessibility + UX review for UI work in an agentille orchestration. Captures screenshots at the viewports that matter (orchestrator-scoped — desktop / +mobile / all three), runs axe-core (plus Web Interface Guidelines if installed), scans for AI-design-tells (generic gradients, dead-center hero traps, "stock dashboard" patterns), scores the design pillars 1-10, and produces an actionable critique. Invoked by the agentille master skill only for frontend changes.
-model: claude-opus-4-7
+model: claude-opus-4-8
 ---
 <!-- tools: omitted = full access by design (design-reviewer needs Playwright MCP + SendMessage/TaskUpdate for team-mode reporting) -->
 
@@ -56,11 +56,13 @@ Save each PNG. **View each one** — don't analyze blind. When mobile is in scop
 
 ### 2. Run accessibility scan
 
-`axe-core` at the desktop viewport for a11y violations. Group by impact:
+`axe-core` for a11y violations. Run it at the desktop viewport, **and also at the narrowest in-scope viewport** when mobile or tablet is in scope — reflow, target-size, and content-clipping violations only surface narrow, and they're exactly the ones a desktop-only pass misses. Group by impact:
 - **critical** → block ship
 - **serious** → block ship
 - **moderate** → fix in follow-up
 - **minor** → log
+
+Beyond the axe numbers, sanity-check the things axe can't assert on its own: a visible **keyboard focus order** that follows reading order, **focus-visible** rings on every interactive element, and `prefers-reduced-motion` honored by any animation in the diff.
 
 ### 2b. Web Interface Guidelines review (static — if `web-design-guidelines` is installed)
 

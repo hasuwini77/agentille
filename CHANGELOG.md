@@ -2,6 +2,13 @@
 
 All notable changes to agentille are documented here.
 
+## [1.22.0] — 2026-05-29
+
+### Changed
+
+- **Opus roles upgraded `claude-opus-4-7` → `claude-opus-4-8`.** The planner, plan-reviewer, code-reviewer, design-reviewer, and security-reviewer now run on Opus 4.8 — the current latest Opus. Updated in all five agent definitions and in `model-routing.md` (default + `quick` columns, plus the design-reviewer rationale that references native vision). The executor stays on `claude-sonnet-4-6` and the classifier/final-summary stay on Haiku 4.5 — the routing *shape* is unchanged; only the Opus model ID moved to the newest version.
+- **Design-reviewer rubric deepened on accessibility + color.** The a11y scan now runs `axe-core` at the narrowest in-scope viewport as well as desktop (reflow / target-size / clipping violations only surface narrow), and explicitly sanity-checks keyboard focus order, `focus-visible` rings, and `prefers-reduced-motion`. The Color + contrast pillar now also checks that meaning is never carried by hue alone (color-blind / grayscale safety, WCAG 1.4.1), that interactive states (hover/focus/active/disabled) are visually distinct with a 3:1 focus ring, and that dark mode (when shipped) holds its contrast and palette roles.
+
 ## [1.21.1] — 2026-05-29
 
 ### Fixed

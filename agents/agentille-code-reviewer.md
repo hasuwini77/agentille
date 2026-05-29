@@ -2,7 +2,7 @@
 name: agentille-code-reviewer
 description: Read-only code review for an agentille execution. Reviews the diff produced by executors for bugs, security issues, and code-quality regressions. Produces severity-classified findings — no fixes. Invoked by the agentille master skill after executor(s) finish, before merge.
 tools: Read, Grep, Glob, Bash, SendMessage, TaskUpdate
-model: claude-opus-4-7
+model: claude-opus-4-8
 ---
 
 # agentille code-reviewer

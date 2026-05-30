@@ -88,8 +88,8 @@ agentille **bundles none of these** — it *reaches for* skills you've already i
 
 | Layer | Skills | Used by |
 |---|---|---|
-| **Design** — how it looks | `impeccable`, `ui-ux-pro-max`, `frontend-design` | ui-prototyper + executor |
-| **Framework** — how it's built | `vercel-react-best-practices` + `next-best-practices` (React/Next), `vercel-react-native-skills` (RN) — gated on the *detected stack* | executor |
+| **Design** | `impeccable`, `ui-ux-pro-max`, `frontend-design` | ui-prototyper + executor |
+| **Framework** | `vercel-react-best-practices` + `next-best-practices` (React/Next), `vercel-react-native-skills` (RN) — gated on the *detected stack* | executor |
 | **Accessibility** | `axe-core` (runtime) + `web-design-guidelines` (static) | design-reviewer, at the gate |
 
 The two build layers don't overlap (aesthetics vs correctness), and a framework skill is never loaded for a stack it doesn't match. In **team mode** the lead hands each teammate a **skill budget** so capability lands where it helps without inflating the ~4× cost. The design micro-skills (`polish`, `delight`, `typeset`, …) stay yours to invoke — agentille doesn't auto-load them.

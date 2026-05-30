@@ -2,6 +2,16 @@
 
 All notable changes to agentille are documented here.
 
+## [1.24.1] — 2026-05-30
+
+### Changed
+
+- **Restored `axe-core` as the design-reviewer's deterministic a11y floor — correctly framed as a runtime scan, not a skill.** v1.24.0 dropped axe entirely; the problem was never axe, it was listing it in the *skills ladder* table as if it were an installable skill (it isn't — it's a JS library injected into the page). Step 2 of the design-reviewer is now two layers: (1) **axe-core** run in-page via Playwright `browser_evaluate` (`window.axe` or the CDN build → `axe.run()`) for deterministic, machine-computed violations — the floor; (2) the **`accessibility`** skill layered on top for WCAG 2.2 reasoning over the same DOM when installed. `web-design-guidelines` stays the static `[WIG]` pass. axe appears only in the reviewer's procedure + the agent/roster lines — **never** in the skills ladder, which still lists just the two real skills. A11Y output header back to `axe-core + WCAG 2.2`.
+
+### Rationale
+
+axe is the strongest a11y signal the reviewer has (real contrast/ARIA from the rendered CSS) and costs nothing — no install, just an in-page injection. The only honest fix was to stop *calling* it a skill, not to remove it. Best of both: deterministic floor + skill-guided reasoning on top, each in its right layer.
+
 ## [1.24.0] — 2026-05-30
 
 ### Changed

@@ -77,7 +77,7 @@ When you run `/agt "task"`, the orchestrator:
 | `agentille-ui-prototyper` | Frames the UI design *before* the build — tokens, component anatomy, states, a11y, anti-generic guardrails — as a Prototype Blueprint the executor builds against. Uses `impeccable` / `ui-ux-pro-max` / `frontend-design` when installed; own taste when not | Opus |
 | `agentille-executor` | Headless implementation — atomic commits, integrates adaptively (PR / push / local branch). Builds against the prototyper's Blueprint on UI work | Sonnet |
 | `agentille-code-reviewer` | Read-only review for bugs, security, quality | Sonnet · Opus for large/cross-cutting diffs |
-| `agentille-design-reviewer` | Visual review (scored design pillars), WCAG 2.2 a11y audit (`accessibility` + `web-design-guidelines` skills), AI-design-tell scan, at the viewports that matter | Opus |
+| `agentille-design-reviewer` | Visual review (scored design pillars), axe-core scan + WCAG 2.2 a11y audit (`accessibility` + `web-design-guidelines` skills), AI-design-tell scan, at the viewports that matter | Opus |
 | `agentille-security-reviewer` | Severity-classified security review | Opus |
 
 > **Where Haiku runs:** two steps happen *inline* in the orchestrator, not as dispatched agents — **task classification** (picks which roster to run) and the **final summary**. Both are cheap, so they go to Haiku.

@@ -45,7 +45,7 @@ That's it. `/agt` does the rest: classify → plan (if needed) → implement →
 - **Right model per role.** Opus plans and runs the heavy reviews, Sonnet writes the code and clears routine reviews, Haiku runs the cheap edges (classify + summary). Tokens go where they earn the most.
 - **Parallel-safe by default.** Each chunk runs in its own git worktree (branched off your *current* branch, never assumed `main`), atomic commits, then integrates adaptively — PR, push, or local branch.
 - **Voice-aware.** Your profile shapes every prompt. Ask for brutal feedback once, and every agent is brutal.
-- **Design as a contract.** On UI work the ui-prototyper frames the components up front (tokens, states, a11y), the executor builds against that, and a design review screenshots the result + runs axe-core — alongside code review on every change.
+- **Design as a contract.** On UI work the ui-prototyper frames the components up front (tokens, states, a11y), the executor builds against that, and a design review screenshots the result + runs a WCAG 2.2 accessibility audit — alongside code review on every change.
 
 ## How it works
 
@@ -77,20 +77,20 @@ When you run `/agt "task"`, the orchestrator:
 | `agentille-ui-prototyper` | Frames the UI design *before* the build — tokens, component anatomy, states, a11y, anti-generic guardrails — as a Prototype Blueprint the executor builds against. Uses `impeccable` / `ui-ux-pro-max` / `frontend-design` when installed; own taste when not | Opus |
 | `agentille-executor` | Headless implementation — atomic commits, integrates adaptively (PR / push / local branch). Builds against the prototyper's Blueprint on UI work | Sonnet |
 | `agentille-code-reviewer` | Read-only review for bugs, security, quality | Sonnet · Opus for large/cross-cutting diffs |
-| `agentille-design-reviewer` | Visual review (scored design pillars), axe-core (+ Web Interface Guidelines), AI-design-tell scan, at the viewports that matter | Opus |
+| `agentille-design-reviewer` | Visual review (scored design pillars), WCAG 2.2 a11y audit (`accessibility` + `web-design-guidelines` skills), AI-design-tell scan, at the viewports that matter | Opus |
 | `agentille-security-reviewer` | Severity-classified security review | Opus |
 
 > **Where Haiku runs:** two steps happen *inline* in the orchestrator, not as dispatched agents — **task classification** (picks which roster to run) and the **final summary**. Both are cheap, so they go to Haiku.
 
 ### Skills it uses (if you have them)
 
-agentille **bundles none of these** — it *reaches for* skills you've already installed and falls back to its own judgment when they're absent (never a hard dependency, never an error on a missing skill). On UI work the **ui-prototyper** and **executor** both pull from these layers, and the design-reviewer adds a static accessibility pass at the gate:
+agentille **bundles none of these** — it *reaches for* skills you've already installed and falls back to its own judgment when they're absent (never a hard dependency, never an error on a missing skill). On UI work the **ui-prototyper** and **executor** both pull from these layers, and the design-reviewer adds an accessibility pass at the gate:
 
 | Layer | Skills | Used by |
 |---|---|---|
 | **Design** | `impeccable`, `ui-ux-pro-max`, `frontend-design` | ui-prototyper + executor |
 | **Framework** | `vercel-react-best-practices` + `next-best-practices` (React/Next), `vercel-react-native-skills` (RN) — gated on the *detected stack* | executor |
-| **Accessibility** | `axe-core` (runtime) + `web-design-guidelines` (static) | design-reviewer, at the gate |
+| **Accessibility** | `accessibility` (WCAG 2.2 audit) + `web-design-guidelines` (static WIG) | design-reviewer, at the gate |
 
 The two build layers don't overlap (aesthetics vs correctness), and a framework skill is never loaded for a stack it doesn't match. In **team mode** the lead hands each teammate a **skill budget** so capability lands where it helps without inflating the ~4× cost. The design micro-skills (`polish`, `delight`, `typeset`, …) stay yours to invoke — agentille doesn't auto-load them.
 
@@ -242,7 +242,7 @@ Then live pings stream below it — **each LED is the agent working that phase**
 🟢 build    exec-1 ▸ search-filter spawned               0/1
 🟢 build    exec-1 ✓  3 files · agt/search-filter        1:58
 🟡 gate     code-review ✓ clean                          2:20
-🟣 gate     design-review ✓ 3 viewports · axe clean      3:05
+🟣 gate     design-review ✓ 3 viewports · a11y clean     3:05
 ```
 
 ```diff

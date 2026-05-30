@@ -92,7 +92,7 @@ A single markdown line — this is where the **live color** lives (colored-emoji
 🟢 build    exec-1 ▸  exec-2 ▸  spawned              0/2
 🟢 build    exec-1 ✓  exec-2 ▸                       1/2
 🟡 gate     code-review · 1 should-fix → patched     2:47
-🟣 gate     design-review · 3 viewports · axe clean  3:20
+🟣 gate     design-review · 3 viewports · a11y clean 3:20
 ```
 
 Each ping carries the **acting agent's color** (see the legend) — so a clean run is naturally multi-colored, one hue per agent, matching its team-pane tint. Emit one per phase transition; for a long station (build) emit a line when it begins (`▸` / `spawned`) and one when it lands (`✓`). Status rides in the glyph + trailing text, not the LED. Keep each ≤ ~60 chars before the trailing metric.
@@ -159,7 +159,7 @@ A **config-highlight card** mirroring the brief — one row per station that pro
 ```yaml
 # DEBRIEF ▸ /agt · <task, one line>
 build:    ✓ <what landed — e.g. ProfileWizard · 3 files>
-gate:     ✓ <review outcome — e.g. code-review clean · design axe 0>
+gate:     ✓ <review outcome — e.g. code-review clean · design a11y 0>
 cost:     ✓ <dispatch shape — e.g. subagent · 2 exec + 1 review · or · team ~4× · 4 teammates + 2 reviews>
 result:   ✓ <N> files · PR #<n> · <runtime>m
 ```

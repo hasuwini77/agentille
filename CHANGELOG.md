@@ -2,6 +2,16 @@
 
 All notable changes to agentille are documented here.
 
+## [1.24.0] — 2026-05-30
+
+### Changed
+
+- **Accessibility layer moved from a runtime `axe-core` scan to skill-guided WCAG 2.2 audits.** The design-reviewer's step-2 "accessibility scan" is now a **WCAG 2.2 audit** driven by the **`accessibility`** skill (addyosmani/web-quality-skills) when installed — it reasons over the live DOM / accessibility tree (still inspected via Playwright `browser_snapshot` / `browser_evaluate`), grouped by the same critical/serious/moderate/minor severity buckets. The **`web-design-guidelines`** skill (vercel-labs/agent-skills, `[WIG]`) stays the static code-level pass alongside it. Both are opportunistic: when neither is installed the reviewer falls back to its own inlined WCAG knowledge (the Color + contrast pillar) — never a hard dependency, never an error on a missing skill. Updated the design-reviewer agent (description, tools comment, steps 2 / 2b, A11Y output header) and every doc surface (`README` features / agent table / skills-ladder / run example, `SKILL.md` roster, `display.md` rail + debrief).
+
+### Rationale
+
+`axe-core` was a deterministic runtime scan but a hard dependency on Playwright wiring; the two installed skills give a more thorough code-level + interaction audit (focus management, semantic structure, reduced-motion, hit-targets) that gracefully degrades to the reviewer's own judgment when absent — matching agentille's borrow-don't-bundle model. The visible trade: less deterministic violation counts, broader pattern coverage.
+
 ## [1.23.1] — 2026-05-30
 
 ### Changed

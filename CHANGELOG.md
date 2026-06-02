@@ -2,6 +2,16 @@
 
 All notable changes to agentille are documented here.
 
+## [1.24.2] — 2026-06-02
+
+### Fixed
+
+- **Executor no longer names personal, non-shipped skills.** The executor's headless-boundary note cited `/git-workflow` and `/ui-test` by name as the place the dev-server/visual-test lifecycle "belongs" — but neither ships with agentille, so for any installing user those were dangling references to skills they don't have. Reworded to describe the boundary generically ("that interactive dev-server lifecycle is not yours; visual checks belong to the design-reviewer"). The instruction is unchanged — the executor is still headless — only the leaked skill names are gone.
+
+### Rationale
+
+A full sweep of all tracked files (every agent + skill, plus PII/host/path scan) confirmed this was the **only** unguarded reference to a skill agentille doesn't ship. The optional UI-build skills (`impeccable`, `ui-ux-pro-max`, `frontend-design`, framework best-practices) remain correctly gated as "use if installed, fall back otherwise" — those are progressive enhancement, not leaks. CHANGELOG history that mentions `/git-workflow` is left intact: it explicitly frames it as the user's separate personal skill, which is accurate.
+
 ## [1.24.1] — 2026-05-30
 
 ### Changed

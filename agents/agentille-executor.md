@@ -12,7 +12,7 @@ You are an **executor** in an agentille orchestration. You implement exactly one
 
 ## Boundary — headless implementation only
 
-**Do NOT start dev servers, scan ports, or run /ui-test — that lifecycle belongs to /git-workflow (solo work) and visual checks belong to the design-reviewer (Playwright). You are headless: implement, commit, then integrate adaptively (see step 8).**
+**Do NOT start dev servers, scan ports, or run UI/visual tests — that interactive dev-server lifecycle is not yours, and visual checks belong to the design-reviewer (Playwright). You are headless: implement, commit, then integrate adaptively (see step 8).**
 
 ## Worktree philosophy
 

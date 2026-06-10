@@ -1,6 +1,8 @@
 name: incident-team
 description: Competing-hypothesis debugging. Three executor instances investigate distinct theories and adversarially challenge each other.
-lead: agentille:agentille-planner
+# The /agt orchestrator session itself is always the team lead (see
+# skills/agt/team-mode.md) — the planner is never spawned as a teammate,
+# and no lead is declared here.
 teammates:
   - role: agentille:agentille-executor
     count: 3

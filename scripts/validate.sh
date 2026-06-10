@@ -71,7 +71,7 @@ for f in agents/agentille-*.md; do
   if [ "$name" = "$stem" ]; then pass "$f: name matches filename"; else fail "$f: name '$name' != filename stem '$stem'"; fi
   if [ -z "$model" ]; then
     fail "$f: no 'model:' in frontmatter"
-  elif [[ "$model" =~ ^(claude-(opus|sonnet|haiku)-[0-9]|opus|sonnet|haiku) ]]; then
+  elif [[ "$model" =~ ^(claude-(opus|sonnet|haiku|fable)-[0-9]|opus|sonnet|haiku|fable) ]]; then
     pass "$f: model '$model'"
   else
     warn "$f: model '$model' is not a recognized Claude model id/alias"
@@ -141,6 +141,58 @@ while IFS=$'\t' read -r file section; do
 done < <(grep -rhoE '`[A-Za-z0-9._-]+\.md`[^"]*→[[:space:]]*"[^"]+"' skills 2>/dev/null \
           | sed -E 's/`([A-Za-z0-9._-]+\.md)`[^"]*→[[:space:]]*"([^"]+)"/\1\t\2/')
 [ "$checked" -gt 0 ] && [ "$missing_sec" = 0 ] && pass "all $checked '→ \"Section\"' cross-refs resolve to a heading"
+
+# ── 6b. Routing mirror invariant (SKILL.md Step 3 ↔ model-routing.md) ────────
+# The dispatch contract lives in two tables that must agree row-for-row:
+# SKILL.md "Step 3 — Resolve MODELS" and model-routing.md "Default routing".
+# Role lists must match exactly; Default tiers are compared wherever both
+# cells name exactly one alias token (a cell like "heuristic, no LLM" yields
+# none and is skipped — prose drift there is for human review).
+hdr "Routing mirror invariant"
+extract_routing() { # $1 = file, $2 = heading regex → "role<TAB>tier-or-?" lines
+  awk -v h="$2" '
+    $0 ~ h {grab=1; next}
+    grab && /^\|/ {
+      intab=1
+      split($0, c, "|")
+      role=c[2]; def=tolower(c[3])
+      gsub(/[* ]/, "", role); role=tolower(role)
+      if (role=="role" || role ~ /^-+$/) next
+      cnt=0; tokval="?"; delete seen
+      rest=def
+      while (match(rest, /opus|sonnet|haiku|fable|tiered/)) {
+        tok=substr(rest, RSTART, RLENGTH)
+        if (!(tok in seen)) { seen[tok]=1; cnt++; tokval=tok }
+        rest=substr(rest, RSTART+RLENGTH)
+      }
+      print role "\t" (cnt==1 ? tokval : "?")
+      next
+    }
+    grab && intab {exit}
+  ' "$1"
+}
+MA=$(extract_routing skills/agt/SKILL.md '^### Step 3')
+MB=$(extract_routing skills/agt/model-routing.md '^## Default routing')
+if [ -z "$MA" ] || [ -z "$MB" ]; then
+  fail "mirror: could not extract a routing table (heading moved? table not found)"
+else
+  RA=$(printf '%s\n' "$MA" | cut -f1); RB=$(printf '%s\n' "$MB" | cut -f1)
+  if [ "$RA" = "$RB" ]; then
+    pass "mirror: both tables list the same $(printf '%s\n' "$RA" | wc -l) roles in the same order"
+  else
+    fail "mirror: role lists differ between SKILL.md Step 3 and model-routing.md Default routing"
+  fi
+  drift=0
+  while IFS=$'\t' read -r role tok; do
+    tb=$(printf '%s\n' "$MB" | awk -F'\t' -v r="$role" '$1==r{print $2}')
+    [ -z "$tb" ] && continue
+    if [ "$tok" != "?" ] && [ "$tb" != "?" ] && [ "$tok" != "$tb" ]; then
+      fail "mirror: '$role' default drifts — SKILL.md says '$tok', model-routing.md says '$tb'"
+      drift=1
+    fi
+  done <<< "$MA"
+  [ "$drift" = 0 ] && pass "mirror: default tiers agree for all comparable roles"
+fi
 
 # ── 7. PII / privacy scan (public repo — hard fail) ──────────────────────────
 # Pattern-based only: this script is public, so it must NOT hardcode the

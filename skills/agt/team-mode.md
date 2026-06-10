@@ -214,6 +214,8 @@ For `incident-team`, override the executor prompts with adversarial framing. Gen
 
 The lead picks the surviving hypothesis after the debate.
 
+Once the surviving hypothesis lands a fix, gate it like any other change: dispatch a one-shot **code-reviewer subagent** on the fix diff (tiered model per `model-routing.md`). The incident template carries no reviewer teammate, but a fix never ships unreviewed — this mirrors the subagent-mode rule (`roster.md` → debug: promote to bugfix flow once a fix is applied).
+
 ## Failure → degrade
 
 If team spawn fails for any reason (env var unset mid-flight, agent-type not found, max teammates exceeded, etc.), fall through to subagent dispatch and log one line after: *"team unavailable — ran N subagents instead"*.

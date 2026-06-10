@@ -1,6 +1,8 @@
 name: review-team
 description: Parallel multi-pillar review (code + design + security) of a change set.
-lead: agentille:agentille-planner
+# The /agt orchestrator session itself is always the team lead (see
+# skills/agt/team-mode.md) — the planner is never spawned as a teammate,
+# and no lead is declared here.
 teammates:
   - role: agentille:agentille-code-reviewer
     count: 1

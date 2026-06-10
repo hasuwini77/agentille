@@ -1,6 +1,8 @@
 name: feature-team
 description: Cross-layer feature implementation with code + design review running in parallel.
-lead: agentille:agentille-planner
+# The /agt orchestrator session itself is always the team lead (see
+# skills/agt/team-mode.md) — the planner is never spawned as a teammate,
+# and no lead is declared here.
 teammates:
   # Dispatched by the lead only when the feature has a UI surface — it frames
   # the component design (Prototype Blueprint) the executor builds against.

@@ -1,7 +1,7 @@
 ---
 name: agt
 description: Personal AI coding orchestrator (the trigger formerly known as /agentille). Reads the user's profile from ~/.agentille/profile.json, classifies the task, and dispatches a tailored roster of agent definitions (planner, executor, code-reviewer, design-reviewer) with the right model per role. Activate ONLY when the user explicitly types `/agt <task>` or directly asks for "agentille orchestration" — do not auto-trigger on generic multi-agent or coding prompts.
-argument-hint: [--team feature-team|review-team|incident-team] [--plan] "<task>"
+argument-hint: [--team feature-team|review-team|incident-team] [--plan] [--fable] "<task>"
 ---
 
 # agentille — orchestrator master skill
@@ -72,13 +72,13 @@ Rows #1–2 are a **force** (the user typed `--team`/`--mode team`). Run the inl
 
 | Role | Default | Override |
 |---|---|---|
-| planner | Opus | → Sonnet if `thinkingDepth=quick` |
-| plan-reviewer | **Sonnet** | → Opus for a large/cross-cutting plan (≥6 steps, or any step touching shared contracts/architecture); **skip entirely** if `thinkingDepth=quick` (don't downgrade — just skip); **also skip** for a ≤3-step fully sequential plan — no parallel-safety risk (see `model-routing.md` → "Default routing") |
-| ui-prototyper | Opus | → Sonnet if `thinkingDepth=quick`; the blueprint sets the UI direction — pay for taste at default depth |
-| executor | Sonnet | never downgrade (broken code costs more than tokens) |
-| code-reviewer | **tiered** | **Sonnet** for a small diff (single file *or* ≤~150 LoC, no cross-cutting/security surface); **Opus** for a large/cross-cutting diff (multi-file logic, public API, auth/data-flow); → Sonnet if `thinkingDepth=quick` |
-| design-reviewer | Opus | never downgrade — native vision + design judgment is agentille's differentiator (savings come from **viewport scope**, not the model) |
-| security-reviewer | Opus | → Sonnet if `thinkingDepth=quick` |
+| planner | Opus | → Sonnet if `thinkingDepth=quick`; → **fable** for large/cross-cutting plans (≥6 steps or any step touching shared contracts/architecture) |
+| plan-reviewer | **Sonnet** | → **fable** for a large/cross-cutting plan (≥6 steps, or any step touching shared contracts/architecture); **skip entirely** if `thinkingDepth=quick` (don't downgrade — just skip); **also skip** for a ≤3-step fully sequential plan — no parallel-safety risk (see `model-routing.md` → "Default routing") |
+| ui-prototyper | Opus | → Sonnet if `thinkingDepth=quick`; the blueprint sets the UI direction — pay for taste at default depth; → fable under `--fable` |
+| executor | Sonnet | never up or down (broken code costs more than tokens; fable is not used here) |
+| code-reviewer | **tiered** | **Sonnet** for a small diff (single file *or* ≤~150 LoC, no cross-cutting/security surface); **fable** for a large/cross-cutting diff (multi-file logic, public API, auth/data-flow); → Sonnet if `thinkingDepth=quick` |
+| design-reviewer | Opus | never downgrade — native vision + design judgment is agentille's differentiator (savings come from **viewport scope**, not the model); → fable under `--fable` |
+| security-reviewer | **fable** | → Sonnet if `thinkingDepth=quick`; graceful fallback: fable unavailable → opus + one log line |
 | classifier | heuristic, no LLM | Haiku only if every heuristic misses |
 | final-summary | Haiku | — |
 
@@ -90,6 +90,14 @@ Two review roles tier their model by the size of the work — see `model-routing
 
 - The point is to let the user approve the *shape and cost* before paying for the build — the cheapest guard against "it built the wrong thing." It pairs with any mode: `/agt --plan --team feature-team "<task>"` previews the team roster + ~4× cost without spawning the team.
 - On a task with no planner (solo/trivial), `--plan` degrades to one honest line — *"nothing to pre-plan — this is a single-step `<category>`; re-run without `--plan` to execute"* — and never spawns an executor.
+
+### Run modifier: `--fable` (escalation ceiling — force fable for all opus-resolving roles)
+
+`--fable` is **orthogonal to mode and `--plan`** — it doesn't change the roster or the stop point, it forces the model ceiling up for roles that would otherwise resolve to opus this run. With `--fable` present, the following roles dispatch on fable instead of opus: planner, ui-prototyper, design-reviewer, security-reviewer, and any size/risk-escalated code-reviewer or plan-reviewer. Executor stays Sonnet; classifier and final-summary stay Haiku — those are never upgraded.
+
+- Use when a task is exceptionally large, cross-cutting, or highest-stakes and you want fable's full reasoning depth applied to every judgment-heavy role — not just the roles that auto-escalate.
+- Composes freely: `/agt --fable --plan "<task>"` previews the fable-ceiling roster; `/agt --fable --team feature-team "<task>"` runs the full team at fable depth.
+- **Graceful fallback:** if the `fable` alias is unavailable on the current Claude Code version or plan, each affected dispatch falls back to opus + one log line. The run never hard-fails due to `--fable`. See `model-routing.md` → "Hard rules".
 
 ## Clarify before planning
 

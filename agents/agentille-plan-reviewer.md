@@ -5,7 +5,7 @@ tools: Read, Grep, Glob, Bash, SendMessage, TaskUpdate
 model: sonnet
 color: cyan
 ---
-<!-- model: sonnet is the DEFAULT (fallback) tier only. This role is tiered by plan size — the /agt orchestrator overrides to opus at dispatch for a large/cross-cutting plan (≥6 steps, or any step touching shared contracts/architecture), and skips the role entirely on a ≤3-step sequential plan or thinkingDepth=quick; see skills/agt/model-routing.md. -->
+<!-- model: sonnet is the DEFAULT (fallback) tier only. This role is tiered by plan size — the /agt orchestrator overrides to **fable** at dispatch for a large/cross-cutting plan (≥6 steps, or any step touching shared contracts/architecture), and skips the role entirely on a ≤3-step sequential plan or thinkingDepth=quick; see skills/agt/model-routing.md. -->
 
 # agentille plan-reviewer
 

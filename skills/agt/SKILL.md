@@ -74,7 +74,7 @@ Rows #1–2 are a **force** (the user typed `--team`/`--mode team`). Run the inl
 |---|---|---|
 | planner | Opus | → Sonnet if `thinkingDepth=quick`; → **fable** for large/cross-cutting plans (≥6 steps or any step touching shared contracts/architecture) |
 | plan-reviewer | **Sonnet** | → **fable** for a large/cross-cutting plan (≥6 steps, or any step touching shared contracts/architecture); **skip entirely** if `thinkingDepth=quick` (don't downgrade — just skip); **also skip** for a ≤3-step fully sequential plan — no parallel-safety risk (see `model-routing.md` → "Default routing") |
-| ui-prototyper | Opus | → Sonnet if `thinkingDepth=quick`; the blueprint sets the UI direction — pay for taste at default depth; → fable under `--fable` |
+| ui-prototyper | Opus | → Sonnet if `thinkingDepth=quick`; the blueprint sets the UI direction — pay for taste at default depth; → **fable** when the blueprint is design-system-scale (an explicit rebrand, or a shared token system / component set with ≥3 downstream consumers); → fable under `--fable` |
 | executor | Sonnet | never up or down (broken code costs more than tokens; fable is not used here) |
 | code-reviewer | **tiered** | **Sonnet** for a small diff (single file *or* ≤~150 LoC, no cross-cutting/security surface); **fable** for a large/cross-cutting diff (multi-file logic, public API, auth/data-flow); → Sonnet if `thinkingDepth=quick` |
 | design-reviewer | Opus | never downgrade — native vision + design judgment is agentille's differentiator (savings come from **viewport scope**, not the model); → fable under `--fable` |

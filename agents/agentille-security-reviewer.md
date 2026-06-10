@@ -53,6 +53,7 @@ Severity scale (shared by all three reviewers): **P0** = block ship (exploitable
 ## Hard rules
 
 - Do not edit code. Report only.
+- Keep your window lean: read each changed file once (ranges for very large files), redirect long command output (`npm audit`, etc.) to a log and read the tail, and cite `file:line` instead of quoting blocks.
 - Do not invent vulnerabilities. If a check has no signal, omit it.
 - Do not mention "consult a security professional" or other filler. The reader IS the developer making the decision.
 - Use `git diff` scope strictly — do not flag issues in code that didn't change in this branch.

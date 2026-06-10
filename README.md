@@ -44,6 +44,7 @@ That's it. `/agt` does the rest: classify → plan (if needed) → implement →
 - **One-command orchestration.** `/agt "task"` routes work through the right agents automatically — no manual skill-chaining.
 - **Right model per role.** Opus plans and runs the standard reviews, Sonnet writes the code and clears routine reviews, Haiku runs the cheap edges (classify + summary). The heaviest escalations — large cross-cutting plans, large diffs, and every security review — reach the fable ceiling. Tokens go where they earn the most.
 - **Parallel-safe by default.** Each chunk runs in its own git worktree (branched off your *current* branch, never assumed `main`), atomic commits, then integrates adaptively — PR, push, or local branch.
+- **Context-disciplined agents.** Chunks are planned to fit ~30% of an executor's window; at runtime executors checkpoint at every commit and, if their context fills, rotate out to a fresh successor seeded from the checkpoint — lossless, because the state lives in git + a checkpoint file, never the conversation.
 - **Voice-aware.** Your profile shapes every prompt. Ask for brutal feedback once, and every agent is brutal.
 - **Design as a contract.** On UI work the ui-prototyper frames the components up front (tokens, states, a11y), the executor builds against that, and a design review screenshots the result + runs a WCAG 2.2 accessibility audit — alongside code review on every change.
 
@@ -55,7 +56,7 @@ When you run `/agt "task"`, the orchestrator:
 2. **Classifies the task** — feature, bugfix, refactor, design, review, debug, research, or planning.
 3. **Smart-picks the execution mode** — in-session **subagents** (default) or a real **agent team**, based on whether the work has ≥2 independent slices that can build at once. It shows you the pick and a one-line reason every run.
 4. **Builds the roster** — only the agents the task needs (no design reviewer on a backend change), routes a model per role, and applies your voice to every prompt.
-5. **Runs in dependency order**, parallelizing independent work (max 3 executors). The repo is explored **once** and each executor gets only its slice — so splitting work saves tokens instead of paying an N× rediscovery tax.
+5. **Runs in dependency order**, parallelizing independent work (max 3 executors). The repo is explored **once** and each executor gets only its slice — so splitting work saves tokens instead of paying an N× rediscovery tax. Executors checkpoint as they go and rotate to a fresh successor if their window fills, so no half-full agent limps through the trickiest code.
 
 ## What's inside
 

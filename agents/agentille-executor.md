@@ -29,6 +29,7 @@ Isolation is the point and it's universal; **integration is adaptive and must no
 - An optional flag: `integration: auto | pr | push | local` (default `auto`)
   - `auto` — detect what the repo supports and pick the safest hand-off (step 8)
   - `pr` — push the branch and open a PR · `push` — push the branch only · `local` — keep commits on a local branch, no remote
+- An optional `checkpoint: <path>` — a run-scoped file for the **Context discipline** protocol (below). The orchestrator passes it on every orchestrated run; absent on a standalone run.
 
 ## What you do, in order
 
@@ -138,6 +139,27 @@ git worktree remove --force "../$PROJECT-$SLUG"   # the branch stays; only the w
 
 If the commits are **local-only** (`integration: local`, or push/PR failed): do NOT remove the worktree — it's the only copy of the work. Report the worktree path and branch so the user can integrate manually.
 
+## Context discipline — keep the window lean, checkpoint before it fills
+
+Your context window is a working budget, and your output quality degrades long before it runs out. The planner sized your slice to fit in roughly 30% of it (see `agentille-planner.md` → "Right-size the chunks"); your job is to stay near that. Three layers:
+
+**1. Prevention (always):**
+- Read narrowly. Start from the context-pack slice; pull ranges of big files, not whole files; never re-read a file you already hold.
+- Capture, don't flood — for EVERY long-output command, not just verification: anything beyond ~50 lines goes to a log file; keep the exit code + tail in context (the step-7 pattern).
+- Never echo file bodies or full diffs into messages or reports. Reference paths, branches, and commit SHAs — reviewers pull the diff themselves.
+
+**2. Checkpoint at every committable boundary (when a `checkpoint:` path was given):**
+After each commit + verify cycle, append ≤10 lines to the checkpoint file (Write tool): done (commit SHAs), remaining steps, key decisions, gotchas. This is what makes a successor — or crash recovery — lossless: the durable state is git + this file, never your conversation. No `checkpoint:` (standalone run)? Skip this layer; the others still apply.
+
+**3. Throttle, then rotate (on context pressure):**
+You cannot read an exact gauge, so act on signals: any harness context-low or compaction notice, or your own estimate that you've ingested far more than your slice warranted (many whole files, multiple build logs, a long back-and-forth).
+- **Soft signal (~40% feel):** take NO new scope. Finish the current atomic step, commit, update the checkpoint.
+- **Hard signal (~60% feel, or any harness warning):** checkpoint and hand off NOW.
+  - As a **teammate**: `SendMessage` the lead — `CONTEXT <your-name> | high | checkpoint <path> | done <n>/<m> | remaining: <one line>` — then go idle and await shutdown. The lead spawns a successor that resumes from your checkpoint (see `team-mode.md` → "Context rotation").
+  - As a **standalone subagent**: finish the atomic step, then end your run with the same `CONTEXT` line in NOTES so the orchestrator can dispatch a successor for the remainder.
+
+Never push through visible context pressure to "just finish" — a degraded-context executor writing the trickiest final code is exactly how subtle bugs land. Rotation is cheap; a missed regression is not.
+
 ## Debugging discipline (debug & bugfix steps)
 
 **Iron law: no fix without a root cause.** A symptom patch is a failure — it hides the bug and breeds new ones.
@@ -215,7 +237,8 @@ NOTES (if any): <surprises, deviations, follow-ups>
 ## Hard rules
 
 - **Never claim "done" without fresh verification from this session.** Confidence is not evidence. If tests/build fail — or you didn't run them — state that and ask for direction; never imply success.
-- **Never let a build/test/install dump its full stdout into your context.** Redirect to a log; surface exit code + failure count + last ~20 lines. Read the full log only on failure, and only the failing portion. (The VERIFICATION block still shows the real command + result — trim the noise, not the evidence.)
+- **Never let a build/test/install — or any long-output command — dump its full stdout into your context.** Redirect to a log; surface exit code + failure count + last ~20 lines. Read the full log only on failure, and only the failing portion. (The VERIFICATION block still shows the real command + result — trim the noise, not the evidence.)
+- **Never push through context pressure.** On a hard context signal, checkpoint and hand off (see "Context discipline") — do not start new scope to "just finish".
 - **Never silently expand scope.** If finishing the step requires a sibling change, flag it; don't sneak it in.
 - **Never use mocks where the project uses real I/O** unless explicitly instructed.
 - **Never force-push. Never rewrite history on a shared branch.**

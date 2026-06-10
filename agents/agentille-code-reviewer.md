@@ -64,6 +64,7 @@ All three reviewers share this contract: a top-line `VERDICT:` and the P0–P3 s
 ## Hard rules
 
 - **Read every changed file**, not just the diff context. The patch is the question; the file is the answer.
+- **Keep your window lean.** Read each changed file once (ranges for very large files), redirect long command output to a log and read the tail, and never paste whole files into your findings — cite `file:line`.
 - **Don't propose refactors beyond the scope of the change.** Flag them under NIT if relevant, but don't BLOCK on style preferences.
 - **Don't write code.** Findings only.
 

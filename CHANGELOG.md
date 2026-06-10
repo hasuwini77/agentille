@@ -2,6 +2,24 @@
 
 All notable changes to agentille are documented here.
 
+## [1.26.0] — 2026-06-10
+
+### Added
+
+- **Context Discipline Protocol — checkpoint + rotation.** Long-running executors (especially team teammates) could fill 50–60%+ of their context window with nothing telling them to stop, and a half-full agent writes subtly worse code. Agents cannot run `/compact` on themselves (it's a CLI command, not a tool) and compaction is lossy summarization at an uncontrolled moment — so the protocol is **checkpoint + rotation** instead. The ladder: the planner sizes every chunk to **≤ ~30%** of an executor's window (now enforced by a new plan-reviewer check #7, "Context budget per chunk"); at runtime the executor **throttles at ~40%** (no new scope — finish the atomic step, commit, checkpoint) and **rotates out by ~60%** or on any harness context warning, sending the lead one structured `CONTEXT` ping. The lead spawns a fresh successor seeded from the run-scoped checkpoint file + the same context-pack slice — lossless, because the durable state lives in git + the checkpoint, never the conversation. The orchestrator now creates the run dir on every non-solo run and passes every executor a `checkpoint:` path; the same protocol doubles as crash recovery. Prevention rules (narrow reads, log-capture for *all* long-output commands, never echoing diffs/file bodies into messages) extend across the executor and all three reviewers, and the lead gets its own hygiene rules (structured handoffs only, verdicts not patches).
+- **ui-prototyper escalation trigger.** The prototyper was the only judgment-heavy role with no auto-escalation (fable only under `--fable`). It now escalates to fable when the blueprint is **design-system-scale** — an explicit rebrand, or a shared token system / component set with ≥3 downstream consumers — mirrored across `SKILL.md` Step 3, `model-routing.md`, the agent comment, and the README agent table. The opus default is unchanged.
+- **Routing mirror-invariant lint in `scripts/validate.sh`.** The dispatch contract lives in two tables that must agree row-for-row (`SKILL.md` Step 3 ↔ `model-routing.md` Default routing). The validator now extracts both, fails on differing role lists or a drifted Default tier, and names the role + both values. This is the second routing-drift incident (table drift caught manually in the v1.25.0 review; prose drift caught in this audit) — it's mechanical now. The model-alias check also recognizes `fable`.
+
+### Fixed
+
+- **Stale opus prose contradicting the v1.25.0 routing tables.** Three surfaces still described the pre-fable world: `SKILL.md`'s Token budget hints said "reserve **Opus** for large/cross-cutting diffs" and "Upgrade to **Opus** for a large plan" (both escalations are fable since v1.25.0), and `model-routing.md` glossed opus as the "strongest reasoning" / "strongest design judgment" tier — superlatives that moved to fable. All three now match the tables.
+- **incident-team shipped fixes unreviewed.** Subagent-mode debug promotes to the bugfix flow (code-reviewer) once a fix is applied, but the team path had no review step — the surviving hypothesis's fix landed ungated. The lead now dispatches a one-shot code-reviewer subagent (tiered model) on the fix diff; no fourth teammate needed.
+- **Dead `lead:` field in the team manifests.** All three `.claude-plugin/teams/*.yaml` declared `lead: agentille:agentille-planner`, contradicting `team-mode.md`'s contract that the `/agt` orchestrator session itself is always the team lead. The field drove nothing; removed, with a comment recording the rule.
+
+### Rationale
+
+The audit behind this release asked two questions. *Is fable used well?* Yes — the v1.25.0 escalation-ceiling shape is right, so no defaults moved; this release only fixes the prose that drifted from it, closes the one missing escalation trigger, and makes future drift a lint failure instead of a review catch. *What about context?* The plugin had plan-time sizing (the planner's ~30% chunk budget) and output-side trimming, but **zero runtime discipline** — nothing happened when a window actually filled. Checkpoint + rotation closes that gap with the cheapest mechanism that's actually available to agents, and the 30/40/60 ladder makes the three layers reinforce each other: plan to 30, throttle at 40, rotate by 60.
+
 ## [1.25.0] — 2026-06-10
 
 ### Added

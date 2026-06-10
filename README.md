@@ -42,7 +42,7 @@ That's it. `/agt` does the rest: classify → plan (if needed) → implement →
 ## What you get
 
 - **One-command orchestration.** `/agt "task"` routes work through the right agents automatically — no manual skill-chaining.
-- **Right model per role.** Opus plans and runs the heavy reviews, Sonnet writes the code and clears routine reviews, Haiku runs the cheap edges (classify + summary). Tokens go where they earn the most.
+- **Right model per role.** Opus plans and runs the standard reviews, Sonnet writes the code and clears routine reviews, Haiku runs the cheap edges (classify + summary). The heaviest escalations — large cross-cutting plans, large diffs, and every security review — reach the fable ceiling. Tokens go where they earn the most.
 - **Parallel-safe by default.** Each chunk runs in its own git worktree (branched off your *current* branch, never assumed `main`), atomic commits, then integrates adaptively — PR, push, or local branch.
 - **Voice-aware.** Your profile shapes every prompt. Ask for brutal feedback once, and every agent is brutal.
 - **Design as a contract.** On UI work the ui-prototyper frames the components up front (tokens, states, a11y), the executor builds against that, and a design review screenshots the result + runs a WCAG 2.2 accessibility audit — alongside code review on every change.
@@ -72,13 +72,13 @@ When you run `/agt "task"`, the orchestrator:
 
 | Agent | Role | Model |
 |---|---|---|
-| `agentille-planner` | Goal-backward plan with parallelizable steps marked | Opus |
-| `agentille-plan-reviewer` | Critiques the plan before execution — goal, coverage, parallel-safety, real verification | Sonnet · Opus for large plans |
+| `agentille-planner` | Goal-backward plan with parallelizable steps marked | Opus · fable for large/cross-cutting |
+| `agentille-plan-reviewer` | Critiques the plan before execution — goal, coverage, parallel-safety, real verification | Sonnet · fable for large plans |
 | `agentille-ui-prototyper` | Frames the UI design *before* the build — tokens, component anatomy, states, a11y, anti-generic guardrails — as a Prototype Blueprint the executor builds against. Uses `impeccable` / `ui-ux-pro-max` / `frontend-design` when installed; own taste when not | Opus |
 | `agentille-executor` | Headless implementation — atomic commits, integrates adaptively (PR / push / local branch). Builds against the prototyper's Blueprint on UI work | Sonnet |
-| `agentille-code-reviewer` | Read-only review for bugs, security, quality | Sonnet · Opus for large/cross-cutting diffs |
+| `agentille-code-reviewer` | Read-only review for bugs, security, quality | Sonnet · fable for large/cross-cutting diffs |
 | `agentille-design-reviewer` | Visual review (scored design pillars), axe-core scan + WCAG 2.2 a11y audit (`accessibility` + `web-design-guidelines` skills), AI-design-tell scan, at the viewports that matter | Opus |
-| `agentille-security-reviewer` | Severity-classified security review | Opus |
+| `agentille-security-reviewer` | Severity-classified security review | fable (opus fallback) |
 
 > **Where Haiku runs:** two steps happen *inline* in the orchestrator, not as dispatched agents — **task classification** (picks which roster to run) and the **final summary**. Both are cheap, so they go to Haiku.
 
@@ -109,6 +109,7 @@ The two build layers don't overlap (aesthetics vs correctness), and a framework 
 | `/agt --team review-team "task"` | Force the audit team (code + design + security review) |
 | `/agt --team incident-team "task"` | Force the debug team (3 executors race competing theories) |
 | `/agt --mode subagent "task"` | Force subagent mode for one run |
+| `/agt --fable "task"` | Force fable as the ceiling for all opus-resolving roles this run (composes with `--team` and `--plan`) |
 
 Any `--team` overrides the auto-pick; if the work has no ≥2 disjoint slices, `/agt` flags it as overkill and asks whether to downgrade (see below).
 
@@ -195,9 +196,12 @@ Keep your repo on the **WSL filesystem** (`~/projects/…`), not `/mnt/c/…` �
 /agt --team review-team   "audit PR #42 before we merge"                                   # code + design + security, in parallel
 /agt --team incident-team "users get randomly logged out — find why"                       # race 3 competing theories
 /agt --plan "refactor the auth module into smaller files"                                  # preview plan + cost, then stop for your "go"
+/agt --fable "redesign the entire auth layer + migrate 12 services"                       # escalation ceiling for all judgment-heavy roles
 ```
 
 **`--plan` (dry-run).** Stops after the plan + plan-review — before any executor or teammate spawns — so you approve the *shape and cost* first; a plain "go" then runs that exact plan. Pairs with any mode (`/agt --plan --team feature-team "…"` previews the team roster + ~4× cost without spawning). The cheapest guard against building the wrong thing.
+
+**`--fable` (escalation ceiling).** Forces fable for all roles that would otherwise resolve to opus this run — planner, security-reviewer, design-reviewer, ui-prototyper, and any size-triggered code-reviewer or plan-reviewer. Executor stays Sonnet; classifier and final-summary stay Haiku. Composes with `--plan` and `--team`. Graceful fallback: fable unavailable → opus + one log line.
 
 `--team` also overrides your profile's `team.defaultMode` for that run. (Overkill handling — the downgrade ask — is covered in [Subagents vs teams](#subagents-vs-teams--agt-smart-picks).)
 

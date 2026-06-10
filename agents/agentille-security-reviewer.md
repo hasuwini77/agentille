@@ -5,6 +5,7 @@ tools: Read, Grep, Glob, Bash, SendMessage, TaskUpdate
 model: opus
 color: red
 ---
+<!-- model: opus is the GRACEFUL FALLBACK floor only. The /agt orchestrator dispatches on **fable** by default (highest-stakes, rare — auth-bypass / injection reasoning is the costliest miss); opus is the fallback when fable is unavailable on the user's Claude Code version or plan; → sonnet if thinkingDepth=quick. See skills/agt/model-routing.md. -->
 
 # agentille-security-reviewer
 

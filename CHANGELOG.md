@@ -2,6 +2,26 @@
 
 All notable changes to agentille are documented here.
 
+## [1.25.0] — 2026-06-10
+
+### Added
+
+- **`fable` model alias — escalation ceiling tier.** A fourth model alias (`fable` = Claude Fable 5, ~2× opus cost) is now recognized by the routing contract. It is reserved for the largest and highest-stakes work — positions that previously topped out at opus now escalate further when the work warrants it.
+- **`--fable` run modifier.** Passing `--fable` forces fable for all roles that would otherwise resolve to opus this run: planner, security-reviewer, design-reviewer, ui-prototyper, and any size/risk-triggered code-reviewer or plan-reviewer. Executor stays Sonnet; classifier and final-summary stay Haiku. Orthogonal to `--plan` and `--team`; composes freely with both.
+- **Graceful fable fallback (hard rule).** If the `fable` alias is unavailable on the user's Claude Code version or plan, each affected dispatch falls back to opus and emits one log line — same pattern as team-mode degradation. The run never hard-fails due to a missing fable alias.
+
+### Changed
+
+- **`security-reviewer` default model: opus → fable.** Auth-bypass and injection reasoning is the costliest miss; the security reviewer now dispatches on fable by default (opus remains the graceful fallback). `→ sonnet` on `thinkingDepth=quick` unchanged.
+- **`planner` escalation ceiling: opus → fable.** For large/cross-cutting plans (≥6 steps or any step touching shared contracts/architecture) the planner now dispatches on fable instead of opus.
+- **`plan-reviewer` escalation ceiling: opus → fable.** The upgrade trigger (large/cross-cutting plan) now reaches fable instead of opus. Sonnet default and skip conditions unchanged.
+- **`code-reviewer` escalation ceiling: opus → fable.** The upgrade trigger (multi-file logic, public API, auth/data-flow, large diff) now reaches fable instead of opus. Sonnet default unchanged.
+- **`model-routing.md` and `SKILL.md` Step 3 mirror invariant maintained.** Both contract surfaces reflect identical routing for all nine roles after this change.
+
+### Rationale
+
+fable (~2× opus cost) is positioned as the escalation ceiling: reserved for positions where subtle errors are most expensive — cross-cutting architectural plans, large/risky diffs, and every security pass. Opus remains the everyday planning and design model; fable only fires at the explicit escalation triggers that already existed. The graceful fallback protects users who don't yet have fable access — their runs degrade to opus rather than failing.
+
 ## [1.24.2] — 2026-06-02
 
 ### Fixed

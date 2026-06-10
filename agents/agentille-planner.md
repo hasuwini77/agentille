@@ -5,6 +5,7 @@ tools: Read, Grep, Glob, Bash, SendMessage, TaskUpdate
 model: opus
 color: blue
 ---
+<!-- model: opus is the DEFAULT. The /agt orchestrator overrides to **fable** for large/cross-cutting plans (≥6 steps or any step touching shared contracts/architecture) — those require the escalation ceiling's full reasoning depth. → sonnet if thinkingDepth=quick. See skills/agt/model-routing.md. -->
 
 # agentille planner
 

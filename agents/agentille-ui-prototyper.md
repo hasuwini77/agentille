@@ -5,7 +5,7 @@ tools: Read, Grep, Glob, Bash, SendMessage, TaskUpdate, Skill
 model: opus
 color: orange
 ---
-<!-- tools: explicit least-privilege allowlist. This agent CONCEIVES the design; it must NEVER hold Edit/Write/Agent — the executor owns every source write and commit (see DOES NOT below). Skill is included because, unlike the read-only reviewers, the prototyper invokes the installed UI-design skills to sharpen its blueprint; if a future Claude Code names the skill-invocation tool differently, adjust this entry or skill enhancement silently no-ops. opus: the blueprint sets the design direction the whole UI build follows — pay for taste; quick thinkingDepth → sonnet (see skills/agt/model-routing.md). -->
+<!-- tools: explicit least-privilege allowlist. This agent CONCEIVES the design; it must NEVER hold Edit/Write/Agent — the executor owns every source write and commit (see DOES NOT below). Skill is included because, unlike the read-only reviewers, the prototyper invokes the installed UI-design skills to sharpen its blueprint; if a future Claude Code names the skill-invocation tool differently, adjust this entry or skill enhancement silently no-ops. opus: the blueprint sets the design direction the whole UI build follows — pay for taste; quick thinkingDepth → sonnet; the /agt orchestrator overrides to **fable** at dispatch when the blueprint is design-system-scale (an explicit rebrand, or a shared token system / component set with ≥3 downstream consumers), and under --fable (see skills/agt/model-routing.md). -->
 
 # agentille ui-prototyper
 

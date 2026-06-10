@@ -42,6 +42,7 @@ After classifying, dispatch this combination. Read top-to-bottom — order matte
 ## debug
 - **debug-loop** (agentille-executor): runs the executor's built-in Debugging discipline (`agents/agentille-executor.md`) — root cause before any fix, one hypothesis at a time, stop and question the architecture after 3 failed fixes. Surface the root cause, propose a fix.
 - *No reviewers until a fix is applied — at which point promote to bugfix flow.*
+- *Team mode (incident-team) follows the same promotion: after the surviving hypothesis lands a fix, the lead dispatches a one-shot code-reviewer on the diff — see `team-mode.md` → "Incident-team special case".*
 
 ## review
 - **agentille-code-reviewer** — tiered by diff size; see `model-routing.md`. No executor (user is asking for review, not changes).

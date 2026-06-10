@@ -116,6 +116,7 @@ You (the orchestrator) are the **team lead**. Given a resolved template:
    - `team_name` = the team you just created; `run_in_background: true` so teammates run concurrently.
    - Spawn `count` instances per role. Give each a distinct `name` you can reference (e.g. `exec-1`, `exec-2`).
    - Prompt = the user's task + the profile context block + which slice of the work this teammate owns. **Assign disjoint file sets** — two teammates editing the same file overwrite each other. Implementation teammates should each take their own git worktree (the executor does this when `isolated: true`, branching off the current branch) so they can't collide even by accident.
+   - Give every executor teammate a `checkpoint:` path (`~/.agentille/state/run-<id>/checkpoint-<name>.md`) — it checkpoints at committable boundaries and self-reports context pressure so you can rotate it (see "Context rotation" below).
    - If the template marks `require-plan-approval: true`, tell the teammate to plan first in read-only mode and wait for your approval before implementing; you approve/reject as lead.
 
 4. **Coordinate.** **The lead writes zero implementation code in team mode — see `SKILL.md` → "Hard rules".** Teammates message you automatically when they go idle. Use the shared task list (`TaskCreate` / `TaskList`) for dependencies. Wait for teammates; if one is genuinely stuck, steer or respawn it — never implement the work yourself. For build→review overlap, wire the scoped peer channel below (**Pipelined review**) rather than routing every finished piece through yourself.
@@ -138,7 +139,7 @@ Teammates **never self-terminate** — an idle teammate stays alive in its pane 
 
 **Guard rails:** wrap the whole sequence so it never blocks the user — if a teammate won't shut down, surface it ("teammate `<name>` didn't shut down cleanly; close its pane manually") rather than hanging. Skip the entire tmux portion silently in in-process mode (no `$TMUX`, empty pane IDs). Never run `tmux kill-pane` against `$TMUX_PANE` or the empty-paneId lead entry.
 
-**Reclaiming a pane mid-run (optional, not the default).** Do **not** blanket-close teammates the moment they go idle — an idle teammate is usually still needed (a later message from the lead, pipelined review, a respawn). Only when a teammate's slice is **fully merged, has a `PASS`, and has no remaining dependent work** may the lead opportunistically shut it down and `kill-pane` its pane early to reclaim space. When in doubt, leave it until end-of-run teardown. This is "reclaim when truly finished," never "close on idle." (A `TeammateIdle` hook that kills panes is the wrong tool for this — it fires on *every* idle, including a teammate parked waiting for the lead, so it would tear down workers you still intend to use.)
+**Reclaiming a pane mid-run (optional, not the default).** Do **not** blanket-close teammates the moment they go idle — an idle teammate is usually still needed (a later message from the lead, pipelined review, a respawn). Only when a teammate's slice is **fully merged, has a `PASS`, and has no remaining dependent work** may the lead opportunistically shut it down and `kill-pane` its pane early to reclaim space. When in doubt, leave it until end-of-run teardown. This is "reclaim when truly finished," never "close on idle." (A `TeammateIdle` hook that kills panes is the wrong tool for this — it fires on *every* idle, including a teammate parked waiting for the lead, so it would tear down workers you still intend to use.) The one other sanctioned mid-run shutdown is **Context rotation** (below) — a teammate that has checkpointed out is "truly finished" by definition.
 
 ### Skill budget — capability without token blowup
 
@@ -149,6 +150,25 @@ A teammate loads skills from the user's/project's settings exactly like a normal
 - **Reviewers** → no build skills; they review.
 
 This is the team-mode counterpart to the executor's "Graceful UI enhancement" rule (`agents/agentille-executor.md`): capability lands on the slice that needs it, silence everywhere else. The budget is guidance in the prompt, never a hard gate — a teammate with no UI work simply never reaches for a UI skill, and a teammate whose context carries no skills list builds with its own design judgment.
+
+### Context rotation — replace a filling teammate, don't let it limp
+
+Teammates self-monitor their context window (`agents/agentille-executor.md` → "Context discipline"): they checkpoint at every committable boundary to the run-scoped file the lead passed at spawn (`~/.agentille/state/run-<id>/checkpoint-<name>.md`), and when context pressure shows they send ONE structured ping instead of pushing through:
+
+```
+CONTEXT <name> | high | checkpoint <path> | done <n>/<m> | remaining: <one line>
+```
+
+On receiving it, the lead rotates:
+
+1. **Confirm the handoff state.** The protocol's precondition for pinging is that the teammate already finished its in-flight atomic step, committed, and updated its checkpoint — so there is nothing to wait for.
+2. **Shut the teammate down** and reclaim its pane (see "Reclaiming a pane mid-run" — a rotated-out teammate is truly finished).
+3. **Spawn a successor** — same role, suffixed name (`exec-1` → `exec-1b`) — with: the SAME context-pack slice, the SAME checkpoint path, and the instruction *"Resume from the checkpoint + `git log` on branch `agt/<slug>`; trust them — do NOT re-read or redo completed work."* The successor reuses the existing worktree and branch and occupies the same slot against the 3-parallel cap.
+4. The rotation is invisible to the rest of the run — `READY` handoffs, review, and consolidation proceed as if it were one executor.
+
+Why rotation, not `/compact`: a teammate cannot invoke CLI commands on itself, and compaction is lossy summarization at an uncontrolled moment. Rotation through a checkpoint is deterministic — the durable state lives in git + the checkpoint file, not the conversation — and a successor starts with a near-empty window instead of a summarized one. The same protocol doubles as crash recovery: a teammate that dies mid-run gets a successor seeded the same way.
+
+**Lead-side hygiene.** The lead's own window fills too — it receives every report. Keep teammate traffic to the structured handoffs (`READY` / `REVIEW` / `CONTEXT`), persist consolidated run state to the run directory instead of holding it in-window, and never pull a teammate's diff into your own context — you read verdicts, not patches.
 
 ### Pipelined review (overlap phases)
 
@@ -193,6 +213,8 @@ For `incident-team`, override the executor prompts with adversarial framing. Gen
 - Teammate 3: "Investigate hypothesis C: [hypothesis]. Adversarially challenge teammates A and B."
 
 The lead picks the surviving hypothesis after the debate.
+
+Once the surviving hypothesis lands a fix, gate it like any other change: dispatch a one-shot **code-reviewer subagent** on the fix diff (tiered model per `model-routing.md`). The incident template carries no reviewer teammate, but a fix never ships unreviewed — this mirrors the subagent-mode rule (`roster.md` → debug: promote to bugfix flow once a fix is applied).
 
 ## Failure → degrade
 

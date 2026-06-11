@@ -2,6 +2,18 @@
 
 All notable changes to agentille are documented here.
 
+## [1.27.0] — 2026-06-11
+
+### Changed
+
+- **Context discipline ladder tightened: 30/40/60 → 20/30/40.** The v1.26.0 ladder rotated executors out at ~60% — meaning a 60%-full agent was *by design*, and in practice the "feel"-based signals let agents overshoot to 70–80% before reacting. The whole ladder shifts down one rung: the planner budgets each chunk to **≤ ~20%** of an executor's window (plan-reviewer check #7 enforces the same bound), the executor **throttles at ~30%** (no new scope) and **rotates out by ~40%** or on any harness warning. An executor now peaks at 30–40% instead of 60%+, which is where output quality is still flat. Mirrored across `agentille-planner.md`, `agentille-plan-reviewer.md`, `agentille-executor.md`, and `SKILL.md` (hard rule + token budget hints).
+- **Measurable context gauge replaces "feel".** Agents cannot read their own context meter, and "~40% feel" is exactly how the overshoot happened. The executor now tracks a countable proxy: a running tally of **lines ingested** (file reads, grep output, log tails, diffs), calibrated at ~10–12 tokens per line of code with ~10% baseline overhead before any reading. On a 200k window the thresholds land at ≈2,500 lines (soft) and ≈4,000 lines (hard), scaling proportionally on larger windows. The planner sizes chunks with the same arithmetic (≤ ~2,500 lines of read set per chunk). Harness context-low/compaction notices remain an unconditional hard signal.
+- **Fable 5 effective-cost note in routing rationale.** Fable 5's tokenizer counts the same content as ~30% more tokens than the opus/sonnet tiers, so the escalation ceiling's effective spend per dispatch is ~2.6× opus, not the naive ~2× per-token ratio. Recorded in `model-routing.md`'s tier rationale; no routing defaults move — the v1.25.0 escalation shape already prices fable as "reserved for the largest/highest-stakes work", which the corrected number reinforces.
+
+### Rationale
+
+Observed in the field: Sonnet executors regularly reaching 60–80% of their window. Two causes — the installed plugin predated the Context Discipline Protocol entirely, and even the v1.26.0 protocol *designed for* 60% peaks with unmeasurable trigger points. This release makes the target explicit (peak at 30–40% MAX) and the triggers countable. Rotation is cheap because it was already lossless (checkpoint + context-pack slice + git); a lower rotation point just exercises the same mechanism earlier, while smaller planned chunks mean most executors never hit the soft signal at all.
+
 ## [1.26.0] — 2026-06-10
 
 ### Added

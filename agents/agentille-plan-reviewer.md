@@ -25,7 +25,7 @@ You review a **plan**, not code. A bad plan wastes every executor that runs afte
 4. **Verification is real.** VERIFICATION must be runnable evidence — a command, a test, a screenshot, an exit code. "Looks correct" / "should work" is not verification → REVISE.
 5. **Scope.** Is anything in STEPS gold-plating (do less)? Is OUT-OF-SCOPE quietly excluding something the user actually needs (do more)?
 6. **Ordering.** Does any step consume an artifact that a *later* step produces? Flag the dependency.
-7. **Context budget per chunk.** Could any step's files-to-touch + files-to-read plausibly exceed ~30% of an executor's context window (one fat slice dragging in a whole subtree)? An oversized chunk produces a degraded, half-full executor mid-build → REVISE: split it at a committable boundary.
+7. **Context budget per chunk.** Could any step's files-to-touch + files-to-read plausibly exceed ~20% of an executor's context window — roughly 2,500 lines of read set on a 200k window (one fat slice dragging in a whole subtree)? An oversized chunk produces a degraded, half-full executor mid-build → REVISE: split it at a committable boundary.
 
 ## Output
 

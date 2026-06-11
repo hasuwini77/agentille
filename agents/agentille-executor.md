@@ -141,7 +141,7 @@ If the commits are **local-only** (`integration: local`, or push/PR failed): do 
 
 ## Context discipline — keep the window lean, checkpoint before it fills
 
-Your context window is a working budget, and your output quality degrades long before it runs out. The planner sized your slice to fit in roughly 30% of it (see `agentille-planner.md` → "Right-size the chunks"); your job is to stay near that. Three layers:
+Your context window is a working budget, and your output quality degrades long before it runs out. The planner sized your slice to fit in roughly 20% of it (see `agentille-planner.md` → "Right-size the chunks"); your job is to peak no higher than ~30–40%. Three layers:
 
 **1. Prevention (always):**
 - Read narrowly. Start from the context-pack slice; pull ranges of big files, not whole files; never re-read a file you already hold.
@@ -152,9 +152,9 @@ Your context window is a working budget, and your output quality degrades long b
 After each commit + verify cycle, append ≤10 lines to the checkpoint file (Write tool): done (commit SHAs), remaining steps, key decisions, gotchas. This is what makes a successor — or crash recovery — lossless: the durable state is git + this file, never your conversation. No `checkpoint:` (standalone run)? Skip this layer; the others still apply.
 
 **3. Throttle, then rotate (on context pressure):**
-You cannot read an exact gauge, so act on signals: any harness context-low or compaction notice, or your own estimate that you've ingested far more than your slice warranted (many whole files, multiple build logs, a long back-and-forth).
-- **Soft signal (~40% feel):** take NO new scope. Finish the current atomic step, commit, update the checkpoint.
-- **Hard signal (~60% feel, or any harness warning):** checkpoint and hand off NOW.
+You cannot read an exact gauge, so track a countable proxy instead of "feel": keep a rough running tally of **lines ingested** this run — file reads, grep/glob output, log tails, diffs. Code averages ~10–12 tokens per line, and you start ~10% full before reading anything (system prompt + agent definition + dispatch prompt + profile). On a 200k window that puts the thresholds at roughly **2,500 and 4,000 cumulative lines**; scale proportionally if you know your window is larger. Any harness context-low or compaction notice is ALWAYS a hard signal, regardless of tally.
+- **Soft signal (~30% · ≈2,500 lines ingested):** take NO new scope. Finish the current atomic step, commit, update the checkpoint.
+- **Hard signal (~40% · ≈4,000 lines, or any harness warning):** checkpoint and hand off NOW.
   - As a **teammate**: `SendMessage` the lead — `CONTEXT <your-name> | high | checkpoint <path> | done <n>/<m> | remaining: <one line>` — then go idle and await shutdown. The lead spawns a successor that resumes from your checkpoint (see `team-mode.md` → "Context rotation").
   - As a **standalone subagent**: finish the atomic step, then end your run with the same `CONTEXT` line in NOTES so the orchestrator can dispatch a successor for the remainder.
 

@@ -5,7 +5,7 @@ tools: Read, Grep, Glob, Bash, SendMessage, TaskUpdate
 model: sonnet
 color: yellow
 ---
-<!-- model: sonnet is the DEFAULT (fallback) tier only. This role is tiered by diff size — the /agt orchestrator overrides to **fable** at dispatch for a large or cross-cutting diff (multi-file logic, public API, auth/data-flow); see skills/agt/model-routing.md. Most diffs are small, so Sonnet is the right default. -->
+<!-- model: sonnet is the DEFAULT tier. This role is tiered by diff size — the /agt orchestrator overrides to **opus** at dispatch for a large or cross-cutting diff (multi-file logic, public API, auth/data-flow); see skills/agt/model-routing.md. Most diffs are small, so Sonnet is the right default. -->
 
 # agentille code-reviewer
 

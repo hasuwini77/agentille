@@ -2,6 +2,23 @@
 
 All notable changes to agentille are documented here.
 
+## [1.28.0] — 2026-06-17
+
+### Added
+
+- **Workflow execution tier (`skills/agt/workflow-mode.md`).** `/agt` gains a fourth mode alongside solo / subagent / team. For a build task with **≥2 genuinely disjoint parallel slices across 2+ dependency waves (3+ buckets)**, `/agt` now emits a Claude Code **Dynamic Workflow** script that fans the waves out automatically — intermediate results stay in script variables instead of the conductor's context, and the build runs to completion without per-step babysitting. It uses the *same* disjoint-parallelism bar that gates team mode (no parallelism → no workflow), and **degrades silently to the existing in-session subagent waves** when the `Workflow` tool is unavailable. Workflow = scripted fan-out (results summarized back); team = peer sessions that message each other. Wired into the Step 1 dispatch table and `classifier.md`; full contract (bucket-graph→wave/pipeline mapping, role→stage mapping, adversarial-verify pattern, failure/cleanup, a worked example script) lives in `workflow-mode.md`.
+- **Planner emits a machine-usable `BUCKET-GRAPH`.** `agentille-planner.md` now outputs, alongside its numbered plan, a dependency graph (`id` / `name` / `files-to-touch` / `depends-on[]` / `done-criteria`) plus computed topological **waves** — the structure the workflow tier consumes to auto-parallelize. This turns "big task → smaller tasks, parallelism where safe" into a mechanism rather than a hope.
+
+### Changed
+
+- **Agent-teams API modernized to the current zero-setup model.** `team-mode.md`, `SKILL.md`, and `display.md` no longer reference `TeamCreate`/`TeamDelete` (removed from Claude Code) or rely on the deprecated `team_name` input. Teammates now spawn directly via `Agent(run_in_background: true)`; the team forms on first spawn and shared directories are cleaned up **automatically** on session exit. All agentille-specific protocol (skill budget, context rotation, pipelined review, honesty-on-a-forced-team, conductor-owned consolidation, the three templates) is preserved.
+- **Model routing reworked: Haiku / Sonnet / Opus only.** The `fable` model is no longer available and has been purged from every routing surface (`model-routing.md`, `SKILL.md` Step 3, all agent frontmatter, `README.md`, and the `validate.sh` accepted-alias regex). The heavy reasoning tier is now **Opus** throughout — notably `security-reviewer` now defaults to Opus (was fable). `code-reviewer`/`plan-reviewer` tier between Sonnet (small) and Opus (large/cross-cutting). Executor stays Sonnet; classifier/final-summary stay Haiku.
+- **`--fable` is now a deprecated backward-compatible alias.** It no longer selects a model; it forces the **Opus ceiling** on judgement-heavy roles. It never hard-fails and may be removed in a future major.
+
+### Rationale
+
+The two goals were speed and smart, automatic decomposition. Both are the same lever: move the orchestration plan **into a script** (Claude Code's Dynamic Workflows) so disjoint slices fan out in dependency waves without the conductor narrating each step, and keep intermediate output out of the conductor's context window. The planner's new bucket-graph is the input that makes this automatic. A roster audit (evidence: dispatch-table routing + role distinctness + cost) found **all seven agents justified** — including the narrow `plan-reviewer`, the only source of the pre-execution parallel-safety gate — so no agents were added or cut; the win came from a better *engine*, not more workers. The `fable` purge and the agent-teams API refresh bring the plugin back in line with the models and primitives that exist today.
+
 ## [1.27.0] — 2026-06-11
 
 ### Changed

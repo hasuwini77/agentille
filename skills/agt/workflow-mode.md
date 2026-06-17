@@ -44,7 +44,7 @@ Resolve in this order; first match wins.
 
 **Flag composition:**
 - `--plan` composes: with `--plan`, the orchestrator drafts the bucket-graph + wave plan + the would-be Workflow script and **HALTS** before launching it. The user approves the shape and cost before a single executor runs. A plain "go" resumes with that exact script (no re-planning).
-- `--fable` composes: forces fable as the model ceiling for Opus-resolving roles (planner, ui-prototyper, design-reviewer, security-reviewer). Executors remain Sonnet. See `model-routing.md` → "Hard rules" and the `--fable` run modifier in `SKILL.md`.
+- `--fable` composes: **deprecated alias** — forces the **Opus ceiling** for all judgment-heavy roles (planner, ui-prototyper, design-reviewer, security-reviewer). Executors remain Sonnet. See `model-routing.md` → "`--fable` — deprecated backward-compat alias" and the `--fable` run modifier in `SKILL.md`.
 - `--fable` is a **deprecated alias**: new work should rely on the size/risk auto-escalation in `model-routing.md`. `--fable` continues to function as documented above until removed.
 
 ---
@@ -94,10 +94,10 @@ Map to the Workflow script:
 | agentille role | Workflow stage | Notes |
 |---|---|---|
 | **planner** | Produces the bucket-graph; seeds the script variables. Not itself a `agent()` call in the script. | The orchestrator writes the script from the planner's output. |
-| **executor** (`agentille:agentille-executor`) | **Build stage** — one `agent()` call per bucket, model: Sonnet. Runs inside the pipeline per bucket. | Never upgrade executor to Opus/fable — broken code costs more than tokens. |
+| **executor** (`agentille:agentille-executor`) | **Build stage** — one `agent()` call per bucket, model: Sonnet. Runs inside the pipeline per bucket. | Never upgrade executor — broken code costs more than tokens. |
 | **code-reviewer** (`agentille:agentille-code-reviewer`) | **Verify stage** — dispatched via `pipeline()` as each build completes, NOT gated behind all-builds-done. Model: tiered (see `model-routing.md`). | Receives the finished branch diff; returns PASS or ISSUES. |
 | **design-reviewer** (`agentille:agentille-design-reviewer`) | **Verify stage** (UI buckets only) — same pipeline position as code-reviewer. Model: Opus, never downgrade. | Only for buckets with a UI surface. |
-| **security-reviewer** (`agentille:agentille-security-reviewer`) | **Verify stage** (security-tagged buckets only) — same pipeline position. Model: Opus (fable for large diffs). | Only when the bucket is security-tagged or touches auth/data-flow. |
+| **security-reviewer** (`agentille:agentille-security-reviewer`) | **Verify stage** (security-tagged buckets only) — same pipeline position. Model: Opus; → Sonnet if `thinkingDepth=quick`. | Only when the bucket is security-tagged or touches auth/data-flow. |
 
 Reviewer stages run as each build completes — the same pipelined-review principle as `team-mode.md` → "Pipelined review". A bucket's build and verify stages form one `pipeline()` chain; multiple such chains run concurrently (up to the 3-executor cap).
 
@@ -168,7 +168,7 @@ const [endpointBuild, uiBuild] = await parallel([
     `Files to touch: src/api/endpoint.ts, src/api/endpoint.test.ts.\n` +
     `Done-criteria: endpoint returns 200 on happy path; unit test passes.\n` +
     `Checkpoint path: ~/.agentille/state/run-abc123/checkpoint-B1.md`,
-    { label: "B1-executor", phase: "build-wave-1", model: "claude-sonnet-4-5", isolation: "worktree" }
+    { label: "B1-executor", phase: "build-wave-1", model: "sonnet", isolation: "worktree" }
   ),
   () => agent(
     `You are agentille-executor. Build the UI panel slice.\n` +
@@ -176,7 +176,7 @@ const [endpointBuild, uiBuild] = await parallel([
     `Files to touch: src/components/Panel.tsx, src/components/Panel.css.\n` +
     `Done-criteria: Panel renders with mock data; no console errors.\n` +
     `Checkpoint path: ~/.agentille/state/run-abc123/checkpoint-B2.md`,
-    { label: "B2-executor", phase: "build-wave-1", model: "claude-sonnet-4-5", isolation: "worktree" }
+    { label: "B2-executor", phase: "build-wave-1", model: "sonnet", isolation: "worktree" }
   ),
 ]);
 
@@ -190,7 +190,7 @@ const [endpointVerdict, uiVerdict] = await parallel([
     (build) => agent(
       `You are agentille-code-reviewer. Review B1 endpoint diff adversarially — find a reason it is wrong. ` +
       `If none, return PASS.\nDiff context: ${build}`,
-      { label: "B1-code-reviewer", phase: "verify-wave-1", model: "claude-opus-4-5" }
+      { label: "B1-code-reviewer", phase: "verify-wave-1", model: "opus" }
     ),
   ),
   () => pipeline(
@@ -198,12 +198,12 @@ const [endpointVerdict, uiVerdict] = await parallel([
     (build) => agent(
       `You are agentille-code-reviewer. Review B2 UI diff adversarially — find a reason it is wrong. ` +
       `If none, return PASS.\nDiff context: ${build}`,
-      { label: "B2-code-reviewer", phase: "verify-wave-1", model: "claude-sonnet-4-5" }
+      { label: "B2-code-reviewer", phase: "verify-wave-1", model: "sonnet" }
     ),
     (codeVerdict) => agent(
       `You are agentille-design-reviewer. Review B2 UI panel at desktop viewport only. ` +
       `Score the six pillars 1-10. Flag any AI-design-tells.\nCode verdict: ${codeVerdict}`,
-      { label: "B2-design-reviewer", phase: "verify-wave-1", model: "claude-opus-4-5" }
+      { label: "B2-design-reviewer", phase: "verify-wave-1", model: "opus" }
     ),
   ),
 ]);
@@ -227,7 +227,7 @@ const testsBuild = await agent(
   `Files to touch: tests/integration/endpoint-panel.test.ts.\n` +
   `Done-criteria: integration test suite passes end-to-end.\n` +
   `Checkpoint path: ~/.agentille/state/run-abc123/checkpoint-B3.md`,
-  { label: "B3-executor", phase: "build-wave-2", model: "claude-sonnet-4-5", isolation: "worktree" }
+  { label: "B3-executor", phase: "build-wave-2", model: "sonnet", isolation: "worktree" }
 );
 
 phase("verify-wave-2");
@@ -236,7 +236,7 @@ const testsVerdict = testsBuild
   ? await agent(
       `You are agentille-code-reviewer. Review B3 integration test diff. ` +
       `Verify coverage is real (not vacuous assertions). If sound, return PASS.\nDiff: ${testsBuild}`,
-      { label: "B3-code-reviewer", phase: "verify-wave-2", model: "claude-sonnet-4-5" }
+      { label: "B3-code-reviewer", phase: "verify-wave-2", model: "sonnet" }
     )
   : null;
 

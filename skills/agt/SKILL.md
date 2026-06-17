@@ -22,7 +22,7 @@ When this skill is invoked (`/agt <task>`):
 8. **Persist the context pack, then dispatch in dependency order.** Create the run directory (`~/.agentille/state/run-<id>/`) on **every** non-solo run. When a planner ran, write its `CONTEXT-PACK` to a run-scoped file (`~/.agentille/state/run-<id>/context-pack.md`, via the Write tool) and dispatch each executor with **only its slice** — never the whole pack, never "re-explore the repo." Pass every executor a `checkpoint:` path inside the run dir (`checkpoint-<name>.md`) — executors checkpoint at committable boundaries and self-report context pressure via a `CONTEXT` ping; you rotate in a fresh successor seeded from checkpoint + slice (see `agents/agentille-executor.md` → "Context discipline" and `team-mode.md` → "Context rotation"). Parallelize independent steps only where the task contains genuinely disjoint file sets (≤3 executors at a time). See "Discover once, reuse everywhere" below. The run dir is scratch state, not an artifact — clean it up after the Debrief.
 9. **Stream progress via the Transit Rail** (see `display.md`) — *before* the first dispatch, seed the TodoWrite spine (one todo per resolved phase: the user's live "what's left until we send the agents"). Then render: a drawn-once Mission Brief rail, one thin colored-LED ping per phase transition, a fanout block when the build forks into parallel workers, diff-fence review verdicts, and a final Debrief. Presentation only — it never changes dispatch and never blocks the result; if a frame can't render, drop the field, not the run.
 10. **Append the shipped-log line** to `./docs/agentille-log.md` — you write it directly as the final step (see "Shipped log" below). There is no log hook.
-11. **Tear down a team before declaring done (team mode only).** Teammates never self-terminate and `TeamDelete` does not close their tmux panes — the lead must capture pane IDs, shut each teammate down, `TeamDelete`, then `tmux kill-pane` each captured pane so the screen collapses back to the lead alone. A pane left idling after the run is a teardown miss, not the resting state. See `team-mode.md` → "Teardown". (No-op in subagent/solo mode.)
+11. **Tear down a team before declaring done (team mode only).** The current agent-teams API does not have separate create/delete primitives — teammates are spawned directly via `Agent(run_in_background:true)` and the team's shared scratch dirs are cleaned up automatically when the session ends. To end a run, the lead asks each active teammate to shut down by name (via `SendMessage`). Orphaned tmux panes are an edge case — see `team-mode.md` → "Teardown" for the manual cleanup path. (No-op in subagent/solo/workflow mode.)
 12. **Return one final summary** matching the user's `deliveryStyle` preference.
 
 ## Dispatch decision table (authoritative)
@@ -41,9 +41,12 @@ When this skill is invoked (`/agt <task>`):
 | 6 | Trivial: exactly one file named AND no architectural verb (`refactor`/`design`/`architect`/`migrate`/`redesign`/`restructure`) | **solo** | — |
 | 7 | Task verb = `review` | **team** | review-team |
 | 8 | Task verb = `debug` | **team** | incident-team |
-| 9 | Otherwise | **Stage 2** (inline Haiku classify) — its returned `{mode, template, roster}` is authoritative | per Stage 2 |
+| 9 | Build task with **≥2 genuinely disjoint parallel slices across 2+ dependency waves (3+ buckets)** AND the `Workflow` tool available | **workflow** | — |
+| 10 | Otherwise | **Stage 2** (inline Haiku classify) — its returned `{mode, template, roster}` is authoritative | per Stage 2 |
 
 Any team result must pass the team pre-flight (env flag `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1`, Claude Code ≥ 2.1.32, daily soft cap) — see `team-mode.md`. On any pre-flight or spawn failure, degrade to subagent mode.
+
+Row #9 (workflow) requires the `Workflow` tool to be available at runtime. If it is absent (older Claude Code build, `CLAUDE_CODE_DISABLE_WORKFLOWS=1`, or `disableWorkflows: true`), degrade silently to in-session subagent wave dispatch and emit one log line. See `skills/agt/workflow-mode.md` for the full contract.
 
 Rows #1–2 are a **force** (the user typed `--team`/`--mode team`). Run the inline disjoint-parallelism heuristic first: real parallel work → spawn the team. **Overkill** (no ≥2 disjoint slices) → don't obey blindly — when `preTaskQuestioning` permits, **ask once** whether to downgrade to subagent (recommended, ~¼ the tokens) or force the team anyway; when `preTaskQuestioning: never`, honor the force and emit the `honestyLevel`-gated heads-up instead (see `team-mode.md` → "Honesty on a forced team"). **Always surface the resolved mode + a one-clause reason** in the brief's `mode:` row and on the recon ping — for Stage 2 that's its `reasoning` string; for a Stage 1 rule it's the rule itself (e.g. "forced", "review verb → review-team", "single file, no architectural verb → solo"). The pick is never a black box and never a prose paragraph (see `display.md` → "Frame 2").
 
@@ -72,17 +75,17 @@ Rows #1–2 are a **force** (the user typed `--team`/`--mode team`). Run the inl
 
 | Role | Default | Override |
 |---|---|---|
-| planner | Opus | → Sonnet if `thinkingDepth=quick`; → **fable** for large/cross-cutting plans (≥6 steps or any step touching shared contracts/architecture) |
-| plan-reviewer | **Sonnet** | → **fable** for a large/cross-cutting plan (≥6 steps, or any step touching shared contracts/architecture); **skip entirely** if `thinkingDepth=quick` (don't downgrade — just skip); **also skip** for a ≤3-step fully sequential plan — no parallel-safety risk (see `model-routing.md` → "Default routing") |
-| ui-prototyper | Opus | → Sonnet if `thinkingDepth=quick`; the blueprint sets the UI direction — pay for taste at default depth; → **fable** when the blueprint is design-system-scale (an explicit rebrand, or a shared token system / component set with ≥3 downstream consumers); → fable under `--fable` |
-| executor | Sonnet | never up or down (broken code costs more than tokens; fable is not used here) |
-| code-reviewer | **tiered** | **Sonnet** for a small diff (single file *or* ≤~150 LoC, no cross-cutting/security surface); **fable** for a large/cross-cutting diff (multi-file logic, public API, auth/data-flow); → Sonnet if `thinkingDepth=quick` |
-| design-reviewer | Opus | never downgrade — native vision + design judgment is agentille's differentiator (savings come from **viewport scope**, not the model); → fable under `--fable` |
-| security-reviewer | **fable** | → Sonnet if `thinkingDepth=quick`; graceful fallback: fable unavailable → opus + one log line |
+| planner | Opus | → Sonnet if `thinkingDepth=quick` (large/cross-cutting plans stay Opus) |
+| plan-reviewer | **Sonnet** | → **Opus** for a large/cross-cutting plan (≥6 steps or shared-contract/arch step); **skip** if `thinkingDepth=quick`; **also skip** for a ≤3-step fully sequential plan |
+| ui-prototyper | Opus | → Sonnet if `thinkingDepth=quick`; → Opus under `--fable` (no-op) |
+| executor | Sonnet | never up or down |
+| code-reviewer | **tiered** | **Sonnet** for a small diff (single file or ≤~150 LoC, no cross-cutting/security); **Opus** for a large/cross-cutting diff; → Sonnet if `thinkingDepth=quick` |
+| design-reviewer | Opus | never downgrade (savings come from viewport scope, not model); → Opus under `--fable` (no-op) |
+| security-reviewer | **Opus** | → Sonnet if `thinkingDepth=quick` |
 | classifier | heuristic, no LLM | Haiku only if every heuristic misses |
 | final-summary | Haiku | — |
 
-Two review roles tier their model by the size of the work — see `model-routing.md` → "Tiering the review roles by size" for the exact thresholds. Always declare the model explicitly on each dispatch — never let it default.
+Two review roles tier their model between Sonnet and Opus by the size of the work — see `model-routing.md` → "Tiering the review roles by size" for the exact thresholds. Always declare the model explicitly on each dispatch — never let it default.
 
 ### Run modifier: `--plan` (dry-run — stop after the plan)
 
@@ -91,13 +94,15 @@ Two review roles tier their model by the size of the work — see `model-routing
 - The point is to let the user approve the *shape and cost* before paying for the build — the cheapest guard against "it built the wrong thing." It pairs with any mode: `/agt --plan --team feature-team "<task>"` previews the team roster + ~4× cost without spawning the team.
 - On a task with no planner (solo/trivial), `--plan` degrades to one honest line — *"nothing to pre-plan — this is a single-step `<category>`; re-run without `--plan` to execute"* — and never spawns an executor.
 
-### Run modifier: `--fable` (escalation ceiling — force fable for all opus-resolving roles)
+### Run modifier: `--fable` (deprecated — backward-compat alias for Opus ceiling)
 
-`--fable` is **orthogonal to mode and `--plan`** — it doesn't change the roster or the stop point, it forces the model ceiling up for roles that would otherwise resolve to opus this run. With `--fable` present, the following roles dispatch on fable instead of opus: planner, ui-prototyper, design-reviewer, security-reviewer, and any size/risk-escalated code-reviewer or plan-reviewer. Executor stays Sonnet; classifier and final-summary stay Haiku — those are never upgraded.
+> **Deprecated.** The `fable` model is no longer available. `--fable` is **retained as a backward-compat alias** and may be removed in a future major release. New work should rely on the size/risk auto-escalation in `model-routing.md` — large/cross-cutting plans and diffs already escalate to Opus automatically.
 
-- Use when a task is exceptionally large, cross-cutting, or highest-stakes and you want fable's full reasoning depth applied to every judgment-heavy role — not just the roles that auto-escalate.
-- Composes freely: `/agt --fable --plan "<task>"` previews the fable-ceiling roster; `/agt --fable --team feature-team "<task>"` runs the full team at fable depth.
-- **Graceful fallback:** if the `fable` alias is unavailable on the current Claude Code version or plan, each affected dispatch falls back to opus + one log line. The run never hard-fails due to `--fable`. See `model-routing.md` → "Hard rules".
+`--fable` is **orthogonal to mode and `--plan`** — it doesn't change the roster or the stop point. With `--fable` present, the flag forces the **Opus ceiling** on all judgment-heavy roles this run: planner, ui-prototyper, design-reviewer, security-reviewer, and any size/risk-escalated code-reviewer or plan-reviewer. Executor stays Sonnet; classifier and final-summary stay Haiku — those are never upgraded.
+
+- The flag resolves transparently to Opus; it never hard-fails. Note in the run log that `--fable` is deprecated.
+- Composes freely: `/agt --fable --plan "<task>"` previews the Opus-ceiling roster; `/agt --fable --team feature-team "<task>"` runs the full team at Opus depth.
+- See `model-routing.md` → "`--fable` — deprecated backward-compat alias" for details.
 
 ## Clarify before planning
 
@@ -152,6 +157,14 @@ Each agent def carries its own default `model` and `tools` allowlist, but still 
 
 See `roster.md` for which combinations to dispatch per task category.
 
+## Workflow tier
+
+The workflow tier emits a Claude Code **Dynamic Workflow** script (via the `Workflow` tool) that orchestrates executor subagents across dependency waves in the background — the conductor is freed from wave-by-wave dispatch and intermediate results live in script variables, never in the conductor's context. It degrades silently to in-session subagent wave dispatch when the `Workflow` tool is unavailable.
+
+**Workflow vs team:** workflow = scripted autonomous fan-out with results summarized back to script variables (no inter-agent messaging). Team = independent peer sessions that can `SendMessage` each other — suited for adversarial debate or cross-layer coordination. When peers don't need to talk, workflow is the lighter option.
+
+See `skills/agt/workflow-mode.md` for the full contract: bucket-graph → wave mapping, graceful degradation, the adversarial-verify stage pattern, and a worked example script.
+
 ## Team mode
 
 The orchestrator supports Claude Code's Agent Teams primitive in addition to subagent dispatch. See `team-mode.md` for the full protocol. Highlights:
@@ -183,8 +196,8 @@ The user wants this to be **token-efficient**. Apply these defaults:
 - Classification step: do it inline (heuristic from `classifier.md`), don't spawn a sub-agent for it
 - Planner: only for tasks with ≥3 distinct steps. Single-step tasks skip planning and go straight to executor.
 - Design-reviewer: only for tasks that touch frontend code (heuristic: prompt mentions UI/UX/CSS/component/page/styling/responsive/animation, or files changed under `src/components/`, `src/app/`, `*.css`, `*.tsx`). **Scope its viewports** — ask once which viewports matter and pass `viewports: [...]`; a desktop-only review skips two full-page screenshot+vision passes (the heaviest single cost in a UI run). See "Clarify the viewport scope for UI work" above.
-- Code-reviewer: skip for refactors that are pure renames or moves with no logic changes. Otherwise it's **tiered** — Sonnet clears a small single-file diff; reserve fable for large/cross-cutting/security-adjacent diffs (see `model-routing.md`).
-- Plan-reviewer: **Sonnet by default** — the plan critique is a structured checklist. Upgrade to fable only for a large/cross-cutting plan; skip entirely on `thinkingDepth=quick`.
+- Code-reviewer: skip for refactors that are pure renames or moves with no logic changes. Otherwise it's **tiered** — Sonnet clears a small single-file diff; reserve **Opus** for large/cross-cutting/security-adjacent diffs (see `model-routing.md`).
+- Plan-reviewer: **Sonnet by default** — the plan critique is a structured checklist. Upgrade to **Opus** only for a large/cross-cutting plan; skip entirely on `thinkingDepth=quick`.
 - **Context discipline ladder (20/30/40).** The planner sizes each chunk to ≤ ~20% of an executor's window; at runtime an executor throttles (~30%: no new scope) and rotates out (~40%, or any harness warning) via checkpoint + successor — thresholds tracked by a running lines-ingested tally, not feel (see `agents/agentille-executor.md` → "Context discipline"). An agent past ~40% writes subtly worse code — rotation is cheaper than the review round-trip its bugs cost. See "Hard rules" above and `team-mode.md` → "Context rotation".
 - **Decomposition is a token trade.** Right-size chunks into disjoint, minimal file sets; never subdivide below the break-even where context-reload tokens exceed the work saved. The planner owns this (see `agents/agentille-planner.md` → "Right-size the chunks"). Applies to both team and subagent mode.
 - **Pipeline review over building.** Don't gate review behind all-executors-done. In team mode use the scoped peer handoff (see `team-mode.md` → "Pipelined review"); in subagent mode, dispatch the code-reviewer on each finished piece while remaining executors still run (when pieces are dispatched in sequence) — same overlap pattern, no peer messaging needed.
@@ -222,6 +235,7 @@ If you can't write the file for any reason, skip silently — never let logging 
 - `agt/roster.md` — task-category → agent roster
 - `agt/model-routing.md` — agent role → model selection
 - `agt/team-mode.md` — team-mode auto-detection, Stage 1/Stage 2 dispatch, pre-flight checks, cost transparency
+- `agt/workflow-mode.md` — Dynamic Workflow tier: bucket-graph → wave mapping, graceful degradation, adversarial-verify pattern, worked example script
 - `agt/display.md` — the Transit Rail: progress display (TodoWrite spine + drawn-once brief, thin pings, parallel fanout, diff-fence verdicts, debrief)
 
 The seven worker roles live as **agent definitions** in the plugin's `agents/` dir (dispatched as `agentille:agentille-*`), not as skills:

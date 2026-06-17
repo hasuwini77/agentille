@@ -32,7 +32,7 @@ Three color channels, each used where it is strongest — all theme-independent,
 
 ## Pillar 1 — the TodoWrite spine
 
-The instant the mode + roster are resolved (and **before** the first `Agent`/`TeamCreate` call), seed one todo per phase that will actually run. This is the user's live "steps left until we send the agents."
+The instant the mode + roster are resolved (and **before** the first `Agent` call), seed one todo per phase that will actually run. This is the user's live "steps left until we send the agents."
 
 - One todo per resolved phase only — omit stations with no agent (a solo task has no `review`/`gate`; a review-team has no `build`).
 - `activeForm` is the present-participle station name: `Classifying`, `Planning`, `Reviewing plan`, `Designing`, `Building`, `Reviewing`, `Shipping`.
@@ -97,7 +97,7 @@ A single markdown line — this is where the **live color** lives (colored-emoji
 
 Each ping carries the **acting agent's color** (see the legend) — so a clean run is naturally multi-colored, one hue per agent, matching its team-pane tint. Emit one per phase transition; for a long station (build) emit a line when it begins (`▸` / `spawned`) and one when it lands (`✓`). Status rides in the glyph + trailing text, not the LED. Keep each ≤ ~60 chars before the trailing metric.
 
-**Pre-spawn planning window — the "lead doing stuff" before panes open.** In team mode, recon → classify → plan → plan-review all run before `TeamCreate`. That pre-spawn window is invisible without a signal. Emit one 🔵 ping when the lead enters it and one 🟢 ping when it exits (team spawns):
+**Pre-spawn planning window — the "lead doing stuff" before panes open.** In team mode, recon → classify → plan → plan-review all run before the first `Agent` spawn. That pre-spawn window is invisible without a signal. Emit one 🔵 ping when the lead enters it and one 🟢 ping when it exits (first teammate spawns):
 
 ```
 🔵 planning   classifying · plan drafting · plan-review                   0:04

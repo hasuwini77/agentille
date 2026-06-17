@@ -2,11 +2,14 @@
 
 > **Authority:** the dispatch decision table in `skills/agt/SKILL.md` is the tie-breaker. This doc is the detail/rationale — if it ever conflicts with that table, the table wins.
 
-The orchestrator picks one of three execution modes per task:
+The orchestrator picks one of four execution modes per task:
 
 - **subagent** (default, always available) — dispatches roles via the `Agent` tool, results return to the orchestrator. The v1.0 path.
-- **team** (opt-in, experimental) — uses Claude Code's Agent Teams primitive: each role is an independent Claude session, peers can message each other, shared task list. Requires `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1` and Claude Code 2.1.32+.
+- **workflow** (experimental) — emits a Dynamic Workflow script the Claude Code runtime executes in the background; scripted fan-out with no inter-agent messaging. See `workflow-mode.md`.
+- **team** (opt-in, experimental) — uses Claude Code's Agent Teams primitive: each role is an independent Claude session, peers can message each other via `SendMessage`, shared task list. Requires `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1` and Claude Code 2.1.32+.
 - **solo** — execute inline in this session, no spawn. For trivial tasks (one file mentioned, no architectural verbs).
+
+> **Team vs workflow:** both use the same disjoint-parallelism bar. The split is peer-messaging need — team = peer sessions for adversarial debate or cross-layer coordination (e.g. incident-team hypotheses, competing reviewers exchanging `READY`/`REVIEW` pings); workflow = scripted subagent fan-out where results flow to script variables and no inter-agent messaging is required. If peers don't need to talk, prefer workflow.
 
 ## Auto-detection (Stage 1)
 
@@ -97,53 +100,35 @@ The pre-flight display-readiness check (step 4 above) detects when steps 1–2 a
 
 ## Terminal ergonomics (tmux)
 
-For readability when the lead is talking to you, make the lead the dominant pane: `tmux select-layout main-vertical` (lead = large left pane, teammates = small stacked right), or zoom the focused pane with prefix + `z`. In Warp the tmux prefix (Ctrl+b) is frequently intercepted — add `set -g mouse on` to `~/.tmux.conf` to click-focus and drag-resize panes, or use iTerm2 + `tmux -CC` for native panes. Teammate panes do not auto-minimize *or auto-close* when idle — `main-vertical` keeps them small during the run, and the **Teardown sequence** (under "Team dispatch") collapses them back to the lead alone at run end. A pane left open after the lead is done means teardown did not run; it is a bug, not the resting state.
+For readability when the lead is talking to you, make the lead the dominant pane: `tmux select-layout main-vertical` (lead = large left pane, teammates = small stacked right), or zoom the focused pane with prefix + `z`. In Warp the tmux prefix (Ctrl+b) is frequently intercepted — add `set -g mouse on` to `~/.tmux.conf` to click-focus and drag-resize panes, or use iTerm2 + `tmux -CC` for native panes. Teammate panes do not auto-minimize — `main-vertical` keeps them small during the run. Cleanup is **automatic on session exit** (shared team directories at `~/.claude/teams/{team-name}/` are removed by the runtime). Orphaned tmux panes after an abrupt exit are a troubleshooting edge case only: `tmux kill-session -t <name>` recovers them.
 
 ## Team dispatch
 
-The `.claude-plugin/teams/<name>.yaml` files are **agentille's own role manifests** — they tell the orchestrator which roles/counts make up a template. They are NOT Claude Code team config: Claude Code auto-generates and owns `~/.claude/teams/<name>/config.json` (session IDs, pane IDs) and overwrites any hand-authored version, so never pre-author that file.
+The `.claude-plugin/teams/<name>.yaml` files are **agentille's own role manifests** — they tell the orchestrator which roles/counts make up a template. They are NOT Claude Code team config; Claude Code manages shared team state in session-scoped directories and never requires a hand-authored config file.
 
-> **`--plan` halts here.** If `--plan` is set, preview the resolved template's roster + the `~4×` cost in the Mission Brief and **STOP** — do not run `TeamCreate` or spawn anyone. The user approves the shape first. See `SKILL.md` → "Run modifier: `--plan`".
+> **`--plan` halts here.** If `--plan` is set, preview the resolved template's roster + the `~4×` cost in the Mission Brief and **STOP** — do not spawn anyone. The user approves the shape first. See `SKILL.md` → "Run modifier: `--plan`".
 
-You (the orchestrator) are the **team lead**. Given a resolved template:
+You (the orchestrator) are the **team lead**. A team forms the moment you spawn the first teammate — no prior setup step is needed. Given a resolved template:
 
 1. **Record the run start** (mode, team name, teammate count, verb, start timestamp) so you can write the shipped-log line at the end. Keep it in your own context — there is no log hook.
 
-2. **Create the team** with `TeamCreate` (use the template name).
-
-3. **Spawn each teammate** with the `Agent` tool, into that team:
+2. **Spawn each teammate** directly with the `Agent` tool:
    - `subagent_type` = the **namespaced** agent def, e.g. `agentille:agentille-executor` (NOT bare `agentille-executor` — that resolves to nothing).
-   - `team_name` = the team you just created; `run_in_background: true` so teammates run concurrently.
-   - Spawn `count` instances per role. Give each a distinct `name` you can reference (e.g. `exec-1`, `exec-2`).
-   - Prompt = the user's task + the profile context block + which slice of the work this teammate owns. **Assign disjoint file sets** — two teammates editing the same file overwrite each other. Implementation teammates should each take their own git worktree (the executor does this when `isolated: true`, branching off the current branch) so they can't collide even by accident.
+   - `run_in_background: true` so teammates run concurrently.
+   - Give each a distinct `name` you can reference (e.g. `exec-1`, `exec-2`).
+   - **`team_name` is deprecated** — the field is accepted but ignored by the runtime; the team name is session-derived (`session-` + first 8 chars of session ID). Do not set or rely on it.
+   - Spawn `count` instances per role. Prompt = the user's task + the profile context block + which slice of the work this teammate owns. **Assign disjoint file sets** — two teammates editing the same file overwrite each other. Implementation teammates should each take their own git worktree (the executor does this when `isolated: true`, branching off the current branch) so they can't collide even by accident.
    - Give every executor teammate a `checkpoint:` path (`~/.agentille/state/run-<id>/checkpoint-<name>.md`) — it checkpoints at committable boundaries and self-reports context pressure so you can rotate it (see "Context rotation" below).
    - If the template marks `require-plan-approval: true`, tell the teammate to plan first in read-only mode and wait for your approval before implementing; you approve/reject as lead.
+   - **Agent-def loading note:** teammate agents honor the def's `tools` and `model` frontmatter; the body is appended to the system prompt. `skills` and `mcpServers` frontmatter are NOT applied to a teammate — but the teammate still loads skills from user/project settings, so agentille's skill-budget approach (below) remains valid.
 
-4. **Coordinate.** **The lead writes zero implementation code in team mode — see `SKILL.md` → "Hard rules".** Teammates message you automatically when they go idle. Use the shared task list (`TaskCreate` / `TaskList`) for dependencies. Wait for teammates; if one is genuinely stuck, steer or respawn it — never implement the work yourself. For build→review overlap, wire the scoped peer channel below (**Pipelined review**) rather than routing every finished piece through yourself.
+3. **Coordinate.** **The lead writes zero implementation code in team mode — see `SKILL.md` → "Hard rules".** Teammates message you automatically when they go idle. Use the shared task list (`TaskCreate` / `TaskList`) for dependencies. Wait for teammates; if one is genuinely stuck, steer or respawn it — never implement the work yourself. For build→review overlap, wire the scoped peer channel below (**Pipelined review**) rather than routing every finished piece through yourself.
 
-5. **Synthesize + tear down.** When all teammates finish, synthesize the final response, append the shipped-log line (see SKILL.md "Shipped log"), then run the **Teardown sequence** below. A teammate must never run cleanup — its team context may not resolve. Teardown is **mandatory and runs before you declare the task done**: leaving live teammate sessions idling in their panes is the single most common "is it actually finished?" confusion (the lead is done but N panes sit open, some mid-`forging`, some at a permissions prompt). The run is not over until the panes are collapsed back to the lead alone.
-
-### Teardown — collapse back to a single pane (mandatory at run end)
-
-Teammates **never self-terminate** — an idle teammate stays alive in its pane waiting for more messages, and `TeamDelete` alone does **not** close tmux panes (orphaned panes are a documented Claude Code gotcha). So the lead must drive teardown explicitly, in this order:
-
-1. **Capture pane IDs first — before anything is deleted.** Read `~/.claude/teams/<team>/config.json` and collect every `members[].tmuxPaneId` that is non-empty and is **not** the lead's (the lead's own pane is the one running this session — its entry has an empty `tmuxPaneId`, and at minimum never kill `$TMUX_PANE`). `TeamDelete` removes this file, so you cannot read the pane IDs afterward. If the file is unreadable or every `tmuxPaneId` is empty, there are no panes to collapse (in-process mode) — skip to step 5 silently.
-
-2. **Shut all teammates down in parallel.** Send the shutdown message (`SendMessage` "finish up and shut down") to **every** teammate without waiting between sends — dispatch all of them first, then wait for all to confirm idle/exit. This turns O(N) sequential shutdown into O(1)+wait-for-slowest. `TeamDelete` *fails if any teammate is still running*, so all must confirm before moving on. (Guards: never kill `$TMUX_PANE` or the empty-paneId lead entry; skip silently for in-process teammates with no pane to shut.)
-
-3. **Delete the team** with `TeamDelete` once every teammate is down. This releases the shared team resources.
-
-4. **Collapse the panes.** Only when inside tmux (`$TMUX` is set). For each pane ID captured in step 1 that is still alive, `tmux kill-pane -t <id>`. Do **not** use `tmux kill-session` — in split-pane mode the teammates are panes in the lead's *own* session, so killing the session kills the lead. Target panes surgically by ID, never the session. After the kills, optionally `tmux select-layout` or zoom so the lead fills the window. Each `kill-pane` is independent — a failure on one (already-dead pane) is fine; never let a tmux hiccup block the final summary.
-
-5. **Then declare done** and return the final summary. The Debrief (see `display.md`) should reflect the collapse — e.g. `panes: collapsed to lead` — so the user has positive confirmation the team is gone, not just guessing from a quiet screen.
-
-**Guard rails:** wrap the whole sequence so it never blocks the user — if a teammate won't shut down, surface it ("teammate `<name>` didn't shut down cleanly; close its pane manually") rather than hanging. Skip the entire tmux portion silently in in-process mode (no `$TMUX`, empty pane IDs). Never run `tmux kill-pane` against `$TMUX_PANE` or the empty-paneId lead entry.
-
-**Reclaiming a pane mid-run (optional, not the default).** Do **not** blanket-close teammates the moment they go idle — an idle teammate is usually still needed (a later message from the lead, pipelined review, a respawn). Only when a teammate's slice is **fully merged, has a `PASS`, and has no remaining dependent work** may the lead opportunistically shut it down and `kill-pane` its pane early to reclaim space. When in doubt, leave it until end-of-run teardown. This is "reclaim when truly finished," never "close on idle." (A `TeammateIdle` hook that kills panes is the wrong tool for this — it fires on *every* idle, including a teammate parked waiting for the lead, so it would tear down workers you still intend to use.) The one other sanctioned mid-run shutdown is **Context rotation** (below) — a teammate that has checkpointed out is "truly finished" by definition.
+4. **Synthesize + shut down.** When all teammates finish, synthesize the final response, append the shipped-log line (see SKILL.md "Shipped log"), then **ask each teammate to shut down by name** (send `"finish up and shut down"` via `SendMessage`). Shared team directories (`~/.claude/teams/{session-name}/`) clean up automatically when the session exits — no manual deletion required. If a tmux pane persists after the session ends (abrupt exit only), `tmux kill-pane -t <id>` or `tmux kill-session` is the recovery; it is a troubleshooting edge case, not normal teardown.
 
 ### Skill budget — capability without token blowup
 
-A teammate loads skills from the user's/project's settings exactly like a normal session — its agent-def `skills` frontmatter is ignored when it runs as a teammate (Anthropic's agent-teams doc). So a teammate executor **can** invoke installed UI-build skills (`impeccable`, `ui-ux-pro-max`, `frontend-design`) on its slice — but if every teammate auto-reaches for heavy skills, the `~4×` team tax balloons further. So the lead **scopes each teammate's skill use in its spawn prompt**:
+A teammate loads skills from the user's/project's settings exactly like a normal session — its agent-def `skills` frontmatter is ignored when it runs as a teammate (see "Agent-def loading note" above). So a teammate executor **can** invoke installed UI-build skills (`impeccable`, `ui-ux-pro-max`, `frontend-design`) on its slice — but if every teammate auto-reaches for heavy skills, the `~4×` team tax balloons further. So the lead **scopes each teammate's skill use in its spawn prompt**:
 
 - **UI-slice executor** → *"You may use `ui-ux-pro-max` and `impeccable` for this frontend slice; do not load other skills."*
 - **Backend / non-UI executor** → *"Do not load UI-build skills."*
@@ -162,13 +147,15 @@ CONTEXT <name> | high | checkpoint <path> | done <n>/<m> | remaining: <one line>
 On receiving it, the lead rotates:
 
 1. **Confirm the handoff state.** The protocol's precondition for pinging is that the teammate already finished its in-flight atomic step, committed, and updated its checkpoint — so there is nothing to wait for.
-2. **Shut the teammate down** and reclaim its pane (see "Reclaiming a pane mid-run" — a rotated-out teammate is truly finished).
+2. **Shut the teammate down** by sending `"finish up and shut down"` and wait for acknowledgment. Reclaim its pane if applicable (see below).
 3. **Spawn a successor** — same role, suffixed name (`exec-1` → `exec-1b`) — with: the SAME context-pack slice, the SAME checkpoint path, and the instruction *"Resume from the checkpoint + `git log` on branch `agt/<slug>`; trust them — do NOT re-read or redo completed work."* The successor reuses the existing worktree and branch and occupies the same slot against the 3-parallel cap.
 4. The rotation is invisible to the rest of the run — `READY` handoffs, review, and consolidation proceed as if it were one executor.
 
 Why rotation, not `/compact`: a teammate cannot invoke CLI commands on itself, and compaction is lossy summarization at an uncontrolled moment. Rotation through a checkpoint is deterministic — the durable state lives in git + the checkpoint file, not the conversation — and a successor starts with a near-empty window instead of a summarized one. The same protocol doubles as crash recovery: a teammate that dies mid-run gets a successor seeded the same way.
 
 **Lead-side hygiene.** The lead's own window fills too — it receives every report. Keep teammate traffic to the structured handoffs (`READY` / `REVIEW` / `CONTEXT`), persist consolidated run state to the run directory instead of holding it in-window, and never pull a teammate's diff into your own context — you read verdicts, not patches.
+
+**Reclaiming a pane mid-run (optional, not the default).** When running in tmux (`$TMUX` is set) and a teammate's slice is **fully merged, has a `PASS`, and has no remaining dependent work**, ask the teammate to shut down and collapse its pane via `tmux kill-pane -t <id>` to reclaim space. Do **not** blanket-close teammates the moment they go idle — an idle teammate is usually still needed. When in doubt, leave it until run end. Never kill `$TMUX_PANE` (the lead's own pane). Only applicable in tmux; skip silently in in-process mode.
 
 ### Pipelined review (overlap phases)
 
@@ -215,6 +202,19 @@ For `incident-team`, override the executor prompts with adversarial framing. Gen
 The lead picks the surviving hypothesis after the debate.
 
 Once the surviving hypothesis lands a fix, gate it like any other change: dispatch a one-shot **code-reviewer subagent** on the fix diff (tiered model per `model-routing.md`). The incident template carries no reviewer teammate, but a fix never ships unreviewed — this mirrors the subagent-mode rule (`roster.md` → debug: promote to bugfix flow once a fix is applied).
+
+## Teardown
+
+> **This section exists to satisfy cross-refs from `display.md` and `SKILL.md`.** The old manual teardown sequence (explicit team deletion + pane capture loop) no longer applies — see "Team dispatch" step 4 above for the current procedure.
+
+In the current API, teardown is streamlined:
+
+1. Send `"finish up and shut down"` via `SendMessage` to each teammate (in parallel — dispatch all, then wait for acknowledgments).
+2. Shared team state (`~/.claude/teams/{session-name}/`) cleans up automatically when the session exits. No team deletion API call; no manual file deletion.
+3. If running in tmux and panes remain after all teammates acknowledge shutdown, `tmux kill-pane -t <id>` collapses them. Target panes surgically — never `$TMUX_PANE` (the lead's pane), never `tmux kill-session`.
+4. **Declare done** and return the final summary. The Debrief `team:` row (see `display.md`) should confirm shutdown — e.g. `team: ✓ 3 teammates shut down · panes collapsed to lead`.
+
+Guard rails: if a teammate won't shut down, surface it (`team: ⚠ exec-2 didn't shut down cleanly — close its pane manually`) rather than hanging. Skip tmux steps silently in in-process mode (no `$TMUX`). A teammate must never run cleanup — its team context may not resolve.
 
 ## Failure → degrade
 

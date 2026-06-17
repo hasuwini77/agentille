@@ -71,7 +71,7 @@ for f in agents/agentille-*.md; do
   if [ "$name" = "$stem" ]; then pass "$f: name matches filename"; else fail "$f: name '$name' != filename stem '$stem'"; fi
   if [ -z "$model" ]; then
     fail "$f: no 'model:' in frontmatter"
-  elif [[ "$model" =~ ^(claude-(opus|sonnet|haiku|fable)-[0-9]|opus|sonnet|haiku|fable) ]]; then
+  elif [[ "$model" =~ ^(claude-(opus|sonnet|haiku)-[0-9]|opus|sonnet|haiku) ]]; then
     pass "$f: model '$model'"
   else
     warn "$f: model '$model' is not a recognized Claude model id/alias"
@@ -160,7 +160,7 @@ extract_routing() { # $1 = file, $2 = heading regex → "role<TAB>tier-or-?" lin
       if (role=="role" || role ~ /^-+$/) next
       cnt=0; tokval="?"; delete seen
       rest=def
-      while (match(rest, /opus|sonnet|haiku|fable|tiered/)) {
+      while (match(rest, /opus|sonnet|haiku|tiered/)) {
         tok=substr(rest, RSTART, RLENGTH)
         if (!(tok in seen)) { seen[tok]=1; cnt++; tokval=tok }
         rest=substr(rest, RSTART+RLENGTH)

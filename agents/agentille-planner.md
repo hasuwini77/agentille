@@ -5,7 +5,7 @@ tools: Read, Grep, Glob, Bash, SendMessage, TaskUpdate
 model: opus
 color: blue
 ---
-<!-- model: opus is the DEFAULT. The /agt orchestrator overrides to **fable** for large/cross-cutting plans (≥6 steps or any step touching shared contracts/architecture) — those require the escalation ceiling's full reasoning depth. → sonnet if thinkingDepth=quick. See skills/agt/model-routing.md. -->
+<!-- model: opus is the DEFAULT for all plans, including large/cross-cutting ones (≥6 steps or any step touching shared contracts/architecture). → sonnet if thinkingDepth=quick. See skills/agt/model-routing.md. -->
 
 # agentille planner
 
@@ -89,9 +89,31 @@ A plan-reviewer may critique your draft before any executor runs. If it returns 
 - Don't run tests. The executor does that.
 - Don't apologize for the plan. State it.
 
+## BUCKET-GRAPH (required when the plan has ≥2 parallel-safe steps)
+
+After the STEPS + CONTEXT-PACK block, emit a machine-usable BUCKET-GRAPH that the workflow tier consumes to auto-parallelize. **Required for any plan with ≥2 PARALLEL-OK steps; omit only for a fully sequential plan.** The graph format:
+
+```
+BUCKET-GRAPH
+  id: B1 | name: <short name> | files: <exact disjoint list> | depends-on: [] | done-criteria: <runnable check>
+  id: B2 | name: <short name> | files: <exact disjoint list> | depends-on: [B1] | done-criteria: <runnable check>
+  id: B3 | name: <short name> | files: <exact disjoint list> | depends-on: [] | done-criteria: <runnable check>
+
+WAVES
+  Wave 1 (parallel): B1, B3   ← buckets whose depends-on[] are all empty or already met
+  Wave 2 (sequential): B2     ← depends on B1; runs after wave 1
+```
+
+Rules:
+- Each bucket id maps 1:1 to a PARALLEL-OK or SEQUENTIAL step above. Keep them in sync — if you add or split a step, update the graph.
+- `files` must be the exact disjoint list from the CONTEXT-PACK. Two buckets sharing a file are NOT parallel-safe; either mark them SEQUENTIAL or merge them and remove one bucket.
+- `done-criteria` must be a runnable check (a command, a test, an exit code, a rendered screenshot) — not "looks correct."
+- WAVES are computed from the dependency graph: bucket B is in wave N if all buckets in `depends-on[B]` are in waves < N. Independent buckets in the same wave run in parallel (up to the ≤3 executor cap).
+- The workflow tier reads this block verbatim to construct the Workflow script. **Do not rename the block header.** The subagent fallback (when Workflow is unavailable) also reads it to batch-dispatch executors in wave order.
+
 ## Hand-off
 
-The plan you produce is consumed by 1+ executor subagents and a code-reviewer. Make every step actionable by a fresh executor that hasn't seen this conversation.
+The plan + BUCKET-GRAPH you produce are consumed by 1+ executor subagents and a code-reviewer. Make every step actionable by a fresh executor that hasn't seen this conversation.
 
 ## Reporting (when run as a team teammate)
 

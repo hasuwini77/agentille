@@ -2,6 +2,17 @@
 
 All notable changes to agentille are documented here.
 
+## [1.29.0] — 2026-06-23
+
+### Added
+
+- **Opt-in cockpit event emitter (`scripts/cockpit-emit.sh`).** A flag-gated observability seam: when `AGENTILLE_COCKPIT=1` (or `profile.cockpit.enabled`) is set, the display layer appends one JSON line per run moment (`run_start` / `phase` / `fanout` / `worker` / `verdict` / `debrief` / `run_end`) to `~/.agentille/cockpit/runs/<run-id>.jsonl`, which a separate read-only cockpit dashboard can tail. The CLI is **fail-silent** — it sanitizes the run id, creates the log dir `0700` / files `0600`, swallows every write error, and always exits 0, so a misconfigured or broken emit can never derail an `/agt` run. **Off by default**; when the flag is unset the display layer emits nothing.
+- **`profile.cockpit.enabled` flag** documented in the init profile schema, alongside the `AGENTILLE_COCKPIT` environment toggle.
+
+### Rationale
+
+Observability for `/agt` runs without coupling the orchestrator to any viewer: the emitter is a one-way, append-only seam that writes a stable event log other tools can consume. It is strictly additive and gated off by default, so it changes nothing for users who don't opt in.
+
 ## [1.28.0] — 2026-06-17
 
 ### Added

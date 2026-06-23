@@ -18,6 +18,7 @@ esac
 
 dir="${HOME}/.agentille/cockpit/runs"
 mkdir -p "$dir" 2>/dev/null || exit 0
+chmod 700 "$dir" 2>/dev/null
 chmod 700 "${HOME}/.agentille/cockpit" 2>/dev/null
 file="${dir}/${run}.jsonl"
 [ -e "$file" ] || { (umask 077; : >> "$file") 2>/dev/null || exit 0; }

@@ -29,11 +29,20 @@ check() { if [ "$1" = "$2" ]; then echo "PASS: $3"; else echo "FAIL: $3 (got '$1
   TH=$(mktemp -d)
   HOME="$TH" bash "$SCRIPT" --run '../evil' <<< '{"seq":0}'
   exit_code=$?
-  check "$exit_code" "0" "T3a: path-traversal exits 0"
-  # evil.jsonl must NOT exist anywhere under cockpit
-  evil_exists="no"
-  [ -f "$TH/.agentille/cockpit/evil.jsonl" ] && evil_exists="yes"
-  check "$evil_exists" "no" "T3b: path-traversal writes nothing"
+  check "$exit_code" "0" "T3a: path-traversal '../evil' exits 0"
+  # No .jsonl must exist ANYWHERE under $TH
+  jsonl_count=$(find "$TH" -name '*.jsonl' 2>/dev/null | wc -l)
+  check "$jsonl_count" "0" "T3b: path-traversal '../evil' writes no .jsonl anywhere"
+  rm -rf "$TH"
+}
+
+{
+  TH=$(mktemp -d)
+  HOME="$TH" bash "$SCRIPT" --run '../../evil' <<< '{"seq":0}'
+  exit_code=$?
+  check "$exit_code" "0" "T3c: path-traversal '../../evil' exits 0"
+  jsonl_count=$(find "$TH" -name '*.jsonl' 2>/dev/null | wc -l)
+  check "$jsonl_count" "0" "T3d: path-traversal '../../evil' writes no .jsonl anywhere"
   rm -rf "$TH"
 }
 
@@ -57,6 +66,15 @@ check() { if [ "$1" = "$2" ]; then echo "PASS: $3"; else echo "FAIL: $3 (got '$1
   HOME="$TH" bash "$SCRIPT" --run abc <<< '{"seq":1}'
   line_count=$(wc -l < "$TH/.agentille/cockpit/runs/abc.jsonl" 2>/dev/null)
   check "$line_count" "2" "T5: two emits yield 2 lines"
+  rm -rf "$TH"
+}
+
+# --- Test 6: runs/ dir is 700 ---
+{
+  TH=$(mktemp -d)
+  HOME="$TH" bash "$SCRIPT" --run abc <<< '{"seq":0}'
+  runs_perm=$(stat -c '%a' "$TH/.agentille/cockpit/runs" 2>/dev/null)
+  check "$runs_perm" "700" "T6: runs dir is 700"
   rm -rf "$TH"
 }
 

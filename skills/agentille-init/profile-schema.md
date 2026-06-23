@@ -273,3 +273,13 @@ Example:
 ```
 
 **Migration from v1.0/v1.1 profiles:** If `team` is absent, the orchestrator treats it as `{ enabled: false, defaultMode: "subagent", maxTeammates: 4, displayMode: "auto", dailySoftCap: 10 }`. Users without a `team` section see no behavior change — agentille keeps using subagent dispatch as in v1.0/v1.1.
+
+---
+
+## cockpit (optional)
+
+### `cockpit` (optional)
+- `cockpit.enabled` (boolean, default `false`) — when true, `/agt` emits a read-only event log to
+  `~/.agentille/cockpit/runs/<run-id>.jsonl` for the agentille-cockpit dashboard. The first time it is
+  enabled, agentille prints a one-time notice that runs are logged unredacted (0600, local only). Set
+  `cockpit.redact: true` to elide `task`/`summary` in the log.

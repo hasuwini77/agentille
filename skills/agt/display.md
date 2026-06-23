@@ -30,6 +30,35 @@ Three color channels, each used where it is strongest — all theme-independent,
 
 ---
 
+## Cockpit event emission (opt-in, presentation-only)
+
+When `AGENTILLE_COCKPIT=1` **or** the in-memory `profile.cockpit.enabled === true`, additionally
+emit one structured line at each moment you already render a rail signal. **When the flag is off, do
+nothing here** — do not call the emitter, do not create files. This is presentation-only and never
+gates the run.
+
+At each moment below, build the JSON object and pipe it to the emitter, incrementing a per-run `seq`
+starting at 0 (the emitter is fail-silent — if it errors, ignore it and continue):
+
+    echo '<json-line>' | "${CLAUDE_PLUGIN_ROOT}/scripts/cockpit-emit.sh" --run <run-id>
+
+Use the run id from the existing `~/.agentille/state/run-<id>/` run dir name. Emit:
+
+| Moment (already in the rail) | Event |
+|---|---|
+| Mission Brief drawn | `run_start` (include `version`, `schema:1`, `repo_root`, `task`, `mode`, `template`, `stations`) |
+| Each phase transition ping | `phase` (`station`, `status`) |
+| Fanout block drawn | `fanout` (`workers[]` with `id`, `slice`, `worktree`) |
+| Each worker landing / context ping | `worker` (`id`, `status`, optional `context_pct`) |
+| Each review verdict | `verdict` (`reviewer`, `result`, `findings`) |
+| Debrief | `debrief` (`summary`, `tokens`) |
+| Run completed | `run_end` (`outcome`) |
+
+The schema and field semantics are fixed by the agentille-cockpit spec. Emit valid JSON, one object per
+line. Drop-on-failure, exactly like the rail's own rule.
+
+---
+
 ## Pillar 1 — the TodoWrite spine
 
 The instant the mode + roster are resolved (and **before** the first `Agent` call), seed one todo per phase that will actually run. This is the user's live "steps left until we send the agents."

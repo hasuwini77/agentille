@@ -281,6 +281,85 @@ printf '\n=== 3. CONCURRENCY ===\n'
   rm -rf "$TH"
 }
 
+# ── Section 3b: Recon auto-done on run_start ─────────────────────────────────
+printf '\n=== 3b. RECON AUTO-DONE ===\n'
+
+# R1: stations includes "recon" → phase recon done emitted exactly once after run_start.
+{
+  TH=$(_mk_env "sess-recon" "run-recon")
+  RUN_ID="run-recon"
+  # The default _mk_env already includes "recon" in stations — fire any Pre to trigger run_start.
+  HOME="$TH" bash "$SCRIPT" <<< "$(_pre_payload "sess-recon")" 2>/dev/null
+  f="${TH}/.agentille/cockpit/runs/${RUN_ID}.jsonl"
+  recon_count=$(jq -r 'select(.type=="phase" and .station=="recon" and .status=="done") | .station' \
+    "$f" 2>/dev/null | wc -l | tr -d ' ')
+  _check "$recon_count" "1" "R1: phase recon done emitted exactly once when recon in stations"
+  rm -rf "$TH"
+}
+
+# R2: recon done is emitted right after run_start (lower seq than first worker event).
+{
+  TH=$(_mk_env "sess-recon-seq" "run-recon-seq")
+  RUN_ID="run-recon-seq"
+  HOME="$TH" bash "$SCRIPT" <<< "$(_pre_payload "sess-recon-seq")" 2>/dev/null
+  f="${TH}/.agentille/cockpit/runs/${RUN_ID}.jsonl"
+  run_start_seq=$(jq -r 'select(.type=="run_start") | .seq' "$f" 2>/dev/null | head -1)
+  recon_seq=$(jq -r 'select(.type=="phase" and .station=="recon") | .seq' "$f" 2>/dev/null | head -1)
+  worker_seq=$(jq -r 'select(.type=="worker") | .seq' "$f" 2>/dev/null | head -1)
+  if [ -n "$run_start_seq" ] && [ -n "$recon_seq" ] && [ -n "$worker_seq" ]; then
+    if [ "$recon_seq" -gt "$run_start_seq" ] && [ "$recon_seq" -lt "$worker_seq" ]; then
+      _pass "R2: recon phase seq is between run_start and first worker"
+    else
+      _fail "R2: recon phase seq ordering wrong (run_start=$run_start_seq recon=$recon_seq worker=$worker_seq)"
+    fi
+  else
+    _fail "R2: missing expected events (run_start=$run_start_seq recon=$recon_seq worker=$worker_seq)"
+  fi
+  rm -rf "$TH"
+}
+
+# R3: idempotent — second Pre does NOT emit a second recon done.
+{
+  TH=$(_mk_env "sess-recon-idem" "run-recon-idem")
+  RUN_ID="run-recon-idem"
+  HOME="$TH" bash "$SCRIPT" <<< "$(_pre_payload "sess-recon-idem")" 2>/dev/null
+  HOME="$TH" bash "$SCRIPT" <<< "$(_pre_payload "sess-recon-idem" "agentille:agentille-executor" "second dispatch")" 2>/dev/null
+  f="${TH}/.agentille/cockpit/runs/${RUN_ID}.jsonl"
+  recon_count=$(jq -r 'select(.type=="phase" and .station=="recon") | .station' \
+    "$f" 2>/dev/null | wc -l | tr -d ' ')
+  _check "$recon_count" "1" "R3: recon done idempotent — exactly one even after second Pre"
+  rm -rf "$TH"
+}
+
+# R4: stations WITHOUT "recon" → no phase recon event emitted.
+{
+  TH=$(mktemp -d)
+  SESSION_ID="sess-no-recon"
+  RUN_ID="run-no-recon"
+  SESSIONS="${TH}/.agentille/cockpit/sessions"
+  RUNS="${TH}/.agentille/cockpit/runs/${RUN_ID}"
+  mkdir -p "$SESSIONS" "$RUNS"
+  chmod 700 "$SESSIONS"
+  printf '%s' "$RUN_ID" > "${SESSIONS}/${SESSION_ID}"
+  # stations does NOT include "recon".
+  cat > "${RUNS}/cockpit-meta.json" <<'METAEOF'
+{
+  "task": "quick task",
+  "mode": "solo",
+  "template": "",
+  "stations": ["build","ship"],
+  "version": "1.30.0",
+  "schema": 1
+}
+METAEOF
+  HOME="$TH" bash "$SCRIPT" <<< "$(_pre_payload "$SESSION_ID")" 2>/dev/null
+  f="${TH}/.agentille/cockpit/runs/${RUN_ID}.jsonl"
+  recon_count=$(jq -r 'select(.type=="phase" and .station=="recon") | .station' \
+    "$f" 2>/dev/null | wc -l | tr -d ' ')
+  _check "$recon_count" "0" "R4: no phase recon event when recon not in stations"
+  rm -rf "$TH"
+}
+
 # ── Section 4: Terminal-invariant matrix ──────────────────────────────────────
 printf '\n=== 4. TERMINAL-INVARIANT MATRIX ===\n'
 

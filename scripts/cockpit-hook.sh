@@ -167,6 +167,23 @@ _maybe_run_start() {
     2>/dev/null) || json='{"type":"run_start"}'
   _emit_event "$json"
   touch "$flag" 2>/dev/null || true
+
+  # Recon completes in the main session before any Agent dispatch, so no hook
+  # ever fires for it. Emit phase recon done immediately after run_start —
+  # under the same lock, tied to the same .run_start_emitted guard — so the
+  # transit map doesn't show recon as permanently pending while plan is active.
+  # Only emit if "recon" is actually in this run's stations list.
+  local has_recon
+  has_recon=$(jq -r '(.stations // []) | map(select(. == "recon")) | length' \
+    "${RUN_DIR}/cockpit-meta.json" 2>/dev/null) || has_recon=0
+  if [ "${has_recon:-0}" -gt 0 ]; then
+    local recon_json
+    recon_json=$(jq -cn \
+      --arg type "phase" --arg station "recon" --arg status "done" \
+      '{type: $type, station: $station, status: $status}' 2>/dev/null) \
+      || recon_json='{"type":"phase","station":"recon","status":"done"}'
+    _emit_event "$recon_json"
+  fi
 }
 
 # ── dispatch per event type ───────────────────────────────────────────────────

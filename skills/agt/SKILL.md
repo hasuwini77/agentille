@@ -20,6 +20,29 @@ When this skill is invoked (`/agt <task>`):
 6. **Clarify before planning** — when `preTaskQuestioning` is `always` (or `ambiguous-only` and the task is genuinely ambiguous), resolve the plan-changing unknowns with the user *before* building the plan. See "Clarify before planning" below. Explore the codebase to answer what you can; ask only what actually forks the plan.
 7. **Plan, then review the plan** — for multi-step tasks the planner drafts the plan and the **plan-reviewer** critiques it (goal correctness, coverage, parallel-safety, real verification) before any executor runs. One REVISE round, then proceed. Skip the review on `thinkingDepth=quick`. **Skip-tier:** also skip even in team mode when the plan is ≤3 steps AND all steps are sequential (no parallel slices) — there is no parallel-safety risk to catch; see Step 3 model table and `model-routing.md` → "Default routing".
 8. **Persist the context pack, then dispatch in dependency order.** Create the run directory (`~/.agentille/state/run-<id>/`) on **every** non-solo run. When a planner ran, write its `CONTEXT-PACK` to a run-scoped file (`~/.agentille/state/run-<id>/context-pack.md`, via the Write tool) and dispatch each executor with **only its slice** — never the whole pack, never "re-explore the repo." Pass every executor a `checkpoint:` path inside the run dir (`checkpoint-<name>.md`) — executors checkpoint at committable boundaries and self-report context pressure via a `CONTEXT` ping; you rotate in a fresh successor seeded from checkpoint + slice (see `agents/agentille-executor.md` → "Context discipline" and `team-mode.md` → "Context rotation"). Parallelize independent steps only where the task contains genuinely disjoint file sets (≤3 executors at a time). See "Discover once, reuse everywhere" below. The run dir is scratch state, not an artifact — clean it up after the Debrief.
+
+   **Cockpit seam (mandatory, non-solo, cockpit-enabled runs only).** If `AGENTILLE_COCKPIT=1` (env) **or** `profile.cockpit.enabled === true`, perform the following **before** the first `Agent` dispatch — the hook fires on that dispatch, so the mapping and meta must already exist:
+
+   1. **Obtain `session_id`.** The `$CLAUDE_CODE_SESSION_ID` environment variable is set by Claude Code and is available to the orchestrator at runtime. Read it with a Bash tool call: `bash -c 'printf "%s" "$CLAUDE_CODE_SESSION_ID"'`. Validate it against `^[A-Za-z0-9_-]+$` (same allowlist as `cockpit-hook.sh`). If it is absent or fails validation, **skip the cockpit seam entirely for this run** — do not fabricate an id, do not emit anything, just continue without cockpit. Log a single `# cockpit: no valid session_id — seam skipped` comment in the Mission Brief's `#` comment line.
+
+   2. **Write the session→run mapping** via the Write tool: file path `~/.agentille/cockpit/sessions/<session_id>`, content = the run-id string (the `<id>` from the `run-<id>` dir name, without the `run-` prefix) followed by a newline. Example: if the run dir is `~/.agentille/state/run-a1b2c3/`, write `a1b2c3\n` to `~/.agentille/cockpit/sessions/<session_id>`. Create `~/.agentille/cockpit/sessions/` if absent (via Bash `mkdir -p`).
+
+   3. **Write `cockpit-meta.json`** via the Write tool to `~/.agentille/cockpit/runs/<run-id>/cockpit-meta.json` (create the runs dir with `mkdir -p` if absent). Content (JSON, one object):
+      ```json
+      {
+        "task": "<task, first line, ≤120 chars>",
+        "mode": "<resolved mode: solo|subagent|team|workflow>",
+        "template": "<team template name, or empty string>",
+        "stations": ["<station1>", "<station2>", ...],
+        "version": "<plugin version from skill base path>",
+        "schema": 1
+      }
+      ```
+      `stations` is the ordered list of stations that will run (same set drawn in the Mission Brief). `schema` is always the integer `1`.
+
+   4. **At Debrief** (step 9, after all agents finish): write the final `outcome` field into `cockpit-meta.json` using the Write tool — re-read the file, merge `{"outcome": "success|failed|unknown"}`, and write it back. Use `"success"` when all dispatched agents completed without a blocking finding; `"failed"` when a BLOCKER was unresolved; `"unknown"` on any other termination. **Do NOT emit `run_end` here. Do NOT remove the mapping here.** The Stop hook owns both.
+
+   If any write fails (Write tool error, path issue), skip silently — cockpit seam must never block or stall the run.
 9. **Stream progress via the Transit Rail** (see `display.md`) — *before* the first dispatch, seed the TodoWrite spine (one todo per resolved phase: the user's live "what's left until we send the agents"). Then render: a drawn-once Mission Brief rail, one thin colored-LED ping per phase transition, a fanout block when the build forks into parallel workers, diff-fence review verdicts, and a final Debrief. Presentation only — it never changes dispatch and never blocks the result; if a frame can't render, drop the field, not the run.
 10. **Append the shipped-log line** to `./docs/agentille-log.md` — you write it directly as the final step (see "Shipped log" below). There is no log hook.
 11. **Tear down a team before declaring done (team mode only).** The current agent-teams API does not have separate create/delete primitives — teammates are spawned directly via `Agent(run_in_background:true)` and the team's shared scratch dirs are cleaned up automatically when the session ends. To end a run, the lead asks each active teammate to shut down by name (via `SendMessage`). Orphaned tmux panes are an edge case — see `team-mode.md` → "Teardown" for the manual cleanup path. (No-op in subagent/solo/workflow mode.)

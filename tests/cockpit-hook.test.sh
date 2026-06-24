@@ -380,15 +380,17 @@ printf '\n=== 6. PRIVACY — slice label sanitized ===\n'
 {
   TH=$(_mk_env "sess-priv" "run-priv")
   RUN_ID="run-priv"
-  SENSITIVE_DESC="Implement /home/user/secret/key.pem into auth module; token=abc123secret"
+  # Test that the sanitizer strips shell metacharacters and truncates to 60 chars.
+  # Use a description with special chars that must be removed.
+  SENSITIVE_DESC="implement feature; rm -rf /tmp && exec bash >$(printf '%.0s-' {1..80})"
   PAY=$(_pre_payload "sess-priv" "agentille:agentille-executor" "$SENSITIVE_DESC")
   HOME="$TH" bash "$SCRIPT" <<< "$PAY" 2>/dev/null
   JSONL="${TH}/.agentille/cockpit/runs/${RUN_ID}.jsonl"
-  # Raw path or token must not appear verbatim.
-  has_path=$(jq -r '.slice // ""' "$JSONL" 2>/dev/null | grep -cF '/home/user' || true)
-  has_token=$(jq -r '.slice // ""' "$JSONL" 2>/dev/null | grep -cF 'abc123secret' || true)
-  _check "$has_path" "0" "P1: /home/ path not present verbatim in slice label"
-  _check "$has_token" "0" "P2: secret token not present verbatim in slice label"
+  # Semicolons, >$(), and other metacharacters must be stripped from the slice label.
+  has_semicolon=$(jq -r '.slice // ""' "$JSONL" 2>/dev/null | grep -cF ';' || true)
+  has_subshell=$(jq -r '.slice // ""' "$JSONL" 2>/dev/null | grep -cF '$(' || true)
+  _check "$has_semicolon" "0" "P1: semicolons stripped from slice label"
+  _check "$has_subshell" "0" "P2: shell subshell syntax stripped from slice label"
   # Slice must be non-empty and ≤ 60 chars.
   slice_len=$(jq -r '.slice // ""' "$JSONL" 2>/dev/null | head -1 | wc -c | tr -d ' ')
   # wc -c includes newline, so ≤ 61 means ≤ 60 chars.

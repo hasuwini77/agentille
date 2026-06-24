@@ -30,32 +30,23 @@ Three color channels, each used where it is strongest — all theme-independent,
 
 ---
 
-## Cockpit event emission (opt-in, presentation-only)
+## Cockpit event emission (opt-in, hook-driven)
 
-When `AGENTILLE_COCKPIT=1` **or** the in-memory `profile.cockpit.enabled === true`, additionally
-emit one structured line at each moment you already render a rail signal. **When the flag is off, do
-nothing here** — do not call the emitter, do not create files. This is presentation-only and never
-gates the run.
+Cockpit events are emitted **deterministically by `scripts/cockpit-hook.sh`** via Claude Code's
+`PreToolUse` / `PostToolUse` / `Stop` hooks — not by the orchestrator model. The orchestrator's
+only cockpit responsibilities are:
 
-At each moment below, build the JSON object and pipe it to the emitter, incrementing a per-run `seq`
-starting at 0 (the emitter is fail-silent — if it errors, ignore it and continue):
+1. **At run start** (when `cockpit.enabled`): write the session→run mapping file at
+   `~/.agentille/cockpit/sessions/<session_id>` → `<run-id>`, and write `cockpit-meta.json`
+   (fields: `task`, `mode`, `template`, `stations`, `version`, `schema:1`) into
+   `~/.agentille/cockpit/runs/<run-id>/` — both **before** the first `Agent` dispatch so the hook
+   has them when `PreToolUse` fires.
+2. **At Debrief**: write the final `outcome` value into `cockpit-meta.json`. The `Stop` hook reads
+   this to populate `run_end.outcome`; if it wins the race before Debrief writes, `run_end` carries
+   `"unknown"` (accepted — documented in `scripts/cockpit-hook.sh`).
 
-    echo '<json-line>' | "${CLAUDE_PLUGIN_ROOT}/scripts/cockpit-emit.sh" --run <run-id>
-
-Use the run id from the existing `~/.agentille/state/run-<id>/` run dir name. Emit:
-
-| Moment (already in the rail) | Event |
-|---|---|
-| Mission Brief drawn | `run_start` (include `version`, `schema:1`, `repo_root`, `task`, `mode`, `template`, `stations`) |
-| Each phase transition ping | `phase` (`station`, `status`) |
-| Fanout block drawn | `fanout` (`workers[]` with `id`, `slice`, `worktree`) |
-| Each worker landing / context ping | `worker` (`id`, `status`, optional `context_pct`) |
-| Each review verdict | `verdict` (`reviewer`, `result`, `findings`) |
-| Debrief | `debrief` (`summary`, `tokens`) |
-| Run completed | `run_end` (`outcome`) |
-
-The schema and field semantics are fixed by the agentille-cockpit spec. Emit valid JSON, one object per
-line. Drop-on-failure, exactly like the rail's own rule.
+Do **not** call `cockpit-emit.sh` directly from the skill. Do **not** emit `run_end` from the
+skill. The hook is the single source of truth for all cockpit events.
 
 ---
 

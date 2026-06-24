@@ -462,41 +462,118 @@ printf '\n=== 7. CROSS-REPO SCHEMA CHECK ===\n'
   outcome_val=$(jq -r 'select(.type=="run_end") | .outcome' "$OUTFILE" 2>/dev/null | head -1)
   _check "$outcome_val" "success" "S9: run_end.outcome == success (from cockpit-meta.json)"
 
-  # Cross-repo: try to pipe through cockpit reducer if available.
+  # Cross-repo: pipe the fixture through an inline port of the cockpit reducer
+  # (agentille-cockpit/web/src/lib/reduce.ts — logic inlined to avoid TS compilation).
+  # Requires node; tries the nvm v24 path then falls back to PATH.
+  # Locate node: try known nvm paths first (nvm uses lazy-loading so node may
+  # not be on PATH even when installed), then fall back to whatever is on PATH.
+  NODE_BIN=""
+  if [ -x "$HOME/.nvm/versions/node/v24.14.0/bin/node" ]; then
+    NODE_BIN="$HOME/.nvm/versions/node/v24.14.0/bin/node"
+  elif command -v node >/dev/null 2>&1; then
+    NODE_BIN=$(command -v node)
+  fi
+
   REDUCER="${COCKPIT_REPO}/web/src/lib/reduce.ts"
-  if [ -f "$REDUCER" ]; then
-    # Use a simple node script to run the reducer against the fixture.
+  if [ -z "$NODE_BIN" ]; then
+    printf 'SKIP: S10: node not found (tried nvm v24 and PATH) — set PATH or install node\n'
+  elif [ ! -f "$REDUCER" ]; then
+    printf 'SKIP: S10: agentille-cockpit repo not at %s — set COCKPIT_REPO env to run\n' "$COCKPIT_REPO"
+  else
+    # Inline port of reduce.ts (pure logic, no TS required).
+    # Feeds our hook-generated fixture through the reducer and asserts the
+    # resulting view-model is correct: task populated, mode populated,
+    # stations non-empty, at least one worker, at least one verdict, ended=true,
+    # outcome non-null, schema=1.
     REDUCE_TEST=$(cat <<'NODEEOF'
 const fs = require('fs');
-const path = require('path');
-const libDir = process.argv[2];
-const fixture = process.argv[3];
-// Dynamically require the compiled JS if available, or skip.
-const reducePath = path.join(libDir, '__snapshots__');
-// We check the fixture structure only (TypeScript compilation would be needed for full test).
-const lines = fs.readFileSync(fixture, 'utf8').trim().split('\n');
+// When invoked as: node -e "..." <fixture>, argv layout is:
+//   [0]=node [1]=<fixture> (no argv[2] with -e)
+const fixture = process.argv[1];
+
+// Inline port of agentille-cockpit/web/src/lib/reduce.ts
+function emptyRunVM(run) {
+  return { run, stations: [], stationStatus: {}, workers: {}, verdicts: [],
+           ended: false, lastSeq: -1, seen: new Set() };
+}
+function applyEvent(m, e) {
+  if (m.seen.has(e.seq)) return m;
+  m.seen.add(e.seq);
+  if (e.seq > m.lastSeq) m.lastSeq = e.seq;
+  if (typeof e.ts === 'number') {
+    if (m.startedTs === undefined || e.ts < m.startedTs) m.startedTs = e.ts;
+    if (m.lastTs === undefined || e.ts > m.lastTs) m.lastTs = e.ts;
+  }
+  const a = e;
+  switch (e.type) {
+    case 'run_start':
+      m.version = a.version; m.schema = a.schema;
+      m.task = a.task; m.mode = a.mode; m.template = a.template;
+      m.stations = Array.isArray(a.stations) ? a.stations : [];
+      break;
+    case 'phase':
+      if (typeof a.station === 'string') m.stationStatus[a.station] = a.status;
+      break;
+    case 'fanout':
+      for (const w of (a.workers ?? [])) m.workers[w.id] = { id: w.id, slice: w.slice };
+      break;
+    case 'worker': {
+      const w = m.workers[a.id] ?? { id: a.id };
+      if (typeof a.status === 'string') w.status = a.status;
+      if (typeof a.context_pct === 'number') w.contextPct = a.context_pct;
+      m.workers[a.id] = w;
+      break;
+    }
+    case 'verdict':
+      m.verdicts.push({ reviewer: a.reviewer, result: a.result, findings: a.findings ?? [] });
+      break;
+    case 'debrief':
+      if (typeof a.tokens === 'number') m.tokens = a.tokens;
+      break;
+    case 'run_end':
+      m.outcome = a.outcome; m.ended = true;
+      break;
+  }
+  return m;
+}
+
+const lines = fs.readFileSync(fixture, 'utf8').trim().split('\n').filter(Boolean);
 const events = lines.map(l => JSON.parse(l));
-const types = events.map(e => e.type);
-const hasRunStart = types.includes('run_start');
-const hasRunEnd = types.includes('run_end');
-if (hasRunStart && hasRunEnd) {
-  console.log('CROSS_REPO_OK');
-} else {
-  console.log('CROSS_REPO_MISSING_EVENTS: ' + JSON.stringify(types));
+const vm = emptyRunVM('hook-test-run');
+for (const e of events) applyEvent(vm, e);
+
+const errs = [];
+if (!vm.task) errs.push('task is empty');
+if (!vm.mode) errs.push('mode is empty');
+if (!Array.isArray(vm.stations) || vm.stations.length === 0) errs.push('stations is empty');
+if (Object.keys(vm.workers).length === 0) errs.push('no workers in vm');
+if (vm.verdicts.length === 0) errs.push('no verdicts in vm');
+if (!vm.ended) errs.push('vm.ended is false (run_end not processed)');
+if (!vm.outcome) errs.push('vm.outcome is falsy');
+if (vm.schema !== 1) errs.push('vm.schema !== 1 (schema compat broken)');
+if (vm.lastSeq < 0) errs.push('no events processed (lastSeq < 0)');
+
+if (errs.length > 0) {
+  console.log('REDUCER_FAIL: ' + errs.join('; '));
   process.exit(1);
+} else {
+  console.log('REDUCER_OK: task=' + JSON.stringify(vm.task)
+    + ' mode=' + vm.mode
+    + ' workers=' + Object.keys(vm.workers).length
+    + ' verdicts=' + vm.verdicts.length
+    + ' ended=' + vm.ended
+    + ' outcome=' + vm.outcome
+    + ' schema=' + vm.schema);
 }
 NODEEOF
 )
-    CROSS_RESULT=$(node -e "$REDUCE_TEST" "$(dirname "$REDUCER")" "$OUTFILE" 2>/dev/null || echo "CROSS_REPO_SKIP")
-    if [ "$CROSS_RESULT" = "CROSS_REPO_OK" ]; then
-      _pass "S10: cross-repo fixture structure valid (node check)"
-    elif [ "$CROSS_RESULT" = "CROSS_REPO_SKIP" ]; then
-      printf 'SKIP: S10: node not available for cross-repo check\n'
+    CROSS_RESULT=$("$NODE_BIN" -e "$REDUCE_TEST" "$OUTFILE" 2>&1)
+    NODE_EXIT=$?
+    if [ "$NODE_EXIT" -eq 0 ]; then
+      _pass "S10: cross-repo reducer (inline port) processed fixture correctly: $CROSS_RESULT"
     else
-      _fail "S10: cross-repo check failed: $CROSS_RESULT"
+      _fail "S10: cross-repo reducer check failed: $CROSS_RESULT"
     fi
-  else
-    printf 'SKIP: S10: agentille-cockpit repo not at %s — set COCKPIT_REPO env to run\n' "$COCKPIT_REPO"
   fi
 
   # Save the authoritative fixture for B's acceptance gate.

@@ -1,8 +1,8 @@
-{"type":"run_start","task":"test task","mode":"subagent","template":"","stations":["recon","plan","build","gate","ship"],"version":"1.29.0","schema":1,"seq":1,"ts":1782304411}
-{"type":"phase","station":"plan","status":"active","seq":2,"ts":1782304412}
-{"type":"phase","station":"plan","status":"done","seq":3,"ts":1782304413}
-{"type":"worker","id":"agentille:agentille-executor","status":"editing","slice":"implement auth","seq":4,"ts":1782304414}
-{"type":"worker","id":"agentille:agentille-executor","status":"done","seq":5,"ts":1782304415}
-{"type":"worker","id":"agentille:agentille-code-reviewer","status":"running","seq":6,"ts":1782304416}
-{"type":"verdict","reviewer":"agentille:agentille-code-reviewer","result":"pass","findings":[],"seq":7,"ts":1782304417}
-{"type":"run_end","outcome":"success","seq":8,"ts":1782304417}
+{"type":"run_start","task":"test task","mode":"subagent","template":"","stations":["recon","plan","build","gate","ship"],"version":"1.29.0","schema":1,"seq":1,"ts":1782304829}
+{"type":"phase","station":"plan","status":"active","seq":2,"ts":1782304829}
+{"type":"phase","station":"plan","status":"done","seq":3,"ts":1782304831}
+{"type":"worker","id":"w2210413230","agent":"agentille:agentille-executor","status":"editing","slice":"implement auth","seq":4,"ts":1782304832}
+{"type":"worker","id":"w1373240178","agent":"agentille:agentille-executor","status":"done","seq":5,"ts":1782304834}
+{"type":"worker","id":"w2322634189","agent":"agentille:agentille-code-reviewer","status":"running","seq":6,"ts":1782304835}
+{"type":"verdict","reviewer":"agentille:agentille-code-reviewer","result":"pass","findings":[],"seq":7,"ts":1782304836}
+{"type":"run_end","outcome":"success","seq":8,"ts":1782304837}

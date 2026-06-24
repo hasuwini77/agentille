@@ -54,22 +54,48 @@ METAEOF
 }
 
 # Build a hook payload JSON string.
+# Optional 4th arg = tool_use_id (distinct per Agent dispatch; omit for tests
+# that don't need parallel-worker correctness).
 _pre_payload() {
-  local session_id="$1" agent_type="${2:-agentille:agentille-executor}" desc="${3:-implement feature X}"
-  jq -cn \
-    --arg sid "$session_id" \
-    --arg at "$agent_type" \
-    --arg desc "$desc" \
-    '{hook_event_name:"PreToolUse",tool_name:"Agent",session_id:$sid,tool_input:{subagent_type:$at,description:$desc}}'
+  local session_id="$1" agent_type="${2:-agentille:agentille-executor}" \
+        desc="${3:-implement feature X}" tool_use_id="${4:-}"
+  if [ -n "$tool_use_id" ]; then
+    jq -cn \
+      --arg sid "$session_id" \
+      --arg at "$agent_type" \
+      --arg desc "$desc" \
+      --arg tuid "$tool_use_id" \
+      '{hook_event_name:"PreToolUse",tool_name:"Agent",session_id:$sid,
+        tool_use_id:$tuid,tool_input:{subagent_type:$at,description:$desc}}'
+  else
+    jq -cn \
+      --arg sid "$session_id" \
+      --arg at "$agent_type" \
+      --arg desc "$desc" \
+      '{hook_event_name:"PreToolUse",tool_name:"Agent",session_id:$sid,
+        tool_input:{subagent_type:$at,description:$desc}}'
+  fi
 }
 
 _post_payload() {
-  local session_id="$1" agent_type="${2:-agentille:agentille-executor}" output="${3:-done}"
-  jq -cn \
-    --arg sid "$session_id" \
-    --arg at "$agent_type" \
-    --arg out "$output" \
-    '{hook_event_name:"PostToolUse",tool_name:"Agent",session_id:$sid,tool_input:{subagent_type:$at},tool_response:$out}'
+  local session_id="$1" agent_type="${2:-agentille:agentille-executor}" \
+        output="${3:-done}" tool_use_id="${4:-}"
+  if [ -n "$tool_use_id" ]; then
+    jq -cn \
+      --arg sid "$session_id" \
+      --arg at "$agent_type" \
+      --arg out "$output" \
+      --arg tuid "$tool_use_id" \
+      '{hook_event_name:"PostToolUse",tool_name:"Agent",session_id:$sid,
+        tool_use_id:$tuid,tool_input:{subagent_type:$at},tool_response:$out}'
+  else
+    jq -cn \
+      --arg sid "$session_id" \
+      --arg at "$agent_type" \
+      --arg out "$output" \
+      '{hook_event_name:"PostToolUse",tool_name:"Agent",session_id:$sid,
+        tool_input:{subagent_type:$at},tool_response:$out}'
+  fi
 }
 
 _stop_payload() {
@@ -207,6 +233,50 @@ printf '\n=== 3. CONCURRENCY ===\n'
   # Just check they're all positive integers (ordering is best-effort under concurrency).
   bad_seq=$(jq -r '.seq' "$f" 2>/dev/null | grep -vE '^[0-9]+$' | wc -l | tr -d ' ')
   _check "$bad_seq" "0" "C3: all seqs are non-negative integers"
+
+  rm -rf "$TH"
+}
+
+# C4–C6: Three parallel executors with DISTINCT tool_use_ids → three DISTINCT
+# worker ids in the output, and a Post on one flips only that id.
+{
+  TH=$(_mk_env "sess-three-exec" "run-three-exec")
+  RUN_ID="run-three-exec"
+
+  # Three Pre events each with a distinct tool_use_id (simulating parallel dispatch).
+  HOME="$TH" bash "$SCRIPT" <<< "$(_pre_payload "sess-three-exec" "agentille:agentille-executor" "auth module"   "tuid-aaa")" 2>/dev/null
+  HOME="$TH" bash "$SCRIPT" <<< "$(_pre_payload "sess-three-exec" "agentille:agentille-executor" "api endpoints" "tuid-bbb")" 2>/dev/null
+  HOME="$TH" bash "$SCRIPT" <<< "$(_pre_payload "sess-three-exec" "agentille:agentille-executor" "ui components" "tuid-ccc")" 2>/dev/null
+
+  f="${TH}/.agentille/cockpit/runs/${RUN_ID}.jsonl"
+
+  # Assert 3 distinct worker ids.
+  worker_ids=$(jq -r 'select(.type=="worker") | .id' "$f" 2>/dev/null | sort -u)
+  worker_id_count=$(printf '%s\n' "$worker_ids" | grep -c 'tuid-' || true)
+  _check "$worker_id_count" "3" "C4: 3 parallel executors emit 3 distinct worker ids"
+
+  # Assert all 3 are tuid-based (not the collapsed agent-type string).
+  collapsed=$(jq -r 'select(.type=="worker") | .id' "$f" 2>/dev/null | grep -c 'agentille-executor' || true)
+  _check "$collapsed" "0" "C5: no worker id is the collapsed agent-type string"
+
+  # Assert the agent field still carries the human-readable agent type.
+  agent_field=$(jq -r 'select(.type=="worker") | .agent' "$f" 2>/dev/null | sort -u | head -1)
+  [ "$agent_field" = "agentille:agentille-executor" ] && \
+    _pass "C6: worker.agent field carries the agent type for display" || \
+    _fail "C6: worker.agent field missing or wrong (got: '$agent_field')"
+
+  # C7: Post on tuid-bbb flips only that worker to done; others stay at editing.
+  HOME="$TH" bash "$SCRIPT" <<< "$(_post_payload "sess-three-exec" "agentille:agentille-executor" "done" "tuid-bbb")" 2>/dev/null
+
+  # The most recent status for tuid-bbb must be "done".
+  bbb_status=$(jq -r 'select(.type=="worker" and .id=="tuid-bbb") | .status' "$f" 2>/dev/null | tail -1)
+  _check "$bbb_status" "done" "C7: Post with tuid-bbb flips only tuid-bbb to done"
+
+  # tuid-aaa and tuid-ccc must still be at "editing" (no Post for them).
+  aaa_status=$(jq -r 'select(.type=="worker" and .id=="tuid-aaa") | .status' "$f" 2>/dev/null | tail -1)
+  ccc_status=$(jq -r 'select(.type=="worker" and .id=="tuid-ccc") | .status' "$f" 2>/dev/null | tail -1)
+  _check "$aaa_status" "editing" "C8: tuid-aaa still editing (Post not sent)"
+  _check "$ccc_status" "editing" "C9: tuid-ccc still editing (Post not sent)"
 
   rm -rf "$TH"
 }

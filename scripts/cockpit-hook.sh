@@ -180,6 +180,22 @@ case "$EVENT" in
     AGENT_TYPE=$(_jq '.tool_input.subagent_type // .agent_type // empty')
     DESCRIPTION=$(_jq '.tool_input.description // empty')
 
+    # Unique worker id — must be distinct per Agent dispatch so ≥2 parallel
+    # executors each get their own card in the cockpit reducer (which keys
+    # workers by id). Fallback chain: tool_use_id → agent_id → hash.
+    TOOL_USE_ID=$(_jq '.tool_use_id // empty')
+    AGENT_ID=$(_jq '.agent_id // empty')
+    WORKER_ID=""
+    if _safe_id "$TOOL_USE_ID"; then
+      WORKER_ID="$TOOL_USE_ID"
+    elif _safe_id "$AGENT_ID"; then
+      WORKER_ID="$AGENT_ID"
+    else
+      # Last resort: stable short hash of agent_type + approximate timestamp.
+      WORKER_ID=$(printf '%s%s' "${AGENT_TYPE:-unknown}" "$(_now)" | \
+        cksum | awk '{printf "w%s", $1}')
+    fi
+
     # Coarse sanitized slice label — never the raw prompt.
     SLICE=""
     if [ -n "$DESCRIPTION" ]; then
@@ -202,15 +218,24 @@ case "$EVENT" in
             '{type: $type, station: $station, status: $status}' 2>/dev/null)
           ;;
         *agentille-executor*|*executor*)
-          local_json=$(jq -cn --arg type "worker" --arg id "$AGENT_TYPE" \
-            --arg status "editing" --arg slice "$SLICE" \
-            '{type: $type, id: $id, status: $status, slice: $slice}' 2>/dev/null)
+          local_json=$(jq -cn \
+            --arg type "worker" \
+            --arg id "$WORKER_ID" \
+            --arg agent "$AGENT_TYPE" \
+            --arg status "editing" \
+            --arg slice "$SLICE" \
+            '{type: $type, id: $id, agent: $agent, status: $status, slice: $slice}' \
+            2>/dev/null)
           ;;
         *)
-          # Unknown agent type — emit a generic worker event.
-          local_json=$(jq -cn --arg type "worker" \
-            --arg id "${AGENT_TYPE:-unknown}" --arg status "running" \
-            '{type: $type, id: $id, status: $status}' 2>/dev/null)
+          # Unknown agent type — emit a generic worker event with unique id.
+          local_json=$(jq -cn \
+            --arg type "worker" \
+            --arg id "$WORKER_ID" \
+            --arg agent "${AGENT_TYPE:-unknown}" \
+            --arg status "running" \
+            '{type: $type, id: $id, agent: $agent, status: $status}' \
+            2>/dev/null)
           ;;
       esac
 
@@ -227,6 +252,21 @@ case "$EVENT" in
     [ -f "$MAPPING_FILE" ] || _die "mapping gone — Stop already ran"
 
     AGENT_TYPE=$(_jq '.tool_input.subagent_type // .agent_type // empty')
+
+    # Resolve the same worker id as PreToolUse so the "done" event flips the
+    # correct card in the cockpit reducer. Same fallback chain: tool_use_id →
+    # agent_id → hash. This must match the id emitted on the Pre event.
+    TOOL_USE_ID=$(_jq '.tool_use_id // empty')
+    AGENT_ID=$(_jq '.agent_id // empty')
+    WORKER_ID=""
+    if _safe_id "$TOOL_USE_ID"; then
+      WORKER_ID="$TOOL_USE_ID"
+    elif _safe_id "$AGENT_ID"; then
+      WORKER_ID="$AGENT_ID"
+    else
+      WORKER_ID=$(printf '%s%s' "${AGENT_TYPE:-unknown}" "$(_now)" | \
+        cksum | awk '{printf "w%s", $1}')
+    fi
 
     # Detect error: tool_response may be a string or object; look for error signals.
     RESPONSE_RAW=$(_jq '.tool_response // empty')
@@ -266,9 +306,14 @@ case "$EVENT" in
             '{type: $type, station: $station, status: $status}' 2>/dev/null)
           ;;
         *agentille-executor*|*executor*)
-          local_json=$(jq -cn --arg type "worker" --arg id "$AGENT_TYPE" \
+          # Use WORKER_ID (tool_use_id-based) to flip exactly the card Pre opened.
+          local_json=$(jq -cn \
+            --arg type "worker" \
+            --arg id "$WORKER_ID" \
+            --arg agent "$AGENT_TYPE" \
             --arg status "done" \
-            '{type: $type, id: $id, status: $status}' 2>/dev/null)
+            '{type: $type, id: $id, agent: $agent, status: $status}' \
+            2>/dev/null)
           ;;
         *reviewer*)
           local_json=$(jq -cn --arg type "verdict" --arg reviewer "$AGENT_TYPE" \
@@ -276,9 +321,14 @@ case "$EVENT" in
             '{type: $type, reviewer: $reviewer, result: $result, findings: []}' 2>/dev/null)
           ;;
         *)
-          local_json=$(jq -cn --arg type "worker" \
-            --arg id "${AGENT_TYPE:-unknown}" --arg status "done" \
-            '{type: $type, id: $id, status: $status}' 2>/dev/null)
+          # Unknown type — use WORKER_ID so Pre/Post pair correctly.
+          local_json=$(jq -cn \
+            --arg type "worker" \
+            --arg id "$WORKER_ID" \
+            --arg agent "${AGENT_TYPE:-unknown}" \
+            --arg status "done" \
+            '{type: $type, id: $id, agent: $agent, status: $status}' \
+            2>/dev/null)
           ;;
       esac
 

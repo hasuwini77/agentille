@@ -2,6 +2,23 @@
 
 All notable changes to agentille are documented here.
 
+## [1.30.1] — 2026-06-25
+
+### Added
+
+- **`scripts/cockpit-launch.sh`** — launcher for the separate agentille-cockpit
+  companion viewer.  Resolves the cockpit directory via env var → sibling →
+  `~/.agentille/cockpit-app`; validates `src/main.ts` + `package.json` name;
+  enforces an honest trust model (origin mismatch is always an interactive hard
+  stop — `--yes` never silences it; non-TTY fails); installs with
+  `bun install --frozen-lockfile` and rebuilds the SPA only when stale (mtime
+  of sources vs `web/dist`; `--build` to force); pre-checks the port; runs
+  `bun src/main.ts` foreground (the server prints the `#t=` token URL).
+  Flags: `--build`, `--clone`, `--port N`, `--yes`, `--help`.
+- **README "Companion viewer: agentille-cockpit" section** — documents emission
+  toggle, launch flags, dir-resolution order, and security properties verified
+  in source (127.0.0.1 bind, per-launch token, read-only API).
+
 ## [1.30.0] — 2026-06-24
 
 ### Added

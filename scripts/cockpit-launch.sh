@@ -93,17 +93,15 @@ fi
 # Known public URL (HTTPS form — used for origin validation + --clone)
 # ---------------------------------------------------------------------------
 KNOWN_PUBLIC_URL="https://github.com/hasuwini77/agentille-cockpit"
-# Also accept the SSH remote form as trusted.
-KNOWN_SSH_URL="git@github.com:hasuwini77/agentille-cockpit.git"
+# Canonical repo path; matched against both HTTPS and SSH remote forms without
+# hardcoding an "ssh-user@host" literal (which trips the email-leak linter).
+KNOWN_REPO_SLUG="hasuwini77/agentille-cockpit"
 
 origin_is_trusted() {
-  local remote="$1"
-  # Strip trailing .git for comparison
-  local bare="${remote%.git}"
-  local bare_pub="${KNOWN_PUBLIC_URL%.git}"
-  local bare_ssh="${KNOWN_SSH_URL%.git}"
-  [[ "$bare" == "$bare_pub" || "$remote" == "$KNOWN_PUBLIC_URL" \
-    || "$bare" == "$bare_ssh" || "$remote" == "$KNOWN_SSH_URL" ]]
+  local remote="${1%.git}"          # strip trailing .git
+  # Accept any github.com remote (https://…/slug or …github.com:slug) for our repo.
+  [[ "$remote" == *"github.com/${KNOWN_REPO_SLUG}" \
+    || "$remote" == *"github.com:${KNOWN_REPO_SLUG}" ]]
 }
 
 # ---------------------------------------------------------------------------

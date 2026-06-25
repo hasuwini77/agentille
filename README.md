@@ -268,6 +268,64 @@ The recon line always shows the mode pick and reason. The `cost:` row states the
 
 ---
 
+## Companion viewer: agentille-cockpit
+
+[agentille-cockpit](https://github.com/hasuwini77/agentille-cockpit) is a separate, opt-in live viewer for `/agt` runs — a local web UI that streams planner/executor/reviewer progress in real time as the run unfolds.
+
+**Producer / consumer split.** agentille emits structured events via its hook scripts; the cockpit app consumes them over a local SSE stream.  The two are coupled only by the `schema:1` wire contract — no direct dependency, and the cockpit has no effect on the run itself.
+
+### Enable emission
+
+Cockpit event emission is **off by default**.  Turn it on one of two ways:
+
+```bash
+# Per-run (env var)
+AGENTILLE_COCKPIT=1 /agt "your task"
+
+# Always on (profile flag)
+# In ~/.agentille/profile.json:  "cockpit": { "enabled": true }
+```
+
+### Launch the viewer
+
+```bash
+# Quick start — point at an existing local clone (sibling dir or $AGENTILLE_COCKPIT_DIR)
+scripts/cockpit-launch.sh
+
+# First-time setup — clone the public repo to ~/.agentille/cockpit-app
+scripts/cockpit-launch.sh --clone
+
+# Custom port (default 7878)
+scripts/cockpit-launch.sh --port 7900
+
+# Force a full SPA rebuild (deps or config changed)
+scripts/cockpit-launch.sh --build
+```
+
+The server prints a `http://127.0.0.1:PORT/#t=…` URL on startup — open it in a browser, then run `/agt` in another terminal.
+
+### How the launcher resolves the cockpit directory
+
+First hit wins:
+
+1. `$AGENTILLE_COCKPIT_DIR` (explicit override)
+2. `<plugin-root>/../agentille-cockpit` (sibling of the agentille repo)
+3. `~/.agentille/cockpit-app` (the default `--clone` target)
+
+If none is found the launcher prints the clone command and stops.
+
+### Security (verified in source)
+
+The following properties are confirmed in the cockpit server source (`src/server.ts`, `src/api.ts`):
+
+- **Loopback-only bind.** The server binds to `127.0.0.1` — it is not reachable from the network.
+- **Per-launch bearer token.** A fresh 24-byte random token is generated at startup; every data route requires it (`Authorization: Bearer <token>`).  The token lives in the URL fragment and never reaches the server.
+- **Read-only API.** The server exposes only GET routes: run listing, per-run diff (stat + patch text), and an SSE stream.  There are no write routes into the runs directory.
+
+**Trust boundary.** `cockpit-launch.sh` builds and runs JavaScript from the resolved cockpit directory.  Point it only at code you trust.  `$AGENTILLE_COCKPIT_DIR` and the sibling-directory probe are user-controlled — this is opt-in trust, not a sandboxed environment.  `--clone` fetches and runs the public repository (the resolved commit SHA is shown before install; social trust, not signature-verified).
+
+---
+
 ## Requirements
 
 - Claude Code (any recent version for subagent mode; **2.1.32+** for team mode).

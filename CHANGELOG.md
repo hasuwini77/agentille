@@ -2,6 +2,73 @@
 
 All notable changes to agentille are documented here.
 
+## [1.30.0] — 2026-06-24
+
+### Added
+
+- **Deterministic cockpit emission via hooks (`scripts/cockpit-hook.sh`).** Replaces the
+  model-driven emit table in `display.md` with a Claude Code hook-driven approach.
+  `PreToolUse` / `PostToolUse` / `Stop` hooks on the `Agent` tool now emit cockpit events
+  deterministically — every planner, executor, and reviewer subagent is tracked without
+  relying on the orchestrator model to remember to call `cockpit-emit.sh`. The hook is
+  fail-silent (always exits 0), uses a single `flock` domain per run (seq atomicity, no
+  double `run_start`/`run_end`), and is gated behind a session→run mapping that `/agt`
+  writes before the first dispatch — non-`/agt` Agent calls are silently ignored.
+- **Session→run mapping protocol.** The agt skill writes
+  `~/.agentille/cockpit/sessions/<session_id>` → `<run-id>` and `cockpit-meta.json`
+  (task/mode/template/stations) before the first `Agent` dispatch. The Stop hook reads
+  this to emit `run_end` and removes the mapping. TTL sweep prunes orphan mappings older
+  than 24 h.
+- **`tests/cockpit-hook.test.sh`** — 46 tests covering: gating (no mapping → zero
+  output), `session_id` adversarial inputs (`../../evil`, empty, spaces, slashes,
+  unicode, null bytes), concurrency (5 parallel Pre hooks → unique seqs + exactly one
+  `run_start`), the terminal-invariant matrix (normal success, abort-before/after-Agent,
+  Post-vs-Stop race, Debrief-vs-Stop race, double-Stop), verdict parse failure →
+  `unknown`, privacy (slice label sanitized/truncated), and a cross-repo schema fixture
+  (`tests/fixtures/run-active.hook.jsonl`) proving the emitted events satisfy `schema:1`.
+- **`hooks/hooks.json` Agent matchers** for `PreToolUse`, `PostToolUse`, and `Stop`.
+
+### Changed
+
+- **`display.md` cockpit section** — removed the per-moment model-driven emit table;
+  replaced with a single paragraph describing the hook contract and the agt skill's two
+  responsibilities (write mapping + meta before first dispatch; write outcome at Debrief).
+
+### Rationale
+
+Model-driven emission is unreliable: a model can skip an emit on any tool call, and a
+planner→reviewer run that never triggered an executor would emit nothing at all. Hooks
+fire deterministically on every `Agent` call regardless of what the model does, closing
+the gap. The session→run mapping gates the hook so only `/agt` runs (that explicitly
+opt in by writing the mapping) produce cockpit events — foreign Agent calls silently
+no-op.
+
+### Schema compatibility matrix
+
+`schema:1` event types (`run_start` / `phase` / `fanout` / `worker` / `verdict` /
+`run_end`) are unchanged. Both pairing directions are safe:
+
+| agentille | agentille-cockpit | Behavior |
+|---|---|---|
+| ≥1.30.0 (hook) | any version | Hook emits `schema:1` events; cockpit renders normally |
+| 1.29.x (model-driven) | any version | Model emits `schema:1` events; cockpit renders normally (no double-emit — new hook needs the mapping the old skill never writes) |
+| ≥1.30.0 | old cockpit (pre-`schema:1`) | Unknown event types are forward-compatible; old cockpit ignores unknown fields |
+
+No cockpit package version bump required for this release.
+
+### Install / upgrade acceptance check
+
+After installing or upgrading to ≥1.30.0, verify the wiring is live:
+
+1. `hooks/hooks.json` must declare `PreToolUse`, `PostToolUse`, and `Stop` Agent matchers
+   pointing at `scripts/cockpit-hook.sh`.
+2. Set `AGENTILLE_COCKPIT=1` (or `profile.cockpit.enabled: true`) and run `/agt` on any
+   non-trivial task.
+3. Before the first Agent dispatch, confirm
+   `~/.agentille/cockpit/sessions/<session_id>` exists and contains a valid run-id.
+4. After the run completes, confirm `~/.agentille/cockpit/runs/<run-id>.jsonl` contains
+   at least one `run_start` and one `run_end` line with matching run metadata.
+
 ## [1.29.0] — 2026-06-23
 
 ### Added

@@ -124,7 +124,7 @@ You (the orchestrator) are the **team lead**. A team forms the moment you spawn 
 
 3. **Coordinate.** **The lead writes zero implementation code in team mode — see `SKILL.md` → "Hard rules".** Teammates message you automatically when they go idle. Use the shared task list (`TaskCreate` / `TaskList`) for dependencies. Wait for teammates; if one is genuinely stuck, steer or respawn it — never implement the work yourself. For build→review overlap, wire the scoped peer channel below (**Pipelined review**) rather than routing every finished piece through yourself.
 
-4. **Synthesize + shut down.** When all teammates finish, synthesize the final response, append the shipped-log line (see SKILL.md "Shipped log"), then **ask each teammate to shut down by name** (send `"finish up and shut down"` via `SendMessage`). Shared team directories (`~/.claude/teams/{session-name}/`) clean up automatically when the session exits — no manual deletion required. If a tmux pane persists after the session ends (abrupt exit only), `tmux kill-pane -t <id>` or `tmux kill-session` is the recovery; it is a troubleshooting edge case, not normal teardown.
+4. **Synthesize.** When all teammates finish, synthesize the final response and append the shipped-log line (see SKILL.md "Shipped log"). **Do not declare done yet** — teardown is mandatory (see "Teardown" below) and must complete before the run is closed.
 
 ### Skill budget — capability without token blowup
 
@@ -155,7 +155,7 @@ Why rotation, not `/compact`: a teammate cannot invoke CLI commands on itself, a
 
 **Lead-side hygiene.** The lead's own window fills too — it receives every report. Keep teammate traffic to the structured handoffs (`READY` / `REVIEW` / `CONTEXT`), persist consolidated run state to the run directory instead of holding it in-window, and never pull a teammate's diff into your own context — you read verdicts, not patches.
 
-**Reclaiming a pane mid-run (optional, not the default).** When running in tmux (`$TMUX` is set) and a teammate's slice is **fully merged, has a `PASS`, and has no remaining dependent work**, ask the teammate to shut down and collapse its pane via `tmux kill-pane -t <id>` to reclaim space. Do **not** blanket-close teammates the moment they go idle — an idle teammate is usually still needed. When in doubt, leave it until run end. Never kill `$TMUX_PANE` (the lead's own pane). Only applicable in tmux; skip silently in in-process mode.
+**Reclaiming a pane mid-run (optional, not the default).** This guidance applies **mid-run only** — at run end every pane is closed unconditionally (see "Teardown" below). Mid-run: when running in tmux (`$TMUX` is set) and a teammate's slice is **fully merged, has a `PASS`, and has no remaining dependent work**, ask the teammate to shut down and collapse its pane via `tmux kill-pane -t <id>` to reclaim space. Do **not** blanket-close teammates the moment they go idle mid-run — an idle teammate mid-run is usually still needed for a later step. When in doubt, leave it until run end and let teardown handle it. Never kill `$TMUX_PANE` (the lead's own pane). Only applicable in tmux; skip silently in in-process mode.
 
 ### Pipelined review (overlap phases)
 
@@ -205,16 +205,29 @@ Once the surviving hypothesis lands a fix, gate it like any other change: dispat
 
 ## Teardown
 
-> **This section exists to satisfy cross-refs from `display.md` and `SKILL.md`.** The old manual teardown sequence (explicit team deletion + pane capture loop) no longer applies — see "Team dispatch" step 4 above for the current procedure.
+> **Cross-ref target for `display.md` and `SKILL.md`.** Teardown is **mandatory and verified** — it is not advisory and it is not optional. The lead MUST complete this checklist before declaring the run done.
 
-In the current API, teardown is streamlined:
+**Mid-run vs run end — the critical distinction.**
+- **Mid-run:** an idle teammate may still be needed for a later step — the "leave it until run end" guidance in "Reclaiming a pane mid-run" above applies *here only*. Do not shut teammates down preemptively unless their slice is fully done and they have no remaining dependent work.
+- **At run end:** this changes completely. An idle or spinning teammate at run end is an **orphan**, not "still needed". Every spawned teammate — active, idle, or spinning — shuts down. No exceptions.
 
-1. Send `"finish up and shut down"` via `SendMessage` to each teammate (in parallel — dispatch all, then wait for acknowledgments).
-2. Shared team state (`~/.claude/teams/{session-name}/`) cleans up automatically when the session exits. No team deletion API call; no manual file deletion.
-3. If running in tmux and panes remain after all teammates acknowledge shutdown, `tmux kill-pane -t <id>` collapses them. Target panes surgically — never `$TMUX_PANE` (the lead's pane), never `tmux kill-session`.
-4. **Declare done** and return the final summary. The Debrief `team:` row (see `display.md`) should confirm shutdown — e.g. `team: ✓ 3 teammates shut down · panes collapsed to lead`.
+**Mandatory teardown checklist (run end only):**
 
-Guard rails: if a teammate won't shut down, surface it (`team: ⚠ exec-2 didn't shut down cleanly — close its pane manually`) rather than hanging. Skip tmux steps silently in in-process mode (no `$TMUX`). A teammate must never run cleanup — its team context may not resolve.
+1. **Shut down EVERY teammate spawned this run, by name** — not only the ones that happened to report finished. Send `"finish up and shut down"` via `SendMessage` to all of them (dispatch in parallel; wait for acknowledgments). The roster you recorded at spawn start (step 1 of "Team dispatch") is your authority — shut down every name on it.
+
+2. **Verify each shutdown.** Wait for an acknowledgment from each teammate. Do not assume a teammate that went quiet has shut down — silence is not confirmation. A teammate that does not acknowledge within a reasonable window is treated as still running.
+
+3. **Force-close any pane that persists after its shutdown request (tmux only).** If running in tmux (`$TMUX` is set): after all shutdown requests are dispatched and acknowledgments collected, list the team's panes and `tmux kill-pane -t <id>` any non-lead pane that still persists. A teammate still spinning after its shutdown request is an orphan — close its pane surgically. **Never kill `$TMUX_PANE`** (the lead's own pane). **Never `tmux kill-session`**. Skip this step silently in in-process mode (no `$TMUX`).
+
+4. **Record the teardown outcome in the Debrief `team:` row** (see `display.md` → "Frame 5"). This row is **required** in team mode — it is the proof teardown happened. Report the actual outcome:
+   - Clean: `team: ✓ 3 teammates shut down · panes collapsed to lead`
+   - Orphan force-closed: `team: ⚠ exec-2 was still spinning — force-closed its pane`
+   - Pane couldn't be closed: `team: ⚠ exec-2 pane left open — close manually`
+   Surface orphans; never hide them by omitting the row or reporting clean when it wasn't.
+
+5. **Declare done** and return the final summary only after the above steps complete.
+
+**Guard rails:** if a teammate is wedged and won't respond, force-close its pane if in tmux; report the orphan in the `team:` row and declare done — never hang indefinitely. A teammate must never run cleanup itself — its team context may not resolve. Shared team state (`~/.claude/teams/{session-name}/`) cleans up automatically when the session exits; no manual file deletion is needed.
 
 ## Failure → degrade
 

@@ -2,6 +2,35 @@
 
 All notable changes to agentille are documented here.
 
+## [1.30.2] — 2026-06-25
+
+### Fixed
+
+- **Team-mode teardown is now mandatory and verified, not advisory.** The lead was
+  sometimes leaving teammates running/spinning after a `/agt --team` run because the
+  mid-run "leave idle teammates, they're usually still needed" guidance was being
+  applied at run end too. Fixed by:
+  - Disambiguating lifecycle phases explicitly: mid-run guidance is now scoped to
+    mid-run; at run end every spawned teammate is an orphan to close, never "still
+    needed".
+  - Replacing the advisory teardown prose in `team-mode.md` with a deterministic
+    five-step checklist: (1) send shutdown to EVERY teammate by name, (2) verify each
+    acknowledgment, (3) force-close any pane still spinning in tmux via `tmux kill-pane`
+    (surgical — never `$TMUX_PANE`, never `kill-session`), (4) report the actual
+    teardown outcome in the required Debrief `team:` row, (5) then and only then declare
+    done.
+  - Tightening `SKILL.md` step 11 to match: teardown is mandatory, verified, and
+    includes tmux force-close for orphaned panes.
+  - Clarifying that the Debrief `team:` row is required in team mode and must surface
+    orphans rather than reporting clean when it wasn't.
+
+### Rationale
+
+Advisory teardown is indistinguishable from optional teardown in model behavior — the
+same rationalization that prevents a mid-run shutdown ("it might still be needed") is
+applied at run end, leaving orphan panes. Making teardown a deterministic checklist
+with explicit verification closes that loophole.
+
 ## [1.30.1] — 2026-06-25
 
 ### Added

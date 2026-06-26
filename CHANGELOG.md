@@ -2,6 +2,34 @@
 
 All notable changes to agentille are documented here.
 
+## [1.30.3] — 2026-06-26
+
+### Fixed
+
+- **Team-mode teardown no longer orphans agent processes.** The teardown checklist shut
+  teammates down via `SendMessage` and then "force-closed any pane that persists", but
+  three gaps let a lead leave live agent processes behind (each holding hundreds of MB of
+  RAM, sometimes respawning the team's tmux socket) — the agent panel keeps listing them
+  and a later graceful shutdown can no longer reach them:
+  - `tmux kill-server` was **not** forbidden (only `kill-session` was). `kill-server` is
+    the worst case — it orphans *every* agent process at once and tears down unrelated
+    teams/sessions sharing the server. Now explicitly banned alongside `kill-session`.
+  - The **order requirement was implicit.** Killing a teammate's pane or the server
+    *before* it acknowledges its shutdown orphans it: the process keeps running headless
+    and can no longer read its mailbox, so the shutdown is silently swallowed. Step 3 now
+    states the graceful `SendMessage` shutdown MUST complete first, and explains why.
+  - Verification was **pane-level, not process-level.** A pane vanishing is not proof the
+    agent exited — an orphan can outlive its pane. Step 2 now requires confirming the
+    session actually ended, and the guard rails warn against blind-killing orphaned PIDs
+    (unrelated live sessions share the same binary).
+
+### Rationale
+
+Surfaced by dogfooding a `/agt --team` run whose lead tore the team down with
+`tmux kill-server`; the agent processes survived headless and kept showing in the agent
+panel. `kill-server` closes panes but does not terminate the underlying sessions — the
+opposite of teardown. Graceful-shutdown-first + process-level verification is the fix.
+
 ## [1.30.2] — 2026-06-25
 
 ### Fixed

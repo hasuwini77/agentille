@@ -2,6 +2,30 @@
 
 All notable changes to agentille are documented here.
 
+## [1.30.4] — 2026-07-01
+
+### Changed
+
+- **Documented the model-alias tier system's zero-touch guarantee.** `model-routing.md`
+  now states explicitly that same-tier model releases require no repo changes — the
+  `opus` / `sonnet` / `haiku` aliases resolve to the newest model in each tier at
+  dispatch time. Prompted by verifying Sonnet 5 compatibility (below); recorded so a
+  future model launch doesn't trigger a needless hunt for stale pinned IDs.
+
+### Rationale
+
+- **Sonnet 5 compatibility verified — no functional change required.** With Sonnet 5
+  released, the three surfaces where a new same-tier model could break the plugin were
+  audited: (1) *dispatch* — all seven agent definitions and the routing table dispatch by
+  tier alias, not pinned IDs, so `sonnet` resolves to Sonnet 5 automatically; (2) *routing
+  rationale* — already version-agnostic ("the latest Sonnet"), no stale version pins
+  anywhere outside the historical CHANGELOG; (3) *reviewer prompts* — the code-, plan-,
+  and security-reviewers (which run on Sonnet in the small-diff / small-plan /
+  `thinkingDepth=quick` branches) are already coverage-forward, carrying none of the
+  conservative-reporting language that Sonnet 5's more-literal instruction-following would
+  over-honor to lower recall. All three clean; the alias refactor from v1.28.0 absorbs the
+  new tier exactly as designed.
+
 ## [1.30.3] — 2026-06-26
 
 ### Fixed

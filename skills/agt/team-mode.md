@@ -208,7 +208,7 @@ Once the surviving hypothesis lands a fix, gate it like any other change: dispat
 > **Cross-ref target for `display.md` and `SKILL.md`.** Teardown is **mandatory and verified** — it is not advisory and it is not optional. The lead MUST complete this checklist before declaring the run done.
 
 **Mid-run vs run end — the critical distinction.**
-- **Mid-run:** an idle teammate may still be needed for a later step — the "leave it until run end" guidance in "Reclaiming a pane mid-run" above applies *here only*. Do not shut teammates down preemptively unless their slice is fully done and they have no remaining dependent work.
+- **Mid-run:** an idle teammate may still be needed for a later step — the "leave it until run end" guidance in "Reclaiming a pane mid-run" above applies *here only*. Do not shut teammates down preemptively unless their slice is fully done and they have no remaining dependent work. The inverse is equally binding: once a teammate's slice IS fully consumed (PR merged/rejected, report absorbed) and nothing downstream needs it, shut it down **then** — promptly, not at a run-end sweep hours later. A finished teammate left idling shows a growing uptime timer in the swarm view that reads as a stuck run.
 - **At run end:** this changes completely. An idle or spinning teammate at run end is an **orphan**, not "still needed". Every spawned teammate — active, idle, or spinning — shuts down. No exceptions.
 
 **Mandatory teardown checklist (run end only):**

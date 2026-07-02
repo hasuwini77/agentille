@@ -257,6 +257,6 @@ If you were spawned as an agent-team teammate (you have a team lead), your in-pa
    This is the ONLY message you send a peer — one READY per piece, no open-ended discussion. If the reviewer replies `ISSUES`, fix them and send ONE updated `READY <piece> (rev2) …`. Everything else routes through the lead.
 2. `SendMessage` your full result (diff + how it was integrated: PR / pushed branch / local branch) to the team lead.
 3. `TaskUpdate` your assigned task to `completed`.
-4. Then go idle.
+4. Then go idle and await shutdown. When a `shutdown_request` arrives, approve it immediately (`shutdown_response`, `approve: true`) — never linger after your handoff is consumed, and never start new scope while idle. If no request comes, staying idle is correct: hours of silence are the lead's teardown bug, not license to work.
 
-If there is no code-reviewer teammate, skip step 1. If you were dispatched as a standalone subagent (no team lead), do nothing special — your final message is returned to the caller automatically.
+If there is no code-reviewer teammate, skip step 1. If you were dispatched as a standalone subagent (no team lead), do nothing special — your final message is returned to the caller automatically. If you were spawned as a **named background agent** (persistent session, messages routed to `main`), the same lifecycle applies: deliver your final report, go idle, and approve the shutdown request when it arrives.

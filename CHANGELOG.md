@@ -2,6 +2,28 @@
 
 All notable changes to agentille are documented here.
 
+## [1.30.5] — 2026-07-02
+
+### Fixed
+
+- **Background-spawned executors no longer idle indefinitely after their handoff is
+  consumed.** Teardown (SKILL.md rule 11) previously scoped itself to team mode and
+  declared subagent mode a no-op — but a *named background* `Agent` dispatch
+  materializes as a persistent session too, and it never exits on its own. The rule
+  now mandates a `shutdown_request` the moment any persistent spawn's handoff is
+  consumed (PR merged, branch integrated, or result rejected), with confirmation the
+  session actually ended. `team-mode.md`'s mid-run guidance gains the inverse
+  obligation (consumed slice → shut down *now*, not at a run-end sweep), and the
+  executor definition gains the matching lifecycle contract: go idle after the
+  handoff, approve `shutdown_request` immediately, never start new scope while idle.
+
+### Rationale
+
+- Observed in production use (2026-07-02): three executors finished and merged in
+  ~10 minutes each, then sat idle for 2–4 hours as swarm-view panes with growing
+  uptime timers. The user read "4h 12m" as a hung orchestration and concluded
+  agentille was broken. The work was fine; the lifecycle gap was real.
+
 ## [1.30.4] — 2026-07-01
 
 ### Changed

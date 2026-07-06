@@ -100,10 +100,10 @@ Rows #1–2 are a **force** (the user typed `--team`/`--mode team`). Run the inl
 |---|---|---|
 | planner | Opus | → Sonnet if `thinkingDepth=quick` (large/cross-cutting plans stay Opus) |
 | plan-reviewer | **Sonnet** | → **Opus** for a large/cross-cutting plan (≥6 steps or shared-contract/arch step); **skip** if `thinkingDepth=quick`; **also skip** for a ≤3-step fully sequential plan |
-| ui-prototyper | Opus | → Sonnet if `thinkingDepth=quick`; → Opus under `--fable` (no-op) |
+| ui-prototyper | Opus | → Sonnet if `thinkingDepth=quick`; → Fable under `--fable` |
 | executor | Sonnet | never up or down |
 | code-reviewer | **tiered** | **Sonnet** for a small diff (single file or ≤~150 LoC, no cross-cutting/security); **Opus** for a large/cross-cutting diff; → Sonnet if `thinkingDepth=quick` |
-| design-reviewer | Opus | never downgrade (savings come from viewport scope, not model); → Opus under `--fable` (no-op) |
+| design-reviewer | Opus | never downgrade (savings come from viewport scope, not model); → Fable under `--fable` |
 | security-reviewer | **Opus** | → Sonnet if `thinkingDepth=quick` |
 | classifier | heuristic, no LLM | Haiku only if every heuristic misses |
 | final-summary | Haiku | — |
@@ -117,15 +117,16 @@ Two review roles tier their model between Sonnet and Opus by the size of the wor
 - The point is to let the user approve the *shape and cost* before paying for the build — the cheapest guard against "it built the wrong thing." It pairs with any mode: `/agt --plan --team feature-team "<task>"` previews the team roster + ~4× cost without spawning the team.
 - On a task with no planner (solo/trivial), `--plan` degrades to one honest line — *"nothing to pre-plan — this is a single-step `<category>`; re-run without `--plan` to execute"* — and never spawns an executor.
 
-### Run modifier: `--fable` (deprecated — backward-compat alias for Opus ceiling)
+### Run modifier: `--fable` (Fable ceiling — explicit top-tier escalation)
 
-> **Deprecated.** The `fable` model is no longer available. `--fable` is **retained as a backward-compat alias** and may be removed in a future major release. New work should rely on the size/risk auto-escalation in `model-routing.md` — large/cross-cutting plans and diffs already escalate to Opus automatically.
+> Claude **Fable 5** is a live model tier above Opus (Claude Code model alias `fable`). It costs more than Opus, so it is **never part of default routing** — this flag is the only path to it, chosen per run by the user.
 
-`--fable` is **orthogonal to mode and `--plan`** — it doesn't change the roster or the stop point. With `--fable` present, the flag forces the **Opus ceiling** on all judgment-heavy roles this run: planner, ui-prototyper, design-reviewer, security-reviewer, and any size/risk-escalated code-reviewer or plan-reviewer. Executor stays Sonnet; classifier and final-summary stay Haiku — those are never upgraded.
+`--fable` is **orthogonal to mode and `--plan`** — it doesn't change the roster or the stop point. With `--fable` present, the flag forces the **Fable ceiling** on all judgment-heavy roles this run: planner, ui-prototyper, design-reviewer, security-reviewer, and any size/risk-escalated code-reviewer or plan-reviewer. Executor stays Sonnet; classifier and final-summary stay Haiku — those are never upgraded.
 
-- The flag resolves transparently to Opus; it never hard-fails. Note in the run log that `--fable` is deprecated.
-- Composes freely: `/agt --fable --plan "<task>"` previews the Opus-ceiling roster; `/agt --fable --team feature-team "<task>"` runs the full team at Opus depth.
-- See `model-routing.md` → "`--fable` — deprecated backward-compat alias" for details.
+- **Fallback:** on an older build where the `fable` alias doesn't resolve, a failed dispatch is re-dispatched **once** with `opus` and the downgrade is noted in the run log — never a hard fail.
+- `fable` appears only in dispatch-time model parameters, never in agent-def `model:` frontmatter (see `model-routing.md` → "Placement rule").
+- Composes freely: `/agt --fable --plan "<task>"` previews the Fable-ceiling roster; `/agt --fable --team feature-team "<task>"` runs the full team at Fable depth.
+- See `model-routing.md` → "`--fable` — Fable ceiling (explicit opt-in, top tier)" for details.
 
 ## Clarify before planning
 

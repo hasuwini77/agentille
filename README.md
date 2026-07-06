@@ -110,7 +110,7 @@ The two build layers don't overlap (aesthetics vs correctness), and a framework 
 | `/agt --team review-team "task"` | Force the audit team (code + design + security review) |
 | `/agt --team incident-team "task"` | Force the debug team (3 executors race competing theories) |
 | `/agt --mode subagent "task"` | Force subagent mode for one run |
-| `/agt --fable "task"` | Deprecated alias — forces Opus as the ceiling for all judgment-heavy roles this run (composes with `--team` and `--plan`); use auto-escalation instead |
+| `/agt --fable "task"` | Force the **Fable ceiling** — Claude Fable 5 (the tier above Opus) runs every judgment-heavy role this run (composes with `--team` and `--plan`); costs more than Opus, falls back to Opus on builds without the `fable` alias |
 
 Any `--team` overrides the auto-pick; if the work has no ≥2 disjoint slices, `/agt` flags it as overkill and asks whether to downgrade (see below).
 
@@ -197,12 +197,12 @@ Keep your repo on the **WSL filesystem** (`~/projects/…`), not `/mnt/c/…` �
 /agt --team review-team   "audit PR #42 before we merge"                                   # code + design + security, in parallel
 /agt --team incident-team "users get randomly logged out — find why"                       # race 3 competing theories
 /agt --plan "refactor the auth module into smaller files"                                  # preview plan + cost, then stop for your "go"
-/agt --fable "redesign the entire auth layer + migrate 12 services"                       # deprecated: forces Opus ceiling for all judgment-heavy roles
+/agt --fable "redesign the entire auth layer + migrate 12 services"                       # Fable 5 ceiling on all judgment-heavy roles (top tier, opt-in cost)
 ```
 
 **`--plan` (dry-run).** Stops after the plan + plan-review — before any executor or teammate spawns — so you approve the *shape and cost* first; a plain "go" then runs that exact plan. Pairs with any mode (`/agt --plan --team feature-team "…"` previews the team roster + ~4× cost without spawning). The cheapest guard against building the wrong thing.
 
-**`--fable` (deprecated — Opus ceiling alias).** Retained for backward compatibility. Forces **Opus** as the ceiling for all judgment-heavy roles this run — planner, security-reviewer, design-reviewer, ui-prototyper, and any size-triggered code-reviewer or plan-reviewer. Executor stays Sonnet; classifier and final-summary stay Haiku. Composes with `--plan` and `--team`. New work should rely on the automatic size/risk escalation instead — large/cross-cutting diffs and plans already escalate to Opus.
+**`--fable` (Fable ceiling — top-tier escalation).** Claude **Fable 5** is the model tier above Opus. This flag forces it onto every judgment-heavy role for the run — planner, security-reviewer, design-reviewer, ui-prototyper, and any size-triggered code-reviewer or plan-reviewer. Executor stays Sonnet; classifier and final-summary stay Haiku. Composes with `--plan` and `--team`. It costs more than Opus, so it's never applied automatically — and on an older Claude Code build without the `fable` alias, each role falls back to Opus with a note in the run log. For routine work, skip the flag: large/cross-cutting diffs and plans already auto-escalate to Opus.
 
 `--team` also overrides your profile's `team.defaultMode` for that run. (Overkill handling — the downgrade ask — is covered in [Subagents vs teams](#subagents-vs-teams--agt-smart-picks).)
 

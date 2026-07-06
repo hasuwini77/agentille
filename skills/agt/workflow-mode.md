@@ -46,8 +46,7 @@ Resolve in this order; first match wins.
 
 **Flag composition:**
 - `--plan` composes: with `--plan`, the orchestrator drafts the bucket-graph + wave plan + the would-be Workflow script and **HALTS** before launching it. The user approves the shape and cost before a single executor runs. A plain "go" resumes with that exact script (no re-planning).
-- `--fable` composes: **deprecated alias** — forces the **Opus ceiling** for all judgment-heavy roles (planner, ui-prototyper, design-reviewer, security-reviewer). Executors remain Sonnet. See `model-routing.md` → "`--fable` — deprecated backward-compat alias" and the `--fable` run modifier in `SKILL.md`.
-- `--fable` is a **deprecated alias**: new work should rely on the size/risk auto-escalation in `model-routing.md`. `--fable` continues to function as documented above until removed.
+- `--fable` composes: forces the **Fable ceiling** (Claude Fable 5, alias `fable` — the tier above Opus) for all judgment-heavy roles (planner, ui-prototyper, design-reviewer, security-reviewer, size/risk-escalated reviewers). Executors remain Sonnet. On builds where the alias doesn't resolve, each failed dispatch falls back once to `opus` with a run-log note. See `model-routing.md` → "`--fable` — Fable ceiling (explicit opt-in, top tier)" and the `--fable` run modifier in `SKILL.md`.
 
 ---
 

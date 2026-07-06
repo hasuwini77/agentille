@@ -51,3 +51,7 @@ After classifying, dispatch this combination. Read top-to-bottom — order matte
 ## Hard cap
 
 Never dispatch more than 3 executor subagents in parallel. If the plan has 5 parallel steps, batch them: 3 first, then 2.
+
+## Dispatch shape (foreground vs background)
+
+Subagents run **background-by-default** since Claude Code v2.1.198. Roster order above is dependency order — any role whose output feeds the next role (planner → plan-reviewer → executor → reviewer chains) dispatches with `run_in_background: false`; only genuinely parallel spawns (concurrent executors on disjoint slices, pipelined reviewers) run in the background. See `SKILL.md` → "Worker agents" for the full rule and the teardown obligation on named background spawns.

@@ -1,7 +1,8 @@
 ---
 name: agt
-description: Personal AI coding orchestrator (the trigger formerly known as /agentille). Reads the user's profile from ~/.agentille/profile.json, classifies the task, and dispatches a tailored roster of agent definitions (planner, executor, code-reviewer, design-reviewer) with the right model per role. Activate ONLY when the user explicitly types `/agt <task>` or directly asks for "agentille orchestration" — do not auto-trigger on generic multi-agent or coding prompts.
+description: Personal AI coding orchestrator (the trigger formerly known as /agentille). Reads the user's profile from ~/.agentille/profile.json, classifies the task, and dispatches a tailored roster of agent definitions (planner, executor, code-reviewer, design-reviewer) with the right model per role. Activates ONLY when the user explicitly types `/agt <task>` — model invocation is disabled, so it can never auto-trigger on generic multi-agent or coding prompts.
 argument-hint: [--team feature-team|review-team|incident-team] [--plan] [--fable] "<task>"
+disable-model-invocation: true
 ---
 
 # agentille — orchestrator master skill
@@ -67,9 +68,9 @@ When this skill is invoked (`/agt <task>`):
 | 9 | Build task with **≥2 genuinely disjoint parallel slices across 2+ dependency waves (3+ buckets)** AND the `Workflow` tool available | **workflow** | — |
 | 10 | Otherwise | **Stage 2** (inline Haiku classify) — its returned `{mode, template, roster}` is authoritative | per Stage 2 |
 
-Any team result must pass the team pre-flight (env flag `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1`, Claude Code ≥ 2.1.32, daily soft cap) — see `team-mode.md`. On any pre-flight or spawn failure, degrade to subagent mode.
+Any **team** result must pass the team pre-flight (env flag `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1`, Claude Code ≥ 2.1.178, daily soft cap) — see `team-mode.md`. **This floor gates team mode only** — solo, subagent, and workflow modes are unaffected on older builds. On any pre-flight or spawn failure, degrade to subagent mode.
 
-Row #9 (workflow) requires the `Workflow` tool to be available at runtime. If it is absent (older Claude Code build, `CLAUDE_CODE_DISABLE_WORKFLOWS=1`, or `disableWorkflows: true`), degrade silently to in-session subagent wave dispatch and emit one log line. See `skills/agt/workflow-mode.md` for the full contract.
+Row #9 (workflow) requires the `Workflow` tool to be available at runtime. If it is absent (Claude Code < 2.1.154, a Pro-plan session without `/config` → "Dynamic workflows" enabled, `CLAUDE_CODE_DISABLE_WORKFLOWS=1`, or `disableWorkflows: true`), degrade silently to in-session subagent wave dispatch and emit one log line. Opt-in note: invoking `Workflow` from a user-triggered `/agt` run satisfies the tool's explicit-opt-in requirement (skill-directed call); never invoke it outside one. See `skills/agt/workflow-mode.md` for the full contract.
 
 Rows #1–2 are a **force** (the user typed `--team`/`--mode team`). Run the inline disjoint-parallelism heuristic first: real parallel work → spawn the team. **Overkill** (no ≥2 disjoint slices) → don't obey blindly — when `preTaskQuestioning` permits, **ask once** whether to downgrade to subagent (recommended, ~¼ the tokens) or force the team anyway; when `preTaskQuestioning: never`, honor the force and emit the `honestyLevel`-gated heads-up instead (see `team-mode.md` → "Honesty on a forced team"). **Always surface the resolved mode + a one-clause reason** in the brief's `mode:` row and on the recon ping — for Stage 2 that's its `reasoning` string; for a Stage 1 rule it's the rule itself (e.g. "forced", "review verb → review-team", "single file, no architectural verb → solo"). The pick is never a black box and never a prose paragraph (see `display.md` → "Frame 2").
 
@@ -100,10 +101,10 @@ Rows #1–2 are a **force** (the user typed `--team`/`--mode team`). Run the inl
 |---|---|---|
 | planner | Opus | → Sonnet if `thinkingDepth=quick` (large/cross-cutting plans stay Opus) |
 | plan-reviewer | **Sonnet** | → **Opus** for a large/cross-cutting plan (≥6 steps or shared-contract/arch step); **skip** if `thinkingDepth=quick`; **also skip** for a ≤3-step fully sequential plan |
-| ui-prototyper | Opus | → Sonnet if `thinkingDepth=quick`; → Opus under `--fable` (no-op) |
+| ui-prototyper | Opus | → Sonnet if `thinkingDepth=quick`; → Fable under `--fable` |
 | executor | Sonnet | never up or down |
 | code-reviewer | **tiered** | **Sonnet** for a small diff (single file or ≤~150 LoC, no cross-cutting/security); **Opus** for a large/cross-cutting diff; → Sonnet if `thinkingDepth=quick` |
-| design-reviewer | Opus | never downgrade (savings come from viewport scope, not model); → Opus under `--fable` (no-op) |
+| design-reviewer | Opus | never downgrade (savings come from viewport scope, not model); → Fable under `--fable` |
 | security-reviewer | **Opus** | → Sonnet if `thinkingDepth=quick` |
 | classifier | heuristic, no LLM | Haiku only if every heuristic misses |
 | final-summary | Haiku | — |
@@ -117,15 +118,16 @@ Two review roles tier their model between Sonnet and Opus by the size of the wor
 - The point is to let the user approve the *shape and cost* before paying for the build — the cheapest guard against "it built the wrong thing." It pairs with any mode: `/agt --plan --team feature-team "<task>"` previews the team roster + ~4× cost without spawning the team.
 - On a task with no planner (solo/trivial), `--plan` degrades to one honest line — *"nothing to pre-plan — this is a single-step `<category>`; re-run without `--plan` to execute"* — and never spawns an executor.
 
-### Run modifier: `--fable` (deprecated — backward-compat alias for Opus ceiling)
+### Run modifier: `--fable` (Fable ceiling — explicit top-tier escalation)
 
-> **Deprecated.** The `fable` model is no longer available. `--fable` is **retained as a backward-compat alias** and may be removed in a future major release. New work should rely on the size/risk auto-escalation in `model-routing.md` — large/cross-cutting plans and diffs already escalate to Opus automatically.
+> Claude **Fable 5** is a live model tier above Opus (Claude Code model alias `fable`). It costs more than Opus, so it is **never part of default routing** — this flag is the only path to it, chosen per run by the user.
 
-`--fable` is **orthogonal to mode and `--plan`** — it doesn't change the roster or the stop point. With `--fable` present, the flag forces the **Opus ceiling** on all judgment-heavy roles this run: planner, ui-prototyper, design-reviewer, security-reviewer, and any size/risk-escalated code-reviewer or plan-reviewer. Executor stays Sonnet; classifier and final-summary stay Haiku — those are never upgraded.
+`--fable` is **orthogonal to mode and `--plan`** — it doesn't change the roster or the stop point. With `--fable` present, the flag forces the **Fable ceiling** on all judgment-heavy roles this run: planner, ui-prototyper, design-reviewer, security-reviewer, and any size/risk-escalated code-reviewer or plan-reviewer. Executor stays Sonnet; classifier and final-summary stay Haiku — those are never upgraded.
 
-- The flag resolves transparently to Opus; it never hard-fails. Note in the run log that `--fable` is deprecated.
-- Composes freely: `/agt --fable --plan "<task>"` previews the Opus-ceiling roster; `/agt --fable --team feature-team "<task>"` runs the full team at Opus depth.
-- See `model-routing.md` → "`--fable` — deprecated backward-compat alias" for details.
+- **Fallback:** on an older build where the `fable` alias doesn't resolve, a failed dispatch is re-dispatched **once** with `opus` and the downgrade is noted in the run log — never a hard fail.
+- `fable` appears only in dispatch-time model parameters, never in agent-def `model:` frontmatter — that placement rule is what keeps the Opus fallback reachable.
+- Composes freely: `/agt --fable --plan "<task>"` previews the Fable-ceiling roster; `/agt --fable --team feature-team "<task>"` runs the full team at Fable depth.
+- See `model-routing.md` → "`--fable` — the Fable ceiling" for details.
 
 ## Clarify before planning
 
@@ -177,6 +179,8 @@ This plugin ships seven **agent definitions** (in the plugin's `agents/` dir), o
 - **agentille:agentille-security-reviewer** — severity-classified security review (read-only)
 
 Each agent def carries its own default `model` and `tools` allowlist, but still pass an **explicit `model`** on every dispatch per `model-routing.md` — the static frontmatter default can't express the `thinkingDepth` overrides. The `agentille-` prefix avoids colliding with the user's other installed `planner`/`code-reviewer` agents (e.g. superpowers, gsd).
+
+**Foreground vs background (subagents run background-by-default since Claude Code v2.1.198).** Any dispatch whose result gates the next step — the planner → plan-reviewer → executor chain, a single executor whose diff feeds the reviewer, any sequential wave — MUST pass `run_in_background: false` so the result returns before the pipeline advances. Background dispatch is reserved for genuinely parallel spawns (concurrent executors on disjoint slices, pipelined reviewers). Every *named background* spawn is a persistent session and falls under the teardown obligation in Hard Rule #11 — shut it down once its handoff is consumed.
 
 See `roster.md` for which combinations to dispatch per task category.
 

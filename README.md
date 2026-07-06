@@ -35,7 +35,9 @@ cd ~/your/repo
 
 That's it. `/agt` does the rest: classify → plan (if needed) → implement → review → summarize.
 
-> **Team mode (split panes) requires two things:** Claude Code **2.1.32+**, and `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1` set in `~/.claude/settings.json` under the `env` key (see [Team mode](#team-mode-optional) below). Subagent mode — the default — works on any recent version with no extra config.
+> **Explicit trigger only (v1.31.0+):** `/agt` fires only when you literally type `/agt <task>` — model invocation is disabled in its manifest, so Claude can never auto-launch the orchestrator from an ordinary prompt (and phrasing like "run agentille orchestration on X" no longer triggers it either). Type the command.
+
+> **Team mode requires two things:** Claude Code **2.1.178+** (the version where teams form on first spawn, with no setup step), and `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1` set in `~/.claude/settings.json` under the `env` key (see [Team mode](#team-mode-optional) below). Subagent mode — the default — works on any recent version with no extra config.
 
 ---
 
@@ -110,7 +112,7 @@ The two build layers don't overlap (aesthetics vs correctness), and a framework 
 | `/agt --team review-team "task"` | Force the audit team (code + design + security review) |
 | `/agt --team incident-team "task"` | Force the debug team (3 executors race competing theories) |
 | `/agt --mode subagent "task"` | Force subagent mode for one run |
-| `/agt --fable "task"` | Deprecated alias — forces Opus as the ceiling for all judgment-heavy roles this run (composes with `--team` and `--plan`); use auto-escalation instead |
+| `/agt --fable "task"` | Force the **Fable ceiling** — Claude Fable 5 (the tier above Opus) runs every judgment-heavy role this run (composes with `--team` and `--plan`); costs more than Opus, falls back to Opus on builds without the `fable` alias |
 
 Any `--team` overrides the auto-pick; if the work has no ≥2 disjoint slices, `/agt` flags it as overkill and asks whether to downgrade (see below).
 
@@ -147,7 +149,7 @@ When `/agt` picks a team — or you force one with `--team` — each role become
 
 ### 1 · Enable it (both platforms)
 
-Requires Claude Code **2.1.32+**. Add the experimental flag:
+Requires Claude Code **2.1.178+** (older versions used a team-setup flow that no longer exists). Add the experimental flag:
 
 ```jsonc
 // ~/.claude/settings.json
@@ -156,7 +158,7 @@ Requires Claude Code **2.1.32+**. Add the experimental flag:
 
 ### 2 · Turn on split panes (the "wow")
 
-**Two ways to drive a team:** one agent **per pane** (live — needs tmux or iTerm2), or **in-process** (no panes; teammates share one pane, Shift+Down to cycle). Same team either way — panes are just the view.
+**Two ways to drive a team:** one agent **per pane** (live — needs tmux or iTerm2), or **in-process** (the default since v2.1.179 — no panes; teammates live in an agent panel under the prompt: ↑/↓ to select one, Enter to view and message it, `x` to stop it, Ctrl+T for the shared task list). Same team either way — panes are just the view.
 
 **macOS**
 
@@ -166,7 +168,7 @@ tmux                         # start a session, then launch `claude` inside it
 ```
 ```jsonc
 // ~/.claude/settings.json
-{ "teammateMode": "tmux" }   // or "auto"
+{ "teammateMode": "tmux" }   // or "auto" — or "iterm2" (v2.1.186+) for explicit iTerm2 native panes
 ```
 
 On Warp (and any non-iTerm2 terminal) you must be **inside** a tmux session before launching Claude — that's what the panes attach to. Smoothest native panes: **iTerm2 + `tmux -CC`** (it manages the session for you).
@@ -197,12 +199,12 @@ Keep your repo on the **WSL filesystem** (`~/projects/…`), not `/mnt/c/…` �
 /agt --team review-team   "audit PR #42 before we merge"                                   # code + design + security, in parallel
 /agt --team incident-team "users get randomly logged out — find why"                       # race 3 competing theories
 /agt --plan "refactor the auth module into smaller files"                                  # preview plan + cost, then stop for your "go"
-/agt --fable "redesign the entire auth layer + migrate 12 services"                       # deprecated: forces Opus ceiling for all judgment-heavy roles
+/agt --fable "redesign the entire auth layer + migrate 12 services"                       # Fable 5 ceiling on all judgment-heavy roles (top tier, opt-in cost)
 ```
 
 **`--plan` (dry-run).** Stops after the plan + plan-review — before any executor or teammate spawns — so you approve the *shape and cost* first; a plain "go" then runs that exact plan. Pairs with any mode (`/agt --plan --team feature-team "…"` previews the team roster + ~4× cost without spawning). The cheapest guard against building the wrong thing.
 
-**`--fable` (deprecated — Opus ceiling alias).** Retained for backward compatibility. Forces **Opus** as the ceiling for all judgment-heavy roles this run — planner, security-reviewer, design-reviewer, ui-prototyper, and any size-triggered code-reviewer or plan-reviewer. Executor stays Sonnet; classifier and final-summary stay Haiku. Composes with `--plan` and `--team`. New work should rely on the automatic size/risk escalation instead — large/cross-cutting diffs and plans already escalate to Opus.
+**`--fable` (Fable ceiling — top-tier escalation).** Claude **Fable 5** is the model tier above Opus. This flag forces it onto every judgment-heavy role for the run — planner, security-reviewer, design-reviewer, ui-prototyper, and any size-triggered code-reviewer or plan-reviewer. Executor stays Sonnet; classifier and final-summary stay Haiku. Composes with `--plan` and `--team`. It costs more than Opus, so it's never applied automatically — and on an older Claude Code build without the `fable` alias, each role falls back to Opus with a note in the run log. For routine work, skip the flag: large/cross-cutting diffs and plans already auto-escalate to Opus.
 
 `--team` also overrides your profile's `team.defaultMode` for that run. (Overkill handling — the downgrade ask — is covered in [Subagents vs teams](#subagents-vs-teams--agt-smart-picks).)
 
@@ -328,7 +330,7 @@ The following properties are confirmed in the cockpit server source (`src/server
 
 ## Requirements
 
-- Claude Code (any recent version for subagent mode; **2.1.32+** for team mode).
+- Claude Code (any recent version for subagent mode; **2.1.178+** for team mode).
 - A `~/.agentille/profile.json` — created by `/agentille-init`.
 
 ## Philosophy

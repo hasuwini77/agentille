@@ -2,6 +2,92 @@
 
 All notable changes to agentille are documented here.
 
+## [1.31.0] — 2026-07-06
+
+Doc-currency release against the current Claude Code documentation (Agent Teams
+as of 2.1.199, subagents 2.1.198, Workflow tool runtime schema), **plus three
+intentional, individually-revertable behavior changes** — each flagged below.
+This release is explicitly *not* purely contract-preserving; the preserved-vs-
+changed inventory is in the PR body.
+
+### Changed (behavior — read these)
+
+- **`--fable` is live again and escalates UP, not down.** Claude Fable 5 shipped
+  as a real model tier above Opus with a first-class `fable` Claude Code alias —
+  the previous "the fable model is no longer available" framing was wrong, and a
+  user's explicit `--fable` was being silently *downgraded* to Opus. The flag now
+  forces the Fable ceiling on judgment-heavy roles (executor stays Sonnet). Cost
+  note: Fable > Opus pricing; the flag remains strictly per-run opt-in. On builds
+  without the alias, each failed dispatch falls back once to Opus with a run-log
+  note. `fable` never appears in agent frontmatter — dispatch-time only.
+- **`/agt` now triggers ONLY on a typed `/agt <task>`.** The skill sets
+  `disable-model-invocation: true`, so the harness — not prose — prevents
+  auto-triggering. Migration: phrasing like "run agentille orchestration on X"
+  no longer fires the skill; type the command. The three setup skills keep
+  conversational triggering deliberately.
+- **`effort: high` on planner, security-reviewer, design-reviewer.** Formalizes
+  the pay-for-reasoning intent those Opus-default roles already carry. May raise
+  per-run cost/latency on those three roles only.
+- **Team-mode documented floor: Claude Code 2.1.32 → 2.1.178 (compatibility
+  change).** The skill has always used the no-setup-step spawn flow that only
+  exists on 2.1.178+ (older runtimes required the removed `TeamCreate`/
+  `TeamDelete` flow this skill never performed) — so pre-2.1.178 team spawns were
+  already broken; pre-flight now degrades them honestly to subagent mode. Team
+  mode only: solo/subagent/workflow floors are unchanged.
+- **Update-check hook also fires on session resume** (`startup|resume` matcher).
+  Bounded by the script's own 24h TTL — at most one extra check per day.
+
+### Fixed (doc currency — no behavior change)
+
+- `team-mode.md`/README display guidance: `in-process` is the default
+  `teammateMode` since 2.1.179 (was documented as `auto`); the nonexistent
+  "Shift+Down" keybind replaced with the agent-panel controls (↑/↓ · Enter · `x`
+  · Ctrl+T); explicit `"iterm2"` mode (2.1.186) documented.
+- `team-mode.md` protocol additions from current runtime behavior: idle-row
+  hiding/collapse is cosmetic, not an orphan (2.1.199); a message wakes an
+  API-retry-stalled teammate (2.1.198); an API-error idle notification is an
+  explicit crash signal for rotation (2.1.198); `~/.claude/tasks/` persists under
+  `cleanupPeriodDays` while the team config dir is wiped at session end;
+  teammates inherit the lead's permission settings at spawn.
+- `workflow-mode.md` synced to the current Workflow tool contract
+  (runtime-observed, 2026-07-06): `meta.phases` entries are `{title, detail}`
+  objects (worked example shipped plain strings); resume is
+  `Workflow({scriptPath, resumeFromRunId})` with the prior run stopped; the
+  runtime auto-persists the executing script under the session dir; concurrency
+  is up to 16 agents *per run* plus a 1,000-agent lifetime backstop; degradation
+  triggers now include Claude Code < 2.1.154 and the Pro-plan `/config` gate;
+  the tool's explicit-opt-in rule is stated (`/agt` satisfies it by being
+  user-invoked). Workflow `agent()` calls now pass
+  `agentType: "agentille:agentille-*"` so stages run the real agent defs, and
+  reviewer verdicts use schema-validated structured output.
+- Sequential-dependency dispatches documented as `run_in_background: false`
+  (subagents run background-by-default since 2.1.198); parallel spawns keep the
+  Hard Rule #11 teardown obligation.
+- Per-provider caveat on the model-alias zero-touch guarantee (Anthropic API
+  tracks latest; Bedrock/Vertex/Foundry can lag until pinned).
+
+### Added
+
+- `validate.sh` regression locks for the new contract fields
+  (`disable-model-invocation`, `startup|resume` matcher, `effort: high` ×3) and
+  `fable` in the recognized model-token set.
+- Executor def comment documenting why native `isolation: worktree` is rejected
+  (branches from the default branch, not `$BASE`).
+
+### Rationale
+
+- Compatibility on older plugin loaders for the new frontmatter fields
+  (`disable-model-invocation`, `effort`) is **best-effort**: they are current,
+  documented fields, and older loaders are expected to ignore unknown keys — but
+  this is inferred, not tested per version. If a loader misbehaves, the path is
+  a revert commit + patch release, not guaranteed inertness.
+- Deliberately skipped: `allowed-tools` on `/agt` (pre-approving Bash/Write in a
+  public plugin is bad security posture); validator schema checks beyond the
+  regression locks (validate.sh stays a consistency linter).
+- Deferred follow-ups: a `TeammateIdle` hook as a structural teardown backstop,
+  migrating cockpit hooks to skill-scoped `hooks:` frontmatter, a `userConfig`
+  cockpit toggle, and a saved-workflow recipe.
+
 ## [1.30.5] — 2026-07-02
 
 ### Fixed

@@ -43,7 +43,7 @@ When in genuine doubt about which tier a diff falls in, prefer Opus for the *rev
 - **Never upgrade executor.** Executor stays Sonnet — never up or down.
 - **Always declare the model in the subagent dispatch.** Don't let Claude Code default — be explicit.
 
-## `--fable` — Fable ceiling (explicit opt-in, top tier)
+## `--fable` — the Fable ceiling
 
 Claude Fable 5 is a live, shipping model tier **above Opus** (alias `fable` — a first-class Claude Code model alias). With `--fable` present, force the **Fable ceiling** on all judgment-heavy roles this run: planner, ui-prototyper, design-reviewer, security-reviewer, and any size/risk-escalated code-reviewer or plan-reviewer. Executor stays Sonnet; classifier and final-summary stay Haiku — those are never upgraded. Fable costs more than Opus, which is exactly why it is **never part of default routing** — the flag is the only path to it, per run, chosen by the user.
 

@@ -125,9 +125,9 @@ Two review roles tier their model between Sonnet and Opus by the size of the wor
 `--fable` is **orthogonal to mode and `--plan`** — it doesn't change the roster or the stop point. With `--fable` present, the flag forces the **Fable ceiling** on all judgment-heavy roles this run: planner, ui-prototyper, design-reviewer, security-reviewer, and any size/risk-escalated code-reviewer or plan-reviewer. Executor stays Sonnet; classifier and final-summary stay Haiku — those are never upgraded.
 
 - **Fallback:** on an older build where the `fable` alias doesn't resolve, a failed dispatch is re-dispatched **once** with `opus` and the downgrade is noted in the run log — never a hard fail.
-- `fable` appears only in dispatch-time model parameters, never in agent-def `model:` frontmatter (see `model-routing.md` → "Placement rule").
+- `fable` appears only in dispatch-time model parameters, never in agent-def `model:` frontmatter — that placement rule is what keeps the Opus fallback reachable.
 - Composes freely: `/agt --fable --plan "<task>"` previews the Fable-ceiling roster; `/agt --fable --team feature-team "<task>"` runs the full team at Fable depth.
-- See `model-routing.md` → "`--fable` — Fable ceiling (explicit opt-in, top tier)" for details.
+- See `model-routing.md` → "`--fable` — the Fable ceiling" for details.
 
 ## Clarify before planning
 

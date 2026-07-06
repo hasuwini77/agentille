@@ -71,7 +71,7 @@ for f in agents/agentille-*.md; do
   if [ "$name" = "$stem" ]; then pass "$f: name matches filename"; else fail "$f: name '$name' != filename stem '$stem'"; fi
   if [ -z "$model" ]; then
     fail "$f: no 'model:' in frontmatter"
-  elif [[ "$model" =~ ^(claude-(opus|sonnet|haiku)-[0-9]|opus|sonnet|haiku) ]]; then
+  elif [[ "$model" =~ ^(claude-(fable|opus|sonnet|haiku)-[0-9]|fable|opus|sonnet|haiku) ]]; then
     pass "$f: model '$model'"
   else
     warn "$f: model '$model' is not a recognized Claude model id/alias"
@@ -117,6 +117,29 @@ else
   pass "hook script '$hookrel' exists and is executable"
 fi
 
+# ── 5b. Contract fields shipped in v1.31.0 (regression locks) ────────────────
+# These fields ARE the contract changes of that release; losing one silently
+# would revert a flagged behavior change without anyone noticing.
+hdr "Contract fields (v1.31.0)"
+if grep -qE '^disable-model-invocation:[[:space:]]*true' skills/agt/SKILL.md; then
+  pass "skills/agt/SKILL.md: disable-model-invocation: true present (explicit /agt trigger enforced)"
+else
+  fail "skills/agt/SKILL.md: disable-model-invocation: true missing from frontmatter"
+fi
+SM=$(jq -r '.hooks.SessionStart[0].matcher // empty' hooks/hooks.json 2>/dev/null)
+if [ "$SM" = "startup|resume" ]; then
+  pass "hooks.json: SessionStart matcher is 'startup|resume'"
+else
+  fail "hooks.json: SessionStart matcher is '${SM:-<none>}' (expected 'startup|resume')"
+fi
+for a in agentille-planner agentille-security-reviewer agentille-design-reviewer; do
+  if awk 'NR==1&&$0=="---"{f=1;next} f&&$0=="---"{exit} f{print}' "agents/$a.md" | grep -qE '^effort:[[:space:]]*high'; then
+    pass "agents/$a.md: effort: high present"
+  else
+    fail "agents/$a.md: effort: high missing from frontmatter"
+  fi
+done
+
 # ── 6. Doc cross-references (file exists = FAIL; section match = WARN) ────────
 hdr "Doc cross-references"
 # Pattern: `something.md` ... → "Section Title"  (skill docs lean on these)
@@ -160,7 +183,7 @@ extract_routing() { # $1 = file, $2 = heading regex → "role<TAB>tier-or-?" lin
       if (role=="role" || role ~ /^-+$/) next
       cnt=0; tokval="?"; delete seen
       rest=def
-      while (match(rest, /opus|sonnet|haiku|tiered/)) {
+      while (match(rest, /fable|opus|sonnet|haiku|tiered/)) {
         tok=substr(rest, RSTART, RLENGTH)
         if (!(tok in seen)) { seen[tok]=1; cnt++; tokval=tok }
         rest=substr(rest, RSTART+RLENGTH)

@@ -266,3 +266,28 @@ log(`Wave 2 verdict — tests: ${testsVerdict ?? "FAILED"}`);
 - `phase(title)`, `log(msg)` — progress markers in the runtime transcript.
 - Model: Sonnet for all executors; Opus for code-reviewer on a large/cross-cutting diff; Opus for design-reviewer (never downgrade). See `model-routing.md`.
 - Concurrency: two parallel executors in wave 1 (under the ≤3 cap). B3 runs alone in wave 2.
+
+---
+
+## 9 · Saved workflows — reusable, user-authored (optional pattern)
+
+A **saved workflow** is a user-authored, committable script the Workflow tool invokes by name — worth reaching for when the *same* bucket-graph recurs (e.g. a monthly dependency-audit sweep over a stable module list). It is NOT the per-run script this tier emits: generated scripts stay scratch state (§7, "never committed to the repo"), while a saved workflow is deliberately curated and lives in the repo like any other source file. Don't confuse the two artifacts.
+
+- **Location & invocation** (runtime-observed on current builds): the file lives under the project's `.claude/workflows/`; the Workflow tool resolves `{name: "<name>"}` against that registry and passes parameters via `args` (a real JSON value, not a stringified one).
+- **File shape:** the same contract as any workflow script — `export const meta = { name, description, whenToUse }` (pure literal), then the body, parameterized through the global `args`:
+
+  ```javascript
+  export const meta = {
+    name: "dep-audit",
+    description: "Audit direct dependencies of a target path for CVEs and stale majors",
+    whenToUse: "Recurring dependency sweep over a stable module list",
+  };
+  const TARGET = args?.path ?? "src/";
+  const report = await agent(
+    `Audit the direct dependencies used under ${TARGET} for known CVEs and stale majors. Return a markdown table.`,
+    { label: "dep-audit", model: "sonnet" }
+  );
+  return report;
+  ```
+
+- **When `/agt` uses one:** only when the user names it. The workflow tier keeps emitting scripts dynamically from the planner's bucket-graph — a saved workflow is a shortcut for a *stable, recurring* graph, never a substitute for planning a novel task.

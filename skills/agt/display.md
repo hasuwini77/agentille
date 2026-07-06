@@ -36,7 +36,7 @@ Cockpit events are emitted **deterministically by `scripts/cockpit-hook.sh`** vi
 `PreToolUse` / `PostToolUse` / `Stop` hooks — not by the orchestrator model. The orchestrator's
 only cockpit responsibilities are:
 
-1. **At run start** (when `cockpit.enabled`): write the session→run mapping file at
+1. **At run start** (when cockpit is enabled — `AGENTILLE_COCKPIT=1` env **or** `profile.cockpit.enabled === true`; the gate lives at `SKILL.md` → "The contract", cockpit seam): write the session→run mapping file at
    `~/.agentille/cockpit/sessions/<session_id>` → `<run-id>`, and write `cockpit-meta.json`
    (fields: `task`, `mode`, `template`, `stations`, `version`, `schema:1`) into
    `~/.agentille/cockpit/runs/<run-id>/` — both **before** the first `Agent` dispatch so the hook

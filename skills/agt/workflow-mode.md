@@ -24,6 +24,8 @@ Workflow wins over in-session subagent waves when all three hold:
 
 Workflow wins over team mode when peers do **not** need to message each other. Team = peer sessions for adversarial debate or cross-layer coordination (e.g. incident-team hypotheses, competing design reviewers). Workflow = scripted subagent fan-out, results summarized back to script variables — no inter-agent messaging required.
 
+**Opt-in compliance:** the `Workflow` tool requires explicit user opt-in. `/agt` satisfies it by construction — the user invoked a skill whose own instructions direct the Workflow call, which is one of the tool's sanctioned opt-in paths. No `ultracode` keyword or separate user ask is needed; never invoke `Workflow` outside a user-triggered `/agt` run.
+
 ---
 
 ## 2 · Precedence & flag composition
@@ -51,7 +53,7 @@ Resolve in this order; first match wins.
 
 ## 3 · Graceful degradation (REQUIRED)
 
-If the `Workflow` tool is unavailable — older Claude Code build, `disableWorkflows: true` in settings, `CLAUDE_CODE_DISABLE_WORKFLOWS=1` env var, or a launch-time error — the workflow tier **degrades silently** to the existing in-session subagent wave dispatch already described in `SKILL.md` (planner → context-pack → ≤3 parallel executors per wave → pipelined review).
+If the `Workflow` tool is unavailable — Claude Code older than **2.1.154** (the tool doesn't exist), a **Pro-plan** session where Dynamic workflows hasn't been enabled via `/config` → "Dynamic workflows", `disableWorkflows: true` in settings, `CLAUDE_CODE_DISABLE_WORKFLOWS=1` env var, or a launch-time error — the workflow tier **degrades silently** to the existing in-session subagent wave dispatch already described in `SKILL.md` (planner → context-pack → ≤3 parallel executors per wave → pipelined review).
 
 On degradation, emit **one log line** — never a blocking prompt:
 
@@ -83,9 +85,11 @@ Map to the Workflow script:
 
 **Default: `pipeline()`** — each bucket flows through its build and verify stages independently, with no barrier. Use a `parallel()` barrier only when a stage genuinely needs *all prior results* (e.g. a dedup/merge step that reads every bucket's output, or an early-exit condition that requires a full fan-in before proceeding).
 
-**Concurrency caps:**
-- The Workflow runtime caps at ~16 concurrent agents globally.
+**Concurrency caps** (runtime-observed on current builds):
+- The Workflow runtime caps concurrency at up to **16 agents per workflow run** (fewer on machines with limited CPU cores) — excess `agent()` calls queue and run as slots free. A separate lifetime ceiling of **1,000 agents total per run** exists as a runaway backstop.
 - Agentille's own **house rule: ≤3 parallel executor (build) agents at a time**. This mirrors the subagent-mode cap in `roster.md` → "Hard cap" and applies identically here. Batch waves beyond 3 executors: spawn 3, wait, then the next batch.
+
+**Token budget:** the script has a `budget` API — `budget.total` (the user's token target, or null), `budget.spent()`, `budget.remaining()`. When the user set a token target, size the fan-out with it (e.g. stop spawning optional verify passes when `budget.remaining()` runs low) — this is the concrete lever behind "decomposition is a token trade" (`SKILL.md` → "Token budget hints"). With no target set, ignore it.
 
 ---
 
@@ -101,6 +105,8 @@ Map to the Workflow script:
 
 Reviewer stages run as each build completes — the same pipelined-review principle as `team-mode.md` → "Pipelined review". A bucket's build and verify stages form one `pipeline()` chain; multiple such chains run concurrently (up to the 3-executor cap).
 
+**Dispatch the real agent defs via `agentType`.** Every role-bearing `agent()` call passes `agentType: "agentille:agentille-<role>"` so the stage runs the actual agent definition — its system prompt and `tools` allowlist — instead of a role-play prose prefix. The prompt still carries the slice context (context-pack slice, files, done-criteria). Naming note: `agentType` is the option on the Workflow script's `agent()` helper; `subagent_type` is the separate `Agent` tool's parameter — two surfaces, same registry, not a conflict.
+
 ---
 
 ## 6 · Adversarial-verify stage pattern
@@ -110,7 +116,7 @@ After a build stage, fan out independent verifier agents prompted to **REFUTE** 
 Pattern:
 1. Build stage completes → executor output and diff are in script variables.
 2. Fan out N reviewer agents (`parallel()`) each with an adversarial framing prompt: "Find a reason this is wrong. If you cannot, return PASS."
-3. Collect results. Majority-vote: if ≥ ⌈N/2⌉ reviewers return a finding as BLOCKER/should-fix, it is a confirmed gate. If < ⌈N/2⌉ agree, discard as noise.
+3. Collect results. **Use `schema` for the verdicts** — `agent(prompt, { schema })` forces a validated structured return (e.g. `{ verdict: "PASS" | "BLOCKER" | "should-fix", reason: string }`), so the majority vote counts typed fields instead of string-matching free text. Majority-vote: if ≥ ⌈N/2⌉ reviewers return a finding as BLOCKER/should-fix, it is a confirmed gate. If < ⌈N/2⌉ agree, discard as noise.
 4. A confirmed BLOCKER or should-fix **is a gate, not a memo** — re-dispatch a fix executor (`agent()`, Sonnet) on the specific finding, then re-run the verify stage on the fix.
 
 Map to agentille's reviewers:
@@ -130,8 +136,10 @@ Running them in `parallel()` within the verify stage is the adversarial fan-out 
 ~/.agentille/state/run-<id>/
   context-pack.md      — planner output (written by the orchestrator before script launch)
   checkpoint-<name>.md — executor checkpoints (written by each executor at committable boundaries)
-  workflow-script.js   — the emitted script (written by orchestrator; read-only at runtime)
+  workflow-script.js   — courtesy copy of the emitted script, kept for the Debrief/log
 ```
+
+> The Workflow runtime **persists the executing script itself** under the session directory (`~/.claude/projects/…`) and returns that path in the tool result — that auto-persisted file is the execution source and the one to edit for a resume. agentille's `workflow-script.js` copy is a convenience artifact only.
 
 These are **never committed to the repo**. The run dir is scratch state, cleaned up after the Debrief (the orchestrator deletes it as the final step — `rm -rf ~/.agentille/state/run-<id>/`).
 
@@ -139,7 +147,7 @@ These are **never committed to the repo**. The run dir is scratch state, cleaned
 
 **Merge integration:** the orchestrator (conductor) is the **single writer** that merges finished branches back onto `$BASE`. This matches the subagent/team-mode rule — never let two executors merge concurrently. Serialize merges; disjoint file sets mean these are clean.
 
-**Resumability:** workflow runs are resumable in-session via the `runId` the `Workflow` tool returns. If the run is interrupted, re-launch with the same `runId` to resume from the last completed stage. The orchestrator logs the `runId` to the run dir at launch.
+**Resumability:** workflow runs are resumable in-session. Stop the prior run first if it's still active, then re-launch with **both** the script path and the run id: `Workflow({scriptPath: <the auto-persisted script path from the original tool result>, resumeFromRunId: <runId>})`. Completed `agent()` calls with unchanged prompts return cached results instantly; only edited or new calls re-run. The orchestrator logs the `runId` and the auto-persisted script path to the run dir at launch.
 
 ---
 
@@ -151,7 +159,13 @@ Three-bucket build: "add a REST endpoint + its UI panel + integration tests" —
 export const meta = {
   name: "agt-feature-endpoint-ui-tests",
   description: "Add REST endpoint (B1), UI panel (B2) in parallel; integration tests (B3) after both land.",
-  phases: ["build-wave-1", "verify-wave-1", "build-wave-2", "verify-wave-2"],
+  // phases entries are {title, detail} objects — titles must exactly match the phase() calls below.
+  phases: [
+    { title: "build-wave-1", detail: "B1 endpoint + B2 UI panel build in parallel" },
+    { title: "verify-wave-1", detail: "pipelined review of each wave-1 build" },
+    { title: "build-wave-2", detail: "B3 integration tests (depends on B1+B2)" },
+    { title: "verify-wave-2", detail: "review of B3" },
+  ],
 };
 
 // Seed from the context-pack the orchestrator wrote before launching this script.
@@ -163,20 +177,20 @@ phase("build-wave-1");
 
 const [endpointBuild, uiBuild] = await parallel([
   () => agent(
-    `You are agentille-executor. Build the REST endpoint slice.\n` +
+    `Build the REST endpoint slice.\n` +
     `Context-pack slice: ${CONTEXT_PACK} §B1.\n` +
     `Files to touch: src/api/endpoint.ts, src/api/endpoint.test.ts.\n` +
     `Done-criteria: endpoint returns 200 on happy path; unit test passes.\n` +
     `Checkpoint path: ~/.agentille/state/run-abc123/checkpoint-B1.md`,
-    { label: "B1-executor", phase: "build-wave-1", model: "sonnet", isolation: "worktree" }
+    { label: "B1-executor", phase: "build-wave-1", agentType: "agentille:agentille-executor", model: "sonnet", isolation: "worktree" }
   ),
   () => agent(
-    `You are agentille-executor. Build the UI panel slice.\n` +
+    `Build the UI panel slice.\n` +
     `Context-pack slice: ${CONTEXT_PACK} §B2.\n` +
     `Files to touch: src/components/Panel.tsx, src/components/Panel.css.\n` +
     `Done-criteria: Panel renders with mock data; no console errors.\n` +
     `Checkpoint path: ~/.agentille/state/run-abc123/checkpoint-B2.md`,
-    { label: "B2-executor", phase: "build-wave-1", model: "sonnet", isolation: "worktree" }
+    { label: "B2-executor", phase: "build-wave-1", agentType: "agentille:agentille-executor", model: "sonnet", isolation: "worktree" }
   ),
 ]);
 
@@ -188,22 +202,24 @@ const [endpointVerdict, uiVerdict] = await parallel([
   () => pipeline(
     [endpointBuild].filter(Boolean),
     (build) => agent(
-      `You are agentille-code-reviewer. Review B1 endpoint diff adversarially — find a reason it is wrong. ` +
-      `If none, return PASS.\nDiff context: ${build}`,
-      { label: "B1-code-reviewer", phase: "verify-wave-1", model: "opus" }
+      `Review B1 endpoint diff adversarially — find a reason it is wrong. ` +
+      `If none, verdict PASS.\nDiff context: ${build}`,
+      { label: "B1-code-reviewer", phase: "verify-wave-1", agentType: "agentille:agentille-code-reviewer", model: "opus",
+        schema: { type: "object", properties: { verdict: { enum: ["PASS", "BLOCKER", "should-fix"] }, reason: { type: "string" } }, required: ["verdict"] } }
     ),
   ),
   () => pipeline(
     [uiBuild].filter(Boolean),
     (build) => agent(
-      `You are agentille-code-reviewer. Review B2 UI diff adversarially — find a reason it is wrong. ` +
-      `If none, return PASS.\nDiff context: ${build}`,
-      { label: "B2-code-reviewer", phase: "verify-wave-1", model: "sonnet" }
+      `Review B2 UI diff adversarially — find a reason it is wrong. ` +
+      `If none, verdict PASS.\nDiff context: ${build}`,
+      { label: "B2-code-reviewer", phase: "verify-wave-1", agentType: "agentille:agentille-code-reviewer", model: "sonnet",
+        schema: { type: "object", properties: { verdict: { enum: ["PASS", "BLOCKER", "should-fix"] }, reason: { type: "string" } }, required: ["verdict"] } }
     ),
     (codeVerdict) => agent(
-      `You are agentille-design-reviewer. Review B2 UI panel at desktop viewport only. ` +
-      `Score the six pillars 1-10. Flag any AI-design-tells.\nCode verdict: ${codeVerdict}`,
-      { label: "B2-design-reviewer", phase: "verify-wave-1", model: "opus" }
+      `Review B2 UI panel at desktop viewport only. ` +
+      `Score the six pillars 1-10. Flag any AI-design-tells.\nCode verdict: ${JSON.stringify(codeVerdict)}`,
+      { label: "B2-design-reviewer", phase: "verify-wave-1", agentType: "agentille:agentille-design-reviewer", model: "opus" }
     ),
   ),
 ]);
@@ -221,22 +237,23 @@ if (!endpointBuild || !uiBuild) {
 phase("build-wave-2");
 
 const testsBuild = await agent(
-  `You are agentille-executor. Build the integration test slice.\n` +
+  `Build the integration test slice.\n` +
   `Context-pack slice: ${CONTEXT_PACK} §B3.\n` +
   `Depends on: B1 endpoint branch, B2 UI branch (both merged to $BASE before this runs).\n` +
   `Files to touch: tests/integration/endpoint-panel.test.ts.\n` +
   `Done-criteria: integration test suite passes end-to-end.\n` +
   `Checkpoint path: ~/.agentille/state/run-abc123/checkpoint-B3.md`,
-  { label: "B3-executor", phase: "build-wave-2", model: "sonnet", isolation: "worktree" }
+  { label: "B3-executor", phase: "build-wave-2", agentType: "agentille:agentille-executor", model: "sonnet", isolation: "worktree" }
 );
 
 phase("verify-wave-2");
 
 const testsVerdict = testsBuild
   ? await agent(
-      `You are agentille-code-reviewer. Review B3 integration test diff. ` +
-      `Verify coverage is real (not vacuous assertions). If sound, return PASS.\nDiff: ${testsBuild}`,
-      { label: "B3-code-reviewer", phase: "verify-wave-2", model: "sonnet" }
+      `Review B3 integration test diff. ` +
+      `Verify coverage is real (not vacuous assertions). If sound, verdict PASS.\nDiff: ${testsBuild}`,
+      { label: "B3-code-reviewer", phase: "verify-wave-2", agentType: "agentille:agentille-code-reviewer", model: "sonnet",
+        schema: { type: "object", properties: { verdict: { enum: ["PASS", "BLOCKER", "should-fix"] }, reason: { type: "string" } }, required: ["verdict"] } }
     )
   : null;
 
@@ -244,7 +261,7 @@ log(`Wave 2 verdict — tests: ${testsVerdict ?? "FAILED"}`);
 ```
 
 **Key call signatures used:**
-- `agent(prompt, opts)` — spawns a subagent; returns its final text. `opts.isolation: "worktree"` gives the executor its own git worktree so file sets never collide.
+- `agent(prompt, opts)` — spawns a subagent; returns its final text, or the validated object when `opts.schema` is set. `opts.agentType: "agentille:agentille-<role>"` runs the real agent def (system prompt + tools allowlist). `opts.isolation: "worktree"` gives the executor its own git worktree so file sets never collide.
 - `parallel(thunks)` — runs `() => Promise` thunks concurrently; BARRIER; a thrown thunk resolves to null.
 - `pipeline(items, ...stages)` — each item flows through all stages independently; NO barrier between stages. Default for build→verify chains.
 - `phase(title)`, `log(msg)` — progress markers in the runtime transcript.

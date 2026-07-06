@@ -35,6 +35,8 @@ cd ~/your/repo
 
 That's it. `/agt` does the rest: classify → plan (if needed) → implement → review → summarize.
 
+> **Explicit trigger only (v1.31.0+):** `/agt` fires only when you literally type `/agt <task>` — model invocation is disabled in its manifest, so Claude can never auto-launch the orchestrator from an ordinary prompt (and phrasing like "run agentille orchestration on X" no longer triggers it either). Type the command.
+
 > **Team mode requires two things:** Claude Code **2.1.178+** (the version where teams form on first spawn, with no setup step), and `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1` set in `~/.claude/settings.json` under the `env` key (see [Team mode](#team-mode-optional) below). Subagent mode — the default — works on any recent version with no extra config.
 
 ---

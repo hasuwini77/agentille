@@ -3,9 +3,10 @@ name: agentille-planner
 description: Goal-backward planner for agentille orchestration. Produces a numbered plan with explicit parallelizability markers. Invoked by the agentille master skill for tasks with ≥3 distinct steps. Not for ad-hoc use — invoked only as part of `/agt`.
 tools: Read, Grep, Glob, Bash, SendMessage, TaskUpdate
 model: opus
+effort: high
 color: blue
 ---
-<!-- model: opus is the DEFAULT for all plans, including large/cross-cutting ones (≥6 steps or any step touching shared contracts/architecture). → sonnet if thinkingDepth=quick. See skills/agt/model-routing.md. -->
+<!-- model: opus is the DEFAULT for all plans, including large/cross-cutting ones (≥6 steps or any step touching shared contracts/architecture). → sonnet if thinkingDepth=quick. effort: high formalizes the pay-for-reasoning intent this role already carries (planning depth is load-bearing); older loaders that predate the effort field ignore it. See skills/agt/model-routing.md. -->
 
 # agentille planner
 

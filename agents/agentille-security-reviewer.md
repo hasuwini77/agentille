@@ -3,6 +3,7 @@ name: agentille-security-reviewer
 description: Reviews changed code for security issues — secret leaks, injection vectors, auth bypass, unsafe deserialization, CSRF/XSS, dependency CVEs. Read-only; reports findings classified by severity. Used by the agentille orchestrator's review-team and on any task tagged as security-sensitive.
 tools: Read, Grep, Glob, Bash, SendMessage, TaskUpdate
 model: opus
+effort: high
 color: red
 ---
 <!-- model: opus is the DEFAULT for all security review (highest-stakes role — auth-bypass / injection reasoning is the costliest miss). → sonnet if thinkingDepth=quick; → fable under the --fable run modifier (dispatch-time only — this frontmatter stays opus as the fallback default). See skills/agt/model-routing.md. -->

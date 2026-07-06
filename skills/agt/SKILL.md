@@ -180,6 +180,8 @@ This plugin ships seven **agent definitions** (in the plugin's `agents/` dir), o
 
 Each agent def carries its own default `model` and `tools` allowlist, but still pass an **explicit `model`** on every dispatch per `model-routing.md` — the static frontmatter default can't express the `thinkingDepth` overrides. The `agentille-` prefix avoids colliding with the user's other installed `planner`/`code-reviewer` agents (e.g. superpowers, gsd).
 
+**Foreground vs background (subagents run background-by-default since Claude Code v2.1.198).** Any dispatch whose result gates the next step — the planner → plan-reviewer → executor chain, a single executor whose diff feeds the reviewer, any sequential wave — MUST pass `run_in_background: false` so the result returns before the pipeline advances. Background dispatch is reserved for genuinely parallel spawns (concurrent executors on disjoint slices, pipelined reviewers). Every *named background* spawn is a persistent session and falls under the teardown obligation in Hard Rule #11 — shut it down once its handoff is consumed.
+
 See `roster.md` for which combinations to dispatch per task category.
 
 ## Workflow tier

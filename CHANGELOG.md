@@ -2,6 +2,53 @@
 
 All notable changes to agentille are documented here.
 
+## [1.31.1] — 2026-07-06
+
+Docs-only patch closing the v1.31.0 deferred list — every item resolved with
+evidence rather than left open. No manifest fields, no frontmatter, no
+hook/script/agent changes, no behavior changes.
+
+### Added
+
+- `workflow-mode.md` §9 "Saved workflows": a user-authored, committable
+  `.claude/workflows/` script the Workflow tool invokes by name with `args` —
+  explicitly distinguished from the per-run generated scripts, which stay
+  scratch state and are never committed. Concrete `meta`/`args` example
+  included; surfaces the public docs underspecify are labeled
+  "runtime-observed on current builds".
+
+### Fixed
+
+- `display.md` cockpit note implied `profile.cockpit.enabled` was the only
+  gate; it now names both enable paths (env var or profile flag) and points at
+  the authoritative seam in `SKILL.md`.
+
+### Rationale — deferred-list closures (all four, with evidence)
+
+- **`TeammateIdle` teardown backstop — rejected.** Exit code 2 on
+  `TeammateIdle` *prevents* the teammate from going idle so it keeps working —
+  inverted semantics for teardown, with an anti-idle-loop failure mode; the
+  event also fires only for team teammates. Teardown remains the lead's
+  obligation (SKILL.md Hard Rule #11).
+- **`TeammateIdle` observability event — deferred, consumer-first.** The
+  `schema:1` wire tolerates unknown event types (1.30.x compat matrix), so
+  emission is safe but pointless until the cockpit app renders it. Land the
+  viewer support first.
+- **Skill-scoped `hooks:` migration — rejected (narrowly).** Frontmatter hooks
+  are scoped to "the component's lifecycle"; how that maps to a multi-turn
+  `/agt` run is unproven, and the cockpit `Stop` hook must survive the whole
+  run. The global hooks' self-gate already costs ~nothing in non-agt sessions.
+  Revisit only with positive evidence of cross-turn persistence.
+- **Plugin-config cockpit toggle (`userConfig`) — rejected on probe evidence.**
+  Probed 2026-07-06 on Claude Code 2.1.201 with a throwaway plugin via
+  `claude --plugin-dir`: a `${user_config.KEY}` placeholder in skill content
+  renders LITERALLY (unsubstituted) both with the value unset and with it set
+  via `pluginConfigs`, and `CLAUDE_PLUGIN_OPTION_*` is not visible to the
+  session's Bash environment (plugin subprocesses only). No path exists by
+  which the orchestrator could reliably observe the toggle, so shipping it
+  would create a visible knob that silently does nothing. The two supported
+  cockpit gates remain `AGENTILLE_COCKPIT=1` and `profile.cockpit.enabled`.
+
 ## [1.31.0] — 2026-07-06
 
 Doc-currency release against the current Claude Code documentation (Agent Teams

@@ -35,7 +35,7 @@ cd ~/your/repo
 
 That's it. `/agt` does the rest: classify → plan (if needed) → implement → review → summarize.
 
-> **Team mode (split panes) requires two things:** Claude Code **2.1.32+**, and `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1` set in `~/.claude/settings.json` under the `env` key (see [Team mode](#team-mode-optional) below). Subagent mode — the default — works on any recent version with no extra config.
+> **Team mode requires two things:** Claude Code **2.1.178+** (the version where teams form on first spawn, with no setup step), and `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1` set in `~/.claude/settings.json` under the `env` key (see [Team mode](#team-mode-optional) below). Subagent mode — the default — works on any recent version with no extra config.
 
 ---
 
@@ -147,7 +147,7 @@ When `/agt` picks a team — or you force one with `--team` — each role become
 
 ### 1 · Enable it (both platforms)
 
-Requires Claude Code **2.1.32+**. Add the experimental flag:
+Requires Claude Code **2.1.178+** (older versions used a team-setup flow that no longer exists). Add the experimental flag:
 
 ```jsonc
 // ~/.claude/settings.json
@@ -156,7 +156,7 @@ Requires Claude Code **2.1.32+**. Add the experimental flag:
 
 ### 2 · Turn on split panes (the "wow")
 
-**Two ways to drive a team:** one agent **per pane** (live — needs tmux or iTerm2), or **in-process** (no panes; teammates share one pane, Shift+Down to cycle). Same team either way — panes are just the view.
+**Two ways to drive a team:** one agent **per pane** (live — needs tmux or iTerm2), or **in-process** (the default since v2.1.179 — no panes; teammates live in an agent panel under the prompt: ↑/↓ to select one, Enter to view and message it, `x` to stop it, Ctrl+T for the shared task list). Same team either way — panes are just the view.
 
 **macOS**
 
@@ -166,7 +166,7 @@ tmux                         # start a session, then launch `claude` inside it
 ```
 ```jsonc
 // ~/.claude/settings.json
-{ "teammateMode": "tmux" }   // or "auto"
+{ "teammateMode": "tmux" }   // or "auto" — or "iterm2" (v2.1.186+) for explicit iTerm2 native panes
 ```
 
 On Warp (and any non-iTerm2 terminal) you must be **inside** a tmux session before launching Claude — that's what the panes attach to. Smoothest native panes: **iTerm2 + `tmux -CC`** (it manages the session for you).
@@ -328,7 +328,7 @@ The following properties are confirmed in the cockpit server source (`src/server
 
 ## Requirements
 
-- Claude Code (any recent version for subagent mode; **2.1.32+** for team mode).
+- Claude Code (any recent version for subagent mode; **2.1.178+** for team mode).
 - A `~/.agentille/profile.json` — created by `/agentille-init`.
 
 ## Philosophy

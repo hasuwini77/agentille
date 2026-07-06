@@ -6,7 +6,7 @@ The orchestrator picks one of four execution modes per task:
 
 - **subagent** (default, always available) — dispatches roles via the `Agent` tool, results return to the orchestrator. The v1.0 path.
 - **workflow** (experimental) — emits a Dynamic Workflow script the Claude Code runtime executes in the background; scripted fan-out with no inter-agent messaging. See `workflow-mode.md`.
-- **team** (opt-in, experimental) — uses Claude Code's Agent Teams primitive: each role is an independent Claude session, peers can message each other via `SendMessage`, shared task list. Requires `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1` and Claude Code 2.1.32+.
+- **team** (opt-in, experimental) — uses Claude Code's Agent Teams primitive: each role is an independent Claude session, peers can message each other via `SendMessage`, shared task list. Requires `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1` and Claude Code **2.1.178+** (this skill uses the no-setup-step flow — a team forms on the first teammate spawn; before 2.1.178 the runtime required the now-removed `TeamCreate`/`TeamDelete` setup flow, which this skill never performs).
 - **solo** — execute inline in this session, no spawn. For trivial tasks (one file mentioned, no architectural verbs).
 
 > **Team vs workflow:** both use the same disjoint-parallelism bar. The split is peer-messaging need — team = peer sessions for adversarial debate or cross-layer coordination (e.g. incident-team hypotheses, competing reviewers exchanging `READY`/`REVIEW` pings); workflow = scripted subagent fan-out where results flow to script variables and no inter-agent messaging is required. If peers don't need to talk, prefer workflow.
@@ -65,7 +65,7 @@ Before dispatching team mode:
    > *"Team mode is gated by `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1`. Add it to `~/.claude/settings.json` (in the `env` block) or pass `--mode subagent`."*
    …and degrade to subagent mode.
 
-2. Check `claude --version >= 2.1.32`. If older, degrade with: *"Agent Teams requires Claude Code 2.1.32+. Degraded to subagent mode."*
+2. Check `claude --version >= 2.1.178`. If older, degrade with: *"Agent Teams requires Claude Code 2.1.178+ (the no-setup-step spawn flow this skill uses; older versions used the removed TeamCreate/TeamDelete flow). Degraded to subagent mode."*
 
 3. Check daily soft cap (see below). If exceeded, prompt once per session.
 
@@ -78,7 +78,7 @@ Before dispatching team mode:
    | yes | `tmux`, or `auto` while inside tmux | **Ready** — say nothing. |
    | yes | unset / `in-process` / `auto` outside tmux | **Hint:** *"Teammates will run in-process (no split panes). To get one pane per teammate, add `\"teammateMode\": \"tmux\"` to `~/.claude/settings.json` — or launch `claude --teammate-mode tmux`."* |
    | no (tmux session absent) | `tmux` | **Hint:** *"`teammateMode: tmux` is set but there's no tmux session — start `tmux` (or use iTerm2 on macOS) before launching Claude so panes can attach."* |
-   | no (Windows Terminal / VS Code terminal / Ghostty) | any | **No nag** — panes are unsupported there; teammates run in the lead's terminal (Shift+Down to cycle). |
+   | no (Windows Terminal / VS Code terminal / Ghostty) | any | **No nag** — panes are unsupported there; teammates run in the lead's terminal via the agent panel (↑/↓ select, Enter to view/message, `x` to stop, Ctrl+T task list). |
 
    Guidance only: never write to `settings.json` yourself, never block, and skip silently if the file can't be read. This is the one pre-flight check that does **not** degrade team mode on failure — pane display is cosmetic, the team still runs.
 
@@ -86,8 +86,9 @@ Before dispatching team mode:
 
 Whether teammates appear in separate panes is the **user's** setting, not agentille's — never try to set it from the skill:
 
-- `teammateMode: "in-process"` (and the `"auto"` default outside tmux) → all teammates live in the lead's terminal; cycle with Shift+Down. Works in any terminal.
-- `teammateMode: "tmux"` (or `"auto"` while already inside a tmux session) → each teammate gets its own pane. Requires tmux **or** iTerm2 (`it2` CLI) installed.
+- `teammateMode: "in-process"` — **the default since Claude Code v2.1.179** (before that the default was `"auto"`) → all teammates live in the lead's terminal. The **agent panel** below the prompt input drives them: ↑/↓ selects a teammate, Enter opens its transcript to message it directly, Esc interrupts its turn, `x` stops it, Ctrl+T toggles the shared task list. Works in any terminal.
+- `teammateMode: "tmux"` (or `"auto"` while already inside a tmux session) → each teammate gets its own pane. Requires tmux **or** iTerm2 (`it2` CLI) installed; auto-detects which to use.
+- `teammateMode: "iterm2"` (v2.1.186+) → forces iTerm2 native split panes explicitly (no tmux auto-detect). Requires the `it2` CLI; errors with the install command if `it2` is missing.
 
 > **Two settings, don't confuse them.** Claude Code's top-level **`teammateMode`** (in `~/.claude/settings.json`) is the *only* thing that drives panes. The agentille profile's **`team.displayMode`** is informational metadata — it does **not** control Claude Code's display. A user who sets `team.displayMode: "tmux"` and expects panes will be disappointed; always point them at `teammateMode`.
 
@@ -117,6 +118,7 @@ You (the orchestrator) are the **team lead**. A team forms the moment you spawn 
    - `run_in_background: true` so teammates run concurrently.
    - Give each a distinct `name` you can reference (e.g. `exec-1`, `exec-2`).
    - **`team_name` is deprecated** — the field is accepted but ignored by the runtime; the team name is session-derived (`session-` + first 8 chars of session ID). Do not set or rely on it.
+   - **Permissions inherit at spawn:** teammates start with the lead's permission settings (including `--dangerously-skip-permissions` if the lead runs with it); there is no per-teammate permission mode at spawn time. Reviewer teammates get their read-only behavior from their agent-def `tools:` allowlist, not from a separate permission mode.
    - Spawn `count` instances per role. Prompt = the user's task + the profile context block + which slice of the work this teammate owns. **Assign disjoint file sets** — two teammates editing the same file overwrite each other. Implementation teammates should each take their own git worktree (the executor does this when `isolated: true`, branching off the current branch) so they can't collide even by accident.
    - Give every executor teammate a `checkpoint:` path (`~/.agentille/state/run-<id>/checkpoint-<name>.md`) — it checkpoints at committable boundaries and self-reports context pressure so you can rotate it (see "Context rotation" below).
    - If the template marks `require-plan-approval: true`, tell the teammate to plan first in read-only mode and wait for your approval before implementing; you approve/reject as lead.
@@ -151,11 +153,13 @@ On receiving it, the lead rotates:
 3. **Spawn a successor** — same role, suffixed name (`exec-1` → `exec-1b`) — with: the SAME context-pack slice, the SAME checkpoint path, and the instruction *"Resume from the checkpoint + `git log` on branch `agt/<slug>`; trust them — do NOT re-read or redo completed work."* The successor reuses the existing worktree and branch and occupies the same slot against the 3-parallel cap.
 4. The rotation is invisible to the rest of the run — `READY` handoffs, review, and consolidation proceed as if it were one executor.
 
-Why rotation, not `/compact`: a teammate cannot invoke CLI commands on itself, and compaction is lossy summarization at an uncontrolled moment. Rotation through a checkpoint is deterministic — the durable state lives in git + the checkpoint file, not the conversation — and a successor starts with a near-empty window instead of a summarized one. The same protocol doubles as crash recovery: a teammate that dies mid-run gets a successor seeded the same way.
+Why rotation, not `/compact`: a teammate cannot invoke CLI commands on itself, and compaction is lossy summarization at an uncontrolled moment. Rotation through a checkpoint is deterministic — the durable state lives in git + the checkpoint file, not the conversation — and a successor starts with a near-empty window instead of a summarized one. The same protocol doubles as crash recovery: a teammate that dies mid-run gets a successor seeded the same way. Since v2.1.198 you get an explicit crash signal to key off: a teammate whose turn ends on an API error notifies the lead with the error text instead of appearing to finish normally — treat that notification as confirmed failure and go straight to respawn-from-checkpoint, no silence-based heuristics needed.
 
 **Lead-side hygiene.** The lead's own window fills too — it receives every report. Keep teammate traffic to the structured handoffs (`READY` / `REVIEW` / `CONTEXT`), persist consolidated run state to the run directory instead of holding it in-window, and never pull a teammate's diff into your own context — you read verdicts, not patches.
 
 **Reclaiming a pane mid-run (optional, not the default).** This guidance applies **mid-run only** — at run end every pane is closed unconditionally (see "Teardown" below). Mid-run: when running in tmux (`$TMUX` is set) and a teammate's slice is **fully merged, has a `PASS`, and has no remaining dependent work**, ask the teammate to shut down and collapse its pane via `tmux kill-pane -t <id>` to reclaim space. Do **not** blanket-close teammates the moment they go idle mid-run — an idle teammate mid-run is usually still needed for a later step. When in doubt, leave it until run end and let teardown handle it. Never kill `$TMUX_PANE` (the lead's own pane). Only applicable in tmux; skip silently in in-process mode.
+
+**In-process idle rows (the default display).** An idle teammate's row hides from the agent panel ~30s after the whole panel goes idle (v2.1.199 behavior; 2.1.181–2.1.198 hid a row 30s after its own turn), and when more than three teammates are idle the surplus rows collapse into a single `N idle agents` row (Enter expands it). **This is cosmetic — a hidden or collapsed row is NOT a stopped teammate.** The teammate keeps running and stays addressable by name; its row reappears on its next turn. Never treat a vanished row as an orphan, and never re-spawn a teammate just because its row hid.
 
 ### Pipelined review (overlap phases)
 
@@ -227,7 +231,7 @@ Once the surviving hypothesis lands a fix, gate it like any other change: dispat
 
 5. **Declare done** and return the final summary only after the above steps complete.
 
-**Guard rails:** if a teammate is wedged and won't respond, force-close its pane if in tmux; report the orphan in the `team:` row and declare done — never hang indefinitely. A teammate must never run cleanup itself — its team context may not resolve. Shared team state (`~/.claude/teams/{session-name}/`) cleans up automatically when the session exits; no manual file deletion is needed. **If you find agent processes already orphaned by an earlier abrupt teardown** (live agent processes with no pane — e.g. after a `kill-server`), do **not** blind-kill them by PID: unrelated live sessions run the same binary, so killing the wrong PID closes a session in use. A graceful shutdown can't reach a teammate whose mailbox is already detached, so such orphans clear only when the session that spawned them exits — surface them in the `team:` row rather than guessing at PIDs.
+**Guard rails:** if a teammate seems wedged, first send it any message — since v2.1.198 a message wakes an in-process teammate that is stuck waiting out an API-retry delay, so it retries immediately; that's far cheaper than a force-close/respawn. Only if it still won't respond, force-close its pane if in tmux; report the orphan in the `team:` row and declare done — never hang indefinitely. A teammate must never run cleanup itself — its team context may not resolve. Shared team state (`~/.claude/teams/{session-name}/`) cleans up automatically when the session exits; no manual file deletion is needed. Note the split: only the team *config* directory is wiped at session end — the shared *task list* at `~/.claude/tasks/{session-name}/` persists locally (so resumed sessions keep their tasks) and ages out under the same `cleanupPeriodDays` setting as session transcripts. **If you find agent processes already orphaned by an earlier abrupt teardown** (live agent processes with no pane — e.g. after a `kill-server`), do **not** blind-kill them by PID: unrelated live sessions run the same binary, so killing the wrong PID closes a session in use. A graceful shutdown can't reach a teammate whose mailbox is already detached, so such orphans clear only when the session that spawned them exits — surface them in the `team:` row rather than guessing at PIDs.
 
 ## Failure → degrade
 

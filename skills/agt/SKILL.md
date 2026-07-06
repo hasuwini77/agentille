@@ -67,7 +67,7 @@ When this skill is invoked (`/agt <task>`):
 | 9 | Build task with **≥2 genuinely disjoint parallel slices across 2+ dependency waves (3+ buckets)** AND the `Workflow` tool available | **workflow** | — |
 | 10 | Otherwise | **Stage 2** (inline Haiku classify) — its returned `{mode, template, roster}` is authoritative | per Stage 2 |
 
-Any team result must pass the team pre-flight (env flag `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1`, Claude Code ≥ 2.1.32, daily soft cap) — see `team-mode.md`. On any pre-flight or spawn failure, degrade to subagent mode.
+Any **team** result must pass the team pre-flight (env flag `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1`, Claude Code ≥ 2.1.178, daily soft cap) — see `team-mode.md`. **This floor gates team mode only** — solo, subagent, and workflow modes are unaffected on older builds. On any pre-flight or spawn failure, degrade to subagent mode.
 
 Row #9 (workflow) requires the `Workflow` tool to be available at runtime. If it is absent (older Claude Code build, `CLAUDE_CODE_DISABLE_WORKFLOWS=1`, or `disableWorkflows: true`), degrade silently to in-session subagent wave dispatch and emit one log line. See `skills/agt/workflow-mode.md` for the full contract.
 

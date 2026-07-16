@@ -2,6 +2,14 @@
 
 All notable changes to agentille are documented here.
 
+## [1.32.1] — 2026-07-17
+
+### Fixed
+
+- Company name corrected everywhere: **Systown AI Lab** (singular), not
+  "Systown AI Labs" as v1.32.0 shipped it — plugin author, marketplace
+  owner/author/description, LICENSE copyright holder, and README credit.
+
 ## [1.32.0] — 2026-07-17
 
 Rebrand release: agentille is now maintained and published by **Systown AI

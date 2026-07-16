@@ -2,6 +2,29 @@
 
 All notable changes to agentille are documented here.
 
+## [1.32.0] — 2026-07-17
+
+Rebrand release: agentille is now maintained and published by **Systown AI
+Labs** (systown.ai). Branding and attribution only — no skill, agent, hook, or
+behavior changes.
+
+### Changed
+
+- `plugin.json` `author` is now Systown AI Labs (https://systown.ai).
+- `marketplace.json` renamed to `systown-agentille`; owner and plugin author
+  are now Systown AI Labs. If you added the marketplace before this release,
+  re-add it (`/plugin marketplace add hasuwini77/agentille`) to pick up the
+  new name.
+- `LICENSE` copyright holder is now Systown AI Labs (still MIT).
+- `README.md` credits Systown AI Labs ("Powered by" line + Author section).
+
+### Rationale
+
+- Repository URLs, the install slug, and the update-check raw URL still point
+  at the current GitHub location — changing those before the repository is
+  actually transferred would break installs and the version-check hook. They
+  move in a follow-up release when/if the repo moves to a Systown org.
+
 ## [1.31.1] — 2026-07-06
 
 Docs-only patch closing the v1.31.0 deferred list — every item resolved with

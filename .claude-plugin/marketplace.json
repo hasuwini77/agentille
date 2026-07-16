@@ -1,16 +1,16 @@
 {
   "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
-  "name": "hasuwini77-agentille",
-  "description": "Personal Claude Code marketplace by @hasuwini77 — hosts the agentille orchestration plugin.",
+  "name": "systown-agentille",
+  "description": "Claude Code marketplace by Systown AI Labs — hosts the agentille orchestration plugin.",
   "owner": {
-    "name": "@hasuwini77"
+    "name": "Systown AI Labs"
   },
   "plugins": [
     {
       "name": "agentille",
       "description": "Personal AI coding orchestrator for Claude Code (trigger: /agt). Four skills + seven dispatchable agents with smart model routing, agent-team support, parallel git worktrees, plan review, upfront UI prototyping, and code + design review built in.",
       "author": {
-        "name": "@hasuwini77"
+        "name": "Systown AI Labs"
       },
       "category": "development",
       "source": "./",

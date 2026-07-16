@@ -2,21 +2,29 @@
 
 All notable changes to agentille are documented here.
 
+## [1.32.1] — 2026-07-17
+
+### Fixed
+
+- Company name corrected everywhere: **Systown AI Lab** (singular), not
+  "Systown AI Labs" as v1.32.0 shipped it — plugin author, marketplace
+  owner/author/description, LICENSE copyright holder, and README credit.
+
 ## [1.32.0] — 2026-07-17
 
 Rebrand release: agentille is now maintained and published by **Systown AI
-Labs** (systown.ai). Branding and attribution only — no skill, agent, hook, or
+Lab** (systown.ai). Branding and attribution only — no skill, agent, hook, or
 behavior changes.
 
 ### Changed
 
-- `plugin.json` `author` is now Systown AI Labs (https://systown.ai).
+- `plugin.json` `author` is now Systown AI Lab (https://systown.ai).
 - `marketplace.json` renamed to `systown-agentille`; owner and plugin author
-  are now Systown AI Labs. If you added the marketplace before this release,
+  are now Systown AI Lab. If you added the marketplace before this release,
   re-add it (`/plugin marketplace add hasuwini77/agentille`) to pick up the
   new name.
-- `LICENSE` copyright holder is now Systown AI Labs (still MIT).
-- `README.md` credits Systown AI Labs ("Powered by" line + Author section).
+- `LICENSE` copyright holder is now Systown AI Lab (still MIT).
+- `README.md` credits Systown AI Lab ("Powered by" line + Author section).
 
 ### Rationale
 

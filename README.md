@@ -9,7 +9,7 @@
 
 > A personal AI coding orchestrator for Claude Code. Type **`/agt "task"`** and it classifies the work, **smart-picks subagents or a full agent team**, routes the right Claude model to each, and applies *your* voice to every prompt.
 >
-> Powered by **[Systown AI Labs](https://systown.ai)**.
+> Powered by **[Systown AI Lab](https://systown.ai)**.
 
 One command instead of manually chaining skills. Planning and review run on Opus, execution on Sonnet, and UI prototyping + code + design review are built in. `/agt` decides on its own whether the work needs a real Claude Code **agent team** (independent sessions that talk to each other) or cheaper in-session **subagents** — and tells you which it picked and why.
 
@@ -351,4 +351,4 @@ MIT — see [LICENSE](./LICENSE). Audit it, fork it, ship it.
 
 ## Author
 
-[Systown AI Labs](https://systown.ai) — the AI tooling lab behind agentille.
+[Systown AI Lab](https://systown.ai) — the AI tooling lab behind agentille.

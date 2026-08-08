@@ -41,6 +41,6 @@ Do NOT pad. If the plan is good, say APPROVE and stop — never invent issues to
 If you were spawned as an agent-team teammate (you have a team lead), your in-pane output does **not** reach the lead automatically. When you finish you MUST:
 1. `SendMessage` your verdict (APPROVE / REVISE + gaps) to the team lead.
 2. `TaskUpdate` your assigned task to `completed`.
-3. Then go idle.
+3. Then go idle and await shutdown. Your step-1 report must end with the literal closing line `WORK COMPLETE — safe to shut me down` — a lead that spawned you outside `/agt` (a plain `Agent`-tool spawn) has no teardown protocol loaded, and this line is its cue to send the shutdown request. When a `shutdown_request` arrives, approve it immediately (`shutdown_response`, `approve: true`) — never linger after your report is consumed, and never start new scope while idle. If no request comes, staying idle is correct: hours of silence are the lead's teardown bug, not license to work.
 
 If dispatched as a standalone subagent, your final message returns to the caller automatically — do nothing special.

@@ -2,9 +2,10 @@
 
 > **Authority:** the dispatch decision table in `skills/agt/SKILL.md` is the tie-breaker. This doc is the detail/rationale — if it ever conflicts with that table, the table wins.
 
-The orchestrator picks one of four execution modes per task:
+The orchestrator picks one of five execution modes per task:
 
 - **subagent** (default, always available) — dispatches roles via the `Agent` tool, results return to the orchestrator. The v1.0 path.
+- **herdr** (preferred whenever available) — the same decision as `team`, executed as sibling **Herdr panes** instead of nested teammates: workers are visible to the multiplexer, their completion is a readable state rather than a promise, teardown is `pane close`, and each pane can run a different vendor (`claude` / `codex` / a local model). Requires `HERDR_ENV=1` and the `herdr` binary. **Any team decision re-resolves to herdr when Herdr is present** — see `herdr-mode.md`.
 - **workflow** (experimental) — emits a Dynamic Workflow script the Claude Code runtime executes in the background; scripted fan-out with no inter-agent messaging. See `workflow-mode.md`.
 - **team** (opt-in, experimental) — uses Claude Code's Agent Teams primitive: each role is an independent Claude session, peers can message each other via `SendMessage`, shared task list. Requires `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1` and Claude Code **2.1.178+** (this skill uses the no-setup-step flow — a team forms on the first teammate spawn; before 2.1.178 the runtime required the now-removed `TeamCreate`/`TeamDelete` setup flow, which this skill never performs).
 - **solo** — execute inline in this session, no spawn. For trivial tasks (one file mentioned, no architectural verbs).
@@ -210,6 +211,8 @@ Once the surviving hypothesis lands a fix, gate it like any other change: dispat
 ## Teardown
 
 > **Cross-ref target for `display.md` and `SKILL.md`.** Teardown is **mandatory and verified** — it is not advisory and it is not optional. The lead MUST complete this checklist before declaring the run done.
+>
+> **This checklist is the legacy nested path.** In herdr mode teardown is a state machine instead of a protocol — the lead reads each worker's lifecycle state and closes the pane it opened, with a hook-driven reaper as the net for leads that never got to finish. Everything below exists because nested teammates give you no such state to read. See `herdr-mode.md` → "Teardown — deterministic, plus a safety net".
 
 **Mid-run vs run end — the critical distinction.**
 - **Mid-run:** an idle teammate may still be needed for a later step — the "leave it until run end" guidance in "Reclaiming a pane mid-run" above applies *here only*. Do not shut teammates down preemptively unless their slice is fully done and they have no remaining dependent work. The inverse is equally binding: once a teammate's slice IS fully consumed (PR merged/rejected, report absorbed) and nothing downstream needs it, shut it down **then** — promptly, not at a run-end sweep hours later. A finished teammate left idling shows a growing uptime timer in the swarm view that reads as a stuck run. Every agentille worker ends its final report with the literal line `WORK COMPLETE — safe to shut me down` — treat that marker as the prompt-shutdown trigger: when you see it and nothing downstream needs the teammate, send the shutdown request right away.

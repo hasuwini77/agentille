@@ -2,6 +2,61 @@
 
 All notable changes to agentille are documented here.
 
+## [1.33.0] — 2026-08-08
+
+Herdr mode: when the orchestrator runs inside a Herdr session, parallel workers
+become **sibling panes running real vendor sessions** instead of agents nested
+inside the lead. Same classification, roster, model routing, and review gates —
+only the transport changes.
+
+### Added
+
+- `skills/agt/herdr-mode.md` — the herdr execution contract: pre-flight, the
+  elastic worker pool, vendor routing, the spawn recipe, the lifecycle state
+  machine, and deterministic teardown.
+- **Elastic worker pool.** The concurrent-worker count is computed at dispatch
+  time (`min(disjoint slices, resourceCap)`, where `resourceCap` derives from
+  free RAM and core count) rather than fixed at a constant. Slices beyond the
+  pool queue and run as waves, so a 10-slice task is a normal run at whatever
+  width the machine supports. Fan-outs past 4 must print a slice map; past 6
+  they additionally require machine-checkable exit criteria and a non-Claude
+  majority.
+- **Cross-vendor routing.** Implementation → `claude`, adversarial review →
+  `codex` (decorrelated errors), mechanical high-volume work → `opencode` on a
+  local endpoint. Local slices are admissible only with a machine-decidable
+  exit criterion.
+- `hooks/agentille-reap.sh` + a second `Stop` hook entry — the safety-net
+  reaper. Closes `agt-*` panes that sit continuously in `done` (90s grace) or
+  `idle` (300s grace), measured against `state_change_seq` so an intermittently
+  active agent resets its own timer. Never touches `working`, `blocked`, or
+  `unknown`, and never touches an agent whose name lacks the `agt-` prefix.
+  `--dry-run` and `--verbose` supported; reaps are logged.
+
+### Changed
+
+- Dispatch: a **team** result re-resolves to **herdr** whenever `HERDR_ENV=1`
+  and the `herdr` binary is present. No new decision logic and no new user
+  choice — the parallelism bar (≥2 disjoint slices) is unchanged. `--mode herdr`
+  forces it; `--mode team` forces the legacy nested path.
+- Teardown in herdr mode is a state machine, not a protocol: each worker is
+  harvested with `herdr agent read` and its pane closed with `herdr pane close`
+  the moment its output is consumed. A run closes on an agent list filtered to
+  the run id returning zero rows.
+- `display.md` gains a herdr entry — the fanout card names each worker's vendor,
+  and a `blocked` worker is surfaced immediately rather than waited on.
+
+### Rationale
+
+- A multiplexer tracks one agent per pane, so anything spawned *inside* the
+  lead's pane is invisible to it. That invisibility is the whole bug class
+  behind orphaned workers: completion degrades from a readable state to a
+  promise, and teardown from an operation to a request. Hoisting workers to
+  sibling panes makes `done`/`idle`/`blocked` machine-readable, makes closing
+  them a one-liner, and — the bonus — lets each pane run a different vendor.
+- Ownership is the `agt-` name prefix. It is the single choke point that lets
+  both the lead and the reaper act automatically while being structurally
+  incapable of closing a pane the user opened by hand.
+
 ## [1.32.2] — 2026-08-08
 
 ### Fixed

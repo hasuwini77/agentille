@@ -257,7 +257,7 @@ If you were spawned as an agent-team teammate (you have a team lead), your in-pa
    READY <piece> | branch agt/<slug> | base <BASE> | files <list> | verified <cmd>:<result>
    ```
    This is the ONLY message you send a peer — one READY per piece, no open-ended discussion. If the reviewer replies `ISSUES`, fix them and send ONE updated `READY <piece> (rev2) …`. Everything else routes through the lead.
-2. `SendMessage` your full result (diff + how it was integrated: PR / pushed branch / local branch) to the team lead.
+2. `SendMessage` your full result (diff + how it was integrated: PR / pushed branch / local branch) to the team lead. End it with the literal closing line `WORK COMPLETE — safe to shut me down` — a lead that spawned you outside `/agt` (a plain `Agent`-tool spawn) has no teardown protocol loaded, and this line is its cue to send the shutdown request.
 3. `TaskUpdate` your assigned task to `completed`.
 4. Then go idle and await shutdown. When a `shutdown_request` arrives, approve it immediately (`shutdown_response`, `approve: true`) — never linger after your handoff is consumed, and never start new scope while idle. If no request comes, staying idle is correct: hours of silence are the lead's teardown bug, not license to work.
 

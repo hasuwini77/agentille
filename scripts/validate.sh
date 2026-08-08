@@ -103,19 +103,24 @@ while IFS= read -r ref; do
 done < <(grep -rhoE 'agentille:agentille-[a-z-]+' skills 2>/dev/null | sort -u)
 [ "$bad" = 0 ] && pass "all agentille:agentille-* refs in skills/ resolve"
 
-# ── 5. Hook script declared by hooks.json exists and is executable ───────────
+# ── 5. EVERY hook script declared by hooks.json exists and is executable ─────
+# All of them, not just the first: a hook whose script is missing or lost its
+# +x bit fails silently at runtime, which is the worst way for a hook to break.
 hdr "Hooks"
-hookcmd=$(jq -r '.. | .command? // empty' hooks/hooks.json 2>/dev/null | head -1)
-hookrel=${hookcmd#\$\{CLAUDE_PLUGIN_ROOT\}/}
-if [ -z "$hookrel" ]; then
-  warn "hooks.json declares no command path"
-elif [ ! -f "$hookrel" ]; then
-  fail "hook script '$hookrel' (from hooks.json) does not exist"
-elif [ ! -x "$hookrel" ]; then
-  fail "hook script '$hookrel' is not executable (chmod +x)"
-else
-  pass "hook script '$hookrel' exists and is executable"
-fi
+hookcount=0
+while IFS= read -r hookcmd; do
+  [ -n "$hookcmd" ] || continue
+  hookrel=${hookcmd#\$\{CLAUDE_PLUGIN_ROOT\}/}
+  hookcount=$((hookcount + 1))
+  if [ ! -f "$hookrel" ]; then
+    fail "hook script '$hookrel' (from hooks.json) does not exist"
+  elif [ ! -x "$hookrel" ]; then
+    fail "hook script '$hookrel' is not executable (chmod +x)"
+  else
+    pass "hook script '$hookrel' exists and is executable"
+  fi
+done < <(jq -r '.. | .command? // empty' hooks/hooks.json 2>/dev/null | sort -u)
+[ "$hookcount" = 0 ] && warn "hooks.json declares no command path"
 
 # ── 5b. Contract fields shipped in v1.31.0 (regression locks) ────────────────
 # These fields ARE the contract changes of that release; losing one silently

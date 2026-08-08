@@ -2,6 +2,30 @@
 
 All notable changes to agentille are documented here.
 
+## [1.32.2] — 2026-08-08
+
+### Fixed
+
+- Finished worker agents no longer idle forever when spawned outside `/agt`.
+  All seven agent defs now end their final teammate report with the literal
+  marker `WORK COMPLETE — safe to shut me down` and approve any
+  `shutdown_request` immediately (previously only the executor carried the
+  shutdown-approval lifecycle; the other six defs stopped at "go idle").
+  A lead using the plain `Agent` tool — with no agentille teardown protocol
+  loaded — now gets an explicit cue that the teammate session is disposable.
+- `team-mode.md` teardown: the lead treats the `WORK COMPLETE` marker as the
+  prompt-shutdown trigger for a fully-consumed teammate, instead of leaving
+  finished teammates idling until a run-end sweep.
+
+### Rationale
+
+- Agent-teams teammates never terminate themselves — an idle teammate stays
+  alive until the lead sends a shutdown request or the session exits. When an
+  agentille agent def is spawned as a teammate by an orchestrator other than
+  `/agt`, nothing instructed anyone to shut it down, so finished workers
+  accumulated as idle sessions with growing uptime timers. The marker line
+  travels with the agent def, so the cue works no matter who spawned it.
+
 ## [1.32.1] — 2026-07-17
 
 ### Fixed

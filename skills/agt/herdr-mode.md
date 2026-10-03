@@ -2,7 +2,7 @@
 
 > **Authority:** the dispatch decision table in `skills/agt/SKILL.md` is the tie-breaker. This doc is the detail/rationale — if it ever conflicts with that table, the table wins.
 
-Herdr mode is team mode's execution shape done right. Same brain — classify, roster, model routing, review gates, git consolidation — but each worker is a **sibling Herdr pane running a real vendor session** instead of an agent nested inside the lead's own session.
+Herdr mode is the parallel execution shape done right. Same brain — classify, roster, model routing, review gates, git consolidation — but each worker is a **sibling Herdr pane running a real vendor session** instead of an agent nested inside the lead's own session.
 
 ## Why panes beat nested teammates
 
@@ -24,21 +24,21 @@ Hoisting workers to sibling panes fixes all three at once: they show up in `herd
 
 ## When herdr mode is selected
 
-Herdr mode **takes precedence over team mode** whenever it is available. The user never chooses between them — availability decides:
+Herdr mode is the parallel transport whenever it is available; availability decides:
 
 | Condition | Mode |
 |---|---|
 | `HERDR_ENV=1`, `herdr` on PATH, and the task has ≥2 genuinely disjoint slices | **herdr** |
-| Same parallelism bar, but not inside Herdr | **team** (the legacy path — see `team-mode.md`) |
+| Same parallelism bar, but not inside Herdr | **workflow** if the `Workflow` tool exists, else subagent waves |
 | No real parallelism | **subagent** / **solo**, exactly as today |
 
 The parallelism bar is unchanged and non-negotiable: **≥2 slices with disjoint file sets that can build at once.** Panes are cheaper to open than teammates, which is exactly why the bar must not drift — a pane per sequential step is theatre, not parallelism.
 
-`--mode herdr` forces it; `--mode team` still forces the legacy path. A forced herdr mode with no disjoint slices gets the same honesty treatment as a forced team (see `team-mode.md` → "Honesty on a forced team").
+`--mode herdr` forces it; teams (`--team` / `--mode team`) are legacy, opt-in only and never auto-selected. A forced herdr mode with no disjoint slices gets the same honesty treatment as a forced team (see `team-mode.md` → "Honesty on a forced team").
 
 ## Pre-flight
 
-1. `test "${HERDR_ENV:-}" = 1` — if it fails, you are not inside Herdr. Fall through to team/subagent mode silently. Never drive a Herdr session from outside one.
+1. `test "${HERDR_ENV:-}" = 1` — if it fails, you are not inside Herdr. Fall through to workflow/subagent mode silently. Never drive a Herdr session from outside one.
 2. `command -v herdr` — absent → fall through.
 3. Read your own location so every spawn is relative to it:
    ```bash
@@ -159,7 +159,7 @@ herdr worktree remove --workspace <id> --force
 
 ## Failure → degrade
 
-Any failure — `HERDR_ENV` unset, `herdr` missing, `pane split` refused, `agent start` timing out, the pool resolving to 1 — degrades to the next mode down (team if its own pre-flight passes, otherwise subagent) and logs one line: *"herdr unavailable — ran N subagents instead"*. Panes already opened for this run are closed before degrading; a half-spawned fan-out is never left on screen.
+Any failure — `HERDR_ENV` unset, `herdr` missing, `pane split` refused, `agent start` timing out, the pool resolving to 1 — degrades to the next mode down (workflow if available, otherwise subagent waves) and logs one line: *"herdr unavailable — ran N subagents instead"*. Panes already opened for this run are closed before degrading; a half-spawned fan-out is never left on screen.
 
 ## Cost
 

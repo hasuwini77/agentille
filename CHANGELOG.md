@@ -2,6 +2,26 @@
 
 All notable changes to agentille are documented here.
 
+## [2.5.1] — 2026-10-04
+
+### Fixed
+
+- **The deck opens on its own again, at any width.** v2.5.0 opened it from
+  the first agent spawn, but Claude Code places a pane opened that way only
+  at 144+ columns (110 once opened by hand), so in a split pane it never
+  appeared. Measured: at 100 columns an open from the typed prompt is placed,
+  from the /agt skill hook or a spawn it is not. The deck now opens on the
+  typed `/agt` as a one-line waiting strip, fills when the first agent or
+  pane worker spawns, and closes itself when the turn ends with no agent. A
+  run that ends its turn on a question reopens it on the reply. Verified in
+  an 83-column session with a real review run.
+- **Focus flags.** A plan-reviewer answer counts as REVISE only when that is
+  its first verdict word (an approval that mentions REVISE no longer flags).
+  A failed check written as `exit code 2` or `exit code: 1` now flags. A
+  brief line starting `⚑️` no longer carries the invisible variation
+  selector into the band. All three were found by an agentille code-reviewer
+  run on the focus module.
+
 ## [2.5.0] — 2026-10-03
 
 ### Added

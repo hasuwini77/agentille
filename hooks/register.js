@@ -208,7 +208,11 @@ export function register(on) {
   })
 
   on('ui.close', async ($, e, next) => {
-    if (e.id === DECK) deckOpen = false
+    if (e.id === DECK) {
+      deckOpen = false
+      // Closed by hand: stay closed until the next typed /agt or a new run.
+      if (e.origin.kind === 'person') deckDismissedRun = lastRun
+    }
     return next(e)
   })
 

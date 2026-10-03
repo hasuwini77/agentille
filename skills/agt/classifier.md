@@ -33,9 +33,9 @@ After picking the primary category, also note:
 - **hasUIComponent**: true if prompt mentions UI/UX/styling/component/page/screen/responsive/animation OR explicitly lists a `.tsx/.css/.scss` file → triggers the **design-reviewer** after the build, and on **build categories** (`design`, `feature`) prepends the **ui-prototyper** before the executor to frame the component design it builds against. A UI *bugfix*/*review* gets the design-reviewer but no prototyper — there's no new design to frame. No new signal — every UI role keys off this one flag; see `SKILL.md` dispatch table for the authoritative per-category roster.
 - **hasMultipleSubtasks**: true if prompt contains "and ", "also", "plus", "as well as" connecting verbs, OR ≥3 distinct actionable nouns → triggers planner
 
-## Parallel tiers — herdr, workflow, subagent (teams are opt-in only)
+## Parallel tiers — panes, workflow, subagent (teams are opt-in only)
 
-The disjoint-parallelism criterion governs every parallel tier. Classification never returns `team`: ≥2 disjoint slices → **parallel**, run as **herdr** inside Herdr (`herdr-mode.md`), else **workflow** when the `Workflow` tool exists, else subagent waves.
+The disjoint-parallelism criterion governs every parallel tier. Classification never returns `team`: ≥2 disjoint slices → **parallel**, run as **panes** inside Herdr or tmux (`panes-mode.md`), else **workflow** when the `Workflow` tool exists, else subagent waves.
 
 - **Team mode** — legacy, only when the user types `--team` / `--mode team` (~4× tokens). Cost transparency lives in `team-mode.md` → "Honesty on a forced team".
 

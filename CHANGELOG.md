@@ -2,6 +2,50 @@
 
 All notable changes to agentille are documented here.
 
+## [2.2.0] — 2026-10-03
+
+### Added
+
+- **tmux transport.** Outside Herdr but inside tmux, parallel slices run as
+  tmux panes. The mod probes the transport once per session (Herdr, then
+  tmux, else none) and injects a `## Pane transport` block into `/agt` so the
+  orchestrator knows which recipe to follow. Workers signal completion with a
+  `done-<role>` file in `~/.agentille/state/run-<id>/`.
+- **`/agt-spawn "task" [--model …]`**: opens one extra pane running one
+  Claude session on the model you pick (default `sonnet`), on Herdr or tmux.
+  Typed only, never focused.
+- tmux `agt-` panes appear in the band and the deck, and the reaper closes
+  them once their done file has held for 90s. tmux panes are scoped to the
+  lead's own window.
+- `panes-mode.md` gains "tmux transport" and "/agt-spawn" sections.
+
+### Changed
+
+- **`herdr-mode.md` is now `panes-mode.md`.** The mode is `panes`, with
+  Herdr or tmux as the transport. `--mode herdr` stays as an alias. Every
+  existing heading is unchanged, so old cross-references still resolve.
+- `SKILL.md`, `classifier.md`, `team-mode.md`, `display.md` and the README say
+  panes over Herdr or tmux instead of Herdr only.
+- **The cost section uses measured numbers** in place of the unmeasured "~4×"
+  claim for panes. On a two-slice test task, two Claude workers in panes used
+  1.12× the fresh tokens of the same two as subagents (1.05× counting the
+  lead, 1.55× counting cache reads). A pane opens at about 55k tokens of
+  context, a subagent at about 32k. Team mode's ~4× is labeled an estimate.
+
+### Fixed
+
+- `/agt-spawn` panes are never reaped, on either transport: the reserved
+  `spawn` role is exempt from the lead's teardown and from the mod's reaper.
+
+### Rationale
+
+Panes were Herdr-only, which left every plain tmux user on subagent waves.
+tmux has no per-agent lifecycle, so the transport reads a done file or a dead
+pane and never reaps on silence. The measurement corrects an earlier claim:
+panes are not a token saving, and the docs now say so. The gain is routing
+and handing each worker only its slice. The sample is small (one task, two
+runs per arm).
+
 ## [2.1.0] — 2026-10-03
 
 ### Changed

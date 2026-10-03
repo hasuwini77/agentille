@@ -34,9 +34,10 @@ Three color channels, each used where it is strongest — all theme-independent,
 
 With the agentille mod (Claude Code ≥ 2.1.287) the run is also visible live, outside the transcript:
 
-- **Band** above the prompt: one row per agentille agent (subagents and herdr `agt-*` panes) — role, model · effort, state, elapsed, tokens, `↑ <reason>` when escalated.
+- **Band** above the prompt: one row per agentille agent (subagents and Herdr or tmux `agt-*` panes) — role, model · effort, state, elapsed, tokens, `↑ <reason>` when escalated.
 - **Deck**: opens on its own when `/agt` starts (no focus; the prompt keeps the keys). One pixel mini-Claude per agent (hat = role, hat color = model); text fallback in the desktop app. Closed by hand → stays closed for that run. `/agt-nodeck` turns auto-open off (kept across sessions); `/agt-deck` opens it and turns it back on. Unasked opens (no typed `/agt`) seat only on terminals ≥ 144 columns.
 - **Ledger**: tokens per agent and per role, written to `~/.agentille/state/run-<id>/ledger.json`; `/agt-ledger` prints it.
+- **`/agt-spawn "task" [--model …]`**: opens one extra pane running one Claude session on the model you pick, on Herdr or tmux. Typed only, never focused, never reaped; it shows in the band and deck like any other `agt-` pane.
 
 The Debrief replaces the `cost:` shape row with a per-role token table when `ledger.json` exists (read it; never estimate):
 
@@ -140,6 +141,7 @@ Never narrate the wait in prose; the harness spinner already says *still alive*,
 ```
 🟢 recon    subagent · sequential, no disjoint slices    0:03
 🟢 recon    team · feature-team — 2 disjoint slices       0:04
+🟢 recon    panes · tmux — 2 disjoint slices              0:04
 🟢 recon    subagent · downgraded from forced team        0:06
 🟡 recon    team (forced) · overkill, ran as asked        0:03
 ```
@@ -236,6 +238,6 @@ Status (done / active / waiting) rides in the **glyph + trailing text** — `✓
 ## Mode notes
 
 - **Subagent mode:** the lead prints every frame inline (results return to the lead). The fanout block visualizes parallel `Agent` dispatches; pings update as each returns.
-- **Herdr mode:** identical to team mode from the rail's point of view — the lead prints every frame in its own pane while workers occupy sibling panes. Two additions: the fanout card's comment names each worker's **vendor** alongside its slice (`# auth · claude`, `# review · codex`, `# fixtures · local`), and the Debrief `team:` row reports the harvest/reap outcome (`team: ✓ 5 panes harvested and closed · 0 orphans`). A `blocked` worker gets its own 🟡 ping the moment it is detected — it is waiting on the user, so silence there is the one dead-air the rail must never keep.
+- **Panes mode (Herdr or tmux):** identical to team mode from the rail's point of view — the lead prints every frame in its own pane while workers occupy sibling panes. Two additions: the fanout card's comment names each worker's **vendor** alongside its slice (`# auth · claude`, `# review · codex`, `# fixtures · local`), and the Debrief `team:` row reports the harvest/reap outcome (`team: ✓ 5 panes harvested and closed · 0 orphans`). A `blocked` worker gets its own 🟡 ping the moment it is detected — it is waiting on the user, so silence there is the one dead-air the rail must never keep.
 - **Team mode:** the lead still prints the rail in its own pane. Teammate panes (the user's `teammateMode`) are *not* ours to style — the rail is the lead's connective narration above them, not a replacement. At run end the lead runs teardown (`team-mode.md` → "Teardown") and closes those panes, then prints the Debrief `team:` row confirming the collapse — so the screen the user is left with is the lead alone, not a wall of idle teammates.
 - **Degrade:** if a frame can't render (e.g. a station's metadata is unknown), drop that field, never the run. Logging and display both follow the same law: they never block the user's result.

@@ -107,3 +107,16 @@ export function ledgerText(l) {
   const line = (name, t) => name.padEnd(20) + String(t.agents).padStart(3) + '  in ' + tokens(t.input).padStart(7) + '  out ' + tokens(t.output).padStart(7) + '  cache ' + tokens(t.cacheRead).padStart(7) + '  ' + elapsed(t.ms)
   return ['run ' + l.run, ...names.sort().map((n) => line(n, l.roles[n])), line('total', l.total)].join('\n')
 }
+
+// ── deck auto-open policy ─────────────────────────────────────────────────────
+
+// A typed /agt run (bare or plugin-qualified), never /agt-deck, /agt-ledger, …
+export function isAgtPrompt(text) {
+  return /^\s*\/(agentille:)?agt(\s|$)/.test(String(text ?? ''))
+}
+
+// Open the deck unasked? Only with auto on, not already open, and not after the
+// person closed it by hand during this same run.
+export function shouldAutoOpen({ auto, open, dismissedRun, run }) {
+  return auto !== false && !open && dismissedRun !== run
+}

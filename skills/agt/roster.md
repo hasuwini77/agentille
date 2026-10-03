@@ -54,6 +54,10 @@ After classifying, dispatch this combination. Read top-to-bottom — order matte
 
 When the repo matches a squad (`.claude-plugin/squads.json`), extra reviewers join the **review step** of feature, bugfix, refactor, design, and review runs — `payments-reviewer`, `seo-reviewer`, `perf-reviewer` — in parallel with code-reviewer/design-reviewer, only when the diff touches their domain. Planning, research, and debug categories get checklist overlays only. Detection and rules: `squads.md`.
 
+## Formations
+
+A formation reshapes the workers above without changing the categories: **duel** runs two executors on one slice and a code-reviewer judges, **gauntlet** inserts the `agentille-adversary` between the executor and the reviewers, **relay** adds a contract leg before parallel executors. Picking rules and flows: `formations.md`.
+
 ## Hard cap
 
 Never dispatch more than 3 executor subagents in parallel. If the plan has 5 parallel steps, batch them: 3 first, then 2.

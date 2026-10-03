@@ -35,7 +35,8 @@ Three color channels, each used where it is strongest — all theme-independent,
 With the agentille mod (Claude Code ≥ 2.1.287) the run is also visible live, outside the transcript:
 
 - **Band** above the prompt: one row per agentille agent (subagents and Herdr or tmux `agt-*` panes) — role, model · effort, state, elapsed, tokens, `↑ <reason>` when escalated.
-- **Deck**: opens on its own when `/agt` starts (no focus; the prompt keeps the keys). One pixel mini-Claude per agent (hat = role, hat color = model); text fallback in the desktop app. Closed by hand → stays closed for that run. `/agt-nodeck` turns auto-open off (kept across sessions); `/agt-deck` opens it and turns it back on. Unasked opens (no typed `/agt`) seat only on terminals ≥ 144 columns.
+- **Deck**: opens on its own when the run's first agent or pane worker spawns — a solo run never opens it (no focus; the prompt keeps the keys). One pixel mini-Claude per agent (hat = role, hat color = model); text fallback in the desktop app. Closed by hand → stays closed for that run. `/agt-nodeck` turns auto-open off (kept across sessions); `/agt-deck` opens it and turns it back on. The deck opens from a spawn, not from your keystroke, so on terminals under 144 columns it waits for room; `/agt-deck` seats it at any width.
+- **Focus**: a block at the top of the band with what needs you — `⚑` flags read off agent results (a REVISE, a FAIL or CONCERNS verdict, a failed or skipped verification, an adversary that broke cases, a blocked pane; each also toasts) and, after a long answer, a Haiku brief: `→` next action, `✓` what got done, `⚑` what needs you. Cleared on your next prompt. `/agt-focus all|agt|off` sets the scope (default `agt`: answers of /agt runs only); `/agt-focus` alone prints it. Write the Debrief so its first line is the result and its last line is the next action — the brief leans on both.
 - **Ledger**: tokens per agent and per role, written to `~/.agentille/state/run-<id>/ledger.json`; `/agt-ledger` prints it.
 - **`/agt-spawn "task" [--model …]`**: opens one extra pane running one Claude session on the model you pick, on Herdr or tmux. Typed only, never focused, never reaped; it shows in the band and deck like any other `agt-` pane.
 
@@ -85,6 +86,7 @@ The brief is a **config-highlight card** — a ` ```yaml ` fence. The terminal's
 # agentille v<version> ▸ <mode> · <template-or-category> ▸ ~<est>m
 task:    <task, first line, ≤ 60 chars>
 mode:    <mode>      # <one-clause reason / spine shape>
+formation: <name>   # <shape · cost> — only when a formation runs (formations.md)
 recon:   ◉ done      # classified: <category>
 plan:    ◐ active    # <model> · drafting
 review:  ○ pending   # plan-reviewer · <model>

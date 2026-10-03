@@ -16,11 +16,19 @@ const TABLE = {
   'payments-reviewer': { base: ['opus', 'high'],     large: ['opus', 'high'],  risk: ['opus', 'max'],    quick: ['sonnet', 'high'] },
   'seo-reviewer':      { base: ['sonnet', 'medium'], large: ['sonnet', 'high'], risk: null,              quick: ['sonnet', 'low'] },
   'perf-reviewer':     { base: ['sonnet', 'high'],   large: ['opus', 'high'],  risk: null,              quick: ['sonnet', 'medium'] },
+  adversary:           { base: ['sonnet', 'high'],   large: ['sonnet', 'high'], risk: ['opus', 'high'],   quick: ['sonnet', 'medium'] },
 }
 
 // Roles that may run on Fable. The executor never changes model.
 const FABLE_ROLES = new Set(['planner', 'ui-prototyper', 'design-reviewer', 'security-reviewer', 'payments-reviewer', 'code-reviewer', 'plan-reviewer'])
 const FORCED_FABLE_NEEDS_LARGE = new Set(['code-reviewer', 'plan-reviewer'])
+
+// Run shapes beyond the plain roster (skills/agt/formations.md); shown on the deck header.
+export const FORMATIONS = new Set(['duel', 'gauntlet', 'relay'])
+
+export function formationOf(hdr) {
+  return hdr && FORMATIONS.has(hdr.formation) ? hdr.formation : null
+}
 
 export const DEFAULTS = { autoFable: true, maxFablePerRun: 1, fableWeeklyCeiling: 60 }
 

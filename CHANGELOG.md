@@ -2,6 +2,48 @@
 
 All notable changes to agentille are documented here.
 
+## [2.5.0] — 2026-10-03
+
+### Added
+
+- **Focus.** A block at the top of the band with what needs you. Flags come
+  straight off agent results, with no model call: a plan-reviewer REVISE, a
+  reviewer FAIL or CONCERNS, an executor whose verification failed or did not
+  run, an executor that handed off at its context limit, an adversary that
+  broke cases, a pane blocked on a prompt. Each also toasts. After a long
+  answer (150+ words) a Haiku pass adds at most three lines: `→` next action,
+  `✓` what got done, `⚑` what needs you. It runs off the turn's path and
+  clears on the next prompt. `/agt-focus all|agt|off` sets the scope (default
+  `agt`: answers of /agt runs only) and is remembered.
+- **Formations** (`skills/agt/formations.md`): **duel** (two executors, two
+  strategies, tests then a code-reviewer judge, the loser never pushed),
+  **gauntlet** (the new adversary attacks the build with tests, the executor
+  fixes, at most two rounds, the tests stay as regressions), **relay** (a
+  contract leg with stubs and contract tests, then slices coupled by that
+  interface build in parallel). `--formation` forces one; auto-pick is
+  conservative and a duel is never auto-picked. The planner marks
+  `coupled-by` slices. The mod shows the formation on the band and deck.
+- **`agentille-adversary`**: a red-team tester that writes tests only,
+  triages its own false failures and reports BROKEN/HELD. Routed sonnet · high
+  (opus · high on auth/money/data), never Fable; horns on the deck.
+
+### Changed
+
+- **The live view wakes with the first agent.** The deck opens when the
+  run's first agentille agent or pane worker spawns, not on a typed `/agt`,
+  so a solo run never shows an empty deck. Pane polling starts only when
+  panes can exist and stops after a quiet minute; the redraw ticker runs only
+  while something works. Because the deck now opens from a spawn, terminals
+  under 144 columns hold it until there is room (`/agt-deck` seats it at any
+  width).
+
+### Rationale
+
+The run was visible but not readable: the user had to scan every row and
+every Debrief to find the one thing that needed them. Focus puts that thing
+first. Formations give hard work a shape that pays (a second strategy, an
+attacker, parallel coupled slices) and say what it costs.
+
 ## [2.4.0] — 2026-10-03
 
 ### Added

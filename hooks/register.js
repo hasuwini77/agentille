@@ -1,11 +1,12 @@
-// agentille mod — routing, the live view, squads, and the pane reaper (herdr and tmux).
-// Policy and state live in routing.js / live.js / squads.js / sprites.js; this file
+// agentille mod — routing, the live view, squads, the pane reaper (herdr and tmux) and focus.
+// Policy and state live in routing.js / live.js / squads.js / sprites.js / focus.js; this file
 // observes events, applies decisions, and draws.
 
-import { DEFAULTS, decide, parseHeader, roleOf, verdictOf } from './routing.js'
+import { DEFAULTS, decide, formationOf, parseHeader, roleOf, verdictOf } from './routing.js'
 import { addUsage, effortBar, elapsed, finish, isAgtPrompt, ledger, ledgerText, newAgent, paneAgents, reapable, shouldAutoOpen, short, summary, tokens, visible } from './live.js'
 import { activeSquads, allPaths, depsOf, injection } from './squads.js'
 import { cells, MODEL_COLOR, modelKey } from './sprites.js'
+import { BRIEF_SYSTEM, DEFAULT_FOCUS, briefPrompt, flagOf, focusText, paneFlags, parseBrief, parseFocusArgs, shouldBrief } from './focus.js'
 import {
   CLOSE_TOOL, HERDR_START_TIMEOUT, PROBE, SPAWN_TOOL, closeTarget, spawnToolInput, SAFE_RUN, SPAWN_ROLE, TMUX_LIST_ARGV, doneFile, herdrCloseArgv, herdrPaneIdOf, herdrPromptArgv, herdrSplitArgv, herdrStartArgv,
   isFreshDone, isLead, newRunId, paneName, parseSpawnArgs, parseTmuxList, pickTransport, quietSpawn, reapPool, scopeRows, splitName, tmuxKillArgv, tmuxPaneAgents, tmuxPaneIdOf,
@@ -37,9 +38,19 @@ let deckOpen = false
 let deckAuto = true          // open the deck on its own when a run starts
 let deckDismissedRun = null  // run whose deck the person closed by hand
 let tick = 0
+let pollTimer = null         // pane polling: runs only while panes may exist
+let quietPolls = 0
+let tickTimer = null         // redraw ticker: runs only while something works
+let focusMode = DEFAULT_FOCUS
+let brief = []               // [{ kind, text }] for the latest long answer
+let briefSeq = 0
+let flags = []               // [{ text, at }] from agent results this run
+let agtTurn = false          // this turn is part of an /agt run
+const FLAG_TTL_MS = 30 * 60_000
+const FOCUS_COLOR = { next: '#3fb950', flag: '#f85149' }
 
 function runState(id) {
-  if (!runs.has(id)) runs.set(id, { revise: 0, fixes: 0, fable: 0, log: [] })
+  if (!runs.has(id)) runs.set(id, { revise: 0, fixes: 0, fable: 0, formation: null, log: [] })
   return runs.get(id)
 }
 
@@ -232,6 +243,52 @@ async function pollNow($, t) {
   else if (t === 'tmux') await pollTmux($)
 }
 
+const working = () => [...live.values()].some((a) => a.state === 'working') || panes.some((p) => p.state === 'working')
+
+// Pane polling starts when panes can exist (an /agt run, a spawn, panes found at start) and
+// stops after a minute with no agt- pane and nothing working.
+function ensurePolling($) {
+  if (pollTimer || !transport || transport === 'none') return
+  quietPolls = 0
+  pollTimer = $.clock.every(5000, () => {
+    pollNow($, transport).then(() => {
+      if (panes.length || working()) { quietPolls = 0; ensureTicker($); return }
+      if (++quietPolls >= 12) { pollTimer?.cancel(); pollTimer = null }
+    })
+  })
+}
+
+// Redraw while something works (elapsed times tick, deck sprites bob); stop once idle.
+function ensureTicker($) {
+  if (tickTimer) return
+  tickTimer = $.clock.every(600, () => {
+    if (!working()) {
+      tickTimer?.cancel()
+      tickTimer = null
+    } else tick ^= 1
+    $.ui.invalidate('ui.render')
+  })
+}
+
+function addFlag($, text) {
+  if (!text) return
+  const now = Date.now()
+  flags = flags.filter((f) => now - f.at < FLAG_TTL_MS && f.text !== text)
+  flags.push({ text, at: now })
+  $.ui.toast('agt ⚑ ' + text)
+}
+
+function focusLines(now) {
+  const fresh = flags.filter((f) => now - f.at < FLAG_TTL_MS).map((f) => f.text)
+  return [...[...fresh, ...paneFlags(panes)].map((text) => ({ kind: 'flag', text })), ...brief.filter((b) => b.kind !== 'flag'), ...brief.filter((b) => b.kind === 'flag')].slice(0, 5)
+}
+
+function focusRow(els, line) {
+  const mark = { next: '→', flag: '⚑', done: '✓' }[line.kind]
+  const color = FOCUS_COLOR[line.kind]
+  return els.Text({ ...(color ? { color } : { dimColor: true }), wrap: 'truncate', children: [mark + ' ' + line.text] })
+}
+
 // ── drawing helpers (take resolved elements, never $) ─────────────────────────
 
 function modelText(Text, a) {
@@ -267,6 +324,8 @@ function header(els, rows) {
   const { Text } = els
   const s = summary(rows)
   const parts = ['agentille', 'run ' + lastRun, s.working + ' working', s.done + ' done', tokens(s.tok) + ' tok']
+  const formation = runs.get(lastRun)?.formation
+  if (formation) parts.splice(2, 0, formation)
   if (squads.length) parts.push('squads: ' + squads.map((q) => q.name).join('+'))
   parts.push('/agt-deck')
   return Text({ dimColor: true, children: [parts.join(' · ')] })
@@ -302,9 +361,12 @@ export function register(on) {
     await $.command.register({ name: 'agt-nodeck', description: 'Stop the agentille deck from opening on its own; /agt-deck turns it back on', immediate: true })
     await $.command.register({ name: 'agt-spawn', description: 'Open a routed claude pane beside this one (Herdr or tmux); it is never reaped', argumentHint: '"task" [--model sonnet|opus|haiku|fable]' })
     await $.command.register({ name: 'agt-ledger', description: 'Tokens per agent role for the latest agentille run', immediate: true })
+    focusMode = (await $.store.get('focus:mode')) ?? DEFAULT_FOCUS
+    await $.command.register({ name: 'agt-focus', description: 'What needs you: agent flags and a short brief of long answers. all · agt · off', argumentHint: '[all|agt|off]', immediate: true })
     if (transport !== 'none') {
+      // One look now: a lead restarted mid-run still reaps its leftover panes.
       await pollNow($, transport)
-      $.clock.every(5000, () => { pollNow($, transport) })
+      if (panes.length) ensurePolling($)
       // The lead opens and closes its workers through the mod; a worker pane gets no fan-out of its own.
       if (!selfName) {
         await $.tool.register(SPAWN_TOOL)
@@ -312,13 +374,7 @@ export function register(on) {
         paneTools = true
       }
     }
-    // Redraw while something is working: elapsed times tick, deck sprites bob.
-    $.clock.every(600, () => {
-      const busy = [...live.values()].some((a) => a.state === 'working') || panes.some((p) => p.state === 'working')
-      if (!busy) return
-      tick ^= 1
-      $.ui.invalidate('ui.render')
-    })
+    if (working()) ensureTicker($)
     return next(e)
   })
 
@@ -341,6 +397,7 @@ export function register(on) {
     } catch (err) {
       return { text: 'Could not open a ' + t + ' pane: ' + String(err?.message ?? err).slice(0, 160) }
     }
+    ensurePolling($)
     return { text: 'Opened ' + name + ' · ' + a.model + ' · ' + t + ' pane.' }
   })
 
@@ -362,6 +419,9 @@ export function register(on) {
       return { deny: 'Could not open a ' + t + ' pane: ' + String(err?.message ?? err).slice(0, 160) }
     }
     await pollNow($, t)
+    ensurePolling($)
+    ensureTicker($)
+    await autoDeck($)
     return { result: 'Opened ' + a.name + ' · ' + a.model + ' · ' + t + ' pane.' }
   })
 
@@ -376,6 +436,18 @@ export function register(on) {
     if (!r || r.exitCode !== 0) return { deny: 'Could not close ' + c.pane.name + '.' }
     await pollNow($, t)
     return { result: 'Closed ' + c.pane.name + '.' }
+  })
+
+  on('command.run', { command: 'agt-focus' }, async ($, e) => {
+    const a = parseFocusArgs(e.args)
+    if (a.error) return { text: a.error }
+    if (a.mode) {
+      focusMode = a.mode
+      await $.store.set('focus:mode', a.mode)
+      if (a.mode === 'off') brief = []
+      $.ui.invalidate('ui.render')
+    }
+    return { text: focusText(focusMode, brief, focusLines(Date.now()).filter((l) => l.kind === 'flag' && !brief.includes(l)).map((l) => l.text)) }
   })
 
   on('command.run', { command: 'agt-ledger' }, async () => ({ text: ledgerText(ledger(live, lastRun)) }))
@@ -407,13 +479,15 @@ export function register(on) {
     return next(e)
   })
 
-  // A typed /agt opens the deck; answering the person's prompt, it seats at any width.
+  // The deck waits for the first agent: a solo /agt never opens an empty one.
   on('prompt.submit', async ($, e, next) => {
-    if (isAgtPrompt(e.text)) {
+    brief = []
+    agtTurn = isAgtPrompt(e.text)
+    if (agtTurn) {
       pendingForce = teamForce(e.text)
       if (pendingForce) $.ui.toast(teamNotice(await transportOf($)))
       deckDismissedRun = null
-      await autoDeck($)
+      flags = []   // a new run starts with a clean slate
     } else {
       pendingForce = null   // a force belongs to the /agt it was typed with
     }
@@ -422,8 +496,9 @@ export function register(on) {
 
   on('skill.prompt', async ($, e, next) => {
     if (!/(^|:)agt$/.test(e.skill)) return next(e)
-    await autoDeck($)
+    agtTurn = true
     const t = await transportOf($)
+    if (t !== 'none') ensurePolling($)
     const forced = pendingForce ? teamDirective(t) : ''
     pendingForce = null
     return next({ ...e, text: e.text + squadBlock + transportBlock(t, paneTools && !selfName) + forced })
@@ -442,14 +517,17 @@ export function register(on) {
     if (!role) {
       const res = await next(e)
       if (res.agentId) live.set(res.agentId, newAgent({ id: res.agentId, role: shortType(e.subagentType), routed: false, model: res.model, effort: null, reason: null, run: lastRun, now: Date.now() }))
+      ensureTicker($)
       $.ui.invalidate('ui.render')
       return res
     }
 
     const hdr = parseHeader(e.prompt) ?? {}
     const runId = SAFE_RUN.test(hdr.run ?? '') ? hdr.run : 'adhoc'
+    agtTurn = true
     lastRun = runId
     const run = runState(runId)
+    run.formation = formationOf(hdr) ?? run.formation
     if (role === 'executor' && hdr.mode === 'fix') run.fixes += 1
     const shared = Number((await $.store.get('fable:' + runId)) ?? 0)
     run.fable = Math.max(run.fable, shared)
@@ -467,6 +545,7 @@ export function register(on) {
     decisions.push(rec)
     run.log.push(JSON.stringify(rec))
     await writeRunFile($, runId, 'routing.jsonl', run.log.join('\n') + '\n')
+    ensureTicker($)
     await autoDeck($)
     if (d.reason !== 'table') $.ui.toast('agt ↑ ' + role + ' → ' + short(res.model) + ' · ' + d.effort + ' — ' + d.reason)
     $.ui.invalidate('ui.render')
@@ -486,7 +565,19 @@ export function register(on) {
 
   on('turn.complete', async ($, e, next) => {
     const a = e.agentId ? live.get(e.agentId) : undefined
+    if (!e.agentId && e.reason === 'answer' && shouldBrief({ answer: e.answer, mode: focusMode, agtTurn })) {
+      // Off the turn's path: the answer shows now, the brief lands a moment later.
+      const seq = ++briefSeq
+      const answer = e.answer
+      $.clock.after(0, async () => {
+        const r = await $.model.complete({ model: 'haiku', system: BRIEF_SYSTEM, prompt: briefPrompt(answer), maxTokens: 300, effort: 'low', timeoutMs: 30_000 }).catch(() => null)
+        if (seq !== briefSeq || !r?.isAnswered) return
+        brief = parseBrief(r.text)
+        $.ui.invalidate('ui.render')
+      })
+    }
     if (a) {
+      if (a.routed) addFlag($, flagOf(a.role, e.answer))
       if (a.role === 'plan-reviewer' && verdictOf(e.answer) === 'REVISE') runState(a.run).revise += 1
       if (a.input + a.output === 0) addUsage(a, e.usage)
       finish(a, Date.now(), e.durationMs)
@@ -500,10 +591,11 @@ export function register(on) {
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     const now = Date.now()
     const rows = visible(live, panes, now)
-    if (rows.length === 0 && !selfName) return next(e)
+    const focus = focusLines(now)
+    if (rows.length === 0 && !selfName && focus.length === 0) return next(e)
     const els = $.ui.resolve(e)
-    const max = Math.max(2, Math.min(8, (e.props.maxRows ?? 8) - 2))
-    const kids = []
+    const max = Math.max(2, Math.min(8, (e.props.maxRows ?? 8) - 2 - focus.length))
+    const kids = focus.map((l) => focusRow(els, l))
     if (selfName) kids.push(els.Text({ color: hex(MODEL_COLOR.opus), children: ['agentille worker · ' + selfName] }))
     if (rows.length) {
       kids.push(header(els, rows))

@@ -2,6 +2,30 @@
 
 All notable changes to agentille are documented here.
 
+## [2.3.0] — 2026-10-03
+
+### Changed
+
+- **A forced team re-resolves to panes.** `/agt --team <name>` and
+  `/agt --mode team` no longer spawn an agent team where a pane transport
+  exists. With Herdr or tmux and ≥2 disjoint slices the run uses panes; with a
+  transport but no disjoint slices it uses subagent (the existing honesty
+  flow); with no transport it runs the team as before.
+- The mod toasts the deprecation notice when a team is forced, remembers the
+  force, and injects a `## Forced team` directive on the next `/agt` skill
+  prompt, then clears it.
+
+### Deprecated
+
+- `--team <name>` and `--mode team`: removed in v3.0 along with team mode, its
+  templates and `team-mode.md`. `argument-hint` no longer lists `--team`.
+
+### Rationale
+
+Panes give the same parallelism with workers the multiplexer can see, close
+and reap, without the agent-teams experimental flag. Teams stay reachable for
+one more minor so nobody without a pane transport loses a working path.
+
 ## [2.2.0] — 2026-10-03
 
 ### Added

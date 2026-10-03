@@ -1,4 +1,4 @@
-// agentille mod — routing, the live view, squads, and the herdr reaper.
+// agentille mod — routing, the live view, squads, and the pane reaper (herdr and tmux).
 // Policy and state live in routing.js / live.js / squads.js / sprites.js; this file
 // observes events, applies decisions, and draws.
 
@@ -6,7 +6,7 @@ import { DEFAULTS, decide, parseHeader, roleOf, verdictOf } from './routing.js'
 import { addUsage, effortBar, elapsed, finish, isAgtPrompt, ledger, ledgerText, newAgent, paneAgents, reapable, shouldAutoOpen, short, summary, tokens, visible } from './live.js'
 import { activeSquads, allPaths, depsOf, injection } from './squads.js'
 import { cells, MODEL_COLOR, modelKey } from './sprites.js'
-import { PROBE, pickTransport, transportBlock } from './panes.js'
+import { PROBE, TMUX_LIST_ARGV, doneFile, isLead, parseTmuxList, pickTransport, splitName, tmuxKillArgv, tmuxPaneAgents, transportBlock } from './panes.js'
 
 const SAFE_RUN = /^[A-Za-z0-9_-]{1,64}$/
 const DECK = 'agt-deck'
@@ -20,9 +20,9 @@ let lastRun = 'adhoc'
 const runs = new Map()       // run id → { revise, fixes, fable, log: [] }
 const live = new Map()       // agentId → live agent (live.js)
 const decisions = []         // this session, for /agt-routing
-let panes = []               // herdr agt-* panes other than this one
+let panes = []               // agt-* panes (herdr or tmux) other than this one
 const paneSeen = new Map()   // reaper bookkeeping
-let selfName = null          // this pane's herdr name when it is an agt-* worker
+let selfName = null          // this pane's name when it is an agt-* worker
 let squads = []              // active squads for this repo
 let squadBlock = ''
 let transport = null        // 'herdr' | 'tmux' | 'none', probed once at session start
@@ -137,6 +137,46 @@ async function pollHerdr($) {
   $.ui.invalidate('ui.render')
 }
 
+// tmux has no agent status, so a pane is working until its done-file appears or tmux
+// calls it dead. Panes are scoped to the lead's own window; only an unnamed lead reaps,
+// and tmux has no idle state, so only the 90s done grace applies.
+async function pollTmux($) {
+  let rows = []
+  try {
+    const r = await $.process.run(TMUX_LIST_ARGV, PROBE)
+    if (r.exitCode !== 0) return
+    rows = parseTmuxList(r.stdout)
+  } catch {
+    return
+  }
+  const selfPane = (await $.env.get('TMUX_PANE')) ?? null
+  const me = rows.find((r) => r.id === selfPane)
+  selfName = me && me.agt.startsWith('agt-') ? me.agt : null
+  const done = new Map()
+  for (const r of rows) {
+    const n = r.agt.startsWith('agt-') ? splitName(r.agt) : null
+    const file = n && doneFile(home, n.run, n.role)
+    if (!file) continue
+    try {
+      done.set(r.agt, await $.fs.exists(file))
+    } catch {
+      // unreadable counts as not done
+    }
+  }
+  panes = tmuxPaneAgents(rows, selfPane, done)
+  if (isLead(rows, selfPane)) {
+    for (const p of reapable(panes, paneSeen, Date.now())) {
+      try {
+        await $.process.run(tmuxKillArgv(p.id), PROBE)
+        $.ui.toast('agt reaped ' + p.name + ' (' + p.state + ')')
+      } catch {
+        // a pane closed by hand in the meantime is fine
+      }
+    }
+  }
+  $.ui.invalidate('ui.render')
+}
+
 // ── drawing helpers (take resolved elements, never $) ─────────────────────────
 
 function modelText(Text, a) {
@@ -209,6 +249,9 @@ export function register(on) {
     if (transport === 'herdr') {
       await pollHerdr($)
       $.clock.every(5000, () => { pollHerdr($) })
+    } else if (transport === 'tmux') {
+      await pollTmux($)
+      $.clock.every(5000, () => { pollTmux($) })
     }
     // Redraw while something is working: elapsed times tick, deck sprites bob.
     $.clock.every(600, () => {

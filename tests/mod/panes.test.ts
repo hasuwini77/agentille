@@ -194,3 +194,37 @@ describe('skill prompt', () => {
     expect((await $.skill.prompt({ skill: 'commit', text: 'base' })).text).toBe('base')
   })
 })
+
+describe('tmux band', () => {
+  const T = '\t'
+  const row = (id: string, agt: string, dead = '0', win = '@1') => [id, agt, 'claude', dead, win].join(T)
+  const LIST = [row('%1', ''), row('%2', 'agt-r9-executor'), row('%3', 'agt-r9-planner'), row('%4', 'agt-r9-spawn-x', '1'), row('%5', 'agt-r9-other', '0', '@2')].join('\n')
+
+  // session.start probes tmux, polls once and draws; the 5s timer is left unfired
+  const start = async ($: any, on: any, killed: string[] = [], files: string[] = []) => {
+    on('env.get', async ($: any, e: any) => ({ value: ({ TMUX: '/tmp/tmux-1/default,1,0', TMUX_PANE: '%1', HOME: '/h' } as any)[e.name] }))
+    on('session.start', async ($: any, e: any) => ({ cwd: e.cwd }))
+    on('command.register', async () => ({ value: undefined }))
+    on('fs.read', async () => ({ deny: 'no profile' }))
+    on('fs.exists', async ($: any, e: any) => ({ value: files.includes(e.path) }))
+    on('store.get', async () => ({ value: undefined }))
+    on('ui.panes', async () => ({ value: [] }))
+    on('process.run', async ($: any, e: any) => {
+      const cmd = e.argv.join(' ')
+      if (cmd.startsWith('tmux list-panes')) return { value: { exitCode: 0, stdout: LIST + '\n', stderr: '' } }
+      if (cmd.startsWith('tmux kill-pane')) killed.push(e.argv[3])
+      return { value: { exitCode: 0, stdout: '', stderr: '' } }
+    })
+    await $.session.start({ cwd: '/w', surface: null, isInteractive: false })
+  }
+
+  test('shows this window\'s agt- panes in the band', async ($, on) => {
+    on('ui.render', async () => ({ type: 'engine', ref: 0 }) as never)
+    await start($, on, [], ['/h/.agentille/state/run-r9/done-planner'])
+    const ui = await $.ui.mount({ plugin: 'agentille', surface: 'terminal', component: 'AbovePrompt', props: { hasSurvey: false, isWorking: true, maxRows: 10, bodyColumns: 100 } as never })
+    expect(await ui.find({ type: 'Text', text: /executor/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /planner/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /1 working · 2 done/ })).toBeDefined()
+    await ui.unmount()
+  })
+})

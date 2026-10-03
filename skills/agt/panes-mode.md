@@ -160,7 +160,7 @@ Outside Herdr but inside tmux (`$TMUX` non-empty, `tmux -V` exits 0), workers ar
 ```bash
 tmux split-window -d -h -P -F '#{pane_id}' -t "$TMUX_PANE" -c <cwd> \
   -e AGENTILLE_RUN=<run> "$SHELL" -ic 'claude "$@"' agt \
-  --model <model> -n <name> "<task>"
+  --model <model> -n <name> -- "<task>"
 
 tmux set-option -p -t <id> @agt <name>
 tmux set-option -p -t <id> @agt_vendor claude
@@ -168,7 +168,7 @@ tmux set-option -p -t <id> allow-set-title off
 tmux select-pane -t <id> -T <name>
 ```
 
-`-d` keeps focus where the user left it. The `@agt` pane option is the ownership marker (the tmux equivalent of the `agt-` agent name) and `allow-set-title off` stops Claude from renaming the pane out from under you. If `$SHELL` is not zsh or bash, skip the shell wrapper and exec `claude --model <model> -n <name> "<task>"` directly.
+`-d` keeps focus where the user left it. The `@agt` pane option is the ownership marker (the tmux equivalent of the `agt-` agent name) and `allow-set-title off` stops Claude from renaming the pane out from under you. If `$SHELL` is not zsh or bash, skip the shell wrapper and exec `claude --model <model> -n <name> -- "<task>"` directly. The `--` is not optional: it keeps a task that starts with `-` out of claude's option parser. Escape `#` as `##` in `<cwd>`, because tmux reads `-c` as a format string.
 
 **Scope.** The lead only sees and reaps panes in **its own window**. List them with:
 
@@ -190,7 +190,8 @@ Everything else — elastic pool, scale tiers, consolidation, degrade — is ide
 
 `/agt-spawn "task" [--model sonnet|opus|haiku|fable]` opens a single sibling pane running one Claude session on the model you pick (default `sonnet`), on whichever transport is live. It is the manual counterpart of a worker: you route one task to one model without running the orchestrator.
 
-- **Typed only.** It never runs unless the user types it; no skill or agent invokes it.
+- **Typed only.** It runs only for the composer and the remote bridge; no skill, agent, tool or SDK caller invokes it.
+- **No bare subcommand words.** A task that is one lowercase word (`plugin`, `purge`) is refused, because claude would run it as a subcommand even after `--`.
 - **Never focuses** the new pane.
 - **Never reaped.** The pane is named `agt-<6-char-run>-spawn`; the reserved role `spawn` is exempt from both the lead's teardown and the mod's reaper, on both transports. The user closes it.
 - Reply is one line: `Opened <name> · <model> · <transport> pane.` With no transport: `No pane transport here: /agt-spawn needs Claude Code running inside Herdr or tmux.`

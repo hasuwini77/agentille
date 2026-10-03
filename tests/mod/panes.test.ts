@@ -64,7 +64,29 @@ describe('/agt-spawn args', () => {
     expect(parseSpawnArgs('--model haiku')).toMatchObject({ usage: expect.any(String) })
     expect(parseSpawnArgs('"" ')).toMatchObject({ usage: expect.any(String) })
     expect(parseSpawnArgs('task --model gpt-4')).toMatchObject({ error: expect.stringContaining('gpt-4') })
-    expect(parseSpawnArgs('task --model "x;rm"')).toMatchObject({ error: expect.any(String) })
+    expect(parseSpawnArgs('task --model Opus')).toMatchObject({ error: expect.stringContaining('Opus') })
+  })
+
+  test('--model is a flag only before a model token, so prose about it survives', async () => {
+    expect(parseSpawnArgs('explain the --model flag')).toEqual({ task: 'explain the --model flag', model: 'sonnet' })
+    expect(parseSpawnArgs('"explain the --model flag"')).toEqual({ task: 'explain the --model flag', model: 'sonnet' })
+    expect(parseSpawnArgs('explain --model flag --model haiku')).toEqual({ task: 'explain --model flag', model: 'haiku' })
+    expect(parseSpawnArgs('do --model=opus now')).toEqual({ task: 'do now', model: 'opus' })
+  })
+
+  test('only one matching pair of surrounding quotes is stripped', async () => {
+    expect(parseSpawnArgs('"a" and "b"')).toEqual({ task: '"a" and "b"', model: 'sonnet' })
+    expect(parseSpawnArgs("'it is' --model haiku")).toEqual({ task: 'it is', model: 'haiku' })
+    expect(parseSpawnArgs('"say "hi""')).toEqual({ task: '"say "hi""', model: 'sonnet' })
+  })
+
+  test('a single bare word is refused: claude would run it as a subcommand', async () => {
+    for (const w of ['plugin', 'purge', '"doctor"', 'mcp --model haiku', '--help']) {
+      expect(parseSpawnArgs(w)).toMatchObject({ error: expect.stringContaining('one-word task') })
+    }
+    expect(parseSpawnArgs('plugin list')).toEqual({ task: 'plugin list', model: 'sonnet' })
+    expect(parseSpawnArgs('fix bug42')).toEqual({ task: 'fix bug42', model: 'sonnet' })
+    expect(parseSpawnArgs('v2')).toEqual({ task: 'v2', model: 'sonnet' })
   })
 })
 
@@ -126,12 +148,27 @@ describe('tmux panes', () => {
 describe('spawn', () => {
   test('tmux argv runs claude through an interactive zsh/bash, task as a plain argument', async () => {
     const argv = tmuxSplitArgv({ target: '%1', cwd: '/work/repo', run: 'ab12cd', shell: '/bin/zsh', model: 'haiku', name: 'agt-ab12cd-spawn', task: 'a "quoted"; $(thing)' })
-    expect(argv).toEqual(['tmux', 'split-window', '-d', '-h', '-P', '-F', '#{pane_id}', '-t', '%1', '-c', '/work/repo', '-e', 'AGENTILLE_RUN=ab12cd', '/bin/zsh', '-ic', 'claude "$@"', 'agt', '--model', 'haiku', '-n', 'agt-ab12cd-spawn', 'a "quoted"; $(thing)'])
+    expect(argv).toEqual(['tmux', 'split-window', '-d', '-h', '-P', '-F', '#{pane_id}', '-t', '%1', '-c', '/work/repo', '-e', 'AGENTILLE_RUN=ab12cd', '/bin/zsh', '-ic', 'claude "$@"', 'agt', '--model', 'haiku', '-n', 'agt-ab12cd-spawn', '--', 'a "quoted"; $(thing)'])
+  })
+
+  test('a task that starts with a dash sits right behind --, never in claude\'s option list', async () => {
+    for (const task of ['--bogus-flag say hi', '--settings={"hooks":{}}', '-p x']) {
+      const z = tmuxSplitArgv({ target: '%1', cwd: '/w', run: 'ab12cd', shell: '/bin/bash', model: 'haiku', name: 'agt-ab12cd-spawn', task })
+      expect(z.slice(-2)).toEqual(['--', task])
+      expect(z.indexOf('--')).toBe(z.length - 2)
+      const f = tmuxSplitArgv({ target: '%1', cwd: '/w', run: 'ab12cd', shell: '/usr/bin/fish', model: 'haiku', name: 'agt-ab12cd-spawn', task })
+      expect(f.slice(-2)).toEqual(['--', task])
+    }
+  })
+
+  test('# in the working directory is escaped so tmux does not read it as a format', async () => {
+    const argv = tmuxSplitArgv({ target: '%1', cwd: '/w/a#{session_name}b#c', run: 'ab12cd', shell: '/bin/zsh', model: 'haiku', name: 'agt-ab12cd-spawn', task: 't' })
+    expect(argv[argv.indexOf('-c') + 1]).toBe('/w/a##{session_name}b##c')
   })
 
   test('other shells exec claude directly', async () => {
     const argv = tmuxSplitArgv({ target: '%1', cwd: '/w', run: 'ab12cd', shell: '/usr/bin/fish', model: 'haiku', name: 'agt-ab12cd-spawn', task: 't' })
-    expect(argv.slice(13)).toEqual(['claude', '--model', 'haiku', '-n', 'agt-ab12cd-spawn', 't'])
+    expect(argv.slice(13)).toEqual(['claude', '--model', 'haiku', '-n', 'agt-ab12cd-spawn', '--', 't'])
   })
 
   test('tmux tags the pane and pins its title', async () => {
@@ -230,10 +267,10 @@ describe('tmux band', () => {
 })
 
 describe('/agt-spawn', () => {
-  const setup = (on: any, vars: Record<string, string>, table: Record<string, any> = {}) => {
+  const setup = (on: any, vars: Record<string, string>, table: Record<string, any> = {}, cwd = '/work/repo') => {
     const seen: string[][] = []
     on('env.get', async ($: any, e: any) => ({ value: vars[e.name] }))
-    on('session.cwd', async () => ({ value: '/work/repo' }))
+    on('session.cwd', async () => ({ value: cwd }))
     on('process.run', async ($: any, e: any) => {
       seen.push(e.argv)
       const key = Object.keys(table).find((k) => e.argv.join(' ').startsWith(k))
@@ -250,7 +287,7 @@ describe('/agt-spawn', () => {
     expect(r.text).toMatch(/^Opened agt-[a-z0-9]{6}-spawn · haiku · tmux pane\.$/)
     const split = seen.find((a) => a[1] === 'split-window')!
     expect(split).toContain('-d')
-    expect(split.slice(-6)).toEqual(['agt', '--model', 'haiku', '-n', r.text.match(/agt-[a-z0-9]{6}-spawn/)![0], 'reply with ok'])
+    expect(split.slice(-7)).toEqual(['agt', '--model', 'haiku', '-n', r.text.match(/agt-[a-z0-9]{6}-spawn/)![0], '--', 'reply with ok'])
     expect(split[split.indexOf('-c') + 1]).toBe('/work/repo')
     expect(seen.filter((a) => a[1] === 'set-option' && a[5] === '@agt').length).toBe(1)
     expect(seen.some((a) => a[1] === 'select-pane')).toBe(true)
@@ -284,9 +321,39 @@ describe('/agt-spawn', () => {
     expect(seen).toEqual([])
   })
 
-  test('never spawns unless typed', async ($, on) => {
+  test('never spawns unless typed: composer and bridge only', async ($, on) => {
     const seen = setup(on, { TMUX: '/tmp/tmux-1/default,1,0', TMUX_PANE: '%1' })
-    expect((await run($, 'x', { kind: 'plugin', name: 'other' })).text).toBe('/agt-spawn runs only when typed.')
+    for (const kind of ['plugin', 'model', 'tool', 'skill', 'agent', 'sdk']) {
+      expect((await run($, 'do the thing', { kind, name: 'other' })).text).toBe('/agt-spawn runs only when typed.')
+    }
     expect(seen).toEqual([])
+  })
+
+  test('composer and bridge may spawn', async ($, on) => {
+    setup(on, { TMUX: '/tmp/tmux-1/default,1,0', TMUX_PANE: '%1' }, { 'tmux split-window': { stdout: '%9\n' } })
+    for (const kind of ['composer', 'bridge']) {
+      expect((await run($, 'do the thing', { kind } as never)).text).toMatch(/^Opened agt-/)
+    }
+  })
+
+  test('tmux: a task that looks like an option reaches claude as the prompt', async ($, on) => {
+    const seen = setup(on, { TMUX: '/tmp/tmux-1/default,1,0', TMUX_PANE: '%1', SHELL: '/bin/zsh' }, { 'tmux split-window': { stdout: '%9\n' } })
+    const task = '--settings={"hooks":{"SessionStart":[]}} now'
+    await run($, task)
+    const split = seen.find((a) => a[1] === 'split-window')!
+    expect(split.slice(-2)).toEqual(['--', task])
+  })
+
+  test('a bare subcommand word is refused and spawns nothing', async ($, on) => {
+    const seen = setup(on, { TMUX: '/tmp/tmux-1/default,1,0', TMUX_PANE: '%1' })
+    expect((await run($, 'plugin')).text).toContain('one-word task')
+    expect(seen).toEqual([])
+  })
+
+  test('a repo path with # opens the pane in that directory', async ($, on) => {
+    const seen = setup(on, { TMUX: '/tmp/tmux-1/default,1,0', TMUX_PANE: '%1' }, { 'tmux split-window': { stdout: '%9\n' } }, '/work/c#sharp')
+    await run($, 'do the thing')
+    const split = seen.find((a) => a[1] === 'split-window')!
+    expect(split[split.indexOf('-c') + 1]).toBe('/work/c##sharp')
   })
 })

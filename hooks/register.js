@@ -7,12 +7,11 @@ import { addUsage, effortBar, elapsed, finish, isAgtPrompt, ledger, ledgerText, 
 import { activeSquads, allPaths, depsOf, injection } from './squads.js'
 import { cells, MODEL_COLOR, modelKey } from './sprites.js'
 import {
-  HERDR_START_TIMEOUT, PROBE, SPAWN_ROLE, TMUX_LIST_ARGV, doneFile, herdrCloseArgv, herdrPaneIdOf, herdrPromptArgv, herdrSplitArgv, herdrStartArgv,
+  HERDR_START_TIMEOUT, PROBE, SAFE_RUN, SPAWN_ROLE, TMUX_LIST_ARGV, doneFile, herdrCloseArgv, herdrPaneIdOf, herdrPromptArgv, herdrSplitArgv, herdrStartArgv,
   isLead, newRunId, paneName, parseSpawnArgs, parseTmuxList, pickTransport, reapPool, splitName, tmuxKillArgv, tmuxPaneAgents, tmuxPaneIdOf,
   tmuxSplitArgv, tmuxTagArgvs, transportBlock,
 } from './panes.js'
 
-const SAFE_RUN = /^[A-Za-z0-9_-]{1,64}$/
 const DECK = 'agt-deck'
 const hex = (n) => '#' + n.toString(16).padStart(6, '0')
 
@@ -311,7 +310,7 @@ export function register(on) {
 
   // Typed only: a plugin, a scheduled task or a notification never opens a pane.
   on('command.run', { command: 'agt-spawn' }, async ($, e) => {
-    if (!['composer', 'bridge', 'sdk'].includes(e.origin?.kind)) return { text: '/agt-spawn runs only when typed.' }
+    if (!['composer', 'bridge'].includes(e.origin?.kind)) return { text: '/agt-spawn runs only when typed.' }
     const a = parseSpawnArgs(e.args)
     if (a.usage || a.error) return { text: a.usage ?? a.error }
     const t = await transportOf($)

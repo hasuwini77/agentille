@@ -6,6 +6,8 @@
 export const SAFE_RUN = /^[A-Za-z0-9_-]{1,64}$/
 export const NAME_RE = /^[a-z][a-z0-9_-]{0,31}$/
 const ROLE_RE = /^[a-z0-9-]+$/
+const MODEL_LIKE = /^[A-Za-z0-9][\w.-]*$/
+const BARE_WORD = /^[a-z-]+$/
 const MODEL_RE = /^(haiku|sonnet|opus|fable|claude-[a-z0-9.-]+)$/
 export const PROBE = { timeoutMs: 5000 }
 export const HERDR_START_TIMEOUT = { timeoutMs: 60000 }
@@ -60,18 +62,25 @@ export function doneFile(home, run, role) {
 
 // ── /agt-spawn arguments ──────────────────────────────────────────────────────
 
-// `"task" --model haiku` → { task, model }. `--model` may sit anywhere; surrounding
-// quotes on the task are stripped. { usage } for a missing task, { error } for a bad model.
+// `"task" --model haiku` → { task, model }. `--model` counts as the flag only when it stands
+// alone before a model-looking token; "explain the --model flag" stays prose. One matching pair of
+// surrounding quotes is stripped. { usage } for a missing task, { error } for a bad model or a
+// single bare word (claude would run it as a subcommand).
 export function parseSpawnArgs(args) {
   let model = DEFAULT_MODEL
   let bad = null
-  const rest = String(args ?? '').replace(/(^|\s)--model(?:\s+|=)(\S+)(\s|$)/, (_, lead, m, trail) => {
+  let taken = false
+  const rest = String(args ?? '').replace(/(^|\s)--model(?:\s+|=)(\S+)(?=\s|$)/g, (whole, _lead, m) => {
+    if (taken) return whole
     if (MODEL_RE.test(m)) model = m
-    else bad = m
-    return lead && trail ? ' ' : ''
+    else if (MODEL_LIKE.test(m) && /[^a-z]/.test(m)) bad = m
+    else return whole
+    taken = true
+    return ''
   }).trim()
   if (bad) return { error: 'Unknown model "' + bad + '". ' + SPAWN_USAGE }
-  const task = rest.replace(/^(["'])([\s\S]*)\1$/, '$2').trim()
+  const task = rest.replace(/^(["'])((?:(?!\1)[\s\S])*)\1$/, '$2').trim()
+  if (BARE_WORD.test(task)) return { error: 'A one-word task would run as a claude subcommand. Say more. ' + SPAWN_USAGE }
   return task ? { task, model } : { usage: SPAWN_USAGE }
 }
 
@@ -118,8 +127,9 @@ export function reapPool(panes) {
 // ── spawning ──────────────────────────────────────────────────────────────────
 
 export function tmuxSplitArgv({ target, cwd, run, shell, model, name, task }) {
-  const head = ['tmux', 'split-window', '-d', '-h', '-P', '-F', '#{pane_id}', '-t', target, '-c', cwd, '-e', 'AGENTILLE_RUN=' + run]
-  const tail = ['--model', model, '-n', name, task]
+  const head = ['tmux', 'split-window', '-d', '-h', '-P', '-F', '#{pane_id}', '-t', target, '-c', cwd.replace(/#/g, '##'), '-e', 'AGENTILLE_RUN=' + run]
+  // `--` ends claude's options, so a task that starts with `-` is still just the prompt
+  const tail = ['--model', model, '-n', name, '--', task]
   const base = String(shell ?? '').split('/').pop()
   if (base === 'zsh' || base === 'bash') return [...head, shell, '-ic', 'claude "$@"', 'agt', ...tail]
   return [...head, 'claude', ...tail]

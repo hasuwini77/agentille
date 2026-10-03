@@ -228,3 +228,65 @@ describe('tmux band', () => {
     await ui.unmount()
   })
 })
+
+describe('/agt-spawn', () => {
+  const setup = (on: any, vars: Record<string, string>, table: Record<string, any> = {}) => {
+    const seen: string[][] = []
+    on('env.get', async ($: any, e: any) => ({ value: vars[e.name] }))
+    on('session.cwd', async () => ({ value: '/work/repo' }))
+    on('process.run', async ($: any, e: any) => {
+      seen.push(e.argv)
+      const key = Object.keys(table).find((k) => e.argv.join(' ').startsWith(k))
+      return { value: { exitCode: 0, stdout: '', stderr: '', ...(key === undefined ? {} : table[key]) } }
+    })
+    return seen
+  }
+  const typed = { kind: 'composer' } as never
+  const run = ($: any, args: string, origin: any = typed) => $.command.run({ command: 'agt-spawn', args, origin })
+
+  test('tmux: opens a tagged pane and says so', async ($, on) => {
+    const seen = setup(on, { TMUX: '/tmp/tmux-1/default,1,0', TMUX_PANE: '%1', SHELL: '/bin/zsh' }, { 'tmux split-window': { stdout: '%9\n' } })
+    const r = await run($, '"reply with ok" --model haiku')
+    expect(r.text).toMatch(/^Opened agt-[a-z0-9]{6}-spawn · haiku · tmux pane\.$/)
+    const split = seen.find((a) => a[1] === 'split-window')!
+    expect(split).toContain('-d')
+    expect(split.slice(-6)).toEqual(['agt', '--model', 'haiku', '-n', r.text.match(/agt-[a-z0-9]{6}-spawn/)![0], 'reply with ok'])
+    expect(split[split.indexOf('-c') + 1]).toBe('/work/repo')
+    expect(seen.filter((a) => a[1] === 'set-option' && a[5] === '@agt').length).toBe(1)
+    expect(seen.some((a) => a[1] === 'select-pane')).toBe(true)
+  })
+
+  test('herdr: splits without focus, starts and prompts', async ($, on) => {
+    const seen = setup(on, { HERDR_ENV: '1', HERDR_PANE_ID: 'w1:p1' }, { 'herdr pane split': { stdout: JSON.stringify({ result: { pane: { pane_id: 'w1:p5' } } }) } })
+    const r = await run($, 'do the thing')
+    expect(r.text).toMatch(/^Opened agt-[a-z0-9]{6}-spawn · sonnet · herdr pane\.$/)
+    expect(seen.map((a) => a.slice(0, 3).join(' '))).toEqual(['herdr --version', 'herdr pane split', 'herdr agent start', 'herdr agent prompt'])
+    expect(seen[1]).toContain('--no-focus')
+  })
+
+  test('a failed start closes the half-made herdr pane', async ($, on) => {
+    const seen = setup(on, { HERDR_ENV: '1', HERDR_PANE_ID: 'w1:p1' }, { 'herdr pane split': { stdout: JSON.stringify({ result: { pane: { pane_id: 'w1:p5' } } }) }, 'herdr agent start': { exitCode: 2 } })
+    const r = await run($, 'do the thing')
+    expect(r.text).toMatch(/^Could not open a herdr pane/)
+    expect(seen[seen.length - 1]).toEqual(['herdr', 'pane', 'close', 'w1:p5'])
+  })
+
+  test('no transport: refuses and opens nothing', async ($, on) => {
+    const seen = setup(on, {})
+    expect((await run($, 'do the thing')).text).toBe('No pane transport here: /agt-spawn needs Claude Code running inside Herdr or tmux.')
+    expect(seen).toEqual([])
+  })
+
+  test('empty task is usage, bad model is refused, nothing spawns', async ($, on) => {
+    const seen = setup(on, { TMUX: '/tmp/tmux-1/default,1,0', TMUX_PANE: '%1' })
+    expect((await run($, '   ')).text).toContain('Usage: /agt-spawn')
+    expect((await run($, 'x --model gpt-4')).text).toContain('Unknown model')
+    expect(seen).toEqual([])
+  })
+
+  test('never spawns unless typed', async ($, on) => {
+    const seen = setup(on, { TMUX: '/tmp/tmux-1/default,1,0', TMUX_PANE: '%1' })
+    expect((await run($, 'x', { kind: 'plugin', name: 'other' })).text).toBe('/agt-spawn runs only when typed.')
+    expect(seen).toEqual([])
+  })
+})

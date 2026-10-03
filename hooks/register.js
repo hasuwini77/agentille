@@ -6,7 +6,11 @@ import { DEFAULTS, decide, parseHeader, roleOf, verdictOf } from './routing.js'
 import { addUsage, effortBar, elapsed, finish, isAgtPrompt, ledger, ledgerText, newAgent, paneAgents, reapable, shouldAutoOpen, short, summary, tokens, visible } from './live.js'
 import { activeSquads, allPaths, depsOf, injection } from './squads.js'
 import { cells, MODEL_COLOR, modelKey } from './sprites.js'
-import { PROBE, TMUX_LIST_ARGV, doneFile, isLead, parseTmuxList, pickTransport, splitName, tmuxKillArgv, tmuxPaneAgents, transportBlock } from './panes.js'
+import {
+  HERDR_START_TIMEOUT, PROBE, SPAWN_ROLE, TMUX_LIST_ARGV, doneFile, herdrCloseArgv, herdrPaneIdOf, herdrPromptArgv, herdrSplitArgv, herdrStartArgv,
+  isLead, newRunId, paneName, parseSpawnArgs, parseTmuxList, pickTransport, reapPool, splitName, tmuxKillArgv, tmuxPaneAgents, tmuxPaneIdOf,
+  tmuxSplitArgv, tmuxTagArgvs, transportBlock,
+} from './panes.js'
 
 const SAFE_RUN = /^[A-Za-z0-9_-]{1,64}$/
 const DECK = 'agt-deck'
@@ -125,7 +129,7 @@ async function pollHerdr($) {
   panes = paneAgents(list, selfPane).filter((p) => !me || p.workspace === me.workspace_id)
   if (me && !selfName) {
     const mine = panes.filter((p) => p.tab === me.tab_id)
-    for (const p of reapable(mine, paneSeen, Date.now())) {
+    for (const p of reapable(reapPool(mine), paneSeen, Date.now())) {
       try {
         await $.process.run(['herdr', 'pane', 'close', p.id])
         $.ui.toast('agt reaped ' + p.name + ' (' + p.state + ')')
@@ -135,6 +139,42 @@ async function pollHerdr($) {
     }
   }
   $.ui.invalidate('ui.render')
+}
+
+async function runOk($, argv, init) {
+  const r = await $.process.run(argv, init)
+  if (r.exitCode !== 0) throw new Error(argv.slice(0, 3).join(' ') + ' exited ' + r.exitCode)
+  return r
+}
+
+// One claude pane beside this one, named agt-<run>-<role>, never focused. A half-made
+// pane is closed again before the error goes up.
+async function openPane($, t, o) {
+  if (t === 'tmux') {
+    const target = await $.env.get('TMUX_PANE')
+    if (!target) throw new Error('TMUX_PANE is not set')
+    const shell = (await $.env.get('SHELL')) ?? ''
+    const id = tmuxPaneIdOf((await runOk($, tmuxSplitArgv({ ...o, target, shell }), PROBE)).stdout)
+    if (!id) throw new Error('tmux gave no pane id')
+    try {
+      for (const argv of tmuxTagArgvs(id, o.name)) await runOk($, argv, PROBE)
+    } catch (err) {
+      await $.process.run(tmuxKillArgv(id), PROBE).catch(() => {})
+      throw err
+    }
+    return
+  }
+  const pane = await $.env.get('HERDR_PANE_ID')
+  if (!pane) throw new Error('HERDR_PANE_ID is not set')
+  const id = herdrPaneIdOf((await runOk($, herdrSplitArgv({ pane, cwd: o.cwd, run: o.run }), PROBE)).stdout)
+  if (!id) throw new Error('herdr gave no pane id')
+  try {
+    await runOk($, herdrStartArgv({ name: o.name, pane: id, model: o.model }), HERDR_START_TIMEOUT)
+    await runOk($, herdrPromptArgv(o.name, o.task), PROBE)
+  } catch (err) {
+    await $.process.run(herdrCloseArgv(id), PROBE).catch(() => {})
+    throw err
+  }
 }
 
 // tmux has no agent status, so a pane is working until its done-file appears or tmux
@@ -165,7 +205,7 @@ async function pollTmux($) {
   }
   panes = tmuxPaneAgents(rows, selfPane, done)
   if (isLead(rows, selfPane)) {
-    for (const p of reapable(panes, paneSeen, Date.now())) {
+    for (const p of reapable(reapPool(panes), paneSeen, Date.now())) {
       try {
         await $.process.run(tmuxKillArgv(p.id), PROBE)
         $.ui.toast('agt reaped ' + p.name + ' (' + p.state + ')')
@@ -245,6 +285,7 @@ export function register(on) {
     await $.command.register({ name: 'agt-routing', description: 'Show the model + effort agentille picked for each agent this session', immediate: true })
     await $.command.register({ name: 'agt-deck', description: 'Open the agentille deck now (it also opens on its own with /agt)', immediate: true })
     await $.command.register({ name: 'agt-nodeck', description: 'Stop the agentille deck from opening on its own; /agt-deck turns it back on', immediate: true })
+    await $.command.register({ name: 'agt-spawn', description: 'Open a routed claude pane beside this one (Herdr or tmux); it is never reaped', argumentHint: '"task" [--model sonnet|opus|haiku|fable]' })
     await $.command.register({ name: 'agt-ledger', description: 'Tokens per agent role for the latest agentille run', immediate: true })
     if (transport === 'herdr') {
       await pollHerdr($)
@@ -266,6 +307,23 @@ export function register(on) {
   on('command.run', { command: 'agt-routing' }, async () => {
     if (decisions.length === 0) return { text: 'No agentille dispatches this session.' }
     return { text: decisions.slice(-30).map((d) => d.role + ' → ' + d.model + ' · ' + d.effort + (d.reason === 'table' ? '' : '  (' + d.reason + ')')).join('\n') }
+  })
+
+  // Typed only: a plugin, a scheduled task or a notification never opens a pane.
+  on('command.run', { command: 'agt-spawn' }, async ($, e) => {
+    if (!['composer', 'bridge', 'sdk'].includes(e.origin?.kind)) return { text: '/agt-spawn runs only when typed.' }
+    const a = parseSpawnArgs(e.args)
+    if (a.usage || a.error) return { text: a.usage ?? a.error }
+    const t = await transportOf($)
+    if (t === 'none') return { text: 'No pane transport here: /agt-spawn needs Claude Code running inside Herdr or tmux.' }
+    const run = newRunId()
+    const name = paneName(run, SPAWN_ROLE)
+    try {
+      await openPane($, t, { run, name, model: a.model, task: a.task, cwd: await $.session.cwd() })
+    } catch (err) {
+      return { text: 'Could not open a ' + t + ' pane: ' + String(err?.message ?? err).slice(0, 160) }
+    }
+    return { text: 'Opened ' + name + ' · ' + a.model + ' · ' + t + ' pane.' }
   })
 
   on('command.run', { command: 'agt-ledger' }, async () => ({ text: ledgerText(ledger(live, lastRun)) }))

@@ -17,6 +17,13 @@ describe('transport', () => {
     expect(transportBlock('none')).toContain('No pane transport here: parallel slices run as a workflow, else subagent waves.')
     expect(transportBlock('none').startsWith('\n## Pane transport (agentille mod)\n\ntransport: none\n')).toBe(true)
   })
+
+  test('with the tools registered, the block points at them; never on none', async () => {
+    expect(transportBlock('herdr')).not.toContain('spawn_pane')
+    expect(transportBlock('tmux', true)).toContain('mcp__agentille__spawn_pane')
+    expect(transportBlock('tmux', true)).toContain('"Through the mod\'s tools"')
+    expect(transportBlock('none', true)).not.toContain('spawn_pane')
+  })
 })
 
 describe('teamForce', () => {

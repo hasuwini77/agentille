@@ -28,6 +28,7 @@ const paneSeen = new Map()   // reaper bookkeeping
 const tmuxFirstSeen = new Map() // tmux pane id → when this session first listed it
 let selfName = null          // this pane's name when it is an agt-* worker
 let selfTab = null           // herdr: the lead's own tab, where its workers split
+let paneTools = false        // spawn_pane / close_pane registered for this lead
 let squads = []              // active squads for this repo
 let squadBlock = ''
 let pendingForce = null     // { template } from the last typed forced team, until the next agt skill.prompt
@@ -308,6 +309,7 @@ export function register(on) {
       if (!selfName) {
         await $.tool.register(SPAWN_TOOL)
         await $.tool.register(CLOSE_TOOL)
+        paneTools = true
       }
     }
     // Redraw while something is working: elapsed times tick, deck sprites bob.
@@ -424,7 +426,7 @@ export function register(on) {
     const t = await transportOf($)
     const forced = pendingForce ? teamDirective(t) : ''
     pendingForce = null
-    return next({ ...e, text: e.text + squadBlock + transportBlock(t) + forced })
+    return next({ ...e, text: e.text + squadBlock + transportBlock(t, paneTools && !selfName) + forced })
   })
 
   on('session.measure', async ($, e, next) => {

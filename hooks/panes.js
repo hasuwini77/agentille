@@ -26,13 +26,17 @@ export function pickTransport({ herdrOk, tmuxOk }) {
   return herdrOk ? 'herdr' : tmuxOk ? 'tmux' : 'none'
 }
 
-// The line appended to the /agt skill prompt so the model knows which transport is live.
-export function transportBlock(transport) {
+// The line appended to the /agt skill prompt so the model knows which transport is live,
+// and, when the mod registered them, that the pane tools replace the manual recipe.
+export function transportBlock(transport, tools = false) {
   const line = {
     herdr: 'Parallel slices run as Herdr panes — see `panes-mode.md` → "Spawning a worker".',
     tmux: 'Parallel slices run as tmux panes — see `panes-mode.md` → "tmux transport".',
   }[transport] ?? 'No pane transport here: parallel slices run as a workflow, else subagent waves.'
-  return '\n## Pane transport (agentille mod)\n\ntransport: ' + transport + '\n' + line + '\n'
+  const viaTools = tools && transport !== 'none'
+    ? 'Open each claude worker with mcp__agentille__spawn_pane and close it after harvest with mcp__agentille__close_pane — see `panes-mode.md` → "Through the mod\'s tools".\n'
+    : ''
+  return '\n## Pane transport (agentille mod)\n\ntransport: ' + transport + '\n' + line + '\n' + viaTools
 }
 
 // A typed /agt that forces a team: `--team <name>` → { template: name }, `--mode team`

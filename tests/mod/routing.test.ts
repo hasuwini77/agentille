@@ -98,21 +98,35 @@ describe('deck', () => {
     on('ui.panes', async () => ({ value: [] }))
     on('ui.open', async ($: any, e: any) => { seen.push(e); return { value: { isPlaced: true } } })
     on('prompt.submit', async ($: any, e: any) => ({ text: e.text }))
+    on('agent.spawn', async ($: any, e: any) => ({ model: e.model ?? 'sonnet', agentId: 'x' + Math.random() }))
     return seen
   }
 
-  test('a typed /agt opens the deck without taking the keyboard', async ($, on) => {
+  const spawn = ($: any, on: any, type = 'agentille:agentille-executor') => {
+    return $.agent.spawn({ prompt: '[agt run=d1 size=small mode=build]\nbuild', subagentType: type, model: 'sonnet' })
+  }
+
+  test('a typed /agt alone leaves the deck shut; a solo run never sees an empty deck', async ($, on) => {
     const seen = opens(on)
     await $.prompt.submit({ text: '/agt add a search filter', wait: false })
+    expect(seen.length).toBe(0)
+  })
+
+  test('the first agentille agent opens it, without taking the keyboard, once', async ($, on) => {
+    const seen = opens(on)
+    await $.prompt.submit({ text: '/agt add a search filter', wait: false })
+    await spawn($, on)
+    await spawn($, on)
     expect(seen.length).toBe(1)
     expect(seen[0]).toMatchObject({ id: 'agt-deck' })
     expect(seen[0].focus).toBe(undefined)
   })
 
-  test('other prompts and agt-* commands leave it shut', async ($, on) => {
+  test('other prompts, agt-* commands and non-agentille agents leave it shut', async ($, on) => {
     const seen = opens(on)
     await $.prompt.submit({ text: 'fix the header', wait: false })
     await $.prompt.submit({ text: '/agt-ledger', wait: false })
+    await spawn($, on, 'Explore')
     expect(seen.length).toBe(0)
   })
 
@@ -121,6 +135,7 @@ describe('deck', () => {
     const seen = opens(on, stored)
     await $.command.run({ command: 'agt-nodeck' })
     await $.prompt.submit({ text: '/agt add a search filter', wait: false })
+    await spawn($, on)
     expect(seen.length).toBe(0)
     expect(stored).toContainEqual(expect.objectContaining({ key: 'deck:auto', value: false }))
   })

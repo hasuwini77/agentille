@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'claude-code/testing'
+import { describe, expect, mock, test } from 'claude-code/testing'
 import { BRIEF_MIN_WORDS, briefPrompt, flagOf, focusText, paneFlags, parseBrief, parseFocusArgs, shouldBrief, words } from '../../hooks/focus.js'
 
 const LONG = Array.from({ length: BRIEF_MIN_WORDS + 5 }, (_, i) => 'word' + i).join(' ')
@@ -64,3 +64,118 @@ describe('focus: flags from agent results', () => {
   })
 })
 
+describe('focus: in the mod', () => {
+  const setup = (on: any, reply = '→ Restart Claude\n✓ v2.5.0 shipped') => {
+    const asked: any[] = []
+    const toasts: string[] = []
+    const stored: any[] = []
+    on('store.get', async () => ({ value: undefined }))
+    on('store.set', async ($: any, e: any) => { stored.push(e); return { value: undefined } })
+    on('ui.panes', async () => ({ value: [] }))
+    on('ui.open', async () => ({ value: { isPlaced: true } }))
+    on('ui.toast', async ($: any, e: any) => { toasts.push(e.text ?? String(e)); return { value: undefined } })
+    on('ui.render', async () => ({ type: 'engine', ref: 0 }) as never)
+    on('prompt.submit', async ($: any, e: any) => ({ text: e.text }))
+    on('model.complete', async ($: any, e: any) => { asked.push(e); return { value: { isAnswered: true, text: reply, usage: {} } } })
+    on('agent.spawn', async ($: any, e: any) => ({ model: e.model ?? 'sonnet', agentId: 'r1' }))
+    on('turn.complete', async ($: any, e: any) => ({ text: e.answer }))
+    const clock = mock.clock(on, { now: 1_000_000 })
+    return { asked, toasts, stored, clock }
+  }
+  const band = ($: any) => $.ui.mount({ plugin: 'agentille', surface: 'terminal', component: 'AbovePrompt', props: { hasSurvey: false, isWorking: false, maxRows: 10, bodyColumns: 100 } as never })
+  const complete = ($: any, answer: string, agentId?: string) => $.turn.complete({ answer, durationMs: 1000, isAborted: false, turnId: 't', reason: 'answer', ...(agentId ? { agentId } : {}) })
+
+  test('a failing review flags the band and toasts', async ($, on) => {
+    const { toasts } = setup(on)
+    await $.agent.spawn({ prompt: '[agt run=f1 size=small mode=review]\nreview', subagentType: 'agentille:agentille-code-reviewer', model: 'sonnet' })
+    await complete($, 'VERDICT: FAIL\nP0: token logged', 'r1')
+    expect(toasts).toContain('agt ⚑ code-reviewer: FAIL — blocks ship')
+    const ui = await band($)
+    expect(await ui.find({ type: 'Text', text: /⚑ code-reviewer: FAIL/ })).toBeDefined()
+    await ui.unmount()
+  })
+
+  test('a long /agt answer gets a Haiku brief above the prompt', async ($, on) => {
+    const { asked, clock } = setup(on)
+    await $.prompt.submit({ text: '/agt ship it', wait: false })
+    await complete($, LONG)
+    await clock.advance(10)
+    expect(asked.length).toBe(1)
+    expect(asked[0]).toMatchObject({ model: 'haiku', effort: 'low' })
+    const ui = await band($)
+    expect(await ui.find({ type: 'Text', text: /→ Restart Claude/ })).toBeDefined()
+    await ui.unmount()
+  })
+
+  test('outside /agt nothing is briefed until /agt-focus all, which is remembered', async ($, on) => {
+    const { asked, stored, clock } = setup(on)
+    await $.prompt.submit({ text: 'explain the reaper', wait: false })
+    await complete($, LONG)
+    await clock.advance(10)
+    expect(asked.length).toBe(0)
+    await $.command.run({ command: 'agt-focus', args: 'all' })
+    expect(stored).toContainEqual(expect.objectContaining({ key: 'focus:mode', value: 'all' }))
+    await complete($, LONG)
+    await clock.advance(10)
+    expect(asked.length).toBe(1)
+  })
+
+  test('the next prompt clears the brief', async ($, on) => {
+    const { clock } = setup(on)
+    await $.prompt.submit({ text: '/agt ship it', wait: false })
+    await complete($, LONG)
+    await clock.advance(10)
+    await $.prompt.submit({ text: 'thanks', wait: false })
+    const ui = await band($)
+    expect(await ui.find({ type: 'Text', text: /Restart Claude/ })).toBeUndefined()
+    await ui.unmount()
+  })
+})
+
+describe('lazy start', () => {
+  const T = '\t'
+  const start = async ($: any, on: any, rows: string[][]) => {
+    let lists = 0
+    on('env.get', async ($: any, e: any) => ({ value: ({ TMUX: '/tmp/tmux-1/default,1,0', TMUX_PANE: '%1', HOME: '/h' } as any)[e.name] }))
+    on('session.start', async ($: any, e: any) => ({ cwd: e.cwd }))
+    on('command.register', async () => ({ value: undefined }))
+    on('tool.register', async () => ({ value: { tool: 'x' } }))
+    on('fs.read', async () => ({ deny: 'no profile' }))
+    on('fs.exists', async () => ({ value: false }))
+    on('fs.stat', async () => ({ deny: 'ENOENT' }))
+    on('store.get', async () => ({ value: undefined }))
+    on('ui.panes', async () => ({ value: [] }))
+    on('skill.prompt', async ($: any, e: any) => ({ text: e.text }))
+    on('process.run', async ($: any, e: any) => {
+      if (e.argv[1] === 'list-panes') lists += 1
+      return { value: { exitCode: 0, stdout: rows.map((r) => r.join(T)).join('\n') + '\n', stderr: '' } }
+    })
+    const clock = mock.clock(on, { now: 1_000_000 })
+    await $.session.start({ cwd: '/w', surface: null, isInteractive: false })
+    return { clock, lists: () => lists }
+  }
+
+  test('no agt- panes at start: one look, then no polling until /agt runs', async ($, on) => {
+    const { clock, lists } = await start($, on, [['%1', '', 'claude', '0', '@1']])
+    await clock.advance(60_000)
+    expect(lists()).toBe(1)
+    await $.skill.prompt({ skill: 'agt', text: 'base' })
+    await clock.advance(20_000)
+    expect(lists()).toBeGreaterThan(3)
+  })
+
+  test('polling stops after a quiet minute', async ($, on) => {
+    const { clock, lists } = await start($, on, [['%1', '', 'claude', '0', '@1']])
+    await $.skill.prompt({ skill: 'agt', text: 'base' })
+    await clock.advance(70_000)
+    const after = lists()
+    await clock.advance(60_000)
+    expect(lists()).toBe(after)
+  })
+
+  test('leftover agt- panes at start keep the reaper polling', async ($, on) => {
+    const { clock, lists } = await start($, on, [['%1', '', 'claude', '0', '@1'], ['%2', 'agt-r9-executor', 'claude', '0', '@1']])
+    await clock.advance(30_000)
+    expect(lists()).toBeGreaterThan(4)
+  })
+})

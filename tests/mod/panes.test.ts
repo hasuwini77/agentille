@@ -1,5 +1,5 @@
 import { describe, expect, mock, test } from 'claude-code/testing'
-import { doneFile, herdrCloseArgv, herdrPaneIdOf, herdrPromptArgv, herdrSplitArgv, herdrStartArgv, isFreshDone, isLead, newRunId, paneName, parseSpawnArgs, parseTmuxList, pickTransport, quietSpawn, reapPool, scopeRows, splitName, tmuxKillArgv, tmuxPaneAgents, tmuxPaneIdOf, tmuxSplitArgv, tmuxTagArgvs, teamDirective, teamForce, teamNotice, transportBlock, TMUX_LIST_FORMAT } from '../../hooks/panes.js'
+import { closeTarget, doneFile, spawnToolInput, TOOL_MODELS, herdrCloseArgv, herdrPaneIdOf, herdrPromptArgv, herdrSplitArgv, herdrStartArgv, isFreshDone, isLead, newRunId, paneName, parseSpawnArgs, parseTmuxList, pickTransport, quietSpawn, reapPool, scopeRows, splitName, tmuxKillArgv, tmuxPaneAgents, tmuxPaneIdOf, tmuxSplitArgv, tmuxTagArgvs, teamDirective, teamForce, teamNotice, transportBlock, TMUX_LIST_FORMAT } from '../../hooks/panes.js'
 import { reapable } from '../../hooks/live.js'
 
 const TAB = '\t'
@@ -16,6 +16,13 @@ describe('transport', () => {
     expect(transportBlock('tmux')).toContain('"tmux transport"')
     expect(transportBlock('none')).toContain('No pane transport here: parallel slices run as a workflow, else subagent waves.')
     expect(transportBlock('none').startsWith('\n## Pane transport (agentille mod)\n\ntransport: none\n')).toBe(true)
+  })
+
+  test('with the tools registered, the block points at them; never on none', async () => {
+    expect(transportBlock('herdr')).not.toContain('spawn_pane')
+    expect(transportBlock('tmux', true)).toContain('mcp__agentille__spawn_pane')
+    expect(transportBlock('tmux', true)).toContain('"Through the mod\'s tools"')
+    expect(transportBlock('none', true)).not.toContain('spawn_pane')
   })
 })
 
@@ -574,5 +581,130 @@ describe('/agt-spawn', () => {
     await run($, 'do the thing')
     const split = seen.find((a) => a[1] === 'split-window')!
     expect(split[split.indexOf('-c') + 1]).toBe('/work/c##sharp')
+  })
+})
+
+describe('pane tools: input', () => {
+  const ok = { run: 'k7f2ab', role: 'exec-1', task: 'build the search filter' }
+
+  test('a valid spawn defaults to sonnet and the session cwd', async () => {
+    expect(spawnToolInput(ok)).toEqual({ run: 'k7f2ab', role: 'exec-1', name: 'agt-k7f2ab-exec-1', model: 'sonnet', task: 'build the search filter', cwd: null })
+    expect(spawnToolInput({ ...ok, model: 'haiku', cwd: '/w/wt-1' })).toMatchObject({ model: 'haiku', cwd: '/w/wt-1' })
+  })
+
+  test('fable is not a tool model', async () => {
+    expect(TOOL_MODELS).not.toContain('fable')
+    expect(spawnToolInput({ ...ok, model: 'fable' }).error).toContain('routing guard')
+    expect(spawnToolInput({ ...ok, model: 'gpt-4' }).error).toContain('model must be one of')
+  })
+
+  test('bad names, the reserved role, bare words and relative paths are refused', async () => {
+    expect(spawnToolInput({ ...ok, run: 'a b' }).error).toContain('run must be')
+    expect(spawnToolInput({ ...ok, role: 'Exec' }).error).toContain('role must be')
+    expect(spawnToolInput({ ...ok, role: 'spawn' }).error).toContain('reserved')
+    expect(spawnToolInput({ ...ok, role: 'x'.repeat(30) }).error).toContain('max 32')
+    expect(spawnToolInput({ ...ok, task: '  ' }).error).toBe('task is empty.')
+    expect(spawnToolInput({ ...ok, task: 'plugin' }).error).toContain('one-word task')
+    expect(spawnToolInput({ ...ok, cwd: 'wt-1' }).error).toContain('absolute')
+    expect(spawnToolInput(undefined).error).toContain('run must be')
+  })
+
+  test('a name already on screen is not doubled', async () => {
+    expect(spawnToolInput(ok, [{ name: 'agt-k7f2ab-exec-1' }] as never).error).toContain('already open')
+  })
+
+  test('close targets only owned agt- panes in the lead\'s tab', async () => {
+    const live = [{ id: 'w1:p5', name: 'agt-k7f2ab-exec-1', tab: 't1' }, { id: 'w1:p6', name: 'agt-k7f2ab-exec-2', tab: 't2' }, { id: 'w1:p7', name: 'agt-k7f2ab-spawn', tab: 't1' }]
+    expect(closeTarget({ name: 'agt-k7f2ab-exec-1' }, live as never, 't1')).toEqual({ pane: live[0] })
+    expect(closeTarget({ name: 'agt-k7f2ab-exec-2' }, live as never, 't1').error).toContain('No pane named')
+    expect(closeTarget({ name: 'agt-k7f2ab-exec-2' }, live as never, null)).toEqual({ pane: live[1] })
+    expect(closeTarget({ name: 'agt-k7f2ab-spawn' }, live as never, 't1').error).toContain('typed /agt-spawn')
+    expect(closeTarget({ name: 'build' }, live as never).error).toContain('agt-<run>-<role>')
+  })
+})
+
+describe('pane tools: in the mod', () => {
+  const T = '\t'
+  const setup = (on: any, vars: Record<string, string>, table: Record<string, any> = {}) => {
+    const seen: string[][] = []
+    const tools: string[] = []
+    on('env.get', async ($: any, e: any) => ({ value: vars[e.name] }))
+    on('session.cwd', async () => ({ value: '/work/repo' }))
+    on('session.start', async ($: any, e: any) => ({ cwd: e.cwd }))
+    on('command.register', async () => ({ value: undefined }))
+    on('tool.register', async ($: any, e: any) => { tools.push(e.name); return { value: { tool: 'mcp__agentille__' + e.name } } })
+    on('fs.read', async () => ({ deny: 'no profile' }))
+    on('fs.exists', async () => ({ value: false }))
+    on('fs.stat', async ($: any, e: any) => (e.path.startsWith('/work/') ? { value: { kind: 'dir', size: 0, mtimeMs: 0, isLink: false } } : { deny: 'ENOENT' }))
+    on('store.get', async () => ({ value: undefined }))
+    on('ui.panes', async () => ({ value: [] }))
+    on('process.run', async ($: any, e: any) => {
+      seen.push(e.argv)
+      const key = Object.keys(table).find((k) => e.argv.join(' ').startsWith(k))
+      const v = key === undefined ? {} : typeof table[key] === 'function' ? table[key]() : table[key]
+      return { value: { exitCode: 0, stdout: '', stderr: '', ...v } }
+    })
+    mock.clock(on, { now: 1_000_000 })
+    return { seen, tools }
+  }
+  const TMUX = { TMUX: '/tmp/tmux-1/default,1,0', TMUX_PANE: '%1', SHELL: '/bin/zsh', HOME: '/h' }
+  const spawn = ($: any, input: Record<string, unknown>) => $.tool.call({ tool: 'mcp__agentille__spawn_pane', ...input })
+  const close = ($: any, name: string) => $.tool.call({ tool: 'mcp__agentille__close_pane', name })
+
+  test('a lead with a transport registers both tools; no transport registers none', async ($, on) => {
+    const a = setup(on, TMUX, { 'tmux list-panes': { stdout: ['%1', '', 'claude', '0', '@1'].join(T) + '\n' } })
+    await $.session.start({ cwd: '/work/repo', surface: null, isInteractive: false })
+    expect(a.tools).toEqual(['spawn_pane', 'close_pane'])
+  })
+
+  test('no transport: none registered', async ($, on) => {
+    const a = setup(on, {})
+    await $.session.start({ cwd: '/work/repo', surface: null, isInteractive: false })
+    expect(a.tools).toEqual([])
+  })
+
+  test('a worker pane registers no tools', async ($, on) => {
+    const a = setup(on, TMUX, { 'tmux list-panes': { stdout: ['%1', 'agt-k7f2ab-exec-1', 'claude', '0', '@1'].join(T) + '\n' } })
+    await $.session.start({ cwd: '/work/repo', surface: null, isInteractive: false })
+    expect(a.tools).toEqual([])
+  })
+
+  test('tmux: spawn opens a tagged pane in the worktree on the asked model', async ($, on) => {
+    const { seen } = setup(on, TMUX, { 'tmux split-window': { stdout: '%9\n' } })
+    const r = await spawn($, { run: 'k7f2ab', role: 'exec-1', task: 'build the filter', model: 'haiku', cwd: '/work/wt-1' })
+    expect(r.result).toBe('Opened agt-k7f2ab-exec-1 · haiku · tmux pane.')
+    const split = seen.find((a) => a[1] === 'split-window')!
+    expect(split[split.indexOf('-c') + 1]).toBe('/work/wt-1')
+    expect(split.slice(-6)).toEqual(['--model', 'haiku', '-n', 'agt-k7f2ab-exec-1', '--', 'build the filter'])
+  })
+
+  test('herdr: spawn splits, starts and prompts', async ($, on) => {
+    const { seen } = setup(on, { HERDR_ENV: '1', HERDR_PANE_ID: 'w1:p1' }, { 'herdr pane split': { stdout: JSON.stringify({ result: { pane: { pane_id: 'w1:p5' } } }) } })
+    const r = await spawn($, { run: 'k7f2ab', role: 'review', task: 'review the diff' })
+    expect(r.result).toBe('Opened agt-k7f2ab-review · sonnet · herdr pane.')
+    expect(seen.some((a) => a.slice(0, 4).join(' ') === 'herdr agent start agt-k7f2ab-review')).toBe(true)
+    expect(seen.some((a) => a.slice(0, 3).join(' ') === 'herdr agent prompt' && a[4] === 'review the diff')).toBe(true)
+  })
+
+  test('refusals open nothing: fable, a missing directory, no transport', async ($, on) => {
+    const { seen } = setup(on, TMUX)
+    expect((await spawn($, { run: 'k7f2ab', role: 'exec-1', task: 'do the thing', model: 'fable' })).deny).toContain('routing guard')
+    expect((await spawn($, { run: 'k7f2ab', role: 'exec-1', task: 'do the thing', cwd: '/nope' })).deny).toBe('/nope is not a directory.')
+    expect(seen.some((a) => a[1] === 'split-window')).toBe(false)
+  })
+
+  test('no transport refuses the call', async ($, on) => {
+    setup(on, {})
+    expect((await spawn($, { run: 'k7f2ab', role: 'exec-1', task: 'do the thing' })).deny).toContain('No pane transport')
+  })
+
+  test('close: kills an owned worker, refuses a typed spawn pane and strangers', async ($, on) => {
+    const rows = [['%1', '', 'claude', '0', '@1'], ['%5', 'agt-k7f2ab-exec-1', 'claude', '0', '@1'], ['%6', 'agt-k7f2ab-spawn', 'claude', '0', '@1'], ['%7', 'agt-k7f2ab-exec-2', 'claude', '0', '@2']]
+    const { seen } = setup(on, TMUX, { 'tmux list-panes': () => ({ stdout: rows.map((r) => r.join(T)).join('\n') + '\n' }) })
+    expect((await close($, 'agt-k7f2ab-exec-1')).result).toBe('Closed agt-k7f2ab-exec-1.')
+    expect(seen.some((a) => a.join(' ') === 'tmux kill-pane -t %5')).toBe(true)
+    expect((await close($, 'agt-k7f2ab-spawn')).deny).toContain('typed /agt-spawn')
+    expect((await close($, 'agt-k7f2ab-exec-2')).deny).toContain('No pane named')
+    expect(seen.filter((a) => a[1] === 'kill-pane').length).toBe(1)
   })
 })

@@ -7,7 +7,7 @@ import { addUsage, effortBar, elapsed, finish, isAgtPrompt, ledger, ledgerText, 
 import { activeSquads, allPaths, depsOf, injection } from './squads.js'
 import { cells, MODEL_COLOR, modelKey } from './sprites.js'
 import {
-  HERDR_START_TIMEOUT, PROBE, SAFE_RUN, SPAWN_ROLE, TMUX_LIST_ARGV, doneFile, herdrCloseArgv, herdrPaneIdOf, herdrPromptArgv, herdrSplitArgv, herdrStartArgv,
+  CLOSE_TOOL, HERDR_START_TIMEOUT, PROBE, SPAWN_TOOL, closeTarget, spawnToolInput, SAFE_RUN, SPAWN_ROLE, TMUX_LIST_ARGV, doneFile, herdrCloseArgv, herdrPaneIdOf, herdrPromptArgv, herdrSplitArgv, herdrStartArgv,
   isFreshDone, isLead, newRunId, paneName, parseSpawnArgs, parseTmuxList, pickTransport, quietSpawn, reapPool, scopeRows, splitName, tmuxKillArgv, tmuxPaneAgents, tmuxPaneIdOf,
   teamDirective, teamForce, teamNotice, tmuxSplitArgv, tmuxTagArgvs, transportBlock,
 } from './panes.js'
@@ -27,6 +27,8 @@ let panes = []               // agt-* panes (herdr or tmux) other than this one
 const paneSeen = new Map()   // reaper bookkeeping
 const tmuxFirstSeen = new Map() // tmux pane id → when this session first listed it
 let selfName = null          // this pane's name when it is an agt-* worker
+let selfTab = null           // herdr: the lead's own tab, where its workers split
+let paneTools = false        // spawn_pane / close_pane registered for this lead
 let squads = []              // active squads for this repo
 let squadBlock = ''
 let pendingForce = null     // { template } from the last typed forced team, until the next agt skill.prompt
@@ -125,6 +127,7 @@ async function pollHerdr($) {
   const selfPane = (await $.env.get('HERDR_PANE_ID')) ?? null
   const me = list.find((p) => p.pane_id === selfPane)
   selfName = me && typeof me.name === 'string' && me.name.startsWith('agt-') ? me.name : null
+  selfTab = me?.tab_id ?? null
   // Show the workspace's agt-* panes; reap only the lead's own tab, where herdr mode
   // splits its workers. Workers (panes that are themselves agt-*) never reap.
   panes = quietSpawn(paneAgents(list, selfPane).filter((p) => !me || p.workspace === me.workspace_id))
@@ -224,6 +227,11 @@ async function pollTmux($) {
   $.ui.invalidate('ui.render')
 }
 
+async function pollNow($, t) {
+  if (t === 'herdr') await pollHerdr($)
+  else if (t === 'tmux') await pollTmux($)
+}
+
 // ── drawing helpers (take resolved elements, never $) ─────────────────────────
 
 function modelText(Text, a) {
@@ -294,12 +302,15 @@ export function register(on) {
     await $.command.register({ name: 'agt-nodeck', description: 'Stop the agentille deck from opening on its own; /agt-deck turns it back on', immediate: true })
     await $.command.register({ name: 'agt-spawn', description: 'Open a routed claude pane beside this one (Herdr or tmux); it is never reaped', argumentHint: '"task" [--model sonnet|opus|haiku|fable]' })
     await $.command.register({ name: 'agt-ledger', description: 'Tokens per agent role for the latest agentille run', immediate: true })
-    if (transport === 'herdr') {
-      await pollHerdr($)
-      $.clock.every(5000, () => { pollHerdr($) })
-    } else if (transport === 'tmux') {
-      await pollTmux($)
-      $.clock.every(5000, () => { pollTmux($) })
+    if (transport !== 'none') {
+      await pollNow($, transport)
+      $.clock.every(5000, () => { pollNow($, transport) })
+      // The lead opens and closes its workers through the mod; a worker pane gets no fan-out of its own.
+      if (!selfName) {
+        await $.tool.register(SPAWN_TOOL)
+        await $.tool.register(CLOSE_TOOL)
+        paneTools = true
+      }
     }
     // Redraw while something is working: elapsed times tick, deck sprites bob.
     $.clock.every(600, () => {
@@ -331,6 +342,40 @@ export function register(on) {
       return { text: 'Could not open a ' + t + ' pane: ' + String(err?.message ?? err).slice(0, 160) }
     }
     return { text: 'Opened ' + name + ' · ' + a.model + ' · ' + t + ' pane.' }
+  })
+
+  // /agt panes mode: the same openPane as /agt-spawn, with the input validated here.
+  on('tool.call', { tool: 'mcp__agentille__spawn_pane' }, async ($, e) => {
+    if (selfName) return { deny: 'This is a worker pane (' + selfName + '); workers do not open panes.' }
+    const t = await transportOf($)
+    if (t === 'none') return { deny: 'No pane transport here: run the slice as a subagent.' }
+    const a = spawnToolInput(e, panes)
+    if (a.error) return { deny: a.error }
+    const cwd = a.cwd ?? (await $.session.cwd())
+    if (a.cwd) {
+      const s = await $.fs.stat(cwd).catch(() => null)
+      if (s?.kind !== 'dir') return { deny: cwd + ' is not a directory.' }
+    }
+    try {
+      await openPane($, t, { run: a.run, name: a.name, model: a.model, task: a.task, cwd })
+    } catch (err) {
+      return { deny: 'Could not open a ' + t + ' pane: ' + String(err?.message ?? err).slice(0, 160) }
+    }
+    await pollNow($, t)
+    return { result: 'Opened ' + a.name + ' · ' + a.model + ' · ' + t + ' pane.' }
+  })
+
+  on('tool.call', { tool: 'mcp__agentille__close_pane' }, async ($, e) => {
+    if (selfName) return { deny: 'This is a worker pane (' + selfName + '); workers do not close panes.' }
+    const t = await transportOf($)
+    if (t === 'none') return { deny: 'No pane transport here.' }
+    await pollNow($, t)
+    const c = closeTarget(e, panes, t === 'herdr' ? selfTab : null)
+    if (c.error) return { deny: c.error }
+    const r = await $.process.run(t === 'herdr' ? herdrCloseArgv(c.pane.id) : tmuxKillArgv(c.pane.id), PROBE).catch(() => null)
+    if (!r || r.exitCode !== 0) return { deny: 'Could not close ' + c.pane.name + '.' }
+    await pollNow($, t)
+    return { result: 'Closed ' + c.pane.name + '.' }
   })
 
   on('command.run', { command: 'agt-ledger' }, async () => ({ text: ledgerText(ledger(live, lastRun)) }))
@@ -381,7 +426,7 @@ export function register(on) {
     const t = await transportOf($)
     const forced = pendingForce ? teamDirective(t) : ''
     pendingForce = null
-    return next({ ...e, text: e.text + squadBlock + transportBlock(t) + forced })
+    return next({ ...e, text: e.text + squadBlock + transportBlock(t, paneTools && !selfName) + forced })
   })
 
   on('session.measure', async ($, e, next) => {

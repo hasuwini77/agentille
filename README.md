@@ -78,6 +78,8 @@ The mod detects your project type (saas, ecommerce, content, immersive) and adds
 | `/agt --team <feature-team\|review-team\|incident-team> "task"` | **Deprecated, removed in v3.0.** Re-resolves to panes on ≥2 disjoint slices, else subagent; runs as a team only when no pane transport exists |
 | `/agt --plan "task"` | Dry run: plan and cost, then stop for your go |
 
+Pane workers open and close through the mod's own tools (`spawn_pane`, `close_pane`), the same validated path `/agt-spawn` uses: owned `agt-<run>-<role>` names, never focused, only your own `agt-` panes closable, and no Fable outside the routing guard.
+
 Panes are not a token saving: in a measured two-slice test, two Claude workers in panes used 1.12x the fresh tokens of the same two as subagents (1.55x counting cache reads), because a pane opens as a full session. The savings come from model routing and handing each worker only its slice. Small sample: one task, two runs per arm. Team mode's ~4x is an estimate.
 
 Agent teams are never auto-picked, and forcing one with `--team` is deprecated (removed in v3.0): it re-resolves to panes wherever Herdr or tmux is available. The legacy team path needs Claude Code 2.1.178+ and `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1` in `~/.claude/settings.json` under `env`; split panes need tmux or iTerm2 (`teammateMode`). Details: [`skills/agt/team-mode.md`](./skills/agt/team-mode.md).

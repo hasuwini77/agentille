@@ -89,3 +89,39 @@ describe('mod', () => {
     expect(seen).toBe('haiku')
   })
 })
+
+describe('deck', () => {
+  const opens = (on: any, stored: any[] = []) => {
+    const seen: any[] = []
+    on('store.get', async () => ({ value: undefined }))
+    on('store.set', async ($: any, e: any) => { stored.push(e); return { value: undefined } })
+    on('ui.panes', async () => ({ value: [] }))
+    on('ui.open', async ($: any, e: any) => { seen.push(e); return { value: { isPlaced: true } } })
+    on('prompt.submit', async ($: any, e: any) => ({ text: e.text }))
+    return seen
+  }
+
+  test('a typed /agt opens the deck without taking the keyboard', async ($, on) => {
+    const seen = opens(on)
+    await $.prompt.submit({ text: '/agt add a search filter', wait: false })
+    expect(seen.length).toBe(1)
+    expect(seen[0]).toMatchObject({ id: 'agt-deck' })
+    expect(seen[0].focus).toBe(undefined)
+  })
+
+  test('other prompts and agt-* commands leave it shut', async ($, on) => {
+    const seen = opens(on)
+    await $.prompt.submit({ text: 'fix the header', wait: false })
+    await $.prompt.submit({ text: '/agt-ledger', wait: false })
+    expect(seen.length).toBe(0)
+  })
+
+  test('/agt-nodeck turns auto-open off and remembers it', async ($, on) => {
+    const stored: any[] = []
+    const seen = opens(on, stored)
+    await $.command.run({ command: 'agt-nodeck' })
+    await $.prompt.submit({ text: '/agt add a search filter', wait: false })
+    expect(seen.length).toBe(0)
+    expect(stored).toContainEqual(expect.objectContaining({ key: 'deck:auto', value: false }))
+  })
+})

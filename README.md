@@ -36,7 +36,7 @@ cd ~/your/repo
 ## What you see
 
 - **Live band** above the prompt while agents exist: one row per agent with role, model and effort (model colored: haiku grey, sonnet blue, opus amber, fable violet; effort as a bar from low to max), state, elapsed time, tokens, and `↑ <reason>` when escalated. It covers in-process subagents and Herdr `agt-*` panes, and hides itself when nothing has run.
-- **`/agt-deck`** opens a pane with a pixel mini-Claude per agent: hat shape is the role, hat color is the model, working agents bob. Terminals draw pixels; the desktop app gets a text fallback.
+- **The deck** opens on its own when you type `/agt`: a pane with a pixel mini-Claude per agent. Hat shape is the role, hat color is the model, working agents bob. Terminals draw pixels; the desktop app gets a text fallback. Close it and it stays closed for that run. `/agt-nodeck` turns auto-open off for good; `/agt-deck` opens it by hand and turns it back on.
 - **Ledger.** Tokens per agent and per role. `/agt-ledger` prints it, and the Debrief shows a per-role table read from `~/.agentille/state/run-<id>/ledger.json`.
 
 ```yaml
@@ -85,7 +85,8 @@ Agent teams are never auto-picked. They need Claude Code 2.1.178+ and `CLAUDE_CO
 | Command | Does |
 |---|---|
 | `/agt` | The orchestrator |
-| `/agt-deck` | Pixel deck of running agents |
+| `/agt-deck` | Open the pixel deck (also turns auto-open back on) |
+| `/agt-nodeck` | Stop the deck from opening on its own |
 | `/agt-ledger` | Tokens per agent and per role |
 | `/agt-routing` | Routing decisions for this session |
 | `/agentille-init` | One-time global setup |
@@ -104,7 +105,7 @@ Each completed run appends one line to `./docs/agentille-log.md` in the target p
 
 ## Requirements
 
-- Claude Code **2.1.287+** for the mod (band, deck, ledger, squads, reaper, routing enforcement). The skills still work without it: routing falls back to explicit models.
+- Claude Code **2.1.287+** for the mod (band, auto-open deck, ledger, squads, reaper, routing enforcement). The skills still work without it: routing falls back to explicit models.
 - Claude Code 2.1.178+ for team mode.
 - A `~/.agentille/profile.json`, created by `/agentille-init`.
 

@@ -35,7 +35,7 @@ Three color channels, each used where it is strongest — all theme-independent,
 With the agentille mod (Claude Code ≥ 2.1.287) the run is also visible live, outside the transcript:
 
 - **Band** above the prompt: one row per agentille agent (subagents and herdr `agt-*` panes) — role, model · effort, state, elapsed, tokens, `↑ <reason>` when escalated.
-- **`/agt-deck`**: a pane with one pixel mini-Claude per agent (hat = role, hat color = model); text fallback in the desktop app.
+- **Deck**: opens on its own when `/agt` starts (no focus; the prompt keeps the keys). One pixel mini-Claude per agent (hat = role, hat color = model); text fallback in the desktop app. Closed by hand → stays closed for that run. `/agt-nodeck` turns auto-open off (kept across sessions); `/agt-deck` opens it and turns it back on. Unasked opens (no typed `/agt`) seat only on terminals ≥ 144 columns.
 - **Ledger**: tokens per agent and per role, written to `~/.agentille/state/run-<id>/ledger.json`; `/agt-ledger` prints it.
 
 The Debrief replaces the `cost:` shape row with a per-role token table when `ledger.json` exists (read it; never estimate):

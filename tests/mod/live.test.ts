@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'claude-code/testing'
 import { cells, pixels } from '../../hooks/sprites.js'
-import { DONE_GRACE_MS, IDLE_GRACE_MS, ledger, newAgent, addUsage, finish, paneAgents, reapable, visible } from '../../hooks/live.js'
+import { DONE_GRACE_MS, IDLE_GRACE_MS, isAgtPrompt, shouldAutoOpen, ledger, newAgent, addUsage, finish, paneAgents, reapable, visible } from '../../hooks/live.js'
 import { activeSquads, depsOf, injection } from '../../hooks/squads.js'
 
 const ROLES = ['planner', 'plan-reviewer', 'ui-prototyper', 'executor', 'code-reviewer', 'design-reviewer', 'security-reviewer', 'payments-reviewer', 'seo-reviewer', 'perf-reviewer', 'Explore']
@@ -101,5 +101,26 @@ describe('band', () => {
     expect(await ui.find({ type: 'Text', text: /opus ▆ high/ })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: /run bandrun/ })).toBeDefined()
     await ui.unmount()
+  })
+})
+
+describe('deck auto-open', () => {
+  test('only a typed /agt run counts', async () => {
+    expect(isAgtPrompt('/agt add a search filter')).toBe(true)
+    expect(isAgtPrompt('/agt')).toBe(true)
+    expect(isAgtPrompt('/agentille:agt "review the diff"')).toBe(true)
+    expect(isAgtPrompt('/agt-deck')).toBe(false)
+    expect(isAgtPrompt('/agt-nodeck')).toBe(false)
+    expect(isAgtPrompt('/agentille-init')).toBe(false)
+    expect(isAgtPrompt('run /agt later')).toBe(false)
+    expect(isAgtPrompt(undefined)).toBe(false)
+  })
+
+  test('opens unless off, already open, or closed by hand this run', async () => {
+    expect(shouldAutoOpen({ auto: undefined, open: false, dismissedRun: null, run: 'r1' })).toBe(true)
+    expect(shouldAutoOpen({ auto: true, open: false, dismissedRun: 'r0', run: 'r1' })).toBe(true)
+    expect(shouldAutoOpen({ auto: false, open: false, dismissedRun: null, run: 'r1' })).toBe(false)
+    expect(shouldAutoOpen({ auto: true, open: true, dismissedRun: null, run: 'r1' })).toBe(false)
+    expect(shouldAutoOpen({ auto: true, open: false, dismissedRun: 'r1', run: 'r1' })).toBe(false)
   })
 })

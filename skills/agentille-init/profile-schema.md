@@ -276,10 +276,14 @@ Example:
 
 ---
 
-## cockpit (optional)
+## routing (optional)
 
-### `cockpit` (optional)
-- `cockpit.enabled` (boolean, default `false`) — when true, `/agt` emits a read-only event log to
-  `~/.agentille/cockpit/runs/<run-id>.jsonl` for the agentille-cockpit dashboard. The first time it is
-  enabled, agentille prints a one-time notice that runs are logged unredacted (0600, local only). Set
-  `cockpit.redact: true` to elide `task`/`summary` in the log.
+Read by the agentille mod (Claude Code ≥ 2.1.287); absent → defaults shown.
+
+```json
+{ "routing": { "autoFable": true, "maxFablePerRun": 1, "fableWeeklyCeiling": 60 } }
+```
+
+- `routing.autoFable` (boolean, default `true`) — allow the escalation ladder to promote a role to Fable after two observed Opus-max failures; `false` caps escalation at Opus max.
+- `routing.maxFablePerRun` (integer, default `1`) — most Fable spawns the mod permits in one run.
+- `routing.fableWeeklyCeiling` (integer, percent, default `60`) — no automatic Fable once seven-day usage reaches this percentage.

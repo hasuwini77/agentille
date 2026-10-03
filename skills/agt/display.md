@@ -143,10 +143,11 @@ Never narrate the wait in prose; the harness spinner already says *still alive*,
 🟢 recon    team · feature-team — 2 disjoint slices       0:04
 🟢 recon    panes · tmux — 2 disjoint slices              0:04
 🟢 recon    subagent · downgraded from forced team        0:06
-🟡 recon    team (forced) · overkill, ran as asked        0:03
+🟡 recon    team (forced) · no panes · overkill, ran as asked 0:03
+🟡 recon    panes · --team deprecated → re-resolved       0:03
 ```
 
-The last two lines are the **forced-team overkill outcomes** (see `team-mode.md` → "Honesty on a forced team"): the user passed `--team` with no real parallel work. When `preTaskQuestioning` permits, `/agt` *asks* first (downgrade to subagent, or force the team) and the recon ping shows whichever the user chose — `subagent · downgraded from forced team` or `team (forced)`. When questioning is off, it flags the trade (🟡) and runs the team. `honestyLevel`-gated; on the most hands-off honesty level, fall back to the plain 🟢 recon line. The ask never loops, and nothing here blocks.
+The `--team deprecated → re-resolved` line is what a forced team prints on a pane transport (it landed on panes or subagent; `--team` is removed in v3.0). The two lines before it are the **forced-team overkill outcomes, no pane transport only** (see `team-mode.md` → "Honesty on a forced team"): the user passed `--team` with no real parallel work. When `preTaskQuestioning` permits, `/agt` *asks* first (downgrade to subagent, or force the team) and the recon ping shows whichever the user chose — `subagent · downgraded from forced team` or `team (forced)`. When questioning is off, it flags the trade (🟡) and runs the team. `honestyLevel`-gated; on the most hands-off honesty level, fall back to the plain 🟢 recon line. The ask never loops, and nothing here blocks.
 
 ### Frame 3 — the parallel fanout (drawn ONCE when build forks)
 

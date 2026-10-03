@@ -1,7 +1,7 @@
 ---
 name: agt
 description: Personal AI coding orchestrator (the trigger formerly known as /agentille). Reads the user's profile from ~/.agentille/profile.json, classifies the task, and dispatches a tailored roster of agent definitions (planner, executor, code-reviewer, design-reviewer) with the right model per role. Activates ONLY when the user explicitly types `/agt <task>` — model invocation is disabled, so it can never auto-trigger on generic multi-agent or coding prompts.
-argument-hint: [--team feature-team|review-team|incident-team] [--plan] [--fable] "<task>"
+argument-hint: [--mode panes|subagent|solo] [--plan] [--fable] "<task>"
 disable-model-invocation: true
 ---
 
@@ -35,8 +35,8 @@ When this skill is invoked (`/agt <task>`):
 
 | # | Condition (check in order) | Mode | Template |
 |---|---|---|---|
-| 1 | `--team <name>` flag present | **team** | `<name>` |
-| 2 | `--mode <m>` flag present | **`<m>`** | — |
+| 1 | `--team <name>` flag present (**deprecated**, removed in v3.0) | **panes** on ≥2 disjoint slices with a pane transport, else **subagent**; **team** only with no pane transport | `<name>` (team fallback only) |
+| 2 | `--mode <m>` flag present (`--mode team` is **deprecated**, re-resolved like row 1) | **`<m>`** | — |
 | 3 | `profile.team.enabled === false` | **subagent** | — |
 | 4 | `profile.team.defaultMode === 'subagent'` | **subagent** | — |
 | 5 | `profile.team.defaultMode === 'solo'` | **solo** | — |
@@ -46,13 +46,13 @@ When this skill is invoked (`/agt <task>`):
 | 9 | Build task with **≥2 genuinely disjoint parallel slices across 2+ dependency waves (3+ buckets)** | **panes** inside Herdr or tmux, else **workflow** if the `Workflow` tool is available | — |
 | 10 | Otherwise | **Stage 2** (inline Haiku classify) — its returned `{mode, template, roster}` is authoritative | per Stage 2 |
 
-**Agent teams are never auto-selected.** A **team** runs ONLY via rows 1–2 (`--team <name>` / `--mode team`). Stage 2 never returns `team`: on ≥2 genuinely disjoint slices it returns **parallel**, which runs as **panes** inside Herdr (`HERDR_ENV=1` and the `herdr` binary on PATH — sibling panes the multiplexer can see, close, and run other vendors in) or tmux (`$TMUX` set — sibling tmux panes, Claude workers only), else **workflow** when the `Workflow` tool exists, else subagent waves. The mod injects a `## Pane transport` block naming which one is live; `--mode panes` forces it (`--mode herdr` is an alias). See `panes-mode.md`.
+**Agent teams are never auto-selected, and forcing one is deprecated.** A **team** runs ONLY via rows 1–2 (`--team <name>` / `--mode team`), and only when no pane transport exists. Stage 2 never returns `team`: on ≥2 genuinely disjoint slices it returns **parallel**, which runs as **panes** inside Herdr (`HERDR_ENV=1` and the `herdr` binary on PATH — sibling panes the multiplexer can see, close, and run other vendors in) or tmux (`$TMUX` set — sibling tmux panes, Claude workers only), else **workflow** when the `Workflow` tool exists, else subagent waves. The mod injects a `## Pane transport` block naming which one is live; `--mode panes` forces it (`--mode herdr` is an alias). See `panes-mode.md`.
 
 Any forced **team** must pass the team pre-flight (env flag `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1`, Claude Code ≥ 2.1.178, daily soft cap) — see `team-mode.md`. **This floor gates team mode only** — solo, subagent, and workflow modes are unaffected on older builds. On any pre-flight or spawn failure, degrade to subagent mode.
 
 Row #9 (workflow) requires the `Workflow` tool to be available at runtime. If it is absent (Claude Code < 2.1.154, a Pro-plan session without `/config` → "Dynamic workflows" enabled, `CLAUDE_CODE_DISABLE_WORKFLOWS=1`, or `disableWorkflows: true`), degrade silently to in-session subagent wave dispatch and emit one log line. Opt-in note: invoking `Workflow` from a user-triggered `/agt` run satisfies the tool's explicit-opt-in requirement (skill-directed call); never invoke it outside one. See `skills/agt/workflow-mode.md` for the full contract.
 
-Rows #1–2 are a **force** (the user typed `--team`/`--mode team`). Run the inline disjoint-parallelism heuristic first: real parallel work → spawn the team. **Overkill** (no ≥2 disjoint slices) → don't obey blindly — when `preTaskQuestioning` permits, **ask once** whether to downgrade to subagent (recommended, ~¼ the tokens) or force the team anyway; when `preTaskQuestioning: never`, honor the force and emit the `honestyLevel`-gated heads-up instead (see `team-mode.md` → "Honesty on a forced team"). **Always surface the resolved mode + a one-clause reason** in the brief's `mode:` row and on the recon ping — for Stage 2 that's its `reasoning` string; for a Stage 1 rule it's the rule itself (e.g. "forced", "review verb → subagent reviewers", "single file, no architectural verb → solo"). The pick is never a black box and never a prose paragraph (see `display.md` → "Frame 2").
+Rows #1–2 are a **deprecated force** (the user typed `--team`/`--mode team`; the mod prints the notice and injects a `## Forced team` directive). Re-resolve it: with a pane transport and ≥2 disjoint slices → **panes**; with a transport but no disjoint slices → **subagent**; with no transport → run the team as before and print the deprecation line on the recon ping. Run the inline disjoint-parallelism heuristic first. With a pane transport the team option is gone: the choice is panes or subagent, never a team. **No pane transport only — overkill** (no ≥2 disjoint slices) → don't obey blindly — when `preTaskQuestioning` permits, **ask once** whether to downgrade to subagent (recommended, ~¼ the tokens) or force the team anyway; when `preTaskQuestioning: never`, honor the force and emit the `honestyLevel`-gated heads-up instead (see `team-mode.md` → "Honesty on a forced team"). **Always surface the resolved mode + a one-clause reason** in the brief's `mode:` row and on the recon ping — for Stage 2 that's its `reasoning` string; for a Stage 1 rule it's the rule itself (e.g. "forced", "review verb → subagent reviewers", "single file, no architectural verb → solo"). The pick is never a black box and never a prose paragraph (see `display.md` → "Frame 2").
 
 ### Step 2 — Resolve ROSTER
 
@@ -99,7 +99,7 @@ The orchestrator still passes an explicit `model:` on every dispatch (fallback u
 
 `--plan` is **orthogonal to mode** — it doesn't pick subagent/team/solo, it sets a **stop point**. With `--plan` present, run recon → plan → plan-review and then **HALT before any executor or teammate spawns.** Emit the Mission Brief (with `build`/`gate`/`ship` shown as `○ pending`), the planner's plan, the plan-review verdict, and the resolved mode/roster/cost — then stop and wait. A plain "go" / "proceed" resumes the full run with that exact plan (no re-planning); any other reply revises the plan first.
 
-- The point is to let the user approve the *shape and cost* before paying for the build — the cheapest guard against "it built the wrong thing." It pairs with any mode: `/agt --plan --team feature-team "<task>"` previews the team roster + ~4× cost without spawning the team.
+- The point is to let the user approve the *shape and cost* before paying for the build — the cheapest guard against "it built the wrong thing." It pairs with any mode: `/agt --plan --mode panes "<task>"` previews the pane roster + cost without spawning workers.
 - On a task with no planner (solo/trivial), `--plan` degrades to one honest line — *"nothing to pre-plan — this is a single-step `<category>`; re-run without `--plan` to execute"* — and never spawns an executor.
 
 ### Run modifier: `--fable` (Fable ceiling — explicit top-tier escalation)
@@ -109,7 +109,7 @@ The orchestrator still passes an explicit `model:` on every dispatch (fallback u
 `--fable` is **orthogonal to mode and `--plan`** — it doesn't change the roster or the stop point. With `--fable` present, the flag forces the **Fable ceiling** on all judgment-heavy roles this run: planner, ui-prototyper, design-reviewer, security-reviewer, and any size/risk-escalated code-reviewer or plan-reviewer. Executor stays Sonnet; classifier and final-summary stay Haiku — those are never upgraded.
 
 - Send `fable=forced` in the dispatch header; the mod bypasses the escalation gate (the user chose it). Fallback + placement rule: `model-routing.md`.
-- Composes freely: `/agt --fable --plan "<task>"` previews the Fable-ceiling roster; `/agt --fable --team feature-team "<task>"` runs the full team at Fable depth.
+- Composes freely: `/agt --fable --plan "<task>"` previews the Fable-ceiling roster; `/agt --fable --mode panes "<task>"` runs the pane roster at Fable depth.
 - See `model-routing.md` → "`--fable` — manual override" for details.
 
 ## Clarify before planning
@@ -177,9 +177,9 @@ See `skills/agt/workflow-mode.md` for the full contract: bucket-graph → wave m
 
 ## Team mode
 
-The orchestrator supports Claude Code's Agent Teams primitive in addition to subagent dispatch. See `team-mode.md` for the full protocol. Highlights:
+The orchestrator supports Claude Code's Agent Teams primitive in addition to subagent dispatch. See `team-mode.md` for the full protocol. **Deprecated:** forcing a team (`--team` / `--mode team`) is deprecated and removed in v3.0 — it now re-resolves to panes (or subagent) wherever a pane transport exists. Highlights:
 
-- **Opt-in via `--team` only**: `/agt --team <template> "<task>"` (or `--mode team`) is the sole trigger. Auto-detection never picks a team — it resolves solo / subagent / panes / workflow. Teams cost ~4× tokens.
+- **Deprecated; opt-in via `--team` only (no pane transport only)**: `/agt --team <template> "<task>"` (or `--mode team`) is the sole trigger, and it runs a team only when no Herdr or tmux transport exists — otherwise it re-resolves to panes or subagent. Auto-detection never picks a team — it resolves solo / subagent / panes / workflow. Teams cost ~4× tokens.
 - **Teammates are the same agent defs**: each teammate is spawned from `agentille:agentille-*` (e.g. `agentille:agentille-executor`). This is why the workers MUST be agent definitions — teammate definitions ignore `skills`/`mcpServers` frontmatter, so a skill cannot *act as* a teammate. **But a teammate still loads skills from the user's/project's settings** (the same as any session) — so a teammate executor *can* invoke installed UI-build skills (`impeccable` / `ui-ux-pro-max`) on its slice. The lead passes each teammate a **skill budget** in its spawn prompt — which skills it may use for its slice — so capability lands where it helps without every teammate auto-loading heavy skills. See `team-mode.md` → "Skill budget".
 - **Three starter templates** (role manifests, see `.claude-plugin/teams/`): `feature-team`, `review-team`, `incident-team`.
 - **Split-pane "wow" is a user setting, not ours**: whether teammates appear in their own tmux/iTerm2 pane is controlled by the user's `teammateMode` in `~/.claude/settings.json` (`"tmux"` / `"auto"` / `"in-process"`) plus an installed tmux/iTerm2 — agentille does not control it.

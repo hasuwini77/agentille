@@ -37,7 +37,7 @@ After picking the primary category, also note:
 
 The disjoint-parallelism criterion governs every parallel tier. Classification never returns `team`: ≥2 disjoint slices → **parallel**, run as **panes** inside Herdr or tmux (`panes-mode.md`), else **workflow** when the `Workflow` tool exists, else subagent waves.
 
-- **Team mode** — legacy, only when the user types `--team` / `--mode team` (~4× tokens). Cost transparency lives in `team-mode.md` → "Honesty on a forced team".
+- **Team mode** — **deprecated, removed in v3.0**; a forced team re-resolves to panes (or subagent) wherever a pane transport exists. Legacy, only when the user types `--team` / `--mode team` (~4× tokens). Cost transparency lives in `team-mode.md` → "Honesty on a forced team".
 
 - **Workflow tier** — ≥2 genuinely disjoint parallel slices arranged in dependency waves (3+ buckets across 2+ waves) AND peers do NOT need to message each other. The workflow tier emits a Dynamic Workflow script (scripted autonomous fan-out); it degrades silently to in-session subagent waves when the `Workflow` tool is absent (Claude Code < 2.1.154, Pro plan without Dynamic workflows enabled in `/config`, or disabled by settings/env). A user-triggered `/agt` run satisfies the Workflow tool's explicit-opt-in requirement; never reach for it outside one. Same disjoint-parallelism bar everywhere: if it isn't met, do not use workflow (fall to subagent or solo). Dispatch-shape note: subagent dispatches whose result gates the next step run foreground (`run_in_background: false`) — see `SKILL.md` → "Worker agents". Full contract: `workflow-mode.md`.
 

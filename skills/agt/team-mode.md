@@ -1,8 +1,10 @@
 # Team mode — when to use it and how to dispatch
 
+> **Deprecated — removal in v3.0.** Forcing a team (`--team` / `--mode team`) now re-resolves to panes when a pane transport exists and the task has ≥2 disjoint slices, else subagent; it runs as a team only when no pane transport exists. The mod prints the deprecation notice and injects the directive. This doc stays until v3.0.
+
 > **Authority:** the dispatch decision table in `skills/agt/SKILL.md` is the tie-breaker. This doc is the detail/rationale — if it ever conflicts with that table, the table wins.
 
-> **Legacy, opt-in only.** Teams run ONLY via `--team <name>` / `--mode team` (~4× tokens). Auto-detection never selects one: review/debug verbs resolve to subagent mode, and ≥2 disjoint slices resolve to panes / workflow / subagent waves.
+> **Legacy, opt-in only (no pane transport only).** Teams run ONLY via `--team <name>` / `--mode team`, and only when no pane transport exists (~4× tokens). Auto-detection never selects one: review/debug verbs resolve to subagent mode, and ≥2 disjoint slices resolve to panes / workflow / subagent waves.
 
 The orchestrator picks one of five execution modes per task:
 

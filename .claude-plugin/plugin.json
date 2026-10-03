@@ -2,7 +2,7 @@
   "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
   "name": "agentille",
   "displayName": "agentille",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "description": "Personal AI coding orchestrator for Claude Code (trigger: /agt). See your agents work: a live band above the prompt and a pixel team deck show every agent's role, model, effort, state and tokens. A routing mod enforces model + effort per role and escalates to Fable only on observed failure. Project-aware squads (saas, ecommerce, content, immersive) add payments, SEO and performance specialists. Subagent-first dispatch, herdr panes or workflows for parallel work, agent teams only when forced.",
   "author": {
     "name": "Systown AI Lab",

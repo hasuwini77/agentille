@@ -2,6 +2,29 @@
 
 All notable changes to agentille are documented here.
 
+## [2.1.0] — 2026-10-03
+
+### Changed
+
+- **The deck opens on its own.** Typing `/agt` opens it, and the first
+  routed dispatch opens it as a fallback. It opens without focus, so the
+  prompt keeps the keyboard. Closing it by hand keeps it closed until the
+  next `/agt` or a new run.
+- `/agt-deck` still opens it by hand, and now also turns auto-open back on.
+
+### Added
+
+- **`/agt-nodeck`**: closes the deck and stops auto-open, kept across
+  sessions in the mod's store.
+
+### Rationale
+
+A live view you have to remember to ask for mostly goes unseen. On by
+default with a one-word opt-out makes the deck the normal way to watch a
+run. Opens that do not answer a typed `/agt` follow Claude Code's rule for
+unasked panes: they seat from 144 terminal columns (110 once you have
+opened the deck before) and wait below that.
+
 ## [2.0.0] — 2026-10-03
 
 agentille 2: the background becomes visible, and the team becomes

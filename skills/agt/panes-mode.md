@@ -93,9 +93,24 @@ The vendor-mix rule at 7+ exists because ten simultaneous Claude sessions is the
 
 Vendor availability is discovered, never assumed: `herdr agent` prints the supported kinds, and a kind that is not installed fails at `agent start`. On any spawn failure, re-dispatch that slice once as `claude` and note the substitution in the Debrief.
 
+## Through the mod's tools
+
+When the `## Pane transport` block says the tools are live, open every **claude** worker with `mcp__agentille__spawn_pane` and close it with `mcp__agentille__close_pane`. They are the same code path a typed `/agt-spawn` runs, on Herdr and tmux alike, so steps 2–4 below (and the tmux "Spawn" block) collapse into one call:
+
+```
+spawn_pane { run: "<run-id>", role: "exec-1", model: "sonnet", cwd: "<worktree>", task: "<full slice prompt>" }
+→ Opened agt-<run-id>-exec-1 · sonnet · herdr pane.
+close_pane { name: "agt-<run-id>-exec-1" }
+→ Closed agt-<run-id>-exec-1.
+```
+
+What the mod enforces, so you do not have to: the `agt-<run>-<role>` name and its 32-char limit, a duplicate name already on screen, an absolute `cwd` that exists, no focus change, and the model (`sonnet`, `opus` or `haiku` — Fable never goes through a tool, only through the routing guard). `close_pane` reaches only `agt-` panes in your own tab (Herdr) or window (tmux) and never a typed `/agt-spawn` pane. Worker panes get no tools, so a worker cannot fan out on its own.
+
+Still yours: isolation (step 1), the wait/read loop and the tmux done-file instruction in the slice prompt. Non-claude vendors and a session where the tools are absent use the manual recipe below.
+
 ## Spawning a worker
 
-Per slice, in order:
+Per slice, in order (manual recipe — use the tools above when they are live):
 
 1. **Isolate.** One worktree per slice, so disjointness is enforced by the filesystem rather than by good intentions:
    ```bash
@@ -138,6 +153,8 @@ herdr agent get  "agt-<run>-exec-1"                     # confirm the state you 
 herdr agent read "agt-<run>-exec-1" --source recent-unwrapped --lines 200
 herdr pane close <pane-id>                              # only a pane you opened
 ```
+
+With the tools live, `close_pane { name }` replaces the last line.
 
 If `agent read` cannot recover a complete response, the pane is rendering on the terminal's alternate screen and scrollback will not help. Ask that worker to write its full report to a file and reply with only the path, then read the file. Use this as a fallback — never in the initial prompt, where it just adds a step.
 

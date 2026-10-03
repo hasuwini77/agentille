@@ -120,3 +120,17 @@ export function isAgtPrompt(text) {
 export function shouldAutoOpen({ auto, open, dismissedRun, run }) {
   return auto !== false && !open && dismissedRun !== run
 }
+
+// Claude Code seats a pane only at any width when it answers the person's own prompt;
+// opened from a spawn it needs 144 columns. So the deck opens on the typed /agt as a
+// waiting strip. A turn that ends with no agent closes the strip, unless it ended on a
+// question: the person's reply (another asked prompt) reopens it.
+export const WAIT_TTL_MS = 30 * 60_000
+
+export function endsOnQuestion(answer) {
+  return /\?\s*(\*|`|_)*\s*$/.test(String(answer ?? '').trim().slice(-400))
+}
+
+export function reopenOnReply({ waiting, now }) {
+  return !!waiting && now - waiting.at < WAIT_TTL_MS
+}

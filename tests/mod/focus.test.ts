@@ -29,6 +29,7 @@ describe('focus: parsing the brief', () => {
     expect(out[0]).toEqual({ kind: 'next', text: 'Restart Claude to load it' })
     expect(parseBrief('✓ ' + 'y'.repeat(200))[0].text.length).toBe(96)
     expect(parseBrief('nothing useful here')).toEqual([])
+    expect(parseBrief('⚑\uFE0F token in a log')).toEqual([{ kind: 'flag', text: 'token in a log' }])
   })
 })
 
@@ -36,6 +37,8 @@ describe('focus: flags from agent results', () => {
   test('reviewers, plan-reviewer, adversary, executor', async () => {
     expect(flagOf('plan-reviewer', 'REVISE: step 3 misses tests')).toBe('plan-reviewer asked for a revised plan')
     expect(flagOf('plan-reviewer', 'APPROVE')).toBe(null)
+    expect(flagOf('plan-reviewer', 'APPROVE — nothing here warrants a REVISE')).toBe(null)
+    expect(flagOf('plan-reviewer', 'Verdict format: APPROVE / REVISE\nAPPROVE')).toBe(null)
     expect(flagOf('code-reviewer', 'VERDICT: FAIL\nP0 …')).toBe('code-reviewer: FAIL — blocks ship')
     expect(flagOf('security-reviewer', 'VERDICT: CONCERNS')).toBe('security-reviewer: CONCERNS — fix before ship')
     expect(flagOf('design-reviewer', 'VERDICT: PASS')).toBe(null)
@@ -48,6 +51,9 @@ describe('focus: flags from agent results', () => {
     expect(flagOf('executor', 'VERIFICATION:\n- npm test: exit=1, 2 failed\n\nINTEGRATION: x')).toBe('executor: verification failed')
     expect(flagOf('executor', 'VERIFICATION:\n- vitest: 41 pass, 0 fail, exit=0\n\nINTEGRATION: x')).toBe(null)
     expect(flagOf('executor', 'VERIFICATION:\n- build: did not run (no script)\n')).toBe('executor: verification not run')
+    expect(flagOf('executor', 'VERIFICATION:\n- tsc --noEmit: exit code 2\n')).toBe('executor: verification failed')
+    expect(flagOf('executor', 'VERIFICATION:\n- build: exit code: 1\n')).toBe('executor: verification failed')
+    expect(flagOf('executor', 'VERIFICATION:\n- build: exit code: 0\n')).toBe(null)
     expect(flagOf('executor', 'VERIFICATION:\n- tsc: exit 0\nNOTES:\nCONTEXT exec-1 | high | checkpoint x')).toBe('executor handed off at its context limit')
   })
 

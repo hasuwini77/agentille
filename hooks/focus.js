@@ -56,7 +56,7 @@ export function parseBrief(text) {
   for (const raw of String(text ?? '').split('\n')) {
     const line = raw.replace(/^[\s>*•-]+/, '')
     const kind = KIND[line[0]]
-    const rest = line.slice(1).trim()
+    const rest = line.slice(1).replace(/^\uFE0F/, '').trim()
     if (kind && rest) out.push({ kind, text: clip(rest) })
   }
   const order = { next: 0, flag: 1, done: 2 }
@@ -67,7 +67,8 @@ export function parseBrief(text) {
 // the executor's VERIFICATION block carries real exit codes and counts.
 export function flagOf(role, answer) {
   const a = String(answer ?? '')
-  if (role === 'plan-reviewer' && /\bREVISE\b/.test(a)) return role + ' asked for a revised plan'
+  // The first verdict word decides, as routing.js verdictOf reads it: "APPROVE — nothing warrants a REVISE" is an approval.
+  if (role === 'plan-reviewer' && /\b(APPROVE|REVISE)\b/.exec(a)?.[1] === 'REVISE') return role + ' asked for a revised plan'
   const v = /VERDICT:\s*(FAIL|CONCERNS)\b/.exec(a)
   if (v && role.endsWith('reviewer')) return role + ': ' + v[1] + (v[1] === 'FAIL' ? ' — blocks ship' : ' — fix before ship')
   if (role === 'adversary') {
@@ -76,7 +77,7 @@ export function flagOf(role, answer) {
   }
   if (role === 'executor') {
     const ver = (/VERIFICATION:([\s\S]*?)(\n[A-Z]+:|$)/.exec(a) ?? [])[1] ?? ''
-    if (/exit[= ]?\s*[1-9]\d*/i.test(ver) || /\b[1-9]\d* (failed|failing|fail|errors?)\b/i.test(ver)) return 'executor: verification failed'
+    if (/exit(?:\s*code)?\s*[:=]?\s*[1-9]\d*/i.test(ver) || /\b[1-9]\d* (failed|failing|fail|errors?)\b/i.test(ver)) return 'executor: verification failed'
     if (/did not run|not run|couldn'?t run|could not run/i.test(ver)) return 'executor: verification not run'
     if (/^CONTEXT\s/m.test(a)) return 'executor handed off at its context limit'
   }

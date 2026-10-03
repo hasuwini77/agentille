@@ -3,6 +3,8 @@
 // Pure on purpose — the hooks loader never follows `$` across an import — so every
 // $.process / $.env / $.fs call lives in register.js and only feeds these helpers.
 
+import { isAgtPrompt } from './live.js'
+
 export const SAFE_RUN = /^[A-Za-z0-9_-]{1,64}$/
 export const NAME_RE = /^[a-z][a-z0-9_-]{0,31}$/
 const ROLE_RE = /^[a-z0-9-]+$/
@@ -31,6 +33,16 @@ export function transportBlock(transport) {
     tmux: 'Parallel slices run as tmux panes — see `panes-mode.md` → "tmux transport".',
   }[transport] ?? 'No pane transport here: parallel slices run as a workflow, else subagent waves.'
   return '\n## Pane transport (agentille mod)\n\ntransport: ' + transport + '\n' + line + '\n'
+}
+
+// A typed /agt that forces a team: `--team <name>` → { template: name }, `--mode team`
+// → { template: null }; anything else → null. --team wins when both appear.
+export function teamForce(text) {
+  if (!isAgtPrompt(text)) return null
+  const t = String(text)
+  const named = /(?:^|\s)--team(?:=|\s+)([A-Za-z0-9_-]+)/.exec(t)
+  if (named) return { template: named[1] }
+  return /(?:^|\s)--mode(?:=|\s+)team(?=\s|$)/.test(t) ? { template: null } : null
 }
 
 // ── names ─────────────────────────────────────────────────────────────────────

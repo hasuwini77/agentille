@@ -1,5 +1,5 @@
 import { describe, expect, mock, test } from 'claude-code/testing'
-import { doneFile, herdrCloseArgv, herdrPaneIdOf, herdrPromptArgv, herdrSplitArgv, herdrStartArgv, isFreshDone, isLead, newRunId, paneName, parseSpawnArgs, parseTmuxList, pickTransport, quietSpawn, reapPool, scopeRows, splitName, tmuxKillArgv, tmuxPaneAgents, tmuxPaneIdOf, tmuxSplitArgv, tmuxTagArgvs, transportBlock, TMUX_LIST_FORMAT } from '../../hooks/panes.js'
+import { doneFile, herdrCloseArgv, herdrPaneIdOf, herdrPromptArgv, herdrSplitArgv, herdrStartArgv, isFreshDone, isLead, newRunId, paneName, parseSpawnArgs, parseTmuxList, pickTransport, quietSpawn, reapPool, scopeRows, splitName, tmuxKillArgv, tmuxPaneAgents, tmuxPaneIdOf, tmuxSplitArgv, tmuxTagArgvs, teamForce, transportBlock, TMUX_LIST_FORMAT } from '../../hooks/panes.js'
 import { reapable } from '../../hooks/live.js'
 
 const TAB = '\t'
@@ -16,6 +16,24 @@ describe('transport', () => {
     expect(transportBlock('tmux')).toContain('"tmux transport"')
     expect(transportBlock('none')).toContain('No pane transport here: parallel slices run as a workflow, else subagent waves.')
     expect(transportBlock('none').startsWith('\n## Pane transport (agentille mod)\n\ntransport: none\n')).toBe(true)
+  })
+})
+
+describe('teamForce', () => {
+  test('--team <name> and --mode team on a typed /agt', async () => {
+    expect(teamForce('/agt --team feature-team build it')).toEqual({ template: 'feature-team' })
+    expect(teamForce('/agentille:agt --team=review-team x')).toEqual({ template: 'review-team' })
+    expect(teamForce('/agt --mode team build it')).toEqual({ template: null })
+    expect(teamForce('/agt --mode team --team incident-team x')).toEqual({ template: 'incident-team' })
+  })
+
+  test('everything else is null', async () => {
+    expect(teamForce('/agt add a search filter')).toBe(null)
+    expect(teamForce('/agt --mode subagent x')).toBe(null)
+    expect(teamForce('/agt --mode teams x')).toBe(null)
+    expect(teamForce('fix it --team feature-team')).toBe(null)
+    expect(teamForce('/agt-ledger --team a')).toBe(null)
+    expect(teamForce(undefined)).toBe(null)
   })
 })
 

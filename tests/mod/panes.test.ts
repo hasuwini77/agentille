@@ -1,5 +1,5 @@
 import { describe, expect, mock, test } from 'claude-code/testing'
-import { doneFile, herdrCloseArgv, herdrPaneIdOf, herdrPromptArgv, herdrSplitArgv, herdrStartArgv, isFreshDone, isLead, newRunId, paneName, parseSpawnArgs, parseTmuxList, pickTransport, quietSpawn, reapPool, scopeRows, splitName, tmuxKillArgv, tmuxPaneAgents, tmuxPaneIdOf, tmuxSplitArgv, tmuxTagArgvs, teamDirective, teamForce, teamNotice, transportBlock, TMUX_LIST_FORMAT } from '../../hooks/panes.js'
+import { closeTarget, doneFile, spawnToolInput, TOOL_MODELS, herdrCloseArgv, herdrPaneIdOf, herdrPromptArgv, herdrSplitArgv, herdrStartArgv, isFreshDone, isLead, newRunId, paneName, parseSpawnArgs, parseTmuxList, pickTransport, quietSpawn, reapPool, scopeRows, splitName, tmuxKillArgv, tmuxPaneAgents, tmuxPaneIdOf, tmuxSplitArgv, tmuxTagArgvs, teamDirective, teamForce, teamNotice, transportBlock, TMUX_LIST_FORMAT } from '../../hooks/panes.js'
 import { reapable } from '../../hooks/live.js'
 
 const TAB = '\t'
@@ -574,5 +574,44 @@ describe('/agt-spawn', () => {
     await run($, 'do the thing')
     const split = seen.find((a) => a[1] === 'split-window')!
     expect(split[split.indexOf('-c') + 1]).toBe('/work/c##sharp')
+  })
+})
+
+describe('pane tools: input', () => {
+  const ok = { run: 'k7f2ab', role: 'exec-1', task: 'build the search filter' }
+
+  test('a valid spawn defaults to sonnet and the session cwd', async () => {
+    expect(spawnToolInput(ok)).toEqual({ run: 'k7f2ab', role: 'exec-1', name: 'agt-k7f2ab-exec-1', model: 'sonnet', task: 'build the search filter', cwd: null })
+    expect(spawnToolInput({ ...ok, model: 'haiku', cwd: '/w/wt-1' })).toMatchObject({ model: 'haiku', cwd: '/w/wt-1' })
+  })
+
+  test('fable is not a tool model', async () => {
+    expect(TOOL_MODELS).not.toContain('fable')
+    expect(spawnToolInput({ ...ok, model: 'fable' }).error).toContain('routing guard')
+    expect(spawnToolInput({ ...ok, model: 'gpt-4' }).error).toContain('model must be one of')
+  })
+
+  test('bad names, the reserved role, bare words and relative paths are refused', async () => {
+    expect(spawnToolInput({ ...ok, run: 'a b' }).error).toContain('run must be')
+    expect(spawnToolInput({ ...ok, role: 'Exec' }).error).toContain('role must be')
+    expect(spawnToolInput({ ...ok, role: 'spawn' }).error).toContain('reserved')
+    expect(spawnToolInput({ ...ok, role: 'x'.repeat(30) }).error).toContain('max 32')
+    expect(spawnToolInput({ ...ok, task: '  ' }).error).toBe('task is empty.')
+    expect(spawnToolInput({ ...ok, task: 'plugin' }).error).toContain('one-word task')
+    expect(spawnToolInput({ ...ok, cwd: 'wt-1' }).error).toContain('absolute')
+    expect(spawnToolInput(undefined).error).toContain('run must be')
+  })
+
+  test('a name already on screen is not doubled', async () => {
+    expect(spawnToolInput(ok, [{ name: 'agt-k7f2ab-exec-1' }] as never).error).toContain('already open')
+  })
+
+  test('close targets only owned agt- panes in the lead\'s tab', async () => {
+    const live = [{ id: 'w1:p5', name: 'agt-k7f2ab-exec-1', tab: 't1' }, { id: 'w1:p6', name: 'agt-k7f2ab-exec-2', tab: 't2' }, { id: 'w1:p7', name: 'agt-k7f2ab-spawn', tab: 't1' }]
+    expect(closeTarget({ name: 'agt-k7f2ab-exec-1' }, live as never, 't1')).toEqual({ pane: live[0] })
+    expect(closeTarget({ name: 'agt-k7f2ab-exec-2' }, live as never, 't1').error).toContain('No pane named')
+    expect(closeTarget({ name: 'agt-k7f2ab-exec-2' }, live as never, null)).toEqual({ pane: live[1] })
+    expect(closeTarget({ name: 'agt-k7f2ab-spawn' }, live as never, 't1').error).toContain('typed /agt-spawn')
+    expect(closeTarget({ name: 'build' }, live as never).error).toContain('agt-<run>-<role>')
   })
 })

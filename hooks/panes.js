@@ -223,3 +223,70 @@ export function herdrPaneIdOf(stdout) {
 export const herdrStartArgv = ({ name, pane, model }) => ['herdr', 'agent', 'start', name, '--kind', 'claude', '--pane', pane, '--timeout', '45000', '--', '--model', model]
 export const herdrPromptArgv = (name, task) => ['herdr', 'agent', 'prompt', name, task]
 export const herdrCloseArgv = (id) => ['herdr', 'pane', 'close', id]
+
+// ── pane tools: /agt panes mode opens and closes workers through the mod ──────
+
+// Fable is not offered: on a tool it would skip the routing guard. A typed /agt-spawn may still pick it.
+export const TOOL_MODELS = ['sonnet', 'opus', 'haiku']
+
+export const SPAWN_TOOL = {
+  name: 'spawn_pane',
+  description: 'Open one agentille worker pane beside this session (Herdr or tmux, whichever is live), never focused, named agt-<run>-<role>, running Claude on the given model with the task as its first prompt. Use it for each panes-mode slice in place of raw herdr/tmux commands. The pane is reaped once it sits done; close it yourself with close_pane after harvesting.',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      run: { type: 'string', description: 'The run id from the [agt run=…] header (6 chars).' },
+      role: { type: 'string', description: 'Slice role, lowercase letters, digits and dashes (exec-1, review). Not "spawn".' },
+      task: { type: 'string', description: 'The full self-contained worker prompt.' },
+      model: { type: 'string', enum: TOOL_MODELS, description: 'Default sonnet.' },
+      cwd: { type: 'string', description: 'Absolute directory to start in (the slice worktree). Default: this session\'s directory.' },
+    },
+    required: ['run', 'role', 'task'],
+    additionalProperties: false,
+  },
+}
+
+export const CLOSE_TOOL = {
+  name: 'close_pane',
+  description: 'Close one agentille worker pane this session opened (an agt-<run>-<role> pane in this tab or window) after you have read its result. Panes opened by a typed /agt-spawn and panes of other sessions are refused.',
+  inputSchema: {
+    type: 'object',
+    properties: { name: { type: 'string', description: 'The pane name, agt-<run>-<role>.' } },
+    required: ['name'],
+    additionalProperties: false,
+  },
+}
+
+// spawn_pane input → { run, role, name, model, task, cwd } or { error }. `live` is the
+// panes the mod sees now; a name already on screen is refused rather than doubled.
+export function spawnToolInput(input, live = []) {
+  const i = input ?? {}
+  const str = (v) => (typeof v === 'string' ? v.trim() : '')
+  const run = str(i.run)
+  const role = str(i.role)
+  const task = str(i.task)
+  const model = str(i.model) || DEFAULT_MODEL
+  const cwd = i.cwd === undefined ? null : str(i.cwd)
+  if (!SAFE_RUN.test(run)) return { error: 'run must be the run id from the [agt run=…] header.' }
+  if (!ROLE_RE.test(role)) return { error: 'role must be lowercase letters, digits and dashes.' }
+  if (role === SPAWN_ROLE) return { error: '"spawn" is reserved for a typed /agt-spawn.' }
+  const name = paneName(run, role)
+  if (!name) return { error: 'agt-' + run + '-' + role + ' is not a valid pane name (max 32 chars).' }
+  if (!TOOL_MODELS.includes(model)) return { error: 'model must be one of ' + TOOL_MODELS.join(', ') + '. Fable runs only through the routing guard or a typed /agt-spawn.' }
+  if (!task) return { error: 'task is empty.' }
+  if (BARE_WORD.test(task)) return { error: 'A one-word task would run as a claude subcommand. Send the full worker prompt.' }
+  if (cwd !== null && (!cwd.startsWith('/') || cwd.includes('\0'))) return { error: 'cwd must be an absolute path.' }
+  if (live.some((p) => p.name === name)) return { error: name + ' is already open. Pick another role or close it first.' }
+  return { run, role, name, model, task, cwd }
+}
+
+// close_pane input → { pane } from the panes this session owns, or { error }. `tab`, when
+// given, keeps a herdr close inside the lead's own tab.
+export function closeTarget(input, live = [], tab = null) {
+  const name = typeof input?.name === 'string' ? input.name.trim() : ''
+  const n = splitName(name)
+  if (!n) return { error: 'name must be an agt-<run>-<role> pane name.' }
+  if (n.role === SPAWN_ROLE) return { error: name + ' was opened by a typed /agt-spawn; it is the person\'s to close.' }
+  const pane = live.find((p) => p.name === name && (tab === null || p.tab === tab))
+  return pane ? { pane } : { error: 'No pane named ' + name + ' in this tab or window.' }
+}

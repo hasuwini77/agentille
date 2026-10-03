@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'claude-code/testing'
 import { cells, pixels } from '../../hooks/sprites.js'
-import { DONE_GRACE_MS, IDLE_GRACE_MS, isAgtPrompt, shouldAutoOpen, ledger, newAgent, addUsage, finish, paneAgents, reapable, visible } from '../../hooks/live.js'
+import { DONE_GRACE_MS, IDLE_GRACE_MS, isAgtPrompt, shouldAutoOpen, ledger, newAgent, addUsage, finish, paneAgents, reapable, visible, endsOnQuestion, reopenOnReply, WAIT_TTL_MS } from '../../hooks/live.js'
 import { activeSquads, depsOf, injection } from '../../hooks/squads.js'
 
 const ROLES = ['planner', 'plan-reviewer', 'ui-prototyper', 'executor', 'code-reviewer', 'design-reviewer', 'security-reviewer', 'payments-reviewer', 'seo-reviewer', 'perf-reviewer', 'Explore']
@@ -122,5 +122,20 @@ describe('deck auto-open', () => {
     expect(shouldAutoOpen({ auto: false, open: false, dismissedRun: null, run: 'r1' })).toBe(false)
     expect(shouldAutoOpen({ auto: true, open: true, dismissedRun: null, run: 'r1' })).toBe(false)
     expect(shouldAutoOpen({ auto: true, open: false, dismissedRun: 'r1', run: 'r1' })).toBe(false)
+  })
+})
+
+describe('waiting deck', () => {
+  test('a question at the end keeps the deck waiting for the reply', async () => {
+    expect(endsOnQuestion('Stripe or Paddle?')).toBe(true)
+    expect(endsOnQuestion('Which one do you want? **')).toBe(true)
+    expect(endsOnQuestion('Is it fine? Done, merged.')).toBe(false)
+    expect(endsOnQuestion('')).toBe(false)
+  })
+
+  test('a reply reopens only while the wait is fresh', async () => {
+    expect(reopenOnReply({ waiting: { at: 0 }, now: 60_000 })).toBe(true)
+    expect(reopenOnReply({ waiting: { at: 0 }, now: WAIT_TTL_MS + 1 })).toBe(false)
+    expect(reopenOnReply({ waiting: null, now: 0 })).toBe(false)
   })
 })

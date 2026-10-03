@@ -108,49 +108,81 @@ describe('mod', () => {
 describe('deck', () => {
   const opens = (on: any, stored: any[] = []) => {
     const seen: any[] = []
+    const closed: any[] = []
     on('store.get', async () => ({ value: undefined }))
     on('store.set', async ($: any, e: any) => { stored.push(e); return { value: undefined } })
     on('ui.panes', async () => ({ value: [] }))
     on('ui.open', async ($: any, e: any) => { seen.push(e); return { value: { isPlaced: true } } })
+    on('ui.close', async ($: any, e: any) => { closed.push(e); return { value: undefined } })
     on('prompt.submit', async ($: any, e: any) => ({ text: e.text }))
+    on('turn.complete', async ($: any, e: any) => ({ text: e.answer }))
     on('agent.spawn', async ($: any, e: any) => ({ model: e.model ?? 'sonnet', agentId: 'x' + Math.random() }))
-    return seen
+    return { seen, closed }
   }
+  const spawn = ($: any, type = 'agentille:agentille-executor') =>
+    $.agent.spawn({ prompt: '[agt run=d1 size=small mode=build]\nbuild', subagentType: type, model: 'sonnet' })
+  const end = ($: any, answer = 'Done: one file changed.') =>
+    $.turn.complete({ answer, durationMs: 10, isAborted: false, turnId: 't', reason: 'answer' })
 
-  const spawn = ($: any, on: any, type = 'agentille:agentille-executor') => {
-    return $.agent.spawn({ prompt: '[agt run=d1 size=small mode=build]\nbuild', subagentType: type, model: 'sonnet' })
-  }
-
-  test('a typed /agt alone leaves the deck shut; a solo run never sees an empty deck', async ($, on) => {
-    const seen = opens(on)
+  test('a typed /agt opens it at once, unfocused: asked, so it seats at any width', async ($, on) => {
+    const { seen } = opens(on)
     await $.prompt.submit({ text: '/agt add a search filter', wait: false })
-    expect(seen.length).toBe(0)
-  })
-
-  test('the first agentille agent opens it, without taking the keyboard, once', async ($, on) => {
-    const seen = opens(on)
-    await $.prompt.submit({ text: '/agt add a search filter', wait: false })
-    await spawn($, on)
-    await spawn($, on)
     expect(seen.length).toBe(1)
     expect(seen[0]).toMatchObject({ id: 'agt-deck' })
     expect(seen[0].focus).toBe(undefined)
   })
 
-  test('other prompts, agt-* commands and non-agentille agents leave it shut', async ($, on) => {
-    const seen = opens(on)
+  test('the first agent fills the open deck: no second open, no close at turn end', async ($, on) => {
+    const { seen, closed } = opens(on)
+    await $.prompt.submit({ text: '/agt add a search filter', wait: false })
+    await spawn($)
+    await spawn($)
+    await end($)
+    expect(seen.length).toBe(1)
+    expect(closed.length).toBe(0)
+  })
+
+  test('a solo run closes the waiting strip when its turn ends', async ($, on) => {
+    const { closed } = opens(on)
+    await $.prompt.submit({ text: '/agt fix the typo in README.md', wait: false })
+    await end($)
+    expect(closed).toContainEqual(expect.objectContaining({ id: 'agt-deck' }))
+  })
+
+  test('a run that asks first closes the strip, and the reply reopens it', async ($, on) => {
+    const { seen, closed } = opens(on)
+    await $.prompt.submit({ text: '/agt add billing', wait: false })
+    await end($, 'Which provider should I use: Stripe or Paddle?')
+    expect(closed.length).toBe(1)
+    await $.prompt.submit({ text: 'Stripe', wait: false })
+    expect(seen.length).toBe(2)
+    await spawn($)
+    await end($)
+    expect(closed.length).toBe(1)
+  })
+
+  test('after a finished solo run, an unrelated prompt does not reopen it', async ($, on) => {
+    const { seen } = opens(on)
+    await $.prompt.submit({ text: '/agt fix the typo', wait: false })
+    await end($)
+    await $.prompt.submit({ text: 'thanks', wait: false })
+    expect(seen.length).toBe(1)
+  })
+
+  test('other prompts, agt-* commands and non-agentille agents never open it', async ($, on) => {
+    const { seen } = opens(on)
     await $.prompt.submit({ text: 'fix the header', wait: false })
     await $.prompt.submit({ text: '/agt-ledger', wait: false })
-    await spawn($, on, 'Explore')
+    await spawn($, 'Explore')
     expect(seen.length).toBe(0)
   })
 
   test('/agt-nodeck turns auto-open off and remembers it', async ($, on) => {
     const stored: any[] = []
-    const seen = opens(on, stored)
+    const { seen } = opens(on, stored)
     await $.command.run({ command: 'agt-nodeck' })
     await $.prompt.submit({ text: '/agt add a search filter', wait: false })
-    await spawn($, on)
+    await spawn($)
     expect(seen.length).toBe(0)
     expect(stored).toContainEqual(expect.objectContaining({ key: 'deck:auto', value: false }))
   })

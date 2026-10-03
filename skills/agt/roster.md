@@ -50,6 +50,10 @@ After classifying, dispatch this combination. Read top-to-bottom — order matte
 - **agentille-code-reviewer** — tiered by diff size; see `model-routing.md`. No executor (user is asking for review, not changes).
 - **agentille-design-reviewer** — IF the target is UI code. Pass the clarified `viewports: [...]`.
 
+## Squads
+
+When the repo matches a squad (`.claude-plugin/squads.json`), extra reviewers join the **review step** of feature, bugfix, refactor, design, and review runs — `payments-reviewer`, `seo-reviewer`, `perf-reviewer` — in parallel with code-reviewer/design-reviewer, only when the diff touches their domain. Planning, research, and debug categories get checklist overlays only. Detection and rules: `squads.md`.
+
 ## Hard cap
 
 Never dispatch more than 3 executor subagents in parallel. If the plan has 5 parallel steps, batch them: 3 first, then 2.

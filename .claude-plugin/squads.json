@@ -1,0 +1,105 @@
+{
+  "squads": [
+    {
+      "name": "saas",
+      "label": "Micro SaaS",
+      "minScore": 2,
+      "signals": {
+        "deps": ["stripe", "@stripe/stripe-js", "@supabase/supabase-js", "@supabase/ssr", "next-auth", "@auth/core", "@clerk/nextjs", "@lemonsqueezy/lemonsqueezy.js", "resend"],
+        "paths": ["app/api/webhooks", "src/app/api/webhooks", "pages/api/webhooks", "supabase/migrations", "middleware.ts"]
+      },
+      "adds": ["payments-reviewer"],
+      "checklists": {
+        "security-reviewer": [
+          "Webhook handlers verify the provider signature on the raw body before any side effect",
+          "Every table has row-level security enabled with explicit policies",
+          "Secret keys are server-only and never imported into client components or NEXT_PUBLIC_ vars",
+          "Every route handler and server action checks auth and ownership"
+        ],
+        "code-reviewer": [
+          "Webhook handlers are idempotent on the provider event id",
+          "Subscription and entitlement state is derived from the provider, not a client flag",
+          "Failed or retried webhooks cannot leave the database half-updated"
+        ],
+        "executor": [
+          "Never trust a client-sent price, amount, or plan id; resolve it server-side",
+          "Keep secrets in server-only modules and env vars"
+        ]
+      }
+    },
+    {
+      "name": "ecommerce",
+      "label": "E-commerce",
+      "minScore": 2,
+      "signals": {
+        "deps": ["@shopify/hydrogen", "@shopify/storefront-api-client", "@medusajs/medusa", "@medusajs/js-sdk", "@saleor/sdk", "snipcart", "stripe", "@stripe/stripe-js", "@vercel/commerce"],
+        "paths": ["app/cart", "app/checkout", "app/products", "src/app/checkout", "app/(shop)"]
+      },
+      "adds": ["payments-reviewer", "seo-reviewer", "perf-reviewer"],
+      "checklists": {
+        "code-reviewer": [
+          "Checkout cannot oversell stock under concurrent orders (atomic decrement or reservation)",
+          "Cart totals and prices come from the server, never from client state",
+          "Out-of-stock and error states are handled in cart and checkout"
+        ],
+        "seo-reviewer": [
+          "Product pages emit valid Product JSON-LD with price, currency, and availability",
+          "Variant and filter URLs have correct canonical tags"
+        ],
+        "perf-reviewer": [
+          "Product images have explicit sizes and the hero image is prioritized for LCP",
+          "Listing pages paginate or virtualize instead of loading the full catalog"
+        ]
+      }
+    },
+    {
+      "name": "content",
+      "label": "Content and docs",
+      "minScore": 2,
+      "signals": {
+        "deps": ["next-mdx-remote", "@next/mdx", "contentlayer", "contentlayer2", "@content-collections/core", "velite", "fumadocs-core", "nextra", "astro", "@astrojs/mdx", "gray-matter", "rss", "feed"],
+        "paths": ["content", "posts", "app/blog", "src/content", "app/sitemap.ts", "public/rss.xml"]
+      },
+      "adds": ["seo-reviewer"],
+      "checklists": {
+        "seo-reviewer": [
+          "Every page has a unique title, description, and Open Graph image",
+          "Canonical URL is set and absolute on every page",
+          "New routes appear in the sitemap and RSS feed",
+          "One h1 per page with no skipped heading levels",
+          "Every image has meaningful alt text"
+        ],
+        "code-reviewer": [
+          "Frontmatter fields are validated against a schema, not assumed",
+          "Draft or unpublished content is excluded from production builds and feeds"
+        ]
+      }
+    },
+    {
+      "name": "immersive",
+      "label": "Immersive 3D and motion",
+      "minScore": 2,
+      "signals": {
+        "deps": ["three", "@react-three/fiber", "@react-three/drei", "@react-three/postprocessing", "gsap", "@gsap/react", "lenis", "@studio-freight/lenis", "ogl", "pixi.js", "@splinetool/react-spline", "framer-motion", "motion"],
+        "paths": ["public/models", "public/textures", "src/shaders", "app/scene"]
+      },
+      "adds": ["perf-reviewer"],
+      "checklists": {
+        "perf-reviewer": [
+          "Repeated meshes use instancing; report draw-call count for the main scene",
+          "Textures are sized for display and compressed (KTX2), models use Draco or meshopt",
+          "Geometries, materials, and textures are disposed on unmount",
+          "Frame budget holds on mid-tier mobile (target 16ms; no per-frame allocations)"
+        ],
+        "code-reviewer": [
+          "Animations and render loops are cleaned up on unmount (rAF, ScrollTrigger, listeners)",
+          "A prefers-reduced-motion fallback exists for every scripted animation"
+        ],
+        "design-reviewer": [
+          "Loading state and non-WebGL fallback render sensibly at mobile width",
+          "Motion respects prefers-reduced-motion"
+        ]
+      }
+    }
+  ]
+}

@@ -53,3 +53,5 @@ The disjoint-parallelism criterion governs every parallel tier. Classification n
 | "Make the hero feel more playful" | design | ✓ | ✗ |
 | "Review the PR on auth" | review | ? | ? |
 | "Compare Supabase vs Neon for our use case" | research | ✗ | ✗ |
+
+**Squads are orthogonal to the category.** The category picks the base roster; active squads (`squads.md`) add specialist reviewers and checklist lines on top — never reclassify a task because a squad is active.

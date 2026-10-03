@@ -21,6 +21,9 @@ Model · effort per role. Size/risk/depth come from the dispatch header (`SKILL.
 | code-reviewer | sonnet · medium | opus · high | opus · high | sonnet · medium |
 | design-reviewer | opus · high | opus · high | opus · high | opus · high (never downgraded) |
 | security-reviewer | opus · high | opus · high | opus · max | sonnet · high |
+| payments-reviewer | opus · high | opus · high | opus · max | sonnet · high |
+| seo-reviewer | sonnet · medium | sonnet · high | — | sonnet · low |
+| perf-reviewer | sonnet · high | opus · high | — | sonnet · medium |
 
 Executor never changes model (only effort). Classifier = heuristic (Haiku only if every heuristic misses); final-summary = haiku. Also skip the plan-reviewer for a ≤3-step fully sequential plan.
 
@@ -57,7 +60,7 @@ Result: Fable is rare by construction — it needs two observed failures at Opus
 
 ### `--fable` — manual override
 
-Claude Fable 5 is a tier **above Opus** (alias `fable`). `fable=forced` (user typed `--fable`): judgment roles (planner, ui-prototyper, design-reviewer, security-reviewer, large code-/plan-reviewer) run Fable; executor never; classifier and final-summary stay Haiku. Bypasses the gate — the user chose it.
+Claude Fable 5 is a tier **above Opus** (alias `fable`). `fable=forced` (user typed `--fable`): judgment roles (planner, ui-prototyper, design-reviewer, security-reviewer, payments-reviewer, large code-/plan-reviewer) run Fable; executor never; classifier and final-summary stay Haiku. Bypasses the gate — the user chose it.
 
 **Fallback (older builds):** if the `fable` alias doesn't resolve, re-dispatch that role **once** with `opus` and note it in the run log — never hard-fail, never retry-loop.
 

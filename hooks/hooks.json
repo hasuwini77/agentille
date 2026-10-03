@@ -4,7 +4,11 @@
       {
         "matcher": "startup|resume",
         "hooks": [
-          { "type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/hooks/agentille-update-check.sh", "timeout": 8 }
+          {
+            "type": "command",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/agentille-update-check.sh\"",
+            "timeout": 8
+          }
         ]
       }
     ],
@@ -12,7 +16,11 @@
       {
         "matcher": "Agent",
         "hooks": [
-          { "type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/scripts/cockpit-hook.sh", "timeout": 5 }
+          {
+            "type": "command",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/scripts/cockpit-hook.sh\"",
+            "timeout": 5
+          }
         ]
       }
     ],
@@ -20,7 +28,11 @@
       {
         "matcher": "Agent",
         "hooks": [
-          { "type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/scripts/cockpit-hook.sh", "timeout": 5 }
+          {
+            "type": "command",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/scripts/cockpit-hook.sh\"",
+            "timeout": 5
+          }
         ]
       }
     ],
@@ -28,8 +40,16 @@
       {
         "matcher": ".*",
         "hooks": [
-          { "type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/scripts/cockpit-hook.sh", "timeout": 10 },
-          { "type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/hooks/agentille-reap.sh", "timeout": 10 }
+          {
+            "type": "command",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/scripts/cockpit-hook.sh\"",
+            "timeout": 10
+          },
+          {
+            "type": "command",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/agentille-reap.sh\"",
+            "timeout": 10
+          }
         ]
       }
     ]

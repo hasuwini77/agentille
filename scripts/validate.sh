@@ -110,6 +110,7 @@ hdr "Hooks"
 hookcount=0
 while IFS= read -r hookcmd; do
   [ -n "$hookcmd" ] || continue
+  hookcmd=${hookcmd#\"}; hookcmd=${hookcmd%\"}
   hookrel=${hookcmd#\$\{CLAUDE_PLUGIN_ROOT\}/}
   hookcount=$((hookcount + 1))
   if [ ! -f "$hookrel" ]; then

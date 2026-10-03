@@ -1,7 +1,7 @@
 ---
 name: agt
 description: Personal AI coding orchestrator (the trigger formerly known as /agentille). Reads the user's profile from ~/.agentille/profile.json, classifies the task, and dispatches a tailored roster of agent definitions (planner, executor, code-reviewer, design-reviewer) with the right model per role. Activates ONLY when the user explicitly types `/agt <task>` — model invocation is disabled, so it can never auto-trigger on generic multi-agent or coding prompts.
-argument-hint: [--mode panes|subagent|solo] [--plan] [--fable] "<task>"
+argument-hint: [--mode panes|subagent|solo] [--formation duel|gauntlet|relay] [--plan] [--fable] "<task>"
 disable-model-invocation: true
 ---
 
@@ -15,7 +15,7 @@ When this skill is invoked (`/agt <task>`):
 
 1. **Read the profile** from `~/.agentille/profile.json`. If it doesn't exist, tell the user to run `/agentille-init` and stop.
 2. **Classify the task** — resolve via the Dispatch decision table below (authoritative). Stage 1 fast-path (rows 1–9) is inline; Stage 2 runs only when row 10 fires. If Stage 1 resolved the mode, use `classifier.md` for the subagent roster. If Stage 2 ran, its returned `{mode, roster}` is used directly — do not re-run `classifier.md` on top of it. Consult `classifier.md` as a last-resort parse-error fallback only if Stage 2 itself errors.
-3. **Pick the roster** — for subagent mode, see `roster.md`. For team mode, the roster is the resolved team template's `teammates` array.
+3. **Pick the roster** — for subagent mode, see `roster.md`. For team mode, the roster is the resolved team template's `teammates` array. Then resolve the **formation**, if any — duel, gauntlet or relay (`formations.md`).
 4. **Pick the model + effort per role** using `model-routing.md`, and start every `agentille:agentille-*` dispatch with the header in "Dispatch header" below.
 5. **Apply the profile** to every subagent prompt — communication style, tone, challenge level, never-do rules, honesty level.
 6. **Clarify before planning** — when `preTaskQuestioning` is `always` (or `ambiguous-only` and the task is genuinely ambiguous), resolve the plan-changing unknowns with the user *before* building the plan. See "Clarify before planning" below. Explore the codebase to answer what you can; ask only what actually forks the plan.
@@ -58,6 +58,8 @@ Rows #1–2 are a **deprecated force** (the user typed `--team`/`--mode team`; t
 
 Squads add specialists — `squads.md`.
 
+**Formations** reshape how the roster's workers relate — `formations.md`. Resolve after the roster, first match wins: `--formation <name>` → that formation · user asks for two approaches / best-of → **duel** · feature or bugfix with `risk` auth/money/data and a test runner in the repo → **gauntlet** (adds `agentille:agentille-adversary`) · plan has ≥2 slices `coupled-by` one interface → **relay** · else none. Never on `thinkingDepth=quick`. A duel is never auto-picked from the task alone. The formation rides on the mode (panes / workflow / subagent carry its workers) and shows on the brief's `formation:` row with its cost.
+
 **Team mode** → roster = the resolved template's `teammates` array (`.claude-plugin/teams/<template>.yaml`). Drop any reviewer with nothing to review (e.g. design-reviewer when the change set has no UI/frontend surface).
 
 **Subagent mode** → classify into ONE category. If Step 1 resolved via rows 1–9 (fast-path), run the inline heuristics from `classifier.md`. If Step 1 resolved via row 10 (Stage 2 Haiku classify), use the `roster` returned by that call directly — do not re-classify. Then dispatch:
@@ -85,13 +87,14 @@ One table: `model-routing.md` → "Default routing". Classifier = heuristic, fin
 
 Every `agentille:agentille-*` Agent dispatch prompt starts with ONE header line:
 
-`[agt run=<run-id> size=<small|large> risk=<none|auth|money|data> mode=<build|fix|diagnose|review|research> fable=<auto|forced>]`
+`[agt run=<run-id> size=<small|large> risk=<none|auth|money|data> mode=<build|fix|diagnose|review|research> fable=<auto|forced> formation=<none|duel|gauntlet|relay>]`
 
 - `run` — the run id (same as `~/.agentille/state/run-<id>/`).
 - `size=large` — plan ≥6 steps / shared contracts, or diff >1 file with logic or >~150 LoC, or public API/schema change. Else `small`.
 - `risk` — what the diff/plan touches: auth/sessions → `auth`, money/payments/webhooks → `money`, data migrations → `data`; else `none`.
 - `mode=fix` — each executor (re)dispatch that attempts a fix; `diagnose` — read-only root-cause planner dispatch; `review` — reviewers; `research` — research planner; `build` — default.
 - `fable=forced` only when the user typed `--fable`; else `auto`.
+- `formation` — the run's formation (`formations.md`); omit or `none` for a plain run.
 
 The orchestrator still passes an explicit `model:` on every dispatch (fallback under `disableAllHooks`, `--safe-mode`, VS Code chat). When the agentille mod (`hooks/register.js`) is loaded it overrides model, sets effort, shows a toast and appends `~/.agentille/state/run-<id>/routing.jsonl` on every escalation. `/agt-routing` prints this session's routing decisions. Escalation rules: `model-routing.md` → "Escalation ladder".
 
@@ -101,6 +104,10 @@ The orchestrator still passes an explicit `model:` on every dispatch (fallback u
 
 - The point is to let the user approve the *shape and cost* before paying for the build — the cheapest guard against "it built the wrong thing." It pairs with any mode: `/agt --plan --mode panes "<task>"` previews the pane roster + cost without spawning workers.
 - On a task with no planner (solo/trivial), `--plan` degrades to one honest line — *"nothing to pre-plan — this is a single-step `<category>`; re-run without `--plan` to execute"* — and never spawns an executor.
+
+### Run modifier: `--formation` (duel · gauntlet · relay)
+
+`--formation <name>` forces one formation for this run, overriding auto-pick; it composes with any mode, `--plan` (previews the formation's roster and cost) and `--fable`. A forced formation that does not fit gets one honest line on the recon ping and the run proceeds without it. Full contract: `formations.md`.
 
 ### Run modifier: `--fable` (Fable ceiling — explicit top-tier escalation)
 
@@ -151,7 +158,7 @@ Keep this prefix concise — subagents have limited context.
 
 ## Worker agents
 
-This plugin ships seven **agent definitions** (in the plugin's `agents/` dir), one per role. Dispatch them via Claude Code's `Agent` tool with `subagent_type` set to the **plugin-namespaced** name — these are registered agents (not skills), so the `agentille:` namespace is required or the dispatch fails with "Agent type not found":
+This plugin ships its workers as **agent definitions** (in the plugin's `agents/` dir), one per role. Dispatch them via Claude Code's `Agent` tool with `subagent_type` set to the **plugin-namespaced** name — these are registered agents (not skills), so the `agentille:` namespace is required or the dispatch fails with "Agent type not found":
 
 - **agentille:agentille-planner** — produces a goal-backward plan with parallelizable steps marked
 - **agentille:agentille-plan-reviewer** — critiques the planner's draft plan before execution (goal, coverage, parallel-safety, real verification); returns APPROVE / REVISE (read-only)
@@ -160,6 +167,8 @@ This plugin ships seven **agent definitions** (in the plugin's `agents/` dir), o
 - **agentille:agentille-code-reviewer** — reviews changes for bugs, security, quality (read-only)
 - **agentille:agentille-design-reviewer** — for UI work; screenshots + axe-core scan + WCAG 2.2 a11y audit (`accessibility` / `web-design-guidelines` skills) + visual critique (read-only on source)
 - **agentille:agentille-security-reviewer** — severity-classified security review (read-only)
+- **agentille:agentille-adversary** — red-team tester for the gauntlet formation: writes tests meant to break the executor's diff, reports BROKEN/HELD; tests only, never source
+- Squad specialists (`payments-reviewer`, `seo-reviewer`, `perf-reviewer`) — see `squads.md`
 
 Each agent def carries its own default `model` and `tools` allowlist; still pass an explicit `model` per `model-routing.md`. The `agentille-` prefix avoids colliding with the user's other installed `planner`/`code-reviewer` agents (e.g. superpowers, gsd).
 
@@ -247,6 +256,7 @@ If you can't write the file for any reason, skip silently — never let logging 
 - `agt/team-mode.md` — team-mode auto-detection, Stage 1/Stage 2 dispatch, pre-flight checks, cost transparency
 - `agt/panes-mode.md` — panes mode: parallel workers as sibling Herdr or tmux panes — pool sizing, vendor routing, lifecycle, teardown, `/agt-spawn`, measured cost
 - `agt/workflow-mode.md` — Dynamic Workflow tier: bucket-graph → wave mapping, graceful degradation, adversarial-verify pattern, worked example script
+- `agt/formations.md` — duel / gauntlet / relay: when each is picked, its flow, its judge, its honest cost
 - `agt/squads.md` — project squads (saas / ecommerce / content / immersive) and the specialist reviewers they add
 - `agt/display.md` — the Transit Rail: progress display (TodoWrite spine + drawn-once brief, thin pings, parallel fanout, diff-fence verdicts, debrief)
 
@@ -259,3 +269,4 @@ The seven worker roles live as **agent definitions** in the plugin's `agents/` d
 - `agents/agentille-code-reviewer.md` — bugs / security / quality
 - `agents/agentille-design-reviewer.md` — UI quality (inlined six-pillar + AI-design-tells rubric)
 - `agents/agentille-security-reviewer.md` — severity-classified security review
+- `agents/agentille-adversary.md` — red-team tester (gauntlet formation)

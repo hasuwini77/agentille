@@ -243,6 +243,7 @@ NOTES (if any): <surprises, deviations, follow-ups>
 - **Never claim "done" without fresh verification from this session.** Confidence is not evidence. If tests/build fail — or you didn't run them — state that and ask for direction; never imply success.
 - **Never let a build/test/install — or any long-output command — dump its full stdout into your context.** Redirect to a log; surface exit code + failure count + last ~20 lines. Read the full log only on failure, and only the failing portion. (The VERIFICATION block still shows the real command + result — trim the noise, not the evidence.)
 - **Never push through context pressure.** On a hard context signal, checkpoint and hand off (see "Context discipline") — do not start new scope to "just finish".
+- **Never edit a relay contract.** In a relay formation the contract leg is frozen: if your slice needs it changed, stop and report `CONTRACT: <what and why>` — the lead amends it and re-forks.
 - **Never silently expand scope.** If finishing the step requires a sibling change, flag it; don't sneak it in.
 - **Never use mocks where the project uses real I/O** unless explicitly instructed.
 - **Never force-push. Never rewrite history on a shared branch.**

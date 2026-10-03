@@ -16,10 +16,10 @@ When this skill is invoked (`/agt <task>`):
 1. **Read the profile** from `~/.agentille/profile.json`. If it doesn't exist, tell the user to run `/agentille-init` and stop.
 2. **Classify the task** — resolve via the Dispatch decision table below (authoritative). Stage 1 fast-path (rows 1–8) is inline; Stage 2 runs only when row 9 fires. If Stage 1 resolved the mode, use `classifier.md` for the subagent roster. If Stage 2 ran, its returned `{mode, roster}` is used directly — do not re-run `classifier.md` on top of it. Consult `classifier.md` as a last-resort parse-error fallback only if Stage 2 itself errors.
 3. **Pick the roster** — for subagent mode, see `roster.md`. For team mode, the roster is the resolved team template's `teammates` array.
-4. **Pick the model per role** using `model-routing.md`.
+4. **Pick the model + effort per role** using `model-routing.md`, and start every `agentille:agentille-*` dispatch with the header in "Dispatch header" below.
 5. **Apply the profile** to every subagent prompt — communication style, tone, challenge level, never-do rules, honesty level.
 6. **Clarify before planning** — when `preTaskQuestioning` is `always` (or `ambiguous-only` and the task is genuinely ambiguous), resolve the plan-changing unknowns with the user *before* building the plan. See "Clarify before planning" below. Explore the codebase to answer what you can; ask only what actually forks the plan.
-7. **Plan, then review the plan** — for multi-step tasks the planner drafts the plan and the **plan-reviewer** critiques it (goal correctness, coverage, parallel-safety, real verification) before any executor runs. One REVISE round, then proceed. Skip the review on `thinkingDepth=quick`. **Skip-tier:** also skip even in team mode when the plan is ≤3 steps AND all steps are sequential (no parallel slices) — there is no parallel-safety risk to catch; see Step 3 model table and `model-routing.md` → "Default routing".
+7. **Plan, then review the plan** — for multi-step tasks the planner drafts the plan and the **plan-reviewer** critiques it (goal correctness, coverage, parallel-safety, real verification) before any executor runs. REVISE → re-dispatch the planner → review again. A **second** REVISE → re-dispatch the planner once more (the mod decides Opus-max vs Fable — see `model-routing.md` → "Escalation ladder"), then proceed **without** a third review. Skip the review on `thinkingDepth=quick`. **Skip-tier:** also skip even in team mode when the plan is ≤3 steps AND all steps are sequential (no parallel slices) — there is no parallel-safety risk to catch; see `model-routing.md` → "Default routing".
 8. **Persist the context pack, then dispatch in dependency order.** Create the run directory (`~/.agentille/state/run-<id>/`) on **every** non-solo run. When a planner ran, write its `CONTEXT-PACK` to a run-scoped file (`~/.agentille/state/run-<id>/context-pack.md`, via the Write tool) and dispatch each executor with **only its slice** — never the whole pack, never "re-explore the repo." Pass every executor a `checkpoint:` path inside the run dir (`checkpoint-<name>.md`) — executors checkpoint at committable boundaries and self-report context pressure via a `CONTEXT` ping; you rotate in a fresh successor seeded from checkpoint + slice (see `agents/agentille-executor.md` → "Context discipline" and `team-mode.md` → "Context rotation"). Parallelize independent steps only where the task contains genuinely disjoint file sets (≤3 executors at a time). See "Discover once, reuse everywhere" below. The run dir is scratch state, not an artifact — clean it up after the Debrief.
 
    **Cockpit seam (mandatory, non-solo, cockpit-enabled runs only).** If `AGENTILLE_COCKPIT=1` (env) **or** `profile.cockpit.enabled === true`, perform the following **before** the first `Agent` dispatch — the hook fires on that dispatch, so the mapping and meta must already exist:
@@ -97,21 +97,23 @@ Rows #1–2 are a **force** (the user typed `--team`/`--mode team`). Run the inl
 
 > **plan-reviewer** runs only when a planner ran, and is **skipped on `thinkingDepth=quick`** (quick = trust the plan and go). It reviews the plan *artifact* before any executor starts — see `agents/agentille-plan-reviewer.md`.
 
-### Step 3 — Resolve MODELS (per role)
+### Step 3 — Resolve MODELS + EFFORT (per role)
 
-| Role | Default | Override |
-|---|---|---|
-| planner | Opus | → Sonnet if `thinkingDepth=quick` (large/cross-cutting plans stay Opus) |
-| plan-reviewer | **Sonnet** | → **Opus** for a large/cross-cutting plan (≥6 steps or shared-contract/arch step); **skip** if `thinkingDepth=quick`; **also skip** for a ≤3-step fully sequential plan |
-| ui-prototyper | Opus | → Sonnet if `thinkingDepth=quick`; → Fable under `--fable` |
-| executor | Sonnet | never up or down |
-| code-reviewer | **tiered** | **Sonnet** for a small diff (single file or ≤~150 LoC, no cross-cutting/security); **Opus** for a large/cross-cutting diff; → Sonnet if `thinkingDepth=quick` |
-| design-reviewer | Opus | never downgrade (savings come from viewport scope, not model); → Fable under `--fable` |
-| security-reviewer | **Opus** | → Sonnet if `thinkingDepth=quick` |
-| classifier | heuristic, no LLM | Haiku only if every heuristic misses |
-| final-summary | Haiku | — |
+One table: `model-routing.md` → "Default routing". Classifier = heuristic, final-summary = Haiku. Executor never changes model. Declare the model on every dispatch (fallback when mods are off); a loaded mod overrides it and sets effort.
 
-Two review roles tier their model between Sonnet and Opus by the size of the work — see `model-routing.md` → "Tiering the review roles by size" for the exact thresholds. Always declare the model explicitly on each dispatch — never let it default.
+### Dispatch header
+
+Every `agentille:agentille-*` Agent dispatch prompt starts with ONE header line:
+
+`[agt run=<run-id> size=<small|large> risk=<none|auth|money|data> mode=<build|fix|diagnose|review|research> fable=<auto|forced>]`
+
+- `run` — the run id (same as `~/.agentille/state/run-<id>/`).
+- `size=large` — plan ≥6 steps / shared contracts, or diff >1 file with logic or >~150 LoC, or public API/schema change. Else `small`.
+- `risk` — what the diff/plan touches: auth/sessions → `auth`, money/payments/webhooks → `money`, data migrations → `data`; else `none`.
+- `mode=fix` — each executor (re)dispatch that attempts a fix; `diagnose` — read-only root-cause planner dispatch; `review` — reviewers; `research` — research planner; `build` — default.
+- `fable=forced` only when the user typed `--fable`; else `auto`.
+
+The orchestrator still passes an explicit `model:` on every dispatch (fallback under `disableAllHooks`, `--safe-mode`, VS Code chat). When the agentille mod (`hooks/register.js`) is loaded it overrides model, sets effort, shows a toast and appends `~/.agentille/state/run-<id>/routing.jsonl` on every escalation. `/agt-routing` prints this session's routing decisions. Escalation rules: `model-routing.md` → "Escalation ladder".
 
 ### Run modifier: `--plan` (dry-run — stop after the plan)
 
@@ -126,10 +128,9 @@ Two review roles tier their model between Sonnet and Opus by the size of the wor
 
 `--fable` is **orthogonal to mode and `--plan`** — it doesn't change the roster or the stop point. With `--fable` present, the flag forces the **Fable ceiling** on all judgment-heavy roles this run: planner, ui-prototyper, design-reviewer, security-reviewer, and any size/risk-escalated code-reviewer or plan-reviewer. Executor stays Sonnet; classifier and final-summary stay Haiku — those are never upgraded.
 
-- **Fallback:** on an older build where the `fable` alias doesn't resolve, a failed dispatch is re-dispatched **once** with `opus` and the downgrade is noted in the run log — never a hard fail.
-- `fable` appears only in dispatch-time model parameters, never in agent-def `model:` frontmatter — that placement rule is what keeps the Opus fallback reachable.
+- Send `fable=forced` in the dispatch header; the mod bypasses the escalation gate (the user chose it). Fallback + placement rule: `model-routing.md`.
 - Composes freely: `/agt --fable --plan "<task>"` previews the Fable-ceiling roster; `/agt --fable --team feature-team "<task>"` runs the full team at Fable depth.
-- See `model-routing.md` → "`--fable` — the Fable ceiling" for details.
+- See `model-routing.md` → "`--fable` — manual override" for details.
 
 ## Clarify before planning
 
@@ -180,7 +181,7 @@ This plugin ships seven **agent definitions** (in the plugin's `agents/` dir), o
 - **agentille:agentille-design-reviewer** — for UI work; screenshots + axe-core scan + WCAG 2.2 a11y audit (`accessibility` / `web-design-guidelines` skills) + visual critique (read-only on source)
 - **agentille:agentille-security-reviewer** — severity-classified security review (read-only)
 
-Each agent def carries its own default `model` and `tools` allowlist, but still pass an **explicit `model`** on every dispatch per `model-routing.md` — the static frontmatter default can't express the `thinkingDepth` overrides. The `agentille-` prefix avoids colliding with the user's other installed `planner`/`code-reviewer` agents (e.g. superpowers, gsd).
+Each agent def carries its own default `model` and `tools` allowlist; still pass an explicit `model` per `model-routing.md`. The `agentille-` prefix avoids colliding with the user's other installed `planner`/`code-reviewer` agents (e.g. superpowers, gsd).
 
 **Foreground vs background (subagents run background-by-default since Claude Code v2.1.198).** Any dispatch whose result gates the next step — the planner → plan-reviewer → executor chain, a single executor whose diff feeds the reviewer, any sequential wave — MUST pass `run_in_background: false` so the result returns before the pipeline advances. Background dispatch is reserved for genuinely parallel spawns (concurrent executors on disjoint slices, pipelined reviewers). Every *named background* spawn is a persistent session and falls under the teardown obligation in Hard Rule #11 — shut it down once its handoff is consumed.
 
@@ -262,7 +263,7 @@ If you can't write the file for any reason, skip silently — never let logging 
 - `agt/SKILL.md` — this file (master orchestrator)
 - `agt/classifier.md` — task-category decision tree
 - `agt/roster.md` — task-category → agent roster
-- `agt/model-routing.md` — agent role → model selection
+- `agt/model-routing.md` — agent role → model + effort, escalation ladder
 - `agt/team-mode.md` — team-mode auto-detection, Stage 1/Stage 2 dispatch, pre-flight checks, cost transparency
 - `agt/workflow-mode.md` — Dynamic Workflow tier: bucket-graph → wave mapping, graceful degradation, adversarial-verify pattern, worked example script
 - `agt/display.md` — the Transit Rail: progress display (TodoWrite spine + drawn-once brief, thin pings, parallel fanout, diff-fence verdicts, debrief)

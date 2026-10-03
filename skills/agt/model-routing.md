@@ -6,21 +6,23 @@ Pay Opus only where its reasoning is load-bearing — direction-setting and judg
 
 > **Per-provider caveat:** the zero-touch guarantee holds on the Anthropic API, where aliases track the newest model in each tier. Bedrock / Vertex / Foundry deployments can lag — there an alias resolves to whatever that provider currently maps it to, until the user pins full model IDs or `ANTHROPIC_DEFAULT_*_MODEL` env vars. Zero-touch is a per-provider property, not something agentille controls.
 >
-> **Orthogonal lever:** agent-def frontmatter also supports `effort` (`low`→`max`), which deepens reasoning without changing the model tier. agentille sets `effort: high` statically on its three judgment-heaviest defs (planner, security-reviewer, design-reviewer); routing decisions in this file stay model-tier-only.
+> **Effort** (`low`→`max`) deepens reasoning without changing the tier. Agent-def frontmatter carries a static default; the table below is what the mod sets per dispatch.
 
 ## Default routing
 
-| Role | Default | Override |
-|---|---|---|
-| planner | **opus** | → Sonnet if `thinkingDepth=quick` (no escalation above Opus; large/cross-cutting plans stay Opus) |
-| plan-reviewer | **sonnet** | → Opus for a large/cross-cutting plan (≥6 steps or any step touching shared contracts/architecture); skip if `thinkingDepth=quick`; also skip for a ≤3-step fully sequential plan |
-| ui-prototyper | **opus** | → Sonnet if `thinkingDepth=quick`; → Fable under `--fable` |
-| executor | **sonnet** | never up or down |
-| code-reviewer | **tiered** (see below) | Sonnet for small diff (single file or ≤~150 LoC, no cross-cutting/security); Opus for large/cross-cutting diff; → Sonnet if `thinkingDepth=quick` |
-| design-reviewer | **opus** | never downgrade (savings come from viewport scope, not model); → Fable under `--fable` |
-| security-reviewer | **opus** | → Sonnet if `thinkingDepth=quick` |
-| classifier | **heuristic, no LLM** | Haiku only if every heuristic misses |
-| final-summary | **haiku** | — |
+Model · effort per role. Size/risk/depth come from the dispatch header (`SKILL.md` → "Dispatch header"); the mod enforces this table, the orchestrator passes the model as fallback.
+
+| role | default | size=large | risk auth/money | thinkingDepth=quick |
+|---|---|---|---|---|
+| planner | opus · high | opus · xhigh | — | sonnet · medium |
+| plan-reviewer | sonnet · medium | opus · high | — | skipped |
+| ui-prototyper | opus · high | opus · high | — | sonnet · medium |
+| executor | sonnet · medium | sonnet · high | sonnet · high | sonnet · medium |
+| code-reviewer | sonnet · medium | opus · high | opus · high | sonnet · medium |
+| design-reviewer | opus · high | opus · high | opus · high | opus · high (never downgraded) |
+| security-reviewer | opus · high | opus · high | opus · max | sonnet · high |
+
+Executor never changes model (only effort). Classifier = heuristic (Haiku only if every heuristic misses); final-summary = haiku. Also skip the plan-reviewer for a ≤3-step fully sequential plan.
 
 ## Tiering the review roles by size
 
@@ -33,7 +35,7 @@ When in genuine doubt about which tier a diff falls in, prefer Opus for the *rev
 
 ## Profile-driven overrides
 
-- **`thinkingDepth = quick`** → downgrade `planner`, `code-reviewer`, and `security-reviewer` to Sonnet (the user is signaling speed over depth), and **skip the `plan-reviewer` step entirely** (quick = trust the plan and go). `design-reviewer` stays Opus — vision + design judgment is the one place agentille never trades down.
+- **`thinkingDepth = quick`** → the last column of the table; **skip the `plan-reviewer`** entirely (quick = trust the plan and go). `design-reviewer` stays Opus — the one place agentille never trades down.
 - **`challengeLevel = ruthless`** → keep all models at default; the rigor comes from the prompt, not the model.
 
 ## Hard rules
@@ -41,17 +43,27 @@ When in genuine doubt about which tier a diff falls in, prefer Opus for the *rev
 - **Never downgrade design-reviewer.** Vision matters; without it the agent guesses.
 - **Never use Haiku for executor.** Haiku writes correct-looking code that subtly breaks.
 - **Never upgrade executor.** Executor stays Sonnet — never up or down.
-- **Always declare the model in the subagent dispatch.** Don't let Claude Code default — be explicit.
+- **Declare `model:` on every dispatch** (fallback when the mod is off).
 
-## `--fable` — the Fable ceiling
+## Escalation ladder
 
-Claude Fable 5 is a live, shipping model tier **above Opus** (alias `fable` — a first-class Claude Code model alias). With `--fable` present, force the **Fable ceiling** on all judgment-heavy roles this run: planner, ui-prototyper, design-reviewer, security-reviewer, and any size/risk-escalated code-reviewer or plan-reviewer. Executor stays Sonnet; classifier and final-summary stay Haiku — those are never upgraded. Fable costs more than Opus, which is exactly why it is **never part of default routing** — the flag is the only path to it, per run, chosen by the user.
+Evidence is **observed by the mod**, not claimed by the orchestrator.
 
-**Fallback (older builds):** if a dispatch errors because the `fable` alias doesn't resolve, re-dispatch that role **once** with `opus` and note the downgrade in the run log — never hard-fail the run, never retry-loop. The interception point is the dispatch itself: model resolution happens per-dispatch and a failed dispatch returns a tool error the orchestrator observes.
+- **Plan:** the mod reads each plan-reviewer verdict. 1st REVISE → next planner dispatch runs opus · max. 2nd REVISE → next planner dispatch is a Fable candidate.
+- **Fix:** the mod counts `mode=fix` executor dispatches per run. Attempt 2 → effort high; attempt ≥3 → effort max. A `mode=diagnose` planner dispatch after ≥3 fix attempts → Fable candidate.
+- **Fable gate** (all must pass, else opus · max with the reason logged): candidate · `profile.routing.autoFable` not false · fewer than `maxFablePerRun` (default 1) Fable spawns this run · `seven_day` plan usage below `fableWeeklyCeiling` (default 60%).
 
-**Placement rule:** `fable` appears ONLY in dispatch-time model parameters — never in any agent def's static `model:` frontmatter (those stay `opus`/`sonnet` as the alias-fallback defaults). This is what makes the Opus fallback reachable.
+Result: Fable is rare by construction — it needs two observed failures at Opus max effort first.
 
-See also: `workflow-mode.md` → "Flag composition" for how `--fable` composes with `--plan` and workflow mode.
+### `--fable` — manual override
+
+Claude Fable 5 is a tier **above Opus** (alias `fable`). `fable=forced` (user typed `--fable`): judgment roles (planner, ui-prototyper, design-reviewer, security-reviewer, large code-/plan-reviewer) run Fable; executor never; classifier and final-summary stay Haiku. Bypasses the gate — the user chose it.
+
+**Fallback (older builds):** if the `fable` alias doesn't resolve, re-dispatch that role **once** with `opus` and note it in the run log — never hard-fail, never retry-loop.
+
+**Placement rule:** `fable` appears ONLY in dispatch-time model parameters — never in an agent def's `model:` frontmatter (that keeps the Opus fallback reachable).
+
+See also: `workflow-mode.md` → "Flag composition".
 
 ## Workflow tier routing
 
@@ -62,4 +74,4 @@ The workflow tier uses the same role → model mapping as subagent mode:
 - **design-reviewer (verify stages, UI buckets only)** — Opus, never downgrade.
 - **security-reviewer (verify stages, security-tagged buckets only)** — Opus; → Sonnet if `thinkingDepth=quick`.
 
-Workflow executor stages emit explicit `model:` in each `agent()` call. Do not rely on defaults. Full workflow stage/role mapping: `workflow-mode.md` → "Role → workflow stage mapping".
+Workflow executor stages emit explicit `model:` in each `agent()` call (no mod escalation there — see `workflow-mode.md`). Full workflow stage/role mapping: `workflow-mode.md` → "Role → workflow stage mapping".

@@ -171,56 +171,65 @@ done < <(grep -rhoE '`[A-Za-z0-9._-]+\.md`[^"]*→[[:space:]]*"[^"]+"' skills 2>
           | sed -E 's/`([A-Za-z0-9._-]+\.md)`[^"]*→[[:space:]]*"([^"]+)"/\1\t\2/')
 [ "$checked" -gt 0 ] && [ "$missing_sec" = 0 ] && pass "all $checked '→ \"Section\"' cross-refs resolve to a heading"
 
-# ── 6b. Routing mirror invariant (SKILL.md Step 3 ↔ model-routing.md) ────────
-# The dispatch contract lives in two tables that must agree row-for-row:
-# SKILL.md "Step 3 — Resolve MODELS" and model-routing.md "Default routing".
-# Role lists must match exactly; Default tiers are compared wherever both
-# cells name exactly one alias token (a cell like "heuristic, no LLM" yields
-# none and is skipped — prose drift there is for human review).
+# ── 6b. Routing mirror invariant (model-routing.md ↔ hooks/routing.js) ─────
+# The mod enforces hooks/routing.js; model-routing.md "Default routing" is its
+# human-readable spec. Every role and every model · effort cell must agree.
+# A doc cell of "—" means no override (null in code); "skipped" is not compared.
 hdr "Routing mirror invariant"
-extract_routing() { # $1 = file, $2 = heading regex → "role<TAB>tier-or-?" lines
-  awk -v h="$2" '
-    $0 ~ h {grab=1; next}
-    grab && /^\|/ {
-      intab=1
-      split($0, c, "|")
-      role=c[2]; def=tolower(c[3])
-      gsub(/[* ]/, "", role); role=tolower(role)
-      if (role=="role" || role ~ /^-+$/) next
-      cnt=0; tokval="?"; delete seen
-      rest=def
-      while (match(rest, /fable|opus|sonnet|haiku|tiered/)) {
-        tok=substr(rest, RSTART, RLENGTH)
-        if (!(tok in seen)) { seen[tok]=1; cnt++; tokval=tok }
-        rest=substr(rest, RSTART+RLENGTH)
-      }
-      print role "\t" (cnt==1 ? tokval : "?")
-      next
-    }
-    grab && intab {exit}
-  ' "$1"
-}
-MA=$(extract_routing skills/agt/SKILL.md '^### Step 3')
-MB=$(extract_routing skills/agt/model-routing.md '^## Default routing')
-if [ -z "$MA" ] || [ -z "$MB" ]; then
-  fail "mirror: could not extract a routing table (heading moved? table not found)"
+if ! command -v python3 >/dev/null 2>&1; then
+  warn "mirror: python3 not found — routing table comparison skipped"
 else
-  RA=$(printf '%s\n' "$MA" | cut -f1); RB=$(printf '%s\n' "$MB" | cut -f1)
-  if [ "$RA" = "$RB" ]; then
-    pass "mirror: both tables list the same $(printf '%s\n' "$RA" | wc -l) roles in the same order"
+  mirror_out=$(python3 - <<'PY'
+import re, sys
+doc = open('skills/agt/model-routing.md').read()
+code = open('hooks/routing.js').read()
+sec = doc.split('## Default routing', 1)[1].split('\n## ', 1)[0]
+rows = {}
+for line in sec.splitlines():
+    c = [x.strip() for x in line.strip().strip('|').split('|')]
+    if len(c) == 5 and c[0] not in ('role',) and not set(c[0]) <= set('-'):
+        rows[c[0]] = c[1:]
+def cell(v):
+    if v.startswith('—'): return None
+    if v.startswith('skipped'): return 'skip'
+    m = re.match(r'(\w+) · (\w+)', v)
+    return (m.group(1), m.group(2)) if m else '?'
+pat = re.compile(r"^\s*'?([a-z-]+)'?:\s*\{\s*base: \['(\w+)', '(\w+)'\],\s*large: \['(\w+)', '(\w+)'\],\s*risk: (null|\['(\w+)', '(\w+)'\]),\s*quick: \['(\w+)', '(\w+)'\]", re.M)
+table = {}
+for m in pat.finditer(code):
+    g = m.groups()
+    table[g[0]] = [(g[1], g[2]), (g[3], g[4]), None if g[5] == 'null' else (g[6], g[7]), (g[8], g[9])]
+bad = 0
+if set(rows) != set(table):
+    print('FAIL roles differ: doc-only %s, code-only %s' % (sorted(set(rows) - set(table)), sorted(set(table) - set(rows)))); bad = 1
+cols = ['default', 'size=large', 'risk', 'quick']
+for role in sorted(set(rows) & set(table)):
+    for i, col in enumerate(cols):
+        d = cell(rows[role][i])
+        if d == 'skip': continue
+        if d != table[role][i]:
+            print('FAIL %s %s: doc %s, code %s' % (role, col, d, table[role][i])); bad = 1
+if not bad: print('PASS %d roles × 4 columns agree' % len(table))
+PY
+)
+  while IFS= read -r line; do
+    case "$line" in PASS*) pass "mirror: ${line#PASS }";; FAIL*) fail "mirror: ${line#FAIL }";; esac
+  done <<< "$mirror_out"
+fi
+
+# ── 6c. The mod: Claude Code's own validator + its tests ────────────────────
+# Skipped (WARN) where the claude CLI is absent, e.g. CI runners without it.
+hdr "Mod (hooks/register.js)"
+if ! command -v claude >/dev/null 2>&1; then
+  warn "claude CLI not found — run 'claude plugin validate' and 'claude plugin test .' locally"
+else
+  if claude plugin validate .claude-plugin/plugin.json 2>&1 | grep -q '✘'; then
+    fail "claude plugin validate reports errors"
   else
-    fail "mirror: role lists differ between SKILL.md Step 3 and model-routing.md Default routing"
+    pass "claude plugin validate passes"
   fi
-  drift=0
-  while IFS=$'\t' read -r role tok; do
-    tb=$(printf '%s\n' "$MB" | awk -F'\t' -v r="$role" '$1==r{print $2}')
-    [ -z "$tb" ] && continue
-    if [ "$tok" != "?" ] && [ "$tb" != "?" ] && [ "$tok" != "$tb" ]; then
-      fail "mirror: '$role' default drifts — SKILL.md says '$tok', model-routing.md says '$tb'"
-      drift=1
-    fi
-  done <<< "$MA"
-  [ "$drift" = 0 ] && pass "mirror: default tiers agree for all comparable roles"
+  tout=$(claude plugin test . 2>&1); trc=$?
+  if [ "$trc" = 0 ]; then pass "claude plugin test: $(printf '%s\n' "$tout" | grep -oE '[0-9]+ pass' | tail -1)"; else fail "claude plugin test failed"; fi
 fi
 
 # ── 7. PII / privacy scan (public repo — hard fail) ──────────────────────────

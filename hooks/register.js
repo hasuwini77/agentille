@@ -3,7 +3,7 @@
 // observes events, applies decisions, and draws.
 
 import { DEFAULTS, decide, parseHeader, roleOf, verdictOf } from './routing.js'
-import { addUsage, effortBar, elapsed, finish, ledger, ledgerText, newAgent, paneAgents, reapable, short, summary, tokens, visible } from './live.js'
+import { addUsage, effortBar, elapsed, finish, isAgtPrompt, ledger, ledgerText, newAgent, paneAgents, reapable, shouldAutoOpen, short, summary, tokens, visible } from './live.js'
 import { activeSquads, allPaths, depsOf, injection } from './squads.js'
 import { cells, MODEL_COLOR, modelKey } from './sprites.js'
 
@@ -25,6 +25,8 @@ let selfName = null          // this pane's herdr name when it is an agt-* worke
 let squads = []              // active squads for this repo
 let squadBlock = ''
 let deckOpen = false
+let deckAuto = true          // open the deck on its own when a run starts
+let deckDismissedRun = null  // run whose deck the person closed by hand
 let tick = 0
 
 function runState(id) {
@@ -61,6 +63,17 @@ async function loadSquads($) {
   } catch {
     squads = []
     squadBlock = ''
+  }
+}
+
+// Open the deck on the person's behalf. No focus: the prompt keeps the keys.
+async function autoDeck($) {
+  if (!shouldAutoOpen({ auto: deckAuto, open: deckOpen, dismissedRun: deckDismissedRun, run: lastRun })) return
+  deckOpen = true
+  try {
+    await $.ui.open({ id: DECK, title: 'agentille deck', closeOnEscape: true })
+  } catch {
+    deckOpen = false
   }
 }
 
@@ -163,6 +176,7 @@ export function register(on) {
   on('session.start', async ($, e, next) => {
     await loadProfile($)
     await loadSquads($)
+    deckOpen = (await $.ui.panes()).some((p) => p.id === DECK)
     await $.command.register({ name: 'agt-routing', description: 'Show the model + effort agentille picked for each agent this session', immediate: true })
     await $.command.register({ name: 'agt-deck', description: 'Open the agentille deck: every agent as a mini-Claude, live', immediate: true })
     await $.command.register({ name: 'agt-ledger', description: 'Tokens per agent role for the latest agentille run', immediate: true })
@@ -198,8 +212,19 @@ export function register(on) {
     return next(e)
   })
 
+  // A typed /agt opens the deck; answering the person's prompt, it seats at any width.
+  on('prompt.submit', async ($, e, next) => {
+    if (isAgtPrompt(e.text)) {
+      deckDismissedRun = null
+      await autoDeck($)
+    }
+    return next(e)
+  })
+
   on('skill.prompt', async ($, e, next) => {
-    if (!squadBlock || !/(^|:)agt$/.test(e.skill)) return next(e)
+    if (!/(^|:)agt$/.test(e.skill)) return next(e)
+    await autoDeck($)
+    if (!squadBlock) return next(e)
     return next({ ...e, text: e.text + squadBlock })
   })
 
@@ -241,6 +266,7 @@ export function register(on) {
     decisions.push(rec)
     run.log.push(JSON.stringify(rec))
     await writeRunFile($, runId, 'routing.jsonl', run.log.join('\n') + '\n')
+    await autoDeck($)
     if (d.reason !== 'table') $.ui.toast('agt ↑ ' + role + ' → ' + short(res.model) + ' · ' + d.effort + ' — ' + d.reason)
     $.ui.invalidate('ui.render')
     return res

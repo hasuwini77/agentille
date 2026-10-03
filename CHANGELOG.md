@@ -2,6 +2,49 @@
 
 All notable changes to agentille are documented here.
 
+## [2.0.0] — 2026-10-03
+
+agentille 2: the background becomes visible, and the team becomes
+project-aware. Everything is drawn in-session by the Claude Code mod.
+
+### Added
+
+- **Live band** above the prompt: one row per agent with role, model,
+  effort (bar from low to max), state, elapsed time, tokens and the
+  escalation reason. It covers in-process subagents (agentille's and any
+  other) and Herdr `agt-*` panes in the workspace. The main spinner counts
+  working agents.
+- **`/agt-deck`**: a pane drawing every agent as a pixel mini-Claude. Hat
+  shape is the role, hat color is the model, and working agents bob. The
+  desktop app gets a text fallback.
+- **Ledger**: tokens per agent and per role, written to
+  `~/.agentille/state/run-<id>/ledger.json` for the Debrief. `/agt-ledger`
+  prints it.
+- **Squads**: `saas`, `ecommerce`, `content`, `immersive`, detected from
+  package.json deps and repo paths (`.claude-plugin/squads.json`). The mod
+  injects the active squads, their specialists and per-role checklists
+  into the `/agt` skill text; `skills/agt/squads.md` is the manual fallback.
+- **Specialist reviewers**: `agentille-payments-reviewer` (opus),
+  `agentille-seo-reviewer` (sonnet), `agentille-perf-reviewer` (sonnet),
+  each with routing rows.
+- **Pane reaper in the mod**: inside Herdr, the lead closes `agt-*` panes in
+  its own tab after `done` ≥ 90s or `idle` ≥ 300s. Worker panes show their
+  identity in the band and never reap.
+
+### Removed
+
+- **The cockpit companion** (viewer app, `scripts/cockpit-*.sh`, its hooks,
+  `AGENTILLE_COCKPIT`, `profile.cockpit`). The band and deck replace it.
+- `hooks/agentille-reap.sh` and its Stop hook, replaced by the mod reaper.
+
+### Rationale
+
+Routing (1.34) changed behavior but left nothing to see. 2.0 makes routing,
+effort, escalation, cost and herdr workers visible where you already are,
+without a second app. Squads put domain specialists on the team only when
+the repo shows the domain, so the roster grows with the project instead of
+with every run. Major version: the cockpit and its settings are gone.
+
 ## [1.34.0] — 2026-10-03
 
 Routing moves from prose into code. A Claude Code mod (`hooks/register.js`)

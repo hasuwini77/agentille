@@ -8,7 +8,7 @@
   "plugins": [
     {
       "name": "agentille",
-      "description": "Personal AI coding orchestrator for Claude Code (trigger: /agt). Four skills + seven dispatchable agents, a routing mod that enforces model + effort per role and escalates to Fable only on observed failure, subagent-first dispatch (herdr panes or a dynamic workflow for parallel work; agent teams only when forced), parallel git worktrees, plan review, upfront UI prototyping, and code + design review built in.",
+      "description": "Personal AI coding orchestrator for Claude Code (trigger: /agt). See your agents work: a live band above the prompt and a pixel team deck show every agent's role, model, effort, state and tokens. A routing mod enforces model + effort per role and escalates to Fable only on observed failure. Project-aware squads (saas, ecommerce, content, immersive) add payments, SEO and performance specialists. Subagent-first dispatch, herdr panes or workflows for parallel work, agent teams only when forced.",
       "author": {
         "name": "Systown AI Lab"
       },

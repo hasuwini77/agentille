@@ -7,7 +7,7 @@
 ╚═╝  ╚═╝ ╚═════╝ ╚══════╝╚═╝  ╚═══╝   ╚═╝   ╚═╝╚══════╝╚══════╝╚══════╝
 ```
 
-> A personal AI coding orchestrator for Claude Code. Type **`/agt "task"`** and it classifies the work, picks solo, subagents, parallel panes or workflows, routes the right model and effort per role, and runs it in your own voice.
+> A personal AI coding orchestrator for Claude Code. Type **`/agt "task"`** and it classifies the work, picks solo, subagents, parallel panes or workflows, routes the right model and effort per role, and runs it in your own voice. A focus block above the prompt shows only what needs you.
 >
 > Powered by **[Systown AI Lab](https://systown.ai)**.
 
@@ -77,6 +77,7 @@ The mod detects your project type (saas, ecommerce, content, immersive) and adds
 | `/agt "review ..."` / `/agt "debug ..."` | Subagent reviewers / debug loop |
 | `/agt --mode subagent "task"` | Force subagents for one run |
 | `/agt --team <feature-team\|review-team\|incident-team> "task"` | **Deprecated, removed in v3.0.** Re-resolves to panes on ≥2 disjoint slices, else subagent; runs as a team only when no pane transport exists |
+| `/agt --formation duel\|gauntlet\|relay "task"` | Force a formation: two builds and a judge, an adversary that attacks the build, or a contract-first parallel build |
 | `/agt --plan "task"` | Dry run: plan and cost, then stop for your go |
 
 **Formations** reshape a run when it pays: **duel** (two executors build one slice two ways; tests, then a judge, pick one; only when you ask), **gauntlet** (a new adversary agent writes tests to break the build, the executor fixes, at most two rounds; auto on auth/money/data changes), **relay** (a contract leg first, then slices that share an interface build in parallel). `--formation duel|gauntlet|relay` forces one; the brief states its cost. Details: [`skills/agt/formations.md`](./skills/agt/formations.md).
@@ -104,7 +105,7 @@ Agent teams are never auto-picked, and forcing one with `--team` is deprecated (
 
 ## Agents
 
-Dispatched as `agentille:agentille-*`: planner, plan-reviewer, ui-prototyper, executor, code-reviewer, design-reviewer, security-reviewer, plus squad specialists. Every prompt carries your voice profile. UI work gets a Prototype Blueprint up front and a design review (WCAG 2.2) at the gate.
+Dispatched as `agentille:agentille-*`: planner, plan-reviewer, ui-prototyper, executor, code-reviewer, design-reviewer, security-reviewer, adversary (the gauntlet's red-team tester: writes tests to break the build, never touches source), plus squad specialists (payments, SEO, performance). Every prompt carries your voice profile. UI work gets a Prototype Blueprint up front and a design review (WCAG 2.2) at the gate.
 
 agentille bundles no third-party skills: it reaches for design, framework and accessibility skills you have installed and falls back to its own judgment when they are absent.
 
@@ -114,7 +115,7 @@ Each completed run appends one line to `./docs/agentille-log.md` in the target p
 
 ## Requirements
 
-- Claude Code **2.1.287+** for the mod (band, auto-open deck, ledger, squads, reaper, routing enforcement). The skills still work without it: routing falls back to explicit models.
+- Claude Code **2.1.287+** for the mod (band, focus block, deck, ledger, squads, pane tools and reaper, routing enforcement). The skills still work without it: routing falls back to explicit models.
 - Claude Code 2.1.178+ for the deprecated team mode (only reached with no pane transport).
 - A `~/.agentille/profile.json`, created by `/agentille-init`.
 

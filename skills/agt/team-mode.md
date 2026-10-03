@@ -2,12 +2,12 @@
 
 > **Authority:** the dispatch decision table in `skills/agt/SKILL.md` is the tie-breaker. This doc is the detail/rationale — if it ever conflicts with that table, the table wins.
 
-> **Legacy, opt-in only.** Teams run ONLY via `--team <name>` / `--mode team` (~4× tokens). Auto-detection never selects one: review/debug verbs resolve to subagent mode, and ≥2 disjoint slices resolve to herdr / workflow / subagent waves.
+> **Legacy, opt-in only.** Teams run ONLY via `--team <name>` / `--mode team` (~4× tokens). Auto-detection never selects one: review/debug verbs resolve to subagent mode, and ≥2 disjoint slices resolve to panes / workflow / subagent waves.
 
 The orchestrator picks one of five execution modes per task:
 
 - **subagent** (default, always available) — dispatches roles via the `Agent` tool, results return to the orchestrator. The v1.0 path.
-- **herdr** (the parallel transport inside Herdr) — chosen for ≥2 disjoint slices, executed as sibling **Herdr panes** instead of nested teammates: workers are visible to the multiplexer, their completion is a readable state rather than a promise, teardown is `pane close`, and each pane can run a different vendor (`claude` / `codex` / a local model). Requires `HERDR_ENV=1` and the `herdr` binary. See `panes-mode.md`.
+- **panes** (the parallel transport inside Herdr or tmux; `--mode herdr` is an alias) — chosen for ≥2 disjoint slices, executed as sibling **panes** instead of nested teammates: workers are visible to the multiplexer, their completion is a readable state rather than a promise, teardown is `pane close`, and each pane can run a different vendor (`claude` / `codex` / a local model). Requires `HERDR_ENV=1` and the `herdr` binary, or `$TMUX` and `tmux` (Claude workers only). See `panes-mode.md`.
 - **workflow** (experimental) — emits a Dynamic Workflow script the Claude Code runtime executes in the background; scripted fan-out with no inter-agent messaging. See `workflow-mode.md`.
 - **team** (opt-in, experimental) — uses Claude Code's Agent Teams primitive: each role is an independent Claude session, peers can message each other via `SendMessage`, shared task list. Requires `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1` and Claude Code **2.1.178+** (this skill uses the no-setup-step flow — a team forms on the first teammate spawn; before 2.1.178 the runtime required the now-removed `TeamCreate`/`TeamDelete` setup flow, which this skill never performs).
 - **solo** — execute inline in this session, no spawn. For trivial tasks (one file mentioned, no architectural verbs).
@@ -55,7 +55,7 @@ Send Haiku a short prompt containing the user's task and ask it to return ONLY t
 }
 ```
 
-Parse the JSON. `parallel` runs as herdr in Herdr, else workflow when available, else subagent waves. If parsing fails, fall back to `mode: "subagent"` and log a one-line note. Never crash on a malformed classifier response. When Stage 2 returns a valid response, use its `roster` directly — do not re-run the heuristic classifier on top of it (authority: `SKILL.md` → "Dispatch decision table" Step 2).
+Parse the JSON. `parallel` runs as panes in Herdr or tmux, else workflow when available, else subagent waves. If parsing fails, fall back to `mode: "subagent"` and log a one-line note. Never crash on a malformed classifier response. When Stage 2 returns a valid response, use its `roster` directly — do not re-run the heuristic classifier on top of it (authority: `SKILL.md` → "Dispatch decision table" Step 2).
 
 **When the mode hinges on a question, ask it.** Parallel vs subagent turns on one thing: are there ≥2 independent slices that can build at once? If that's genuinely unknowable from the prompt and the profile's `preTaskQuestioning` permits, don't guess — the lead resolves it in the clarify round (see `SKILL.md` → "Clarify before planning"), and the answer re-resolves the mode. Default the provisional `mode` to `subagent` until clarified; promote to `parallel` only once the parallelism is confirmed.
 
@@ -213,7 +213,7 @@ Once the surviving hypothesis lands a fix, gate it like any other change: dispat
 
 > **Cross-ref target for `display.md` and `SKILL.md`.** Teardown is **mandatory and verified** — it is not advisory and it is not optional. The lead MUST complete this checklist before declaring the run done.
 >
-> **This checklist is the legacy nested path.** In herdr mode teardown is a state machine instead of a protocol — the lead reads each worker's lifecycle state and closes the pane it opened, with the mod's reaper as the net for leads that never got to finish. Everything below exists because nested teammates give you no such state to read. See `panes-mode.md` → "Teardown — deterministic, plus a safety net".
+> **This checklist is the legacy nested path.** In panes mode teardown is a state machine instead of a protocol — the lead reads each worker's lifecycle state and closes the pane it opened, with the mod's reaper as the net for leads that never got to finish. Everything below exists because nested teammates give you no such state to read. See `panes-mode.md` → "Teardown — deterministic, plus a safety net".
 
 **Mid-run vs run end — the critical distinction.**
 - **Mid-run:** an idle teammate may still be needed for a later step — the "leave it until run end" guidance in "Reclaiming a pane mid-run" above applies *here only*. Do not shut teammates down preemptively unless their slice is fully done and they have no remaining dependent work. The inverse is equally binding: once a teammate's slice IS fully consumed (PR merged/rejected, report absorbed) and nothing downstream needs it, shut it down **then** — promptly, not at a run-end sweep hours later. A finished teammate left idling shows a growing uptime timer in the swarm view that reads as a stuck run. Every agentille worker ends its final report with the literal line `WORK COMPLETE — safe to shut me down` — treat that marker as the prompt-shutdown trigger: when you see it and nothing downstream needs the teammate, send the shutdown request right away.

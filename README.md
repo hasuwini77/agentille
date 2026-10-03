@@ -35,7 +35,7 @@ cd ~/your/repo
 
 ## What you see
 
-- **Live band** above the prompt while agents exist: one row per agent with role, model and effort (model colored: haiku grey, sonnet blue, opus amber, fable violet; effort as a bar from low to max), state, elapsed time, tokens, and `↑ <reason>` when escalated. It covers in-process subagents and Herdr `agt-*` panes, and hides itself when nothing has run.
+- **Live band** above the prompt while agents exist: one row per agent with role, model and effort (model colored: haiku grey, sonnet blue, opus amber, fable violet; effort as a bar from low to max), state, elapsed time, tokens, and `↑ <reason>` when escalated. It covers in-process subagents and Herdr or tmux `agt-*` panes, and hides itself when nothing has run.
 - **The deck** opens on its own when you type `/agt`: a pane with a pixel mini-Claude per agent. Hat shape is the role, hat color is the model, working agents bob. Terminals draw pixels; the desktop app gets a text fallback. Close it and it stays closed for that run. `/agt-nodeck` turns auto-open off for good; `/agt-deck` opens it by hand and turns it back on.
 - **Ledger.** Tokens per agent and per role. `/agt-ledger` prints it, and the Debrief shows a per-role table read from `~/.agentille/state/run-<id>/ledger.json`.
 
@@ -72,11 +72,13 @@ The mod detects your project type (saas, ecommerce, content, immersive) and adds
 
 | What you type | What you get |
 |---|---|
-| `/agt "task"` | Solo if trivial; subagents for sequential or single-slice work; parallel Herdr panes (inside Herdr) or a workflow when there are 2+ disjoint slices |
+| `/agt "task"` | Solo if trivial; subagents for sequential or single-slice work; parallel panes (Herdr or tmux) or a workflow when there are 2+ disjoint slices |
 | `/agt "review ..."` / `/agt "debug ..."` | Subagent reviewers / debug loop |
 | `/agt --mode subagent "task"` | Force subagents for one run |
 | `/agt --team <feature-team\|review-team\|incident-team> "task"` | Force an agent team (~4x tokens; asks before running on work with no disjoint slices) |
 | `/agt --plan "task"` | Dry run: plan and cost, then stop for your go |
+
+Panes are not a token saving: in a measured two-slice test, two Claude workers in panes used 1.12x the fresh tokens of the same two as subagents (1.55x counting cache reads), because a pane opens as a full session. The savings come from model routing and handing each worker only its slice. Small sample: one task, two runs per arm. Team mode's ~4x is an estimate.
 
 Agent teams are never auto-picked. They need Claude Code 2.1.178+ and `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1` in `~/.claude/settings.json` under `env`; split panes need tmux or iTerm2 (`teammateMode`). Details: [`skills/agt/team-mode.md`](./skills/agt/team-mode.md).
 
@@ -85,6 +87,7 @@ Agent teams are never auto-picked. They need Claude Code 2.1.178+ and `CLAUDE_CO
 | Command | Does |
 |---|---|
 | `/agt` | The orchestrator |
+| `/agt-spawn "task" [--model …]` | Open one extra pane (Herdr or tmux) running one Claude session on the model you pick. Typed only, never reaped |
 | `/agt-deck` | Open the pixel deck (also turns auto-open back on) |
 | `/agt-nodeck` | Stop the deck from opening on its own |
 | `/agt-ledger` | Tokens per agent and per role |

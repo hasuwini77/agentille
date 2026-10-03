@@ -2,7 +2,7 @@
 // Policy and state live in routing.js / live.js / squads.js / sprites.js / focus.js; this file
 // observes events, applies decisions, and draws.
 
-import { DEFAULTS, decide, parseHeader, roleOf, verdictOf } from './routing.js'
+import { DEFAULTS, decide, formationOf, parseHeader, roleOf, verdictOf } from './routing.js'
 import { addUsage, effortBar, elapsed, finish, isAgtPrompt, ledger, ledgerText, newAgent, paneAgents, reapable, shouldAutoOpen, short, summary, tokens, visible } from './live.js'
 import { activeSquads, allPaths, depsOf, injection } from './squads.js'
 import { cells, MODEL_COLOR, modelKey } from './sprites.js'
@@ -50,7 +50,7 @@ const FLAG_TTL_MS = 30 * 60_000
 const FOCUS_COLOR = { next: '#3fb950', flag: '#f85149' }
 
 function runState(id) {
-  if (!runs.has(id)) runs.set(id, { revise: 0, fixes: 0, fable: 0, log: [] })
+  if (!runs.has(id)) runs.set(id, { revise: 0, fixes: 0, fable: 0, formation: null, log: [] })
   return runs.get(id)
 }
 
@@ -324,6 +324,8 @@ function header(els, rows) {
   const { Text } = els
   const s = summary(rows)
   const parts = ['agentille', 'run ' + lastRun, s.working + ' working', s.done + ' done', tokens(s.tok) + ' tok']
+  const formation = runs.get(lastRun)?.formation
+  if (formation) parts.splice(2, 0, formation)
   if (squads.length) parts.push('squads: ' + squads.map((q) => q.name).join('+'))
   parts.push('/agt-deck')
   return Text({ dimColor: true, children: [parts.join(' · ')] })
@@ -525,6 +527,7 @@ export function register(on) {
     agtTurn = true
     lastRun = runId
     const run = runState(runId)
+    run.formation = formationOf(hdr) ?? run.formation
     if (role === 'executor' && hdr.mode === 'fix') run.fixes += 1
     const shared = Number((await $.store.get('fable:' + runId)) ?? 0)
     run.fable = Math.max(run.fable, shared)

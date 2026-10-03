@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'claude-code/testing'
-import { decide, parseHeader, roleOf, verdictOf } from '../../hooks/routing.js'
+import { decide, formationOf, parseHeader, roleOf, verdictOf } from '../../hooks/routing.js'
 
 const fresh = () => ({ revise: 0, fixes: 0, fable: 0 })
 const S = { autoFable: true, maxFablePerRun: 1, fableWeeklyCeiling: 60 }
@@ -70,6 +70,21 @@ describe('Fable is rare', () => {
     expect(decide({ role: 'planner', hdr: { fable: 'forced' }, run: fresh(), settings: S }).model).toBe('fable')
     expect(decide({ role: 'code-reviewer', hdr: { fable: 'forced' }, run: fresh(), settings: S }).model).toBe('sonnet')
     expect(decide({ role: 'code-reviewer', hdr: { fable: 'forced', size: 'large' }, run: fresh(), settings: S }).model).toBe('fable')
+  })
+})
+
+describe('formations', () => {
+  test('the adversary is routed: sonnet high, opus high on risk, never Fable', async () => {
+    expect(roleOf('agentille:agentille-adversary')).toBe('adversary')
+    expect(decide({ role: 'adversary', hdr: {} })).toMatchObject({ model: 'sonnet', effort: 'high' })
+    expect(decide({ role: 'adversary', hdr: { risk: 'money' } })).toMatchObject({ model: 'opus', effort: 'high' })
+    expect(decide({ role: 'adversary', hdr: { fable: 'forced' } }).model).not.toBe('fable')
+  })
+
+  test('only known formations are read off the header', async () => {
+    expect(formationOf(parseHeader('[agt run=a1 formation=duel]'))).toBe('duel')
+    expect(formationOf(parseHeader('[agt run=a1 formation=swarm]'))).toBe(null)
+    expect(formationOf(null)).toBe(null)
   })
 })
 

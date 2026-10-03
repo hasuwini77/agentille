@@ -67,6 +67,12 @@ const LOOKS = {
   },
 }
 
+// Horns: the gauntlet's red-team tester.
+LOOKS.adversary = {
+  hat: [BLANK, BLANK, '..h..........h..', '..hh........hh..', '...hh......hh...', '....hhhhhhhh....'],
+  over: { 8: '___dkkddddkkd___' },
+}
+
 const NO_HAT = { hat: [BLANK, BLANK, BLANK, BLANK, BLANK, BLANK] }
 
 export function modelKey(model) {

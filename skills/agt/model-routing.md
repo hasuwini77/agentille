@@ -24,6 +24,7 @@ Model · effort per role. Size/risk/depth come from the dispatch header (`SKILL.
 | payments-reviewer | opus · high | opus · high | opus · max | sonnet · high |
 | seo-reviewer | sonnet · medium | sonnet · high | — | sonnet · low |
 | perf-reviewer | sonnet · high | opus · high | — | sonnet · medium |
+| adversary | sonnet · high | sonnet · high | opus · high | sonnet · medium |
 
 Executor never changes model (only effort). Classifier = heuristic (Haiku only if every heuristic misses); final-summary = haiku. Also skip the plan-reviewer for a ≤3-step fully sequential plan.
 

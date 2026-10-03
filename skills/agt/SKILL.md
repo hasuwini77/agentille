@@ -14,12 +14,12 @@ You are the **agentille orchestrator**. Your job is to take one user prompt and 
 When this skill is invoked (`/agt <task>`):
 
 1. **Read the profile** from `~/.agentille/profile.json`. If it doesn't exist, tell the user to run `/agentille-init` and stop.
-2. **Classify the task** — resolve via the Dispatch decision table below (authoritative). Stage 1 fast-path (rows 1–8) is inline; Stage 2 runs only when row 9 fires. If Stage 1 resolved the mode, use `classifier.md` for the subagent roster. If Stage 2 ran, its returned `{mode, roster}` is used directly — do not re-run `classifier.md` on top of it. Consult `classifier.md` as a last-resort parse-error fallback only if Stage 2 itself errors.
+2. **Classify the task** — resolve via the Dispatch decision table below (authoritative). Stage 1 fast-path (rows 1–9) is inline; Stage 2 runs only when row 10 fires. If Stage 1 resolved the mode, use `classifier.md` for the subagent roster. If Stage 2 ran, its returned `{mode, roster}` is used directly — do not re-run `classifier.md` on top of it. Consult `classifier.md` as a last-resort parse-error fallback only if Stage 2 itself errors.
 3. **Pick the roster** — for subagent mode, see `roster.md`. For team mode, the roster is the resolved team template's `teammates` array.
-4. **Pick the model per role** using `model-routing.md`.
+4. **Pick the model + effort per role** using `model-routing.md`, and start every `agentille:agentille-*` dispatch with the header in "Dispatch header" below.
 5. **Apply the profile** to every subagent prompt — communication style, tone, challenge level, never-do rules, honesty level.
 6. **Clarify before planning** — when `preTaskQuestioning` is `always` (or `ambiguous-only` and the task is genuinely ambiguous), resolve the plan-changing unknowns with the user *before* building the plan. See "Clarify before planning" below. Explore the codebase to answer what you can; ask only what actually forks the plan.
-7. **Plan, then review the plan** — for multi-step tasks the planner drafts the plan and the **plan-reviewer** critiques it (goal correctness, coverage, parallel-safety, real verification) before any executor runs. One REVISE round, then proceed. Skip the review on `thinkingDepth=quick`. **Skip-tier:** also skip even in team mode when the plan is ≤3 steps AND all steps are sequential (no parallel slices) — there is no parallel-safety risk to catch; see Step 3 model table and `model-routing.md` → "Default routing".
+7. **Plan, then review the plan** — for multi-step tasks the planner drafts the plan and the **plan-reviewer** critiques it (goal correctness, coverage, parallel-safety, real verification) before any executor runs. REVISE → re-dispatch the planner → review again. A **second** REVISE → re-dispatch the planner once more (the mod decides Opus-max vs Fable — see `model-routing.md` → "Escalation ladder"), then proceed **without** a third review. Skip the review on `thinkingDepth=quick`. **Skip-tier:** also skip even in team mode when the plan is ≤3 steps AND all steps are sequential (no parallel slices) — there is no parallel-safety risk to catch; see `model-routing.md` → "Default routing".
 8. **Persist the context pack, then dispatch in dependency order.** Create the run directory (`~/.agentille/state/run-<id>/`) on **every** non-solo run. When a planner ran, write its `CONTEXT-PACK` to a run-scoped file (`~/.agentille/state/run-<id>/context-pack.md`, via the Write tool) and dispatch each executor with **only its slice** — never the whole pack, never "re-explore the repo." Pass every executor a `checkpoint:` path inside the run dir (`checkpoint-<name>.md`) — executors checkpoint at committable boundaries and self-report context pressure via a `CONTEXT` ping; you rotate in a fresh successor seeded from checkpoint + slice (see `agents/agentille-executor.md` → "Context discipline" and `team-mode.md` → "Context rotation"). Parallelize independent steps only where the task contains genuinely disjoint file sets (≤3 executors at a time). See "Discover once, reuse everywhere" below. The run dir is scratch state, not an artifact — clean it up after the Debrief.
 
    **Cockpit seam (mandatory, non-solo, cockpit-enabled runs only).** If `AGENTILLE_COCKPIT=1` (env) **or** `profile.cockpit.enabled === true`, perform the following **before** the first `Agent` dispatch — the hook fires on that dispatch, so the mapping and meta must already exist:
@@ -63,24 +63,24 @@ When this skill is invoked (`/agt <task>`):
 | 4 | `profile.team.defaultMode === 'subagent'` | **subagent** | — |
 | 5 | `profile.team.defaultMode === 'solo'` | **solo** | — |
 | 6 | Trivial: exactly one file named AND no architectural verb (`refactor`/`design`/`architect`/`migrate`/`redesign`/`restructure`) | **solo** | — |
-| 7 | Task verb = `review` | **team** | review-team |
-| 8 | Task verb = `debug` | **team** | incident-team |
-| 9 | Build task with **≥2 genuinely disjoint parallel slices across 2+ dependency waves (3+ buckets)** AND the `Workflow` tool available | **workflow** | — |
+| 7 | Task verb = `review` | **subagent** (parallel background reviewer subagents) | — |
+| 8 | Task verb = `debug` | **subagent** (executor debug loop) | — |
+| 9 | Build task with **≥2 genuinely disjoint parallel slices across 2+ dependency waves (3+ buckets)** | **herdr** inside Herdr, else **workflow** if the `Workflow` tool is available | — |
 | 10 | Otherwise | **Stage 2** (inline Haiku classify) — its returned `{mode, template, roster}` is authoritative | per Stage 2 |
 
-**Transport substitution — a `team` result runs as `herdr` when Herdr is available.** Herdr mode is not a separate decision: it is the better *execution shape* for the exact same call. Any row above that resolves to **team** re-resolves to **herdr** when `HERDR_ENV=1` and the `herdr` binary is on PATH. The decision logic, the roster, the model routing, and the ≥2-disjoint-slices bar are all unchanged — only the workers move, from agents nested inside the lead's session to sibling panes the multiplexer can see, close, and run other vendors in. `--mode herdr` forces it; `--mode team` forces the legacy nested path. When Herdr is absent, everything below applies unchanged. See `herdr-mode.md`.
+**Agent teams are never auto-selected.** A **team** runs ONLY via rows 1–2 (`--team <name>` / `--mode team`). Stage 2 never returns `team`: on ≥2 genuinely disjoint slices it returns **parallel**, which runs as **herdr** inside Herdr (`HERDR_ENV=1` and the `herdr` binary on PATH — sibling panes the multiplexer can see, close, and run other vendors in; `--mode herdr` forces it), else **workflow** when the `Workflow` tool exists, else subagent waves. See `herdr-mode.md`.
 
-Any **team** result must pass the team pre-flight (env flag `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1`, Claude Code ≥ 2.1.178, daily soft cap) — see `team-mode.md`. **This floor gates team mode only** — solo, subagent, and workflow modes are unaffected on older builds. On any pre-flight or spawn failure, degrade to subagent mode.
+Any forced **team** must pass the team pre-flight (env flag `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1`, Claude Code ≥ 2.1.178, daily soft cap) — see `team-mode.md`. **This floor gates team mode only** — solo, subagent, and workflow modes are unaffected on older builds. On any pre-flight or spawn failure, degrade to subagent mode.
 
 Row #9 (workflow) requires the `Workflow` tool to be available at runtime. If it is absent (Claude Code < 2.1.154, a Pro-plan session without `/config` → "Dynamic workflows" enabled, `CLAUDE_CODE_DISABLE_WORKFLOWS=1`, or `disableWorkflows: true`), degrade silently to in-session subagent wave dispatch and emit one log line. Opt-in note: invoking `Workflow` from a user-triggered `/agt` run satisfies the tool's explicit-opt-in requirement (skill-directed call); never invoke it outside one. See `skills/agt/workflow-mode.md` for the full contract.
 
-Rows #1–2 are a **force** (the user typed `--team`/`--mode team`). Run the inline disjoint-parallelism heuristic first: real parallel work → spawn the team. **Overkill** (no ≥2 disjoint slices) → don't obey blindly — when `preTaskQuestioning` permits, **ask once** whether to downgrade to subagent (recommended, ~¼ the tokens) or force the team anyway; when `preTaskQuestioning: never`, honor the force and emit the `honestyLevel`-gated heads-up instead (see `team-mode.md` → "Honesty on a forced team"). **Always surface the resolved mode + a one-clause reason** in the brief's `mode:` row and on the recon ping — for Stage 2 that's its `reasoning` string; for a Stage 1 rule it's the rule itself (e.g. "forced", "review verb → review-team", "single file, no architectural verb → solo"). The pick is never a black box and never a prose paragraph (see `display.md` → "Frame 2").
+Rows #1–2 are a **force** (the user typed `--team`/`--mode team`). Run the inline disjoint-parallelism heuristic first: real parallel work → spawn the team. **Overkill** (no ≥2 disjoint slices) → don't obey blindly — when `preTaskQuestioning` permits, **ask once** whether to downgrade to subagent (recommended, ~¼ the tokens) or force the team anyway; when `preTaskQuestioning: never`, honor the force and emit the `honestyLevel`-gated heads-up instead (see `team-mode.md` → "Honesty on a forced team"). **Always surface the resolved mode + a one-clause reason** in the brief's `mode:` row and on the recon ping — for Stage 2 that's its `reasoning` string; for a Stage 1 rule it's the rule itself (e.g. "forced", "review verb → subagent reviewers", "single file, no architectural verb → solo"). The pick is never a black box and never a prose paragraph (see `display.md` → "Frame 2").
 
 ### Step 2 — Resolve ROSTER
 
 **Team mode** → roster = the resolved template's `teammates` array (`.claude-plugin/teams/<template>.yaml`). Drop any reviewer with nothing to review (e.g. design-reviewer when the change set has no UI/frontend surface).
 
-**Subagent mode** → classify into ONE category. If Step 1 resolved via rows 1–8 (fast-path), run the inline heuristics from `classifier.md`. If Step 1 resolved via row 9 (Stage 2 Haiku classify), use the `roster` returned by that call directly — do not re-classify. Then dispatch:
+**Subagent mode** → classify into ONE category. If Step 1 resolved via rows 1–9 (fast-path), run the inline heuristics from `classifier.md`. If Step 1 resolved via row 10 (Stage 2 Haiku classify), use the `roster` returned by that call directly — do not re-classify. Then dispatch:
 
 | Category | planner | plan-reviewer | ui-prototyper | executor | code-reviewer | design-reviewer | security-reviewer |
 |---|---|---|---|---|---|---|---|
@@ -97,21 +97,23 @@ Rows #1–2 are a **force** (the user typed `--team`/`--mode team`). Run the inl
 
 > **plan-reviewer** runs only when a planner ran, and is **skipped on `thinkingDepth=quick`** (quick = trust the plan and go). It reviews the plan *artifact* before any executor starts — see `agents/agentille-plan-reviewer.md`.
 
-### Step 3 — Resolve MODELS (per role)
+### Step 3 — Resolve MODELS + EFFORT (per role)
 
-| Role | Default | Override |
-|---|---|---|
-| planner | Opus | → Sonnet if `thinkingDepth=quick` (large/cross-cutting plans stay Opus) |
-| plan-reviewer | **Sonnet** | → **Opus** for a large/cross-cutting plan (≥6 steps or shared-contract/arch step); **skip** if `thinkingDepth=quick`; **also skip** for a ≤3-step fully sequential plan |
-| ui-prototyper | Opus | → Sonnet if `thinkingDepth=quick`; → Fable under `--fable` |
-| executor | Sonnet | never up or down |
-| code-reviewer | **tiered** | **Sonnet** for a small diff (single file or ≤~150 LoC, no cross-cutting/security); **Opus** for a large/cross-cutting diff; → Sonnet if `thinkingDepth=quick` |
-| design-reviewer | Opus | never downgrade (savings come from viewport scope, not model); → Fable under `--fable` |
-| security-reviewer | **Opus** | → Sonnet if `thinkingDepth=quick` |
-| classifier | heuristic, no LLM | Haiku only if every heuristic misses |
-| final-summary | Haiku | — |
+One table: `model-routing.md` → "Default routing". Classifier = heuristic, final-summary = Haiku. Executor never changes model. Declare the model on every dispatch (fallback when mods are off); a loaded mod overrides it and sets effort.
 
-Two review roles tier their model between Sonnet and Opus by the size of the work — see `model-routing.md` → "Tiering the review roles by size" for the exact thresholds. Always declare the model explicitly on each dispatch — never let it default.
+### Dispatch header
+
+Every `agentille:agentille-*` Agent dispatch prompt starts with ONE header line:
+
+`[agt run=<run-id> size=<small|large> risk=<none|auth|money|data> mode=<build|fix|diagnose|review|research> fable=<auto|forced>]`
+
+- `run` — the run id (same as `~/.agentille/state/run-<id>/`).
+- `size=large` — plan ≥6 steps / shared contracts, or diff >1 file with logic or >~150 LoC, or public API/schema change. Else `small`.
+- `risk` — what the diff/plan touches: auth/sessions → `auth`, money/payments/webhooks → `money`, data migrations → `data`; else `none`.
+- `mode=fix` — each executor (re)dispatch that attempts a fix; `diagnose` — read-only root-cause planner dispatch; `review` — reviewers; `research` — research planner; `build` — default.
+- `fable=forced` only when the user typed `--fable`; else `auto`.
+
+The orchestrator still passes an explicit `model:` on every dispatch (fallback under `disableAllHooks`, `--safe-mode`, VS Code chat). When the agentille mod (`hooks/register.js`) is loaded it overrides model, sets effort, shows a toast and appends `~/.agentille/state/run-<id>/routing.jsonl` on every escalation. `/agt-routing` prints this session's routing decisions. Escalation rules: `model-routing.md` → "Escalation ladder".
 
 ### Run modifier: `--plan` (dry-run — stop after the plan)
 
@@ -126,10 +128,9 @@ Two review roles tier their model between Sonnet and Opus by the size of the wor
 
 `--fable` is **orthogonal to mode and `--plan`** — it doesn't change the roster or the stop point. With `--fable` present, the flag forces the **Fable ceiling** on all judgment-heavy roles this run: planner, ui-prototyper, design-reviewer, security-reviewer, and any size/risk-escalated code-reviewer or plan-reviewer. Executor stays Sonnet; classifier and final-summary stay Haiku — those are never upgraded.
 
-- **Fallback:** on an older build where the `fable` alias doesn't resolve, a failed dispatch is re-dispatched **once** with `opus` and the downgrade is noted in the run log — never a hard fail.
-- `fable` appears only in dispatch-time model parameters, never in agent-def `model:` frontmatter — that placement rule is what keeps the Opus fallback reachable.
+- Send `fable=forced` in the dispatch header; the mod bypasses the escalation gate (the user chose it). Fallback + placement rule: `model-routing.md`.
 - Composes freely: `/agt --fable --plan "<task>"` previews the Fable-ceiling roster; `/agt --fable --team feature-team "<task>"` runs the full team at Fable depth.
-- See `model-routing.md` → "`--fable` — the Fable ceiling" for details.
+- See `model-routing.md` → "`--fable` — manual override" for details.
 
 ## Clarify before planning
 
@@ -145,7 +146,7 @@ The discipline (this is deliberately *not* a relentless interview):
 2. **Ask the plan-changing questions, each with a recommended default.** Use the question tool; batch related ones. Walk dependent decisions in order. Phrase every option so the user can just accept your recommendation.
 3. **Stop when more questions won't change a single step.** Typically 2–5 questions, not twenty. Over-asking burns the user's patience as surely as under-asking burns tokens on the wrong plan. Resolve the ambiguity that matters, then move.
 
-**Clarify can decide the execution mode.** Team vs subagent turns on exactly one thing: are there ≥2 independent slices that can build at once? When that's genuinely unknowable from the prompt (and `preTaskQuestioning` permits), the parallelism question *is* a plan-changing question — e.g. *"Are the API and UI independent enough to build in parallel, or must the API land first?"* Its answer re-resolves the mode (re-run the Dispatch decision table, Step 1). Don't finalize team vs subagent on a guess when one question settles it. (A `--team` force skips this — the user already decided; see `team-mode.md` → "Honesty on a forced team".)
+**Clarify can decide the execution mode.** Parallel vs sequential turns on exactly one thing: are there ≥2 independent slices that can build at once? When that's genuinely unknowable from the prompt (and `preTaskQuestioning` permits), the parallelism question *is* a plan-changing question — e.g. *"Are the API and UI independent enough to build in parallel, or must the API land first?"* Its answer re-resolves the mode (re-run the Dispatch decision table, Step 1). Don't finalize parallel vs sequential on a guess when one question settles it. (A `--team` force skips this — the user already decided; see `team-mode.md` → "Honesty on a forced team".)
 
 **Clarify the viewport scope for UI work.** When the task touches frontend (the design-reviewer's hasUI heuristic fires) and `preTaskQuestioning` permits, ask one question *before* dispatching the design-reviewer: **which viewports actually matter** — desktop only / desktop + mobile / all three (desktop + tablet + mobile)? The design-reviewer captures a full-page screenshot per viewport and scores a Responsive pillar; capturing viewports the user doesn't care about is the single heaviest waste in a UI run (vision tokens dominate). Pass the chosen set into the design-reviewer dispatch as `viewports: [...]`. **Fallback when you cannot ask** (`preTaskQuestioning: never`, or no UI surface yet visible): default to **all three** — never silently *reduce* coverage, because a dropped viewport can hide a regression the user did care about. Reducing the set is a user decision; expanding to full coverage is the safe default.
 
@@ -180,7 +181,7 @@ This plugin ships seven **agent definitions** (in the plugin's `agents/` dir), o
 - **agentille:agentille-design-reviewer** — for UI work; screenshots + axe-core scan + WCAG 2.2 a11y audit (`accessibility` / `web-design-guidelines` skills) + visual critique (read-only on source)
 - **agentille:agentille-security-reviewer** — severity-classified security review (read-only)
 
-Each agent def carries its own default `model` and `tools` allowlist, but still pass an **explicit `model`** on every dispatch per `model-routing.md` — the static frontmatter default can't express the `thinkingDepth` overrides. The `agentille-` prefix avoids colliding with the user's other installed `planner`/`code-reviewer` agents (e.g. superpowers, gsd).
+Each agent def carries its own default `model` and `tools` allowlist; still pass an explicit `model` per `model-routing.md`. The `agentille-` prefix avoids colliding with the user's other installed `planner`/`code-reviewer` agents (e.g. superpowers, gsd).
 
 **Foreground vs background (subagents run background-by-default since Claude Code v2.1.198).** Any dispatch whose result gates the next step — the planner → plan-reviewer → executor chain, a single executor whose diff feeds the reviewer, any sequential wave — MUST pass `run_in_background: false` so the result returns before the pipeline advances. Background dispatch is reserved for genuinely parallel spawns (concurrent executors on disjoint slices, pipelined reviewers). Every *named background* spawn is a persistent session and falls under the teardown obligation in Hard Rule #11 — shut it down once its handoff is consumed.
 
@@ -198,7 +199,7 @@ See `skills/agt/workflow-mode.md` for the full contract: bucket-graph → wave m
 
 The orchestrator supports Claude Code's Agent Teams primitive in addition to subagent dispatch. See `team-mode.md` for the full protocol. Highlights:
 
-- **Opt-in via `--team`**: `/agt --team <template> "<task>"` is the intended trigger and overrides `profile.team.defaultMode`. Without `--team`, auto-detection (Stage 1 in `team-mode.md`) decides subagent vs team vs solo and defaults to subagent.
+- **Opt-in via `--team` only**: `/agt --team <template> "<task>"` (or `--mode team`) is the sole trigger. Auto-detection never picks a team — it resolves solo / subagent / herdr / workflow. Teams cost ~4× tokens.
 - **Teammates are the same agent defs**: each teammate is spawned from `agentille:agentille-*` (e.g. `agentille:agentille-executor`). This is why the workers MUST be agent definitions — teammate definitions ignore `skills`/`mcpServers` frontmatter, so a skill cannot *act as* a teammate. **But a teammate still loads skills from the user's/project's settings** (the same as any session) — so a teammate executor *can* invoke installed UI-build skills (`impeccable` / `ui-ux-pro-max`) on its slice. The lead passes each teammate a **skill budget** in its spawn prompt — which skills it may use for its slice — so capability lands where it helps without every teammate auto-loading heavy skills. See `team-mode.md` → "Skill budget".
 - **Three starter templates** (role manifests, see `.claude-plugin/teams/`): `feature-team`, `review-team`, `incident-team`.
 - **Split-pane "wow" is a user setting, not ours**: whether teammates appear in their own tmux/iTerm2 pane is controlled by the user's `teammateMode` in `~/.claude/settings.json` (`"tmux"` / `"auto"` / `"in-process"`) plus an installed tmux/iTerm2 — agentille does not control it.
@@ -262,7 +263,7 @@ If you can't write the file for any reason, skip silently — never let logging 
 - `agt/SKILL.md` — this file (master orchestrator)
 - `agt/classifier.md` — task-category decision tree
 - `agt/roster.md` — task-category → agent roster
-- `agt/model-routing.md` — agent role → model selection
+- `agt/model-routing.md` — agent role → model + effort, escalation ladder
 - `agt/team-mode.md` — team-mode auto-detection, Stage 1/Stage 2 dispatch, pre-flight checks, cost transparency
 - `agt/workflow-mode.md` — Dynamic Workflow tier: bucket-graph → wave mapping, graceful degradation, adversarial-verify pattern, worked example script
 - `agt/display.md` — the Transit Rail: progress display (TodoWrite spine + drawn-once brief, thin pings, parallel fanout, diff-fence verdicts, debrief)

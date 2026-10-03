@@ -7,11 +7,11 @@
 ╚═╝  ╚═╝ ╚═════╝ ╚══════╝╚═╝  ╚═══╝   ╚═╝   ╚═╝╚══════╝╚══════╝╚══════╝
 ```
 
-> A personal AI coding orchestrator for Claude Code. Type **`/agt "task"`** and it classifies the work, **smart-picks subagents or a full agent team**, routes the right Claude model to each, and applies *your* voice to every prompt.
+> A personal AI coding orchestrator for Claude Code. Type **`/agt "task"`** and it classifies the work, **smart-picks solo, subagents, parallel panes or workflows (agent teams are opt-in)**, routes the right Claude model to each, and applies *your* voice to every prompt.
 >
 > Powered by **[Systown AI Lab](https://systown.ai)**.
 
-One command instead of manually chaining skills. Planning and review run on Opus, execution on Sonnet, and UI prototyping + code + design review are built in. `/agt` decides on its own whether the work needs a real Claude Code **agent team** (independent sessions that talk to each other) or cheaper in-session **subagents** — and tells you which it picked and why.
+One command instead of manually chaining skills. Planning and review run on Opus, execution on Sonnet, and UI prototyping + code + design review are built in. `/agt` decides on its own between solo, in-session **subagents**, and parallel workers (Herdr panes or a Dynamic Workflow) — and tells you which it picked and why. Real Claude Code **agent teams** run only when you force them with `--team`.
 
 ---
 
@@ -46,7 +46,7 @@ That's it. `/agt` does the rest: classify → plan (if needed) → implement →
 ## What you get
 
 - **One-command orchestration.** `/agt "task"` routes work through the right agents automatically — no manual skill-chaining.
-- **Right model per role.** Opus plans and runs the standard reviews, Sonnet writes the code and clears routine reviews, Haiku runs the cheap edges (classify + summary). The heaviest escalations — large cross-cutting plans, large diffs, and security reviews — automatically escalate to Opus. Tokens go where they earn the most.
+- **Right model per role.** Opus plans and runs the standard reviews, Sonnet writes the code and clears routine reviews, Haiku runs the cheap edges (classify + summary). The heaviest escalations — large cross-cutting plans, large diffs, and security reviews — automatically escalate to Opus. Tokens go where they earn the most. With the bundled mod loaded (v1.34+), model and effort are enforced per dispatch and escalate on observed failures (Opus max, then Fable only after two failed attempts, gated by usage); `/agt-routing` shows the decisions.
 - **Parallel-safe by default.** Each chunk runs in its own git worktree (branched off your *current* branch, never assumed `main`), atomic commits, then integrates adaptively — PR, push, or local branch.
 - **Context-disciplined agents.** Chunks are planned to fit ~30% of an executor's window; at runtime executors checkpoint at every commit and, if their context fills, rotate out to a fresh successor seeded from the checkpoint — lossless, because the state lives in git + a checkpoint file, never the conversation.
 - **Voice-aware.** Your profile shapes every prompt. Ask for brutal feedback once, and every agent is brutal.
@@ -58,7 +58,7 @@ When you run `/agt "task"`, the orchestrator:
 
 1. **Reads your profile** (`~/.agentille/profile.json`) for communication style, tone, and rules.
 2. **Classifies the task** — feature, bugfix, refactor, design, review, debug, research, or planning.
-3. **Smart-picks the execution mode** — in-session **subagents** (default) or a real **agent team**, based on whether the work has ≥2 independent slices that can build at once. It shows you the pick and a one-line reason every run.
+3. **Smart-picks the execution mode** — in-session **subagents** (default) or parallel workers, based on whether the work has ≥2 independent slices that can build at once. It shows you the pick and a one-line reason every run.
 4. **Builds the roster** — only the agents the task needs (no design reviewer on a backend change), routes a model per role, and applies your voice to every prompt.
 5. **Runs in dependency order**, parallelizing independent work (max 3 executors). The repo is explored **once** and each executor gets only its slice — so splitting work saves tokens instead of paying an N× rediscovery tax. Executors checkpoint as they go and rotate to a fresh successor if their window fills, so no half-full agent limps through the trickiest code.
 
@@ -107,18 +107,18 @@ The two build layers don't overlap (aesthetics vs correctness), and a framework 
 
 | What you type | What you get |
 |---|---|
-| `/agt "task"` (no flags) | Auto: solo if trivial; subagent if sequential/single-slice; review-team if verb is "review"; incident-team if verb is "debug"; Haiku classify for everything else |
-| `/agt "review …"` | Auto → `review-team` (verb fast-path) |
-| `/agt "debug …"` | Auto → `incident-team` (verb fast-path) |
+| `/agt "task"` (no flags) | Auto: solo if trivial; subagent for sequential/single-slice, "review" (parallel reviewer subagents) and "debug" (executor debug loop); Haiku classify for everything else (parallel work → herdr in Herdr, else workflow, else subagent waves) |
+| `/agt "review …"` | Auto → subagent reviewers (verb fast-path) |
+| `/agt "debug …"` | Auto → subagent debug loop (verb fast-path) |
 | `/agt --team feature-team "task"` | Force the build team (ui-prototyper + executors + code/design review) |
 | `/agt --team review-team "task"` | Force the audit team (code + design + security review) |
 | `/agt --team incident-team "task"` | Force the debug team (3 executors race competing theories) |
 | `/agt --mode subagent "task"` | Force subagent mode for one run |
 | `/agt --fable "task"` | Force the **Fable ceiling** — Claude Fable 5 (the tier above Opus) runs every judgment-heavy role this run (composes with `--team` and `--plan`); costs more than Opus, falls back to Opus on builds without the `fable` alias |
 
-Any `--team` overrides the auto-pick; if the work has no ≥2 disjoint slices, `/agt` flags it as overkill and asks whether to downgrade (see below).
+Agent teams are **never auto-picked** — only a `--team` flag starts one, and it overrides the auto-pick; if the work has no ≥2 disjoint slices, `/agt` flags it as overkill and asks whether to downgrade (see below).
 
-Stage 2 (a lightweight inline Haiku classify) only fires when Stage 1 fast-paths all miss. It promotes to `team` only when ≥2 genuinely disjoint slices can build in parallel — it won't pay ~4× tokens for sequential work.
+Stage 2 (a lightweight inline Haiku classify) only fires when Stage 1 fast-paths all miss. It never returns `team`; with ≥2 genuinely disjoint slices it returns parallel (herdr / workflow / subagent waves).
 
 Claude Code gives you two ways to parallelize, and they're genuinely different:
 
@@ -137,7 +137,7 @@ You decide. (`preTaskQuestioning: never` skips the ask, honors the force, and no
 
 ## Team mode (optional)
 
-When `/agt` picks a team — or you force one with `--team` — each role becomes an independent Claude session with its own context window that messages peers and shares a task list. Best when parallel perspectives genuinely help — multi-pillar review, cross-layer features, or competing-hypothesis debugging.
+When you force a team with `--team` — each role becomes an independent Claude session with its own context window that messages peers and shares a task list. Best when parallel perspectives genuinely help — multi-pillar review, cross-layer features, or competing-hypothesis debugging.
 
 ### The teams
 
@@ -206,7 +206,7 @@ Keep your repo on the **WSL filesystem** (`~/projects/…`), not `/mnt/c/…` �
 
 **`--plan` (dry-run).** Stops after the plan + plan-review — before any executor or teammate spawns — so you approve the *shape and cost* first; a plain "go" then runs that exact plan. Pairs with any mode (`/agt --plan --team feature-team "…"` previews the team roster + ~4× cost without spawning). The cheapest guard against building the wrong thing.
 
-**`--fable` (Fable ceiling — top-tier escalation).** Claude **Fable 5** is the model tier above Opus. This flag forces it onto every judgment-heavy role for the run — planner, security-reviewer, design-reviewer, ui-prototyper, and any size-triggered code-reviewer or plan-reviewer. Executor stays Sonnet; classifier and final-summary stay Haiku. Composes with `--plan` and `--team`. It costs more than Opus, so it's never applied automatically — and on an older Claude Code build without the `fable` alias, each role falls back to Opus with a note in the run log. For routine work, skip the flag: large/cross-cutting diffs and plans already auto-escalate to Opus.
+**`--fable` (Fable ceiling — top-tier escalation).** Claude **Fable 5** is the model tier above Opus. This flag forces it onto every judgment-heavy role for the run — planner, security-reviewer, design-reviewer, ui-prototyper, and any size-triggered code-reviewer or plan-reviewer. Executor stays Sonnet; classifier and final-summary stay Haiku. Composes with `--plan` and `--team`. It costs more than Opus, so it's never applied by default (the mod only considers it after two observed failures at Opus max) — and on an older Claude Code build without the `fable` alias, each role falls back to Opus with a note in the run log. For routine work, skip the flag: large/cross-cutting diffs and plans already auto-escalate to Opus.
 
 `--team` also overrides your profile's `team.defaultMode` for that run. (Overkill handling — the downgrade ask — is covered in [Subagents vs teams](#subagents-vs-teams--agt-smart-picks).)
 

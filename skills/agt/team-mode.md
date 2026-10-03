@@ -2,10 +2,12 @@
 
 > **Authority:** the dispatch decision table in `skills/agt/SKILL.md` is the tie-breaker. This doc is the detail/rationale — if it ever conflicts with that table, the table wins.
 
+> **Legacy, opt-in only.** Teams run ONLY via `--team <name>` / `--mode team` (~4× tokens). Auto-detection never selects one: review/debug verbs resolve to subagent mode, and ≥2 disjoint slices resolve to herdr / workflow / subagent waves.
+
 The orchestrator picks one of five execution modes per task:
 
 - **subagent** (default, always available) — dispatches roles via the `Agent` tool, results return to the orchestrator. The v1.0 path.
-- **herdr** (preferred whenever available) — the same decision as `team`, executed as sibling **Herdr panes** instead of nested teammates: workers are visible to the multiplexer, their completion is a readable state rather than a promise, teardown is `pane close`, and each pane can run a different vendor (`claude` / `codex` / a local model). Requires `HERDR_ENV=1` and the `herdr` binary. **Any team decision re-resolves to herdr when Herdr is present** — see `herdr-mode.md`.
+- **herdr** (the parallel transport inside Herdr) — chosen for ≥2 disjoint slices, executed as sibling **Herdr panes** instead of nested teammates: workers are visible to the multiplexer, their completion is a readable state rather than a promise, teardown is `pane close`, and each pane can run a different vendor (`claude` / `codex` / a local model). Requires `HERDR_ENV=1` and the `herdr` binary. See `herdr-mode.md`.
 - **workflow** (experimental) — emits a Dynamic Workflow script the Claude Code runtime executes in the background; scripted fan-out with no inter-agent messaging. See `workflow-mode.md`.
 - **team** (opt-in, experimental) — uses Claude Code's Agent Teams primitive: each role is an independent Claude session, peers can message each other via `SendMessage`, shared task list. Requires `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1` and Claude Code **2.1.178+** (this skill uses the no-setup-step flow — a team forms on the first teammate spawn; before 2.1.178 the runtime required the now-removed `TeamCreate`/`TeamDelete` setup flow, which this skill never performs).
 - **solo** — execute inline in this session, no spawn. For trivial tasks (one file mentioned, no architectural verbs).
@@ -14,13 +16,13 @@ The orchestrator picks one of five execution modes per task:
 
 ## Auto-detection (Stage 1)
 
-> The full Stage 1 fast-path table (rows 1–9, first match wins) is the authoritative source at `SKILL.md` → "Dispatch decision table" Step 1. Reproduce the decision logic inline when dispatching — do not re-read that table at runtime, it is embedded here for reference only.
+> The full Stage 1 fast-path table (rows 1–10, first match wins) is the authoritative source at `SKILL.md` → "Dispatch decision table" Step 1. Reproduce the decision logic inline when dispatching — do not re-read that table at runtime, it is embedded here for reference only.
 >
-> Short form: flags first (--team/--mode), then profile blocks (enabled=false, defaultMode), then solo heuristic, then verb shortcuts (review/debug), then Stage 2.
+> Short form: flags first (--team/--mode), then profile blocks (enabled=false, defaultMode), then solo heuristic, then verb shortcuts (review/debug → subagent), then Stage 2 (never returns `team`).
 
 ## Honesty on a forced team (`--team` / `--mode team`)
 
-A `--team`/`--mode team` flag is a **force** — the user explicitly asked for a team, and that intent is respected. But forcing skips the judgment that would have told them whether a team is actually *warranted*. So before spawning a forced team, run the **disjoint-parallelism heuristic inline** (no LLM, no Stage 2 spawn): does the task decompose into **≥ 2 vertical slices with disjoint file sets that can build at once**? (Same criterion as `classifier.md` → "Team vs subagent honesty"; a competing-hypothesis debug or a multi-pillar review also count as warranted.)
+A `--team`/`--mode team` flag is a **force** — the user explicitly asked for a team, and that intent is respected. But forcing skips the judgment that would have told them whether a team is actually *warranted*. So before spawning a forced team, run the **disjoint-parallelism heuristic inline** (no LLM, no Stage 2 spawn): does the task decompose into **≥ 2 vertical slices with disjoint file sets that can build at once**? (Same criterion as `classifier.md` → "Parallel tiers"; a competing-hypothesis debug or a multi-pillar review also count as warranted.)
 
 - **Heuristic passes** (real parallelism, or an adversarial debug / multi-pillar review) → the force matched the work. Spawn the team, say nothing extra.
 - **Heuristic fails** (sequential work, or a single slice — a team would be *overkill*) → don't obey blindly, but don't override silently either. What happens next is governed by `preTaskQuestioning`:
@@ -41,22 +43,21 @@ This is the deliberate counterpart to auto-mode honesty: in **auto** mode `/agt`
 
 ## Stage 2 — lightweight Haiku classify
 
-When Stage 1 falls through (row 9), run an inline Haiku call with a tight classification prompt — do NOT spawn the full Opus planner just to get a mode decision. Reserve the planner for actual plan generation.
+When Stage 1 falls through (row 10), run an inline Haiku call with a tight classification prompt — do NOT spawn the full Opus planner just to get a mode decision. Reserve the planner for actual plan generation.
 
 Send Haiku a short prompt containing the user's task and ask it to return ONLY this JSON:
 
 ```json
 {
-  "mode": "subagent | team | solo",
-  "team_template": "feature-team | review-team | incident-team | null",
+  "mode": "subagent | parallel | solo",
   "roster": ["agentille:agentille-executor", "agentille:agentille-code-reviewer"],
   "reasoning": "one-sentence why"
 }
 ```
 
-Parse the JSON. If parsing fails, fall back to `mode: "subagent"` and log a one-line note. Never crash on a malformed classifier response. When Stage 2 returns a valid response, use its `roster` directly — do not re-run the heuristic classifier on top of it (authority: `SKILL.md` → "Dispatch decision table" Step 2).
+Parse the JSON. `parallel` runs as herdr in Herdr, else workflow when available, else subagent waves. If parsing fails, fall back to `mode: "subagent"` and log a one-line note. Never crash on a malformed classifier response. When Stage 2 returns a valid response, use its `roster` directly — do not re-run the heuristic classifier on top of it (authority: `SKILL.md` → "Dispatch decision table" Step 2).
 
-**When the mode hinges on a question, ask it.** Team vs subagent turns on one thing: are there ≥2 independent slices that can build at once? If that's genuinely unknowable from the prompt and the profile's `preTaskQuestioning` permits, don't guess — the lead resolves it in the clarify round (see `SKILL.md` → "Clarify before planning"), and the answer re-resolves the mode. Default the provisional `mode` to `subagent` until clarified; promote to `team` only once the parallelism is confirmed. A borderline team guess that turns out sequential is the exact ~4× waste this orchestrator exists to avoid.
+**When the mode hinges on a question, ask it.** Parallel vs subagent turns on one thing: are there ≥2 independent slices that can build at once? If that's genuinely unknowable from the prompt and the profile's `preTaskQuestioning` permits, don't guess — the lead resolves it in the clarify round (see `SKILL.md` → "Clarify before planning"), and the answer re-resolves the mode. Default the provisional `mode` to `subagent` until clarified; promote to `parallel` only once the parallelism is confirmed.
 
 ## Pre-flight check (team mode only)
 

@@ -2,6 +2,55 @@
 
 All notable changes to agentille are documented here.
 
+## [1.34.0] — 2026-10-03
+
+Routing moves from prose into code. A Claude Code mod (`hooks/register.js`)
+now enforces the model and effort of every `agentille:agentille-*` dispatch,
+and escalation to Fable happens only after failures the mod observes itself.
+
+### Added
+
+- **Routing mod** (`hooks/register.js` + `hooks/routing.js`, Claude Code ≥ 2.1.287).
+  `agent.spawn` sets the model from the routing table, `turn.step` sets
+  per-agent effort, `turn.complete` reads plan-review verdicts. Other plugins'
+  and built-in agents are never touched.
+- **Dynamic effort.** One table of model · effort per role, keyed by the
+  size, risk and mode the orchestrator declares in a one-line dispatch header
+  (`[agt run=… size=… risk=… mode=… fable=…]`).
+- **Escalation ladder.** Effort rises first: one plan REVISE → planner at
+  Opus max; fix attempt 2 → executor effort high, attempt 3 → max. Fable is
+  reached only after two observed failures (a second REVISE, or a diagnosis
+  after three failed fixes) and only through a gate: `routing.autoFable` not
+  false, at most `maxFablePerRun` (default 1), weekly usage below
+  `fableWeeklyCeiling` (default 60%). The executor never changes model.
+- `/agt-routing` lists this session's routing decisions; escalations show a
+  toast and append to the run's `routing.jsonl`.
+- `tests/mod/` — 13 tests run by `claude plugin test`.
+
+### Changed
+
+- **Agent teams are never auto-selected.** `review` and `debug` resolve to
+  subagents; parallel work runs as herdr panes inside Herdr, else a dynamic
+  workflow, else subagent waves. `--team` / `--mode team` still run teams.
+- Plan review allows a second round only through the escalation ladder,
+  then proceeds without a third review.
+- `validate.sh` mirrors the `model-routing.md` table against
+  `hooks/routing.js` and runs `claude plugin validate` + `claude plugin test`
+  when the CLI is present.
+
+### Fixed
+
+- Hook commands quote `${CLAUDE_PLUGIN_ROOT}`, so a plugin path with a space
+  no longer splits the command.
+
+### Rationale
+
+Prose routing depended on the orchestrator remembering to declare a model on
+every dispatch; a miss silently ran the parent's model. Escalating on
+evidence instead of a complexity guess keeps the top tier for the rare task
+that has already beaten Opus at max effort. Workflow `agent()` stages do not
+pass through `agent.spawn`, so workflow scripts keep explicit models.
+
 ## [1.33.0] — 2026-08-08
 
 Herdr mode: when the orchestrator runs inside a Herdr session, parallel workers

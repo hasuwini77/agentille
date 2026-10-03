@@ -22,6 +22,8 @@ Workflow wins over in-session subagent waves when all three hold:
 2. ≥2 waves (at least one dependency — B2 requires B1's output)
 3. The `Workflow` tool is available (see §3 — if absent, fall to subagent silently)
 
+> **Mod note:** Workflow `agent()` stages do NOT pass through the mod's `agent.spawn` hook (verified), so workflow scripts keep explicit `model:` per stage and get no dynamic effort or escalation.
+
 Workflow wins over team mode when peers do **not** need to message each other. Team = peer sessions for adversarial debate or cross-layer coordination (e.g. incident-team hypotheses, competing design reviewers). Workflow = scripted subagent fan-out, results summarized back to script variables — no inter-agent messaging required.
 
 **Opt-in compliance:** the `Workflow` tool requires explicit user opt-in. `/agt` satisfies it by construction — the user invoked a skill whose own instructions direct the Workflow call, which is one of the tool's sanctioned opt-in paths. No `ultracode` keyword or separate user ask is needed; never invoke `Workflow` outside a user-triggered `/agt` run.
@@ -37,7 +39,7 @@ Resolve in this order; first match wins.
 | 1 | `--team <name>` | **force team** — workflow is not considered |
 | 2 | `--mode <m>` | **force `<m>`** |
 | 3 | `--mode workflow` | **force workflow** (pre-flight still runs; degrades to subagent if unavailable) |
-| 4 | Stage 1 fast-path matches (rows 1–8, `SKILL.md`) | that row's result |
+| 4 | Stage 1 fast-path matches (rows 1–9, `SKILL.md`) | that row's result |
 | 5 | Stage 2 (Haiku classify) returns `mode: workflow` | **workflow** |
 
 **Key distinctions:**
@@ -46,7 +48,7 @@ Resolve in this order; first match wins.
 
 **Flag composition:**
 - `--plan` composes: with `--plan`, the orchestrator drafts the bucket-graph + wave plan + the would-be Workflow script and **HALTS** before launching it. The user approves the shape and cost before a single executor runs. A plain "go" resumes with that exact script (no re-planning).
-- `--fable` composes: forces the **Fable ceiling** (Claude Fable 5, alias `fable` — the tier above Opus) for all judgment-heavy roles (planner, ui-prototyper, design-reviewer, security-reviewer, size/risk-escalated reviewers). Executors remain Sonnet. On builds where the alias doesn't resolve, each failed dispatch falls back once to `opus` with a run-log note. See `model-routing.md` → "`--fable` — the Fable ceiling" and the `--fable` run modifier in `SKILL.md`.
+- `--fable` composes: forces the **Fable ceiling** (Claude Fable 5, alias `fable` — the tier above Opus) for all judgment-heavy roles (planner, ui-prototyper, design-reviewer, security-reviewer, size/risk-escalated reviewers). Executors remain Sonnet. On builds where the alias doesn't resolve, each failed dispatch falls back once to `opus` with a run-log note. See `model-routing.md` → "`--fable` — manual override" and the `--fable` run modifier in `SKILL.md`.
 
 ---
 

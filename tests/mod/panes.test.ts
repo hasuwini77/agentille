@@ -1,5 +1,5 @@
-import { describe, expect, test } from 'claude-code/testing'
-import { doneFile, herdrCloseArgv, herdrPaneIdOf, herdrPromptArgv, herdrSplitArgv, herdrStartArgv, isLead, newRunId, paneName, parseSpawnArgs, parseTmuxList, pickTransport, reapPool, splitName, tmuxKillArgv, tmuxPaneAgents, tmuxPaneIdOf, tmuxSplitArgv, tmuxTagArgvs, transportBlock, TMUX_LIST_FORMAT } from '../../hooks/panes.js'
+import { describe, expect, mock, test } from 'claude-code/testing'
+import { doneFile, herdrCloseArgv, herdrPaneIdOf, herdrPromptArgv, herdrSplitArgv, herdrStartArgv, isFreshDone, isLead, newRunId, paneName, parseSpawnArgs, parseTmuxList, pickTransport, quietSpawn, reapPool, scopeRows, splitName, tmuxKillArgv, tmuxPaneAgents, tmuxPaneIdOf, tmuxSplitArgv, tmuxTagArgvs, transportBlock, TMUX_LIST_FORMAT } from '../../hooks/panes.js'
 import { reapable } from '../../hooks/live.js'
 
 const TAB = '\t'
@@ -122,6 +122,27 @@ describe('tmux panes', () => {
     expect(isLead(rows, '%9')).toBe(false)
   })
 
+  test('a spawn pane is open, not working, and a leftover done-file cannot turn it done', async () => {
+    const rows = parseTmuxList([row('%1', ''), row('%2', 'agt-ab12cd-spawn'), row('%3', 'agt-ab12cd-spawn', '1')].join('\n'))
+    const p = tmuxPaneAgents(rows, '%1', new Map([['agt-ab12cd-spawn', true]]))
+    expect(p.map((x) => x.state)).toEqual(['open', 'open'])
+    expect(quietSpawn([{ id: 'w:p1', role: 'spawn', state: 'working', seq: 4 }, { id: 'w:p2', role: 'b1', state: 'working', seq: 4 }]).map((x) => x.state)).toEqual(['open', 'working'])
+  })
+
+  test('scopeRows keeps this window\'s other agt- panes and trusts nothing when self is unknown', async () => {
+    const rows = parseTmuxList([row('%1', ''), row('%2', 'agt-r1-a'), row('%3', 'agt-r1-b', '0', '@2'), row('%4', 'user')].join('\n'))
+    expect(scopeRows(rows, '%1').map((r) => r.id)).toEqual(['%2'])
+    expect(scopeRows(rows, '%9').map((r) => r.id)).toEqual(['%2', '%3'])
+  })
+
+  test('a done-file counts only if written at or after the pane was first seen', async () => {
+    expect(isFreshDone({ kind: 'file', mtimeMs: 1000 }, 1000)).toBe(true)
+    expect(isFreshDone({ kind: 'file', mtimeMs: 999 }, 1000)).toBe(false)
+    expect(isFreshDone({ kind: 'dir', mtimeMs: 5000 }, 1000)).toBe(false)
+    expect(isFreshDone(undefined, 1000)).toBe(false)
+    expect(isFreshDone({ kind: 'file', mtimeMs: 5000 }, undefined)).toBe(false)
+  })
+
   test('tmux done waits 90s through the shared reaper, working never reaps', async () => {
     const rows = parseTmuxList([row('%1', ''), row('%2', 'agt-r1-executor'), row('%3', 'agt-r1-reviewer', '1')].join('\n'))
     const p = tmuxPaneAgents(rows, '%1', new Map())
@@ -222,8 +243,14 @@ describe('skill prompt', () => {
     expect(r.text).toContain('"tmux transport"')
   })
 
+  test('HERDR_ENV=1 but herdr does not answer, no tmux: none', async ($, on) => {
+    answer(on, { HERDR_ENV: '1' }, { 'herdr --version': 127 })
+    on('skill.prompt', async ($: any, e: any) => ({ text: e.text }))
+    expect((await $.skill.prompt({ skill: 'agt', text: 'base' })).text).toContain('transport: none')
+  })
+
   test('with no multiplexer it says so, and other skills are untouched', async ($, on) => {
-    answer(on, {}, { 'herdr --version': 127 })
+    answer(on, {})
     on('skill.prompt', async ($: any, e: any) => ({ text: e.text }))
     const r = await $.skill.prompt({ skill: 'agt', text: 'base' })
     expect(r.text).toContain('transport: none')
@@ -235,34 +262,98 @@ describe('skill prompt', () => {
 describe('tmux band', () => {
   const T = '\t'
   const row = (id: string, agt: string, dead = '0', win = '@1') => [id, agt, 'claude', dead, win].join(T)
-  const LIST = [row('%1', ''), row('%2', 'agt-r9-executor'), row('%3', 'agt-r9-planner'), row('%4', 'agt-r9-spawn-x', '1'), row('%5', 'agt-r9-other', '0', '@2')].join('\n')
+  const FRESH = Number.MAX_SAFE_INTEGER
+  const LIST = [row('%1', ''), row('%2', 'agt-r9-executor'), row('%3', 'agt-r9-planner'), row('%4', 'agt-r9-spawn-x', '1'), row('%5', 'agt-r9-other', '0', '@2'), row('%6', 'agt-r9-spawn')]
 
-  // session.start probes tmux, polls once and draws; the 5s timer is left unfired
-  const start = async ($: any, on: any, killed: string[] = [], files: string[] = []) => {
-    on('env.get', async ($: any, e: any) => ({ value: ({ TMUX: '/tmp/tmux-1/default,1,0', TMUX_PANE: '%1', HOME: '/h' } as any)[e.name] }))
+  // session.start probes tmux, polls once and draws; `mtimes` maps done-file path → mtimeMs
+  const start = async ($: any, on: any, o: { self?: string; rows?: string[]; mtimes?: Record<string, number> } = {}) => {
+    const killed: string[] = []
+    const statted: string[] = []
+    const rows = o.rows ?? LIST
+    const mtimes = o.mtimes ?? {}
+    on('env.get', async ($: any, e: any) => ({ value: ({ TMUX: '/tmp/tmux-1/default,1,0', TMUX_PANE: o.self ?? '%1', HOME: '/h' } as any)[e.name] }))
     on('session.start', async ($: any, e: any) => ({ cwd: e.cwd }))
     on('command.register', async () => ({ value: undefined }))
     on('fs.read', async () => ({ deny: 'no profile' }))
-    on('fs.exists', async ($: any, e: any) => ({ value: files.includes(e.path) }))
+    on('fs.exists', async ($: any, e: any) => { statted.push(e.path); return { value: false } })
+    on('fs.stat', async ($: any, e: any) => {
+      statted.push(e.path)
+      return e.path in mtimes ? { value: { kind: 'file', size: 0, mtimeMs: mtimes[e.path], isLink: false } } : { deny: 'ENOENT' }
+    })
     on('store.get', async () => ({ value: undefined }))
     on('ui.panes', async () => ({ value: [] }))
     on('process.run', async ($: any, e: any) => {
       const cmd = e.argv.join(' ')
-      if (cmd.startsWith('tmux list-panes')) return { value: { exitCode: 0, stdout: LIST + '\n', stderr: '' } }
-      if (cmd.startsWith('tmux kill-pane')) killed.push(e.argv[3])
+      if (cmd.startsWith('tmux list-panes')) return { value: { exitCode: 0, stdout: rows.join('\n') + '\n', stderr: '' } }
+      if (cmd.startsWith('tmux kill-pane')) {
+        killed.push(e.argv[3])
+        const i = rows.findIndex((r) => r.startsWith(e.argv[3] + T))
+        if (i >= 0) rows.splice(i, 1)
+      }
       return { value: { exitCode: 0, stdout: '', stderr: '' } }
     })
+    const clock = mock.clock(on, { now: 1_000_000 })
     await $.session.start({ cwd: '/w', surface: null, isInteractive: false })
+    return { killed, statted, clock }
   }
 
-  test('shows this window\'s agt- panes in the band', async ($, on) => {
+  test('shows this window\'s agt- panes in the band, a spawn pane stays quiet', async ($, on) => {
     on('ui.render', async () => ({ type: 'engine', ref: 0 }) as never)
-    await start($, on, [], ['/h/.agentille/state/run-r9/done-planner'])
+    await start($, on, { mtimes: { '/h/.agentille/state/run-r9/done-planner': FRESH } })
     const ui = await $.ui.mount({ plugin: 'agentille', surface: 'terminal', component: 'AbovePrompt', props: { hasSurvey: false, isWorking: true, maxRows: 10, bodyColumns: 100 } as never })
     expect(await ui.find({ type: 'Text', text: /executor/ })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: /planner/ })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: /1 working · 2 done/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /^open\s*$/ })).toBeDefined()
     await ui.unmount()
+  })
+
+  const DONE = (role: string) => '/h/.agentille/state/run-r9/done-' + role
+
+  test('a lead kills a done pane only after 90s, never a working or a spawn pane', async ($, on) => {
+    const rows = [row('%1', ''), row('%2', 'agt-r9-executor', '1'), row('%3', 'agt-r9-spawn', '1'), row('%4', 'agt-r9-planner')]
+    const { killed, clock } = await start($, on, { rows })
+    await clock.advance(85_000)
+    expect(killed).toEqual([])
+    await clock.advance(10_000)
+    expect(killed).toEqual(['%2'])
+    await clock.advance(300_000)
+    expect(killed).toEqual(['%2'])
+  })
+
+  test('a worker pane (its own @agt) never kills anything', async ($, on) => {
+    const rows = [row('%1', ''), row('%2', 'agt-r9-executor'), row('%3', 'agt-r9-planner', '1'), row('%4', 'agt-r9-reviewer', '1')]
+    const { killed, clock } = await start($, on, { rows, self: '%2' })
+    await clock.advance(400_000)
+    expect(killed).toEqual([])
+  })
+
+  test('a pane that cannot find itself in the list kills nothing', async ($, on) => {
+    const rows = [row('%2', 'agt-r9-planner', '1'), row('%3', 'agt-r9-reviewer', '1')]
+    const { killed, clock } = await start($, on, { rows, self: '%9' })
+    await clock.advance(400_000)
+    expect(killed).toEqual([])
+  })
+
+  test('no done-file is read for an unsafe name or for a pane in another window', async ($, on) => {
+    const rows = [row('%1', ''), row('%2', 'agt-a.b-planner'), row('%3', 'agt-r9-Bad_Role'), row('%4', 'agt-r9-ok'), row('%5', 'agt-r9-other', '0', '@2'), row('%6', 'agt-..-x')]
+    const { statted, clock } = await start($, on, { rows })
+    await clock.advance(20_000)
+    expect(statted.length).toBeGreaterThan(0)
+    expect([...new Set(statted)]).toEqual([DONE('ok')])
+  })
+
+  test('a done-file older than the pane\'s first sighting is ignored until a fresh one is written', async ($, on) => {
+    const rows = [row('%1', ''), row('%3', 'agt-r9-planner')]
+    const mtimes: Record<string, number> = { [DONE('planner')]: 5 }
+    const { killed, clock } = await start($, on, { rows, mtimes })
+    await clock.advance(300_000)
+    expect(killed).toEqual([])
+    mtimes[DONE('planner')] = clock.now() + 1
+    await clock.advance(10_000)
+    expect(killed).toEqual([])
+    await clock.advance(85_000)
+    expect(killed).toEqual(['%3'])
   })
 })
 
@@ -306,6 +397,22 @@ describe('/agt-spawn', () => {
     const r = await run($, 'do the thing')
     expect(r.text).toMatch(/^Could not open a herdr pane/)
     expect(seen[seen.length - 1]).toEqual(['herdr', 'pane', 'close', 'w1:p5'])
+  })
+
+  test('tmux: a failed tag kills the half-made pane and reports it', async ($, on) => {
+    const seen = setup(on, { TMUX: '/tmp/tmux-1/default,1,0', TMUX_PANE: '%1', SHELL: '/bin/zsh' }, { 'tmux split-window': { stdout: '%9\n' }, 'tmux set-option -p -t %9 @agt_vendor': { exitCode: 1 } })
+    const r = await run($, 'do the thing')
+    expect(r.text).toMatch(/^Could not open a tmux pane/)
+    expect(seen[seen.length - 1]).toEqual(['tmux', 'kill-pane', '-t', '%9'])
+    expect(seen.some((a) => a[1] === 'select-pane')).toBe(false)
+  })
+
+  test('HERDR_ENV=1 with a herdr that will not answer falls back to tmux', async ($, on) => {
+    const seen = setup(on, { HERDR_ENV: '1', HERDR_PANE_ID: 'w1:p1', TMUX: '/tmp/tmux-1/default,1,0', TMUX_PANE: '%1', SHELL: '/bin/zsh' }, { 'herdr --version': { exitCode: 127 }, 'tmux split-window': { stdout: '%9\n' } })
+    const r = await run($, 'do the thing')
+    expect(r.text).toMatch(/^Opened agt-[a-z0-9]{6}-spawn · sonnet · tmux pane\.$/)
+    expect(seen.slice(0, 2).map((a) => a.slice(0, 2).join(' '))).toEqual(['herdr --version', 'tmux -V'])
+    expect(seen.some((a) => a[0] === 'herdr' && a[1] !== '--version')).toBe(false)
   })
 
   test('no transport: refuses and opens nothing', async ($, on) => {

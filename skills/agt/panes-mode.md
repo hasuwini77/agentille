@@ -180,9 +180,12 @@ Your own pane is `$TMUX_PANE`. A pane with no `@agt` value is the user's — nev
 
 **Done signal.** Each worker's last act is writing `~/.agentille/state/run-<run>/done-<role>`. Put that instruction in the slice prompt. The lead treats a worker as `done` when that file exists or the pane is dead (`pane_dead=1`), else `working`. There is no `blocked` or `idle` state to read, so:
 
+- a done file counts only if it was **written after the mod first saw the pane** (file mtime ≥ first sighting), so a file left by an earlier worker of the same role never marks a re-dispatched one done. Delete `done-<role>` before you (re)spawn a role anyway, so a stale file cannot confuse your own check. If the lead session restarts mid-run, panes that finished earlier read as `working` until the lead closes them;
 - reap **only** on the done file or a dead pane — never on silence;
 - a worker that is overdue gets `tmux capture-pane -p -t <id> -S -200` before any decision, because an approval prompt on screen looks exactly like "still working";
 - the mod's safety-net reaper closes a tmux pane only after `done` has held for 90s (no idle timer), with `tmux kill-pane -t <id>`.
+
+**Ownership is the prefix, nothing more.** Two unrelated agentille leads in the same tmux window reap each other's `agt-` workers once those are done, because the `agt-` name is the only ownership line the mod can read. Run one lead per window.
 
 Everything else — elastic pool, scale tiers, consolidation, degrade — is identical. Vendors other than `claude` are Herdr-only for now.
 
@@ -193,6 +196,7 @@ Everything else — elastic pool, scale tiers, consolidation, degrade — is ide
 - **Typed only.** It runs only for the composer and the remote bridge; no skill, agent, tool or SDK caller invokes it.
 - **No bare subcommand words.** A task that is one lowercase word (`plugin`, `purge`) is refused, because claude would run it as a subcommand even after `--`.
 - **Never focuses** the new pane.
+- **Quiet in the band.** The pane shows as `open`, never `working` or `done`, so it never drives the spinner or the working count.
 - **Never reaped.** The pane is named `agt-<6-char-run>-spawn`; the reserved role `spawn` is exempt from both the lead's teardown and the mod's reaper, on both transports. The user closes it.
 - Reply is one line: `Opened <name> · <model> · <transport> pane.` With no transport: `No pane transport here: /agt-spawn needs Claude Code running inside Herdr or tmux.`
 

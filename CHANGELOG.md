@@ -36,6 +36,17 @@ All notable changes to agentille are documented here.
 
 - `/agt-spawn` panes are never reaped, on either transport: the reserved
   `spawn` role is exempt from the lead's teardown and from the mod's reaper.
+- **Security:** `/agt-spawn` tasks can no longer be read as `claude` options.
+  The tmux launch ends option parsing before the task, a one-word task that
+  would run as a subcommand is refused, and only the composer and the remote
+  bridge may run the command.
+- `/agt-spawn` panes show as `open` in the band instead of `working`, so they
+  no longer drive the spinner or the working count.
+- A tmux done file counts only if it was written after the mod first saw the
+  pane, so a leftover file cannot get a re-dispatched worker reaped.
+- The tmux reaper reads done files only for panes in the lead's own window.
+- A `#` in the working directory no longer sends a tmux pane to the wrong
+  directory.
 
 ### Rationale
 

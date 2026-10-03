@@ -8,7 +8,7 @@ import { activeSquads, allPaths, depsOf, injection } from './squads.js'
 import { cells, MODEL_COLOR, modelKey } from './sprites.js'
 import {
   HERDR_START_TIMEOUT, PROBE, SAFE_RUN, SPAWN_ROLE, TMUX_LIST_ARGV, doneFile, herdrCloseArgv, herdrPaneIdOf, herdrPromptArgv, herdrSplitArgv, herdrStartArgv,
-  isLead, newRunId, paneName, parseSpawnArgs, parseTmuxList, pickTransport, reapPool, splitName, tmuxKillArgv, tmuxPaneAgents, tmuxPaneIdOf,
+  isFreshDone, isLead, newRunId, paneName, parseSpawnArgs, parseTmuxList, pickTransport, quietSpawn, reapPool, scopeRows, splitName, tmuxKillArgv, tmuxPaneAgents, tmuxPaneIdOf,
   tmuxSplitArgv, tmuxTagArgvs, transportBlock,
 } from './panes.js'
 
@@ -25,6 +25,7 @@ const live = new Map()       // agentId → live agent (live.js)
 const decisions = []         // this session, for /agt-routing
 let panes = []               // agt-* panes (herdr or tmux) other than this one
 const paneSeen = new Map()   // reaper bookkeeping
+const tmuxFirstSeen = new Map() // tmux pane id → when this session first listed it
 let selfName = null          // this pane's name when it is an agt-* worker
 let squads = []              // active squads for this repo
 let squadBlock = ''
@@ -125,10 +126,10 @@ async function pollHerdr($) {
   selfName = me && typeof me.name === 'string' && me.name.startsWith('agt-') ? me.name : null
   // Show the workspace's agt-* panes; reap only the lead's own tab, where herdr mode
   // splits its workers. Workers (panes that are themselves agt-*) never reap.
-  panes = paneAgents(list, selfPane).filter((p) => !me || p.workspace === me.workspace_id)
+  panes = quietSpawn(paneAgents(list, selfPane).filter((p) => !me || p.workspace === me.workspace_id))
   if (me && !selfName) {
     const mine = panes.filter((p) => p.tab === me.tab_id)
-    for (const p of reapable(reapPool(mine), paneSeen, Date.now())) {
+    for (const p of reapable(reapPool(mine), paneSeen, await $.clock.now())) {
       try {
         await $.process.run(['herdr', 'pane', 'close', p.id])
         $.ui.toast('agt reaped ' + p.name + ' (' + p.state + ')')
@@ -191,20 +192,26 @@ async function pollTmux($) {
   const selfPane = (await $.env.get('TMUX_PANE')) ?? null
   const me = rows.find((r) => r.id === selfPane)
   selfName = me && me.agt.startsWith('agt-') ? me.agt : null
+  // Window-scope first: no file is read for a pane this lead does not own. A done-file counts
+  // only if it was written after the pane was first listed.
+  const now = await $.clock.now()
+  const scoped = me ? scopeRows(rows, selfPane) : []
+  for (const r of scoped) if (!tmuxFirstSeen.has(r.id)) tmuxFirstSeen.set(r.id, now)
+  for (const id of [...tmuxFirstSeen.keys()]) if (!rows.some((r) => r.id === id)) tmuxFirstSeen.delete(id)
   const done = new Map()
-  for (const r of rows) {
-    const n = r.agt.startsWith('agt-') ? splitName(r.agt) : null
-    const file = n && doneFile(home, n.run, n.role)
+  for (const r of scoped) {
+    const n = splitName(r.agt)
+    const file = n && n.role !== SPAWN_ROLE && !r.dead && doneFile(home, n.run, n.role)
     if (!file) continue
     try {
-      done.set(r.agt, await $.fs.exists(file))
+      done.set(r.agt, isFreshDone(await $.fs.stat(file), tmuxFirstSeen.get(r.id)))
     } catch {
-      // unreadable counts as not done
+      // missing or unreadable counts as not done
     }
   }
   panes = tmuxPaneAgents(rows, selfPane, done)
   if (isLead(rows, selfPane)) {
-    for (const p of reapable(reapPool(panes), paneSeen, Date.now())) {
+    for (const p of reapable(reapPool(panes), paneSeen, now)) {
       try {
         await $.process.run(tmuxKillArgv(p.id), PROBE)
         $.ui.toast('agt reaped ' + p.name + ' (' + p.state + ')')

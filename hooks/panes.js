@@ -95,18 +95,33 @@ export function parseTmuxList(stdout) {
   }).filter((r) => r.id)
 }
 
-// tmux rows → live.js pane agents. `done` maps pane name → whether its done-file exists.
-// Self is excluded, and so is every pane outside the lead's own window. A pane is done
-// when its done-file exists or tmux says it is dead; seq is synthesized for reapable().
-export function tmuxPaneAgents(rows, selfPane, done) {
+// The agt- panes a lead looks at: not itself, and only in its own window. Without a known
+// self (its pane is missing from the list) nothing is window-scoped, so nothing is trusted.
+export function scopeRows(rows, selfPane) {
   const me = rows.find((r) => r.id === selfPane)
-  return rows
-    .filter((r) => r.agt.startsWith('agt-') && r.id !== selfPane && (!me || r.window === me.window))
-    .map((r) => {
-      const n = splitName(r.agt)
-      const finished = r.dead || done.get(r.agt) === true
-      return { id: r.id, kind: 'pane', name: r.agt, role: n?.role ?? r.agt, run: n?.run ?? '', vendor: r.vendor || 'claude', state: finished ? 'done' : 'working', seq: finished ? 1 : 0, tab: r.window, workspace: null }
-    })
+  return rows.filter((r) => r.agt.startsWith('agt-') && r.id !== selfPane && (!me || r.window === me.window))
+}
+
+// A done-file counts only if it was written once the pane was already known: a file left by
+// an earlier worker of the same role must not mark the new one done.
+export function isFreshDone(stat, since) {
+  return stat?.kind === 'file' && typeof stat.mtimeMs === 'number' && typeof since === 'number' && stat.mtimeMs >= since
+}
+
+// /agt-spawn panes are the person's, not a run's: shown as `open`, never as working or done,
+// so they feed no spinner, busy timer or working count.
+export function quietSpawn(panes) {
+  return panes.map((p) => (p.role === SPAWN_ROLE ? { ...p, state: 'open', seq: 0 } : p))
+}
+
+// tmux rows → live.js pane agents. `done` maps pane name → whether a fresh done-file exists.
+// A pane is done when that holds or tmux says it is dead; seq is synthesized for reapable().
+export function tmuxPaneAgents(rows, selfPane, done) {
+  return quietSpawn(scopeRows(rows, selfPane).map((r) => {
+    const n = splitName(r.agt)
+    const finished = r.dead || done.get(r.agt) === true
+    return { id: r.id, kind: 'pane', name: r.agt, role: n?.role ?? r.agt, run: n?.run ?? '', vendor: r.vendor || 'claude', state: finished ? 'done' : 'working', seq: finished ? 1 : 0, tab: r.window, workspace: null }
+  }))
 }
 
 // Only a pane with no @agt name of its own is a lead; workers never reap.

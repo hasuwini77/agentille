@@ -2,6 +2,38 @@
 
 All notable changes to agentille are documented here.
 
+## [2.4.0] — 2026-10-03
+
+### Added
+
+- **Pane tools in the mod.** A lead session with a pane transport registers
+  `spawn_pane` and `close_pane` (`mcp__agentille__*`). `/agt` panes mode opens
+  and closes its claude workers through them, on the same code path a typed
+  `/agt-spawn` runs. The mod enforces the `agt-<run>-<role>` name, refuses a
+  duplicate, checks the `cwd` exists, never moves focus, and offers only
+  `sonnet`, `opus` and `haiku`, so a tool call can never skip the Fable guard.
+  `close_pane` reaches only `agt-` panes in the lead's own tab or window and
+  never a typed `/agt-spawn` pane. Worker panes get no tools.
+- The `## Pane transport` block names the tools when they are live;
+  `panes-mode.md` gains "Through the mod's tools". The manual recipe stays
+  for non-claude vendors and sessions without the tools.
+
+### Fixed
+
+- **Every slice builds on its own.** The planner keeps a removed or renamed
+  file, or a changed export, in one slice with its importers. The executor
+  runs the real build before pushing and reports a cross-slice importer
+  instead of pushing. A slice branch that only built once its sibling landed
+  had failed its own preview deploy.
+- `model-routing.md` no longer says Fable runs only under `--fable`; it names
+  the evidence-gated escalation too.
+
+### Rationale
+
+The pane recipe was prose the model had to follow argv by argv. Moving it
+behind two validated tools makes panes mode as safe as `/agt-spawn`, and a
+worker that cannot fan out keeps a run from growing panes on its own.
+
 ## [2.3.0] — 2026-10-03
 
 ### Changed

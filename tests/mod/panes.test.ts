@@ -35,6 +35,16 @@ describe('teamForce', () => {
     expect(teamForce('/agt-ledger --team a')).toBe(null)
     expect(teamForce(undefined)).toBe(null)
   })
+
+  test('only the leading flags of /agt count, templates are validated', async () => {
+    expect(teamForce('/agt explain the --team flag')).toBe(null)
+    expect(teamForce('/agt why does "--mode team" fail')).toBe(null)
+    expect(teamForce('/agt fix "--team foo"')).toBe(null)
+    expect(teamForce('/agt --plan --team review-team "audit"')).toEqual({ template: 'review-team' })
+    expect(teamForce('/agt --team --plan x')).toEqual({ template: null })
+    expect(teamForce('/agt --team bogus-team x')).toEqual({ template: null })
+    expect(teamForce('/agt --fable --mode=team x')).toEqual({ template: null })
+  })
 })
 
 describe('teamNotice', () => {

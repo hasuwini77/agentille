@@ -369,6 +369,8 @@ export function register(on) {
       if (pendingForce) $.ui.toast(teamNotice(await transportOf($)))
       deckDismissedRun = null
       await autoDeck($)
+    } else {
+      pendingForce = null   // a force belongs to the /agt it was typed with
     }
     return next(e)
   })

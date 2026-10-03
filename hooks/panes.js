@@ -37,12 +37,26 @@ export function transportBlock(transport) {
 
 // A typed /agt that forces a team: `--team <name>` → { template: name }, `--mode team`
 // → { template: null }; anything else → null. --team wins when both appear.
+const TEAMS = new Set(['feature-team', 'review-team', 'incident-team'])
+
+// Only the leading flag run of a typed /agt counts: `/agt --plan --team review-team "x"`.
+// The first token that is not a flag ends it, so "--team" inside the task text is just text.
 export function teamForce(text) {
   if (!isAgtPrompt(text)) return null
-  const t = String(text)
-  const named = /(?:^|\s)--team(?:=|\s+)([A-Za-z0-9_-]+)/.exec(t)
-  if (named) return { template: named[1] }
-  return /(?:^|\s)--mode(?:=|\s+)team(?=\s|$)/.test(t) ? { template: null } : null
+  const toks = String(text).trim().split(/\s+/).slice(1)
+  let force = null
+  for (let i = 0; i < toks.length && toks[i].startsWith('--'); i++) {
+    const [flag, inline] = toks[i].split('=', 2)
+    const value = inline ?? (toks[i + 1] && !toks[i + 1].startsWith('--') ? toks[i + 1] : undefined)
+    if (flag === '--team') {
+      force = { template: TEAMS.has(value) ? value : null }
+      if (inline === undefined && value !== undefined) i++
+    } else if (flag === '--mode') {
+      if (value === 'team' && !force) force = { template: null }
+      if (inline === undefined && value !== undefined) i++
+    }
+  }
+  return force
 }
 
 // The toast shown when a team is forced: names where the run will actually land.

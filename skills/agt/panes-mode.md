@@ -1,8 +1,8 @@
-# Herdr mode — workers are panes, not nested agents
+# Panes mode — workers are panes, not nested agents
 
 > **Authority:** the dispatch decision table in `skills/agt/SKILL.md` is the tie-breaker. This doc is the detail/rationale — if it ever conflicts with that table, the table wins.
 
-Herdr mode is the parallel execution shape done right. Same brain — classify, roster, model routing, review gates, git consolidation — but each worker is a **sibling Herdr pane running a real vendor session** instead of an agent nested inside the lead's own session.
+Panes mode is the parallel execution shape done right. Same brain — classify, roster, model routing, review gates, git consolidation — but each worker is a **sibling pane running a real vendor session** instead of an agent nested inside the lead's own session. The mode is `panes`; the transport underneath is **Herdr** or **tmux**, picked by the agentille mod and injected into `/agt` as a `## Pane transport` block. Everything under "Spawning a worker" is the Herdr recipe; "tmux transport" is the tmux one. `--mode herdr` stays as an alias for `--mode panes`.
 
 ## Why panes beat nested teammates
 
@@ -14,7 +14,7 @@ A multiplexer tracks **one agent per pane**. Anything the lead spawns *inside* i
 
 Hoisting workers to sibling panes fixes all three at once: they show up in `herdr agent list`, their completion is a readable state, closing them is `herdr pane close`, and each pane can be a **different vendor**.
 
-| | team mode | herdr mode |
+| | team mode | panes mode (Herdr) |
 |---|---|---|
 | Worker visibility | nested, invisible to the multiplexer | `herdr agent list` |
 | "Is it done?" | the worker must self-report | `herdr agent get <name>` → state |
@@ -22,23 +22,25 @@ Hoisting workers to sibling panes fixes all three at once: they show up in `herd
 | Vendors | Claude only | `claude` · `codex` · `opencode` (local) |
 | Isolation | manual worktrees | `herdr worktree create` |
 
-## When herdr mode is selected
+## When panes mode is selected
 
-Herdr mode is the parallel transport whenever it is available; availability decides:
+Panes mode is the parallel transport whenever a pane transport is available; availability decides:
 
 | Condition | Mode |
 |---|---|
-| `HERDR_ENV=1`, `herdr` on PATH, and the task has ≥2 genuinely disjoint slices | **herdr** |
-| Same parallelism bar, but not inside Herdr | **workflow** if the `Workflow` tool exists, else subagent waves |
+| Inside Herdr (`HERDR_ENV=1`, `herdr` on PATH) or tmux (`$TMUX` set, `tmux` on PATH), and the task has ≥2 genuinely disjoint slices | **panes** (Herdr wins when both are present) |
+| Same parallelism bar, but no pane transport | **workflow** if the `Workflow` tool exists, else subagent waves |
 | No real parallelism | **subagent** / **solo**, exactly as today |
 
 The parallelism bar is unchanged and non-negotiable: **≥2 slices with disjoint file sets that can build at once.** Panes are cheaper to open than teammates, which is exactly why the bar must not drift — a pane per sequential step is theatre, not parallelism.
 
-`--mode herdr` forces it; teams (`--team` / `--mode team`) are legacy, opt-in only and never auto-selected. A forced herdr mode with no disjoint slices gets the same honesty treatment as a forced team (see `team-mode.md` → "Honesty on a forced team").
+`--mode panes` (or the alias `--mode herdr`) forces it; teams (`--team` / `--mode team`) are legacy, opt-in only and never auto-selected. A forced panes mode with no disjoint slices gets the same honesty treatment as a forced team (see `team-mode.md` → "Honesty on a forced team").
 
 ## Pre-flight
 
-1. `test "${HERDR_ENV:-}" = 1` — if it fails, you are not inside Herdr. Fall through to workflow/subagent mode silently. Never drive a Herdr session from outside one.
+The mod probes the transport once per session and injects the result; these checks are the manual equivalent for Herdr. On tmux, skip to "tmux transport".
+
+1. `test "${HERDR_ENV:-}" = 1` — if it fails, you are not inside Herdr. Fall through to the tmux check, then workflow/subagent mode, silently. Never drive a Herdr session from outside one.
 2. `command -v herdr` — absent → fall through.
 3. Read your own location so every spawn is relative to it:
    ```bash
@@ -145,9 +147,53 @@ If `agent read` cannot recover a complete response, the pane is rendering on the
 
 **Primary (the lead, in-loop):** before declaring the run done, every `agt-<run-id>-*` agent must be harvested and its pane closed. Verify with a final `herdr agent list` filtered to your run id — the correct result is zero rows. Report the outcome in the Debrief `team:` row (see `display.md` → "Frame 5"), e.g. `team: ✓ 5 panes harvested and closed · 0 orphans`.
 
-**Safety net (the agentille mod's reaper, running in the lead session):** the lead is not always around to finish the job — a turn ends, a session is interrupted, a worker finishes long after the lead stopped. The reaper closes `agt-*` panes that have sat continuously in `done` (90s grace) or `idle` (300s grace), measured against `state_change_seq` so an intermittently-active agent resets its own timer. It never touches `working`, `blocked`, or `unknown`, and it never touches an agent whose name lacks the `agt-` prefix. Worker panes (their own pane name starts `agt-`) never reap. It is a net, not the plan: a lead that relies on it is leaving the user's screen full of panes for up to five minutes.
+**Safety net (the agentille mod's reaper, running in the lead session):** the lead is not always around to finish the job — a turn ends, a session is interrupted, a worker finishes long after the lead stopped. The reaper closes `agt-*` panes that have sat continuously in `done` (90s grace) or `idle` (300s grace), measured against `state_change_seq` so an intermittently-active agent resets its own timer. On tmux only the `done` grace applies (see "tmux transport"). It never touches `working`, `blocked`, or `unknown`, and it never touches an agent whose name lacks the `agt-` prefix. Worker panes (their own pane name starts `agt-`) never reap. It is a net, not the plan: a lead that relies on it is leaving the user's screen full of panes for up to five minutes.
 
 **Never close what you did not open.** Panes the user created by hand are off-limits to both the lead and the reaper, unconditionally, even when idle. Ownership is the `agt-` prefix — no prefix, no authority.
+
+## tmux transport
+
+Outside Herdr but inside tmux (`$TMUX` non-empty, `tmux -V` exits 0), workers are tmux panes. Same rules as above — disjoint slices, `agt-` ownership, harvest then reap — with a smaller toolbox: tmux has no per-agent lifecycle, so the worker reports completion itself and the lead reads a file.
+
+**Spawn.** All argv, no shell string except the constant `'claude "$@"'`. Pane name is `agt-<run>-<role>`; the run id is 6 chars and the role is `[a-z0-9-]+`, so the whole name fits `^[a-z][a-z0-9_-]{0,31}$`:
+
+```bash
+tmux split-window -d -h -P -F '#{pane_id}' -t "$TMUX_PANE" -c <cwd> \
+  -e AGENTILLE_RUN=<run> "$SHELL" -ic 'claude "$@"' agt \
+  --model <model> -n <name> "<task>"
+
+tmux set-option -p -t <id> @agt <name>
+tmux set-option -p -t <id> @agt_vendor claude
+tmux set-option -p -t <id> allow-set-title off
+tmux select-pane -t <id> -T <name>
+```
+
+`-d` keeps focus where the user left it. The `@agt` pane option is the ownership marker (the tmux equivalent of the `agt-` agent name) and `allow-set-title off` stops Claude from renaming the pane out from under you. If `$SHELL` is not zsh or bash, skip the shell wrapper and exec `claude --model <model> -n <name> "<task>"` directly.
+
+**Scope.** The lead only sees and reaps panes in **its own window**. List them with:
+
+```bash
+tmux list-panes -a -F '#{pane_id}\t#{@agt}\t#{@agt_vendor}\t#{pane_dead}\t#{window_id}'
+```
+
+Your own pane is `$TMUX_PANE`. A pane with no `@agt` value is the user's — never touch it.
+
+**Done signal.** Each worker's last act is writing `~/.agentille/state/run-<run>/done-<role>`. Put that instruction in the slice prompt. The lead treats a worker as `done` when that file exists or the pane is dead (`pane_dead=1`), else `working`. There is no `blocked` or `idle` state to read, so:
+
+- reap **only** on the done file or a dead pane — never on silence;
+- a worker that is overdue gets `tmux capture-pane -p -t <id> -S -200` before any decision, because an approval prompt on screen looks exactly like "still working";
+- the mod's safety-net reaper closes a tmux pane only after `done` has held for 90s (no idle timer), with `tmux kill-pane -t <id>`.
+
+Everything else — elastic pool, scale tiers, consolidation, degrade — is identical. Vendors other than `claude` are Herdr-only for now.
+
+## /agt-spawn — one pane, one routed session
+
+`/agt-spawn "task" [--model sonnet|opus|haiku|fable]` opens a single sibling pane running one Claude session on the model you pick (default `sonnet`), on whichever transport is live. It is the manual counterpart of a worker: you route one task to one model without running the orchestrator.
+
+- **Typed only.** It never runs unless the user types it; no skill or agent invokes it.
+- **Never focuses** the new pane.
+- **Never reaped.** The pane is named `agt-<6-char-run>-spawn`; the reserved role `spawn` is exempt from both the lead's teardown and the mod's reaper, on both transports. The user closes it.
+- Reply is one line: `Opened <name> · <model> · <transport> pane.` With no transport: `No pane transport here: /agt-spawn needs Claude Code running inside Herdr or tmux.`
 
 ## Consolidation
 
@@ -159,8 +205,10 @@ herdr worktree remove --workspace <id> --force
 
 ## Failure → degrade
 
-Any failure — `HERDR_ENV` unset, `herdr` missing, `pane split` refused, `agent start` timing out, the pool resolving to 1 — degrades to the next mode down (workflow if available, otherwise subagent waves) and logs one line: *"herdr unavailable — ran N subagents instead"*. Panes already opened for this run are closed before degrading; a half-spawned fan-out is never left on screen.
+Any failure — no pane transport, `herdr` or `tmux` missing, `pane split` refused, `agent start` timing out, the pool resolving to 1 — degrades to the next mode down (workflow if available, otherwise subagent waves) and logs one line: *"panes unavailable — ran N subagents instead"*. Panes already opened for this run are closed before degrading; a half-spawned fan-out is never left on screen.
 
 ## Cost
 
-A pane is a full vendor session, so a Claude-only fan-out costs about the same as team mode (~4×). The difference is that herdr mode can **route the cost**: mechanical slices to a local endpoint cost nothing, and review slices to `codex` spend a different budget entirely. A well-routed 6-pane herdr run is routinely cheaper than a 3-teammate team run. Surface the shape, never a fabricated token count — `cost: ✓ herdr · 4 claude + 2 codex + 1 local` (see `display.md` → "Frame 5").
+Measured, not estimated: on a two-slice test task (two runs per arm, alternating order), two Claude workers in panes used 1.12× the fresh tokens of the same two workers as subagents (1.05× counting the lead), and 1.55× counting cache reads, which bill at a fraction. The gap is start-up context: a pane opens as a full Claude session at about 55k tokens, a subagent at about 32k. That fixed cost matters most on small slices. The sample is small — one task, two runs per arm — so read it as a shape, not a benchmark.
+
+Panes are not a token saving; the savings come from model routing and handing each worker only its slice of the plan. Routing is also where panes can spend other budgets: mechanical slices to a local endpoint cost nothing, and review slices to `codex` spend a different budget entirely. Team mode's ~4× is an estimate, not a measurement. Surface the shape, never a fabricated token count — `cost: ✓ panes · 4 claude + 2 codex + 1 local` (see `display.md` → "Frame 5").

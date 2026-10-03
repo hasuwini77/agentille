@@ -35,7 +35,7 @@ After picking the primary category, also note:
 
 ## Parallel tiers — herdr, workflow, subagent (teams are opt-in only)
 
-The disjoint-parallelism criterion governs every parallel tier. Classification never returns `team`: ≥2 disjoint slices → **parallel**, run as **herdr** inside Herdr (`herdr-mode.md`), else **workflow** when the `Workflow` tool exists, else subagent waves.
+The disjoint-parallelism criterion governs every parallel tier. Classification never returns `team`: ≥2 disjoint slices → **parallel**, run as **herdr** inside Herdr (`panes-mode.md`), else **workflow** when the `Workflow` tool exists, else subagent waves.
 
 - **Team mode** — legacy, only when the user types `--team` / `--mode team` (~4× tokens). Cost transparency lives in `team-mode.md` → "Honesty on a forced team".
 

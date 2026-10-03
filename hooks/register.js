@@ -177,8 +177,10 @@ export function register(on) {
     await loadProfile($)
     await loadSquads($)
     deckOpen = (await $.ui.panes()).some((p) => p.id === DECK)
+    deckAuto = (await $.store.get('deck:auto')) !== false
     await $.command.register({ name: 'agt-routing', description: 'Show the model + effort agentille picked for each agent this session', immediate: true })
-    await $.command.register({ name: 'agt-deck', description: 'Open the agentille deck: every agent as a mini-Claude, live', immediate: true })
+    await $.command.register({ name: 'agt-deck', description: 'Open the agentille deck now (it also opens on its own with /agt)', immediate: true })
+    await $.command.register({ name: 'agt-nodeck', description: 'Stop the agentille deck from opening on its own; /agt-deck turns it back on', immediate: true })
     await $.command.register({ name: 'agt-ledger', description: 'Tokens per agent role for the latest agentille run', immediate: true })
     if ((await $.env.get('HERDR_ENV')) === '1') {
       await pollHerdr($)
@@ -203,8 +205,20 @@ export function register(on) {
 
   on('command.run', { command: 'agt-deck' }, async ($) => {
     deckOpen = true
+    deckDismissedRun = null
     await $.ui.open({ id: DECK, title: 'agentille deck', focus: true, closeOnEscape: true })
-    return {}
+    if (deckAuto) return {}
+    deckAuto = true
+    await $.store.set('deck:auto', true)
+    return { text: 'Deck auto-open is back on.' }
+  })
+
+  on('command.run', { command: 'agt-nodeck' }, async ($) => {
+    deckAuto = false
+    await $.store.set('deck:auto', false)
+    if (deckOpen) await $.ui.close({ id: DECK })
+    deckOpen = false
+    return { text: 'Deck auto-open is off (kept across sessions). /agt-deck opens it and turns it back on.' }
   })
 
   on('ui.close', async ($, e, next) => {

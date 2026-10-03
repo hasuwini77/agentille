@@ -113,6 +113,8 @@ Read the **full** log ONLY if it failed, and even then only the failing section 
 
 Paste the command + its real result (exit code, pass/fail counts) into the VERIFICATION block. If you didn't run it this session, you cannot claim it — say so instead.
 
+**Your slice must build alone before it is pushed.** A pushed branch can trigger its own CI or preview deploy before the lead integrates anything, so a slice that only builds once a sibling lands ships a red build to the user's inbox. When the project has a build command, run it — not just `tsc` on the files you touched — before step 8. If you removed or renamed a file or an export, grep for its importers first: update every one that is in your file set, and if one is outside it, **stop and report the coupling** to the lead instead of pushing (the plan split the work wrong; it is the lead's call to merge the slices or sequence them).
+
 ### 8. If `isolated: true` — integrate adaptively
 
 Resolve the `integration` mode (honor the flag; for `auto`, detect):

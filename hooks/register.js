@@ -9,7 +9,7 @@ import { cells, MODEL_COLOR, modelKey } from './sprites.js'
 import {
   HERDR_START_TIMEOUT, PROBE, SAFE_RUN, SPAWN_ROLE, TMUX_LIST_ARGV, doneFile, herdrCloseArgv, herdrPaneIdOf, herdrPromptArgv, herdrSplitArgv, herdrStartArgv,
   isFreshDone, isLead, newRunId, paneName, parseSpawnArgs, parseTmuxList, pickTransport, quietSpawn, reapPool, scopeRows, splitName, tmuxKillArgv, tmuxPaneAgents, tmuxPaneIdOf,
-  teamForce, teamNotice, tmuxSplitArgv, tmuxTagArgvs, transportBlock,
+  teamDirective, teamForce, teamNotice, tmuxSplitArgv, tmuxTagArgvs, transportBlock,
 } from './panes.js'
 
 const DECK = 'agt-deck'
@@ -376,7 +376,10 @@ export function register(on) {
   on('skill.prompt', async ($, e, next) => {
     if (!/(^|:)agt$/.test(e.skill)) return next(e)
     await autoDeck($)
-    return next({ ...e, text: e.text + squadBlock + transportBlock(await transportOf($)) })
+    const t = await transportOf($)
+    const forced = pendingForce ? teamDirective(t) : ''
+    pendingForce = null
+    return next({ ...e, text: e.text + squadBlock + transportBlock(t) + forced })
   })
 
   on('session.measure', async ($, e, next) => {

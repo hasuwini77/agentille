@@ -51,6 +51,15 @@ export function teamNotice(transport) {
   return '--team is deprecated (removed in v3.0): running as ' + where + '.'
 }
 
+// Appended after the transport block when a team was forced: resolve it as panes (or
+// subagent) when a transport exists, else run the team as before and say so.
+export function teamDirective(transport) {
+  const line = transport === 'herdr' || transport === 'tmux'
+    ? 'A forced team (--team/--mode team) is deprecated: resolve it as panes when the task has ≥2 genuinely disjoint slices, else subagent (the existing honesty flow). Do not spawn an agent team.'
+    : 'A forced team is deprecated (removed in v3.0); no pane transport here, so run the team as before and print the deprecation line on the recon ping.'
+  return '\n## Forced team (agentille mod)\n\n' + line + '\n'
+}
+
 // ── names ─────────────────────────────────────────────────────────────────────
 
 export function paneName(run, role) {

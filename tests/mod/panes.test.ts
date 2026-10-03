@@ -1,5 +1,5 @@
 import { describe, expect, mock, test } from 'claude-code/testing'
-import { doneFile, herdrCloseArgv, herdrPaneIdOf, herdrPromptArgv, herdrSplitArgv, herdrStartArgv, isFreshDone, isLead, newRunId, paneName, parseSpawnArgs, parseTmuxList, pickTransport, quietSpawn, reapPool, scopeRows, splitName, tmuxKillArgv, tmuxPaneAgents, tmuxPaneIdOf, tmuxSplitArgv, tmuxTagArgvs, teamForce, teamNotice, transportBlock, TMUX_LIST_FORMAT } from '../../hooks/panes.js'
+import { doneFile, herdrCloseArgv, herdrPaneIdOf, herdrPromptArgv, herdrSplitArgv, herdrStartArgv, isFreshDone, isLead, newRunId, paneName, parseSpawnArgs, parseTmuxList, pickTransport, quietSpawn, reapPool, scopeRows, splitName, tmuxKillArgv, tmuxPaneAgents, tmuxPaneIdOf, tmuxSplitArgv, tmuxTagArgvs, teamDirective, teamForce, teamNotice, transportBlock, TMUX_LIST_FORMAT } from '../../hooks/panes.js'
 import { reapable } from '../../hooks/live.js'
 
 const TAB = '\t'
@@ -309,6 +309,55 @@ describe('forced team notice', () => {
     const toasts = setup(on, { HERDR_ENV: '1' })
     await $.prompt.submit({ text: '/agt build it', wait: false })
     expect(toasts.some((t) => t.includes('deprecated'))).toBe(false)
+  })
+})
+
+describe('forced team directive', () => {
+  const DEPRECATED = 'A forced team (--team/--mode team) is deprecated: resolve it as panes when the task has ≥2 genuinely disjoint slices, else subagent (the existing honesty flow). Do not spawn an agent team.'
+  const NO_PANES = 'A forced team is deprecated (removed in v3.0); no pane transport here, so run the team as before and print the deprecation line on the recon ping.'
+
+  test('directive text follows the transport', async () => {
+    expect(teamDirective('herdr')).toContain(DEPRECATED)
+    expect(teamDirective('tmux')).toContain(DEPRECATED)
+    expect(teamDirective('none')).toContain(NO_PANES)
+    expect(teamDirective('none')).not.toContain('Do not spawn')
+  })
+
+  const wire = (on: any, vars: Record<string, string>) => {
+    on('env.get', async ($: any, e: any) => ({ value: vars[e.name] }))
+    on('process.run', async () => ({ value: { exitCode: 0, stdout: '', stderr: '' } }))
+    on('store.get', async () => ({ value: undefined }))
+    on('store.set', async () => ({ value: undefined }))
+    on('ui.panes', async () => ({ value: [] }))
+    on('ui.open', async () => ({ value: { isPlaced: true } }))
+    on('ui.toast', async () => ({ value: undefined }))
+    on('prompt.submit', async ($: any, e: any) => ({ text: e.text }))
+    on('skill.prompt', async ($: any, e: any) => ({ text: e.text }))
+  }
+
+  test('the next agt skill prompt carries it after the transport block, then it clears', async ($, on) => {
+    wire(on, { HERDR_ENV: '1' })
+    await $.prompt.submit({ text: '/agt --team feature-team build it', wait: false })
+    const first = (await $.skill.prompt({ skill: 'agt', text: 'base' })).text
+    expect(first).toContain(DEPRECATED)
+    expect(first.indexOf('transport: herdr')).toBeLessThan(first.indexOf(DEPRECATED))
+    const second = (await $.skill.prompt({ skill: 'agt', text: 'base' })).text
+    expect(second).not.toContain('deprecated')
+  })
+
+  test('with no transport the team runs as before and says so', async ($, on) => {
+    wire(on, {})
+    await $.prompt.submit({ text: '/agt --mode team build it', wait: false })
+    expect((await $.skill.prompt({ skill: 'agt', text: 'base' })).text).toContain(NO_PANES)
+  })
+
+  test('a plain /agt gets no directive, and other skills never consume the force', async ($, on) => {
+    wire(on, { HERDR_ENV: '1' })
+    await $.prompt.submit({ text: '/agt build it', wait: false })
+    expect((await $.skill.prompt({ skill: 'agt', text: 'base' })).text).not.toContain('Forced team')
+    await $.prompt.submit({ text: '/agt --team feature-team x', wait: false })
+    expect((await $.skill.prompt({ skill: 'commit', text: 'base' })).text).toBe('base')
+    expect((await $.skill.prompt({ skill: 'agt', text: 'base' })).text).toContain(DEPRECATED)
   })
 })
 

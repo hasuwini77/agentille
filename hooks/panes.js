@@ -45,6 +45,12 @@ export function teamForce(text) {
   return /(?:^|\s)--mode(?:=|\s+)team(?=\s|$)/.test(t) ? { template: null } : null
 }
 
+// The toast shown when a team is forced: names where the run will actually land.
+export function teamNotice(transport) {
+  const where = { herdr: 'panes · herdr', tmux: 'panes · tmux' }[transport] ?? 'a team — no pane transport here'
+  return '--team is deprecated (removed in v3.0): running as ' + where + '.'
+}
+
 // ── names ─────────────────────────────────────────────────────────────────────
 
 export function paneName(run, role) {

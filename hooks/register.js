@@ -9,7 +9,7 @@ import { cells, MODEL_COLOR, modelKey } from './sprites.js'
 import {
   HERDR_START_TIMEOUT, PROBE, SAFE_RUN, SPAWN_ROLE, TMUX_LIST_ARGV, doneFile, herdrCloseArgv, herdrPaneIdOf, herdrPromptArgv, herdrSplitArgv, herdrStartArgv,
   isFreshDone, isLead, newRunId, paneName, parseSpawnArgs, parseTmuxList, pickTransport, quietSpawn, reapPool, scopeRows, splitName, tmuxKillArgv, tmuxPaneAgents, tmuxPaneIdOf,
-  tmuxSplitArgv, tmuxTagArgvs, transportBlock,
+  teamForce, teamNotice, tmuxSplitArgv, tmuxTagArgvs, transportBlock,
 } from './panes.js'
 
 const DECK = 'agt-deck'
@@ -29,6 +29,7 @@ const tmuxFirstSeen = new Map() // tmux pane id → when this session first list
 let selfName = null          // this pane's name when it is an agt-* worker
 let squads = []              // active squads for this repo
 let squadBlock = ''
+let pendingForce = null     // { template } from the last typed forced team, until the next agt skill.prompt
 let transport = null        // 'herdr' | 'tmux' | 'none', probed once at session start
 let deckOpen = false
 let deckAuto = true          // open the deck on its own when a run starts
@@ -364,6 +365,8 @@ export function register(on) {
   // A typed /agt opens the deck; answering the person's prompt, it seats at any width.
   on('prompt.submit', async ($, e, next) => {
     if (isAgtPrompt(e.text)) {
+      pendingForce = teamForce(e.text)
+      if (pendingForce) $.ui.toast(teamNotice(await transportOf($)))
       deckDismissedRun = null
       await autoDeck($)
     }

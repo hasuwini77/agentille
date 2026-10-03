@@ -1,5 +1,5 @@
 import { describe, expect, mock, test } from 'claude-code/testing'
-import { doneFile, herdrCloseArgv, herdrPaneIdOf, herdrPromptArgv, herdrSplitArgv, herdrStartArgv, isFreshDone, isLead, newRunId, paneName, parseSpawnArgs, parseTmuxList, pickTransport, quietSpawn, reapPool, scopeRows, splitName, tmuxKillArgv, tmuxPaneAgents, tmuxPaneIdOf, tmuxSplitArgv, tmuxTagArgvs, teamForce, transportBlock, TMUX_LIST_FORMAT } from '../../hooks/panes.js'
+import { doneFile, herdrCloseArgv, herdrPaneIdOf, herdrPromptArgv, herdrSplitArgv, herdrStartArgv, isFreshDone, isLead, newRunId, paneName, parseSpawnArgs, parseTmuxList, pickTransport, quietSpawn, reapPool, scopeRows, splitName, tmuxKillArgv, tmuxPaneAgents, tmuxPaneIdOf, tmuxSplitArgv, tmuxTagArgvs, teamForce, teamNotice, transportBlock, TMUX_LIST_FORMAT } from '../../hooks/panes.js'
 import { reapable } from '../../hooks/live.js'
 
 const TAB = '\t'
@@ -34,6 +34,14 @@ describe('teamForce', () => {
     expect(teamForce('fix it --team feature-team')).toBe(null)
     expect(teamForce('/agt-ledger --team a')).toBe(null)
     expect(teamForce(undefined)).toBe(null)
+  })
+})
+
+describe('teamNotice', () => {
+  test('names the transport the forced team lands on', async () => {
+    expect(teamNotice('herdr')).toBe('--team is deprecated (removed in v3.0): running as panes · herdr.')
+    expect(teamNotice('tmux')).toBe('--team is deprecated (removed in v3.0): running as panes · tmux.')
+    expect(teamNotice('none')).toBe('--team is deprecated (removed in v3.0): running as a team — no pane transport here.')
   })
 })
 
@@ -274,6 +282,33 @@ describe('skill prompt', () => {
     expect(r.text).toContain('transport: none')
     expect(r.text).toContain('workflow, else subagent waves')
     expect((await $.skill.prompt({ skill: 'commit', text: 'base' })).text).toBe('base')
+  })
+})
+
+describe('forced team notice', () => {
+  const setup = (on: any, vars: Record<string, string>) => {
+    const toasts: string[] = []
+    on('env.get', async ($: any, e: any) => ({ value: vars[e.name] }))
+    on('process.run', async () => ({ value: { exitCode: 0, stdout: '', stderr: '' } }))
+    on('store.get', async () => ({ value: undefined }))
+    on('store.set', async () => ({ value: undefined }))
+    on('ui.panes', async () => ({ value: [] }))
+    on('ui.open', async () => ({ value: { isPlaced: true } }))
+    on('ui.toast', async ($: any, e: any) => { toasts.push(e.text ?? e.message ?? String(e)); return { value: undefined } })
+    on('prompt.submit', async ($: any, e: any) => ({ text: e.text }))
+    return toasts
+  }
+
+  test('a typed forced team toasts the notice', async ($, on) => {
+    const toasts = setup(on, { HERDR_ENV: '1' })
+    await $.prompt.submit({ text: '/agt --team feature-team build it', wait: false })
+    expect(toasts.some((t) => t.includes('--team is deprecated (removed in v3.0): running as panes · herdr.'))).toBe(true)
+  })
+
+  test('a plain /agt stays quiet', async ($, on) => {
+    const toasts = setup(on, { HERDR_ENV: '1' })
+    await $.prompt.submit({ text: '/agt build it', wait: false })
+    expect(toasts.some((t) => t.includes('deprecated'))).toBe(false)
   })
 })
 

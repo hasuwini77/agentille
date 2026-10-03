@@ -75,12 +75,12 @@ The mod detects your project type (saas, ecommerce, content, immersive) and adds
 | `/agt "task"` | Solo if trivial; subagents for sequential or single-slice work; parallel panes (Herdr or tmux) or a workflow when there are 2+ disjoint slices |
 | `/agt "review ..."` / `/agt "debug ..."` | Subagent reviewers / debug loop |
 | `/agt --mode subagent "task"` | Force subagents for one run |
-| `/agt --team <feature-team\|review-team\|incident-team> "task"` | Force an agent team (~4x tokens; asks before running on work with no disjoint slices) |
+| `/agt --team <feature-team\|review-team\|incident-team> "task"` | **Deprecated, removed in v3.0.** Re-resolves to panes on ≥2 disjoint slices, else subagent; runs as a team only when no pane transport exists |
 | `/agt --plan "task"` | Dry run: plan and cost, then stop for your go |
 
 Panes are not a token saving: in a measured two-slice test, two Claude workers in panes used 1.12x the fresh tokens of the same two as subagents (1.55x counting cache reads), because a pane opens as a full session. The savings come from model routing and handing each worker only its slice. Small sample: one task, two runs per arm. Team mode's ~4x is an estimate.
 
-Agent teams are never auto-picked. They need Claude Code 2.1.178+ and `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1` in `~/.claude/settings.json` under `env`; split panes need tmux or iTerm2 (`teammateMode`). Details: [`skills/agt/team-mode.md`](./skills/agt/team-mode.md).
+Agent teams are never auto-picked, and forcing one with `--team` is deprecated (removed in v3.0): it re-resolves to panes wherever Herdr or tmux is available. The legacy team path needs Claude Code 2.1.178+ and `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1` in `~/.claude/settings.json` under `env`; split panes need tmux or iTerm2 (`teammateMode`). Details: [`skills/agt/team-mode.md`](./skills/agt/team-mode.md).
 
 ## Commands
 
@@ -109,7 +109,7 @@ Each completed run appends one line to `./docs/agentille-log.md` in the target p
 ## Requirements
 
 - Claude Code **2.1.287+** for the mod (band, auto-open deck, ledger, squads, reaper, routing enforcement). The skills still work without it: routing falls back to explicit models.
-- Claude Code 2.1.178+ for team mode.
+- Claude Code 2.1.178+ for the deprecated team mode (only reached with no pane transport).
 - A `~/.agentille/profile.json`, created by `/agentille-init`.
 
 ## Philosophy

@@ -6,6 +6,7 @@ import { DEFAULTS, decide, parseHeader, roleOf, verdictOf } from './routing.js'
 import { addUsage, effortBar, elapsed, finish, isAgtPrompt, ledger, ledgerText, newAgent, paneAgents, reapable, shouldAutoOpen, short, summary, tokens, visible } from './live.js'
 import { activeSquads, allPaths, depsOf, injection } from './squads.js'
 import { cells, MODEL_COLOR, modelKey } from './sprites.js'
+import { PROBE, pickTransport, transportBlock } from './panes.js'
 
 const SAFE_RUN = /^[A-Za-z0-9_-]{1,64}$/
 const DECK = 'agt-deck'
@@ -24,6 +25,7 @@ const paneSeen = new Map()   // reaper bookkeeping
 let selfName = null          // this pane's herdr name when it is an agt-* worker
 let squads = []              // active squads for this repo
 let squadBlock = ''
+let transport = null        // 'herdr' | 'tmux' | 'none', probed once at session start
 let deckOpen = false
 let deckAuto = true          // open the deck on its own when a run starts
 let deckDismissedRun = null  // run whose deck the person closed by hand
@@ -32,6 +34,27 @@ let tick = 0
 function runState(id) {
   if (!runs.has(id)) runs.set(id, { revise: 0, fixes: 0, fable: 0, log: [] })
   return runs.get(id)
+}
+
+async function probeOk($, argv) {
+  try {
+    return (await $.process.run(argv, PROBE)).exitCode === 0
+  } catch {
+    return false
+  }
+}
+
+// herdr → tmux → none. A probe that rejects or exits non-zero counts as unavailable; so
+// does a host with no $.process (desktop app, VS Code), where the call itself throws.
+async function detectTransport($) {
+  const herdrOk = (await $.env.get('HERDR_ENV')) === '1' && (await probeOk($, ['herdr', '--version']))
+  const tmuxOk = !herdrOk && ((await $.env.get('TMUX')) ?? '') !== '' && (await probeOk($, ['tmux', '-V']))
+  return pickTransport({ herdrOk, tmuxOk })
+}
+
+async function transportOf($) {
+  transport ??= await detectTransport($)
+  return transport
 }
 
 function shortType(t) {
@@ -176,13 +199,14 @@ export function register(on) {
   on('session.start', async ($, e, next) => {
     await loadProfile($)
     await loadSquads($)
+    transport = await detectTransport($)
     deckOpen = (await $.ui.panes()).some((p) => p.id === DECK)
     deckAuto = (await $.store.get('deck:auto')) !== false
     await $.command.register({ name: 'agt-routing', description: 'Show the model + effort agentille picked for each agent this session', immediate: true })
     await $.command.register({ name: 'agt-deck', description: 'Open the agentille deck now (it also opens on its own with /agt)', immediate: true })
     await $.command.register({ name: 'agt-nodeck', description: 'Stop the agentille deck from opening on its own; /agt-deck turns it back on', immediate: true })
     await $.command.register({ name: 'agt-ledger', description: 'Tokens per agent role for the latest agentille run', immediate: true })
-    if ((await $.env.get('HERDR_ENV')) === '1') {
+    if (transport === 'herdr') {
       await pollHerdr($)
       $.clock.every(5000, () => { pollHerdr($) })
     }
@@ -242,8 +266,7 @@ export function register(on) {
   on('skill.prompt', async ($, e, next) => {
     if (!/(^|:)agt$/.test(e.skill)) return next(e)
     await autoDeck($)
-    if (!squadBlock) return next(e)
-    return next({ ...e, text: e.text + squadBlock })
+    return next({ ...e, text: e.text + squadBlock + transportBlock(await transportOf($)) })
   })
 
   on('session.measure', async ($, e, next) => {

@@ -1,33 +1,25 @@
 // Pane transport: which multiplexer this session runs in (Herdr, tmux, or none), how to
 // open a worker pane in it, and how to read tmux panes back as live.js pane agents.
-// Pure helpers plus a few functions that take `$`; register.js only wires them.
+// Pure on purpose — the hooks loader never follows `$` across an import — so every
+// $.process / $.env / $.fs call lives in register.js and only feeds these helpers.
 
 export const SAFE_RUN = /^[A-Za-z0-9_-]{1,64}$/
 export const NAME_RE = /^[a-z][a-z0-9_-]{0,31}$/
 const ROLE_RE = /^[a-z0-9-]+$/
 const MODEL_RE = /^(haiku|sonnet|opus|fable|claude-[a-z0-9.-]+)$/
-const PROBE = { timeoutMs: 5000 }
+export const PROBE = { timeoutMs: 5000 }
+export const HERDR_START_TIMEOUT = { timeoutMs: 60000 }
 const TAB = '\t'
 
 export const SPAWN_ROLE = 'spawn'
 export const DEFAULT_MODEL = 'sonnet'
 export const SPAWN_USAGE = 'Usage: /agt-spawn "task" [--model sonnet|opus|haiku|fable]'
 
-async function probe($, argv) {
-  try {
-    return (await $.process.run(argv, PROBE)).exitCode === 0
-  } catch {
-    return false
-  }
-}
-
-// herdr when HERDR_ENV=1 and `herdr --version` runs; else tmux when $TMUX is set and
-// `tmux -V` runs; else none. No $.process (desktop app, VS Code) is none.
-export async function detectTransport($) {
-  if (!$?.process?.run) return 'none'
-  if ((await $.env.get('HERDR_ENV')) === '1' && (await probe($, ['herdr', '--version']))) return 'herdr'
-  if (((await $.env.get('TMUX')) ?? '') !== '' && (await probe($, ['tmux', '-V']))) return 'tmux'
-  return 'none'
+// herdr when HERDR_ENV=1 and `herdr --version` ran; else tmux when $TMUX is set and
+// `tmux -V` ran; else none. Callers pass what their probes found (a probe that rejects
+// or exits non-zero is false).
+export function pickTransport({ herdrOk, tmuxOk }) {
+  return herdrOk ? 'herdr' : tmuxOk ? 'tmux' : 'none'
 }
 
 // The line appended to the /agt skill prompt so the model knows which transport is live.
@@ -114,26 +106,7 @@ export function isLead(rows, selfPane) {
   return !!me && !me.agt.startsWith('agt-')
 }
 
-export async function listTmux($) {
-  const r = await $.process.run(['tmux', 'list-panes', '-a', '-F', TMUX_LIST_FORMAT], PROBE)
-  if (r.exitCode !== 0) throw new Error('tmux list-panes exited ' + r.exitCode)
-  return parseTmuxList(r.stdout)
-}
-
-export async function readDone($, home, rows) {
-  const done = new Map()
-  for (const r of rows) {
-    const n = r.agt.startsWith('agt-') ? splitName(r.agt) : null
-    const file = n && doneFile(home, n.run, n.role)
-    if (!file) continue
-    try {
-      done.set(r.agt, await $.fs.exists(file))
-    } catch {
-      // unreadable counts as not done
-    }
-  }
-  return done
-}
+export const TMUX_LIST_ARGV = ['tmux', 'list-panes', '-a', '-F', TMUX_LIST_FORMAT]
 
 // ── reaping ───────────────────────────────────────────────────────────────────
 
@@ -161,51 +134,26 @@ export function tmuxTagArgvs(id, name) {
   ]
 }
 
-async function ok($, argv, init) {
-  const r = await $.process.run(argv, init)
-  if (r.exitCode !== 0) throw new Error(argv.slice(0, 3).join(' ') + ' exited ' + r.exitCode + (r.stderr ? ': ' + String(r.stderr).trim().slice(0, 200) : ''))
-  return r
+export function tmuxPaneIdOf(stdout) {
+  const id = String(stdout ?? '').trim()
+  return /^%\d+$/.test(id) ? id : null
 }
 
-async function spawnTmux($, o) {
-  const target = await $.env.get('TMUX_PANE')
-  if (!target) throw new Error('TMUX_PANE is not set')
-  const shell = (await $.env.get('SHELL')) ?? ''
-  const r = await ok($, tmuxSplitArgv({ ...o, target, shell }), PROBE)
-  const id = r.stdout.trim()
-  if (!/^%\d+$/.test(id)) throw new Error('tmux gave no pane id')
+export const tmuxKillArgv = (id) => ['tmux', 'kill-pane', '-t', id]
+
+// herdr: split beside the lead (never focused), start claude in it, then prompt it.
+export function herdrSplitArgv({ pane, cwd, run }) {
+  return ['herdr', 'pane', 'split', '--pane', pane, '--direction', 'right', '--cwd', cwd, '--env', 'AGENTILLE_RUN=' + run, '--no-focus']
+}
+
+export function herdrPaneIdOf(stdout) {
   try {
-    for (const argv of tmuxTagArgvs(id, o.name)) await ok($, argv, PROBE)
-  } catch (err) {
-    await $.process.run(['tmux', 'kill-pane', '-t', id], PROBE).catch(() => {})
-    throw err
+    return JSON.parse(stdout).result?.pane?.pane_id ?? null
+  } catch {
+    return null
   }
-  return id
 }
 
-async function spawnHerdr($, o) {
-  const self = await $.env.get('HERDR_PANE_ID')
-  if (!self) throw new Error('HERDR_PANE_ID is not set')
-  const split = await ok($, ['herdr', 'pane', 'split', '--pane', self, '--direction', 'right', '--cwd', o.cwd, '--env', 'AGENTILLE_RUN=' + o.run, '--no-focus'], PROBE)
-  const id = JSON.parse(split.stdout).result?.pane?.pane_id
-  if (!id) throw new Error('herdr gave no pane id')
-  try {
-    await ok($, ['herdr', 'agent', 'start', o.name, '--kind', 'claude', '--pane', id, '--timeout', '45000', '--', '--model', o.model], { timeoutMs: 60000 })
-    await ok($, ['herdr', 'agent', 'prompt', o.name, o.task], PROBE)
-  } catch (err) {
-    await $.process.run(['herdr', 'pane', 'close', id], PROBE).catch(() => {})
-    throw err
-  }
-  return id
-}
-
-// Opens one claude pane beside this one, named agt-<run>-<role>, never focused.
-// Resolves the pane id; rejects with a short reason, having closed a half-made pane.
-export async function spawnPane($, transport, { run, role, model, task, cwd }) {
-  const name = paneName(run, role)
-  if (!name) throw new Error('bad pane name')
-  const o = { run, model, task, cwd, name }
-  if (transport === 'herdr') return spawnHerdr($, o)
-  if (transport === 'tmux') return spawnTmux($, o)
-  throw new Error('no pane transport')
-}
+export const herdrStartArgv = ({ name, pane, model }) => ['herdr', 'agent', 'start', name, '--kind', 'claude', '--pane', pane, '--timeout', '45000', '--', '--model', model]
+export const herdrPromptArgv = (name, task) => ['herdr', 'agent', 'prompt', name, task]
+export const herdrCloseArgv = (id) => ['herdr', 'pane', 'close', id]

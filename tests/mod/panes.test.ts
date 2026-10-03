@@ -1,60 +1,13 @@
 import { describe, expect, test } from 'claude-code/testing'
-import { detectTransport, doneFile, isLead, newRunId, paneName, parseSpawnArgs, parseTmuxList, reapPool, spawnPane, splitName, tmuxPaneAgents, tmuxSplitArgv, tmuxTagArgvs, transportBlock, TMUX_LIST_FORMAT } from '../../hooks/panes.js'
+import { doneFile, herdrCloseArgv, herdrPaneIdOf, herdrPromptArgv, herdrSplitArgv, herdrStartArgv, isLead, newRunId, paneName, parseSpawnArgs, parseTmuxList, pickTransport, reapPool, splitName, tmuxKillArgv, tmuxPaneAgents, tmuxPaneIdOf, tmuxSplitArgv, tmuxTagArgvs, transportBlock, TMUX_LIST_FORMAT } from '../../hooks/panes.js'
 import { reapable } from '../../hooks/live.js'
 
 const TAB = '\t'
-// A stand-in for `$`: env vars and process.run answered from tables. A table value is a
-// partial { exitCode, stdout, stderr } or an Error (the binary is missing, so run rejects).
-const mk = (vars: Record<string, string> = {}, table: Record<string, any> = {}, exists: string[] = []) => {
-  const seen: string[][] = []
-  const inits: any[] = []
-  const $: any = {
-    env: { get: async (name: string) => vars[name] },
-    fs: { exists: async (p: string) => exists.includes(p) },
-    process: {
-      run: async (argv: string[], init?: any) => {
-        seen.push(argv)
-        inits.push(init)
-        const key = Object.keys(table).find((k) => argv.join(' ').startsWith(k))
-        const hit = key === undefined ? {} : table[key]
-        if (hit instanceof Error) throw hit
-        return { exitCode: 0, stdout: '', stderr: '', ...hit }
-      },
-    },
-  }
-  return { $, seen, inits }
-}
-
 describe('transport', () => {
-  test('herdr wins when HERDR_ENV=1 and herdr runs', async () => {
-    const { $ } = mk({ HERDR_ENV: '1', TMUX: '/tmp/tmux-1/default,1,0' }, { 'herdr --version': { stdout: 'herdr 1' }, 'tmux -V': { stdout: 'tmux 3.4' } })
-    expect(await detectTransport($)).toBe('herdr')
-  })
-
-  test('a failed herdr probe falls through to tmux', async () => {
-    const { $ } = mk({ HERDR_ENV: '1', TMUX: '/tmp/tmux-1/default,1,0' }, { 'herdr --version': { exitCode: 127 } })
-    expect(await detectTransport($)).toBe('tmux')
-  })
-
-  test('a probe that rejects counts as unavailable', async () => {
-    const { $ } = mk({ HERDR_ENV: '1', TMUX: '/tmp/tmux-1/default,1,0' }, { 'herdr --version': new Error('spawn herdr ENOENT'), 'tmux -V': new Error('spawn tmux ENOENT') })
-    expect(await detectTransport($)).toBe('none')
-  })
-
-  test('tmux needs a non-empty TMUX; HERDR_ENV must be exactly 1', async () => {
-    const { $, seen } = mk({ HERDR_ENV: '0', TMUX: '' })
-    expect(await detectTransport($)).toBe('none')
-    expect(seen).toEqual([])
-  })
-
-  test('no $.process (desktop app, VS Code) is none', async () => {
-    expect(await detectTransport({ env: { get: async () => '1' } })).toBe('none')
-  })
-
-  test('probes carry the 5s timeout', async () => {
-    const { $, inits } = mk({ HERDR_ENV: '1' })
-    await detectTransport($)
-    expect(inits).toEqual([{ timeoutMs: 5000 }])
+  test('herdr beats tmux, tmux beats none', async () => {
+    expect(pickTransport({ herdrOk: true, tmuxOk: true })).toBe('herdr')
+    expect(pickTransport({ herdrOk: false, tmuxOk: true })).toBe('tmux')
+    expect(pickTransport({ herdrOk: false, tmuxOk: false })).toBe('none')
   })
 
   test('block names the transport and the matching playbook section', async () => {
@@ -171,8 +124,6 @@ describe('tmux panes', () => {
 })
 
 describe('spawn', () => {
-  const o = { run: 'ab12cd', role: 'spawn', model: 'haiku', task: 'reply with ok', cwd: '/work/repo' }
-
   test('tmux argv runs claude through an interactive zsh/bash, task as a plain argument', async () => {
     const argv = tmuxSplitArgv({ target: '%1', cwd: '/work/repo', run: 'ab12cd', shell: '/bin/zsh', model: 'haiku', name: 'agt-ab12cd-spawn', task: 'a "quoted"; $(thing)' })
     expect(argv).toEqual(['tmux', 'split-window', '-d', '-h', '-P', '-F', '#{pane_id}', '-t', '%1', '-c', '/work/repo', '-e', 'AGENTILLE_RUN=ab12cd', '/bin/zsh', '-ic', 'claude "$@"', 'agt', '--model', 'haiku', '-n', 'agt-ab12cd-spawn', 'a "quoted"; $(thing)'])
@@ -192,36 +143,54 @@ describe('spawn', () => {
     ])
   })
 
-  test('tmux spawn: split, tag, return the pane id', async () => {
-    const { $, seen } = mk({ TMUX_PANE: '%1', SHELL: '/bin/zsh' }, { 'tmux split-window': { stdout: '%9\n' } })
-    expect(await spawnPane($, 'tmux', o)).toBe('%9')
-    expect(seen.map((a) => a[1])).toEqual(['split-window', 'set-option', 'set-option', 'set-option', 'select-pane'])
+  test('pane ids are read strictly from the command output', async () => {
+    expect(tmuxPaneIdOf('%9\n')).toBe('%9')
+    expect(tmuxPaneIdOf('oops')).toBe(null)
+    expect(tmuxKillArgv('%9')).toEqual(['tmux', 'kill-pane', '-t', '%9'])
+    expect(herdrPaneIdOf(JSON.stringify({ result: { pane: { pane_id: 'w1:p5' } } }))).toBe('w1:p5')
+    expect(herdrPaneIdOf('not json')).toBe(null)
+    expect(herdrPaneIdOf('{}')).toBe(null)
   })
 
-  test('tmux spawn kills the pane when tagging fails', async () => {
-    const { $, seen } = mk({ TMUX_PANE: '%1', SHELL: '/bin/zsh' }, { 'tmux split-window': { stdout: '%9\n' }, 'tmux set-option -p -t %9 @agt_vendor': { exitCode: 1, stderr: 'boom' } })
-    await expect(spawnPane($, 'tmux', o)).rejects.toThrow(/exited 1/)
-    expect(seen[seen.length - 1]).toEqual(['tmux', 'kill-pane', '-t', '%9'])
+  test('herdr: split beside the lead without focus, start claude, prompt it', async () => {
+    expect(herdrSplitArgv({ pane: 'w1:p1', cwd: '/work/repo', run: 'ab12cd' })).toEqual(['herdr', 'pane', 'split', '--pane', 'w1:p1', '--direction', 'right', '--cwd', '/work/repo', '--env', 'AGENTILLE_RUN=ab12cd', '--no-focus'])
+    expect(herdrStartArgv({ name: 'agt-ab12cd-spawn', pane: 'w1:p5', model: 'haiku' })).toEqual(['herdr', 'agent', 'start', 'agt-ab12cd-spawn', '--kind', 'claude', '--pane', 'w1:p5', '--timeout', '45000', '--', '--model', 'haiku'])
+    expect(herdrPromptArgv('agt-ab12cd-spawn', 'reply with ok')).toEqual(['herdr', 'agent', 'prompt', 'agt-ab12cd-spawn', 'reply with ok'])
+    expect(herdrCloseArgv('w1:p5')).toEqual(['herdr', 'pane', 'close', 'w1:p5'])
+  })
+})
+
+describe('skill prompt', () => {
+  const answer = (on: any, vars: Record<string, string>, table: Record<string, number> = {}) => {
+    on('env.get', async ($: any, e: any) => ({ value: vars[e.name] }))
+    on('process.run', async ($: any, e: any) => {
+      const key = Object.keys(table).find((k) => e.argv.join(' ').startsWith(k))
+      return { value: { exitCode: key === undefined ? 0 : table[key], stdout: '', stderr: '' } }
+    })
+  }
+
+  test('/agt is told which transport is live', async ($, on) => {
+    answer(on, { HERDR_ENV: '1' })
+    on('skill.prompt', async ($: any, e: any) => ({ text: e.text }))
+    const r = await $.skill.prompt({ skill: 'agt', text: 'base' })
+    expect(r.text).toContain('\n## Pane transport (agentille mod)\n\ntransport: herdr\n')
+    expect(r.text).toContain('"Spawning a worker"')
   })
 
-  test('herdr spawn: split, start, prompt, never focused', async () => {
-    const { $, seen, inits } = mk({ HERDR_PANE_ID: 'w1:p1' }, { 'herdr pane split': { stdout: JSON.stringify({ result: { pane: { pane_id: 'w1:p5' } } }) } })
-    expect(await spawnPane($, 'herdr', o)).toBe('w1:p5')
-    expect(seen[0]).toEqual(['herdr', 'pane', 'split', '--pane', 'w1:p1', '--direction', 'right', '--cwd', '/work/repo', '--env', 'AGENTILLE_RUN=ab12cd', '--no-focus'])
-    expect(seen[1]).toEqual(['herdr', 'agent', 'start', 'agt-ab12cd-spawn', '--kind', 'claude', '--pane', 'w1:p5', '--timeout', '45000', '--', '--model', 'haiku'])
-    expect(seen[2]).toEqual(['herdr', 'agent', 'prompt', 'agt-ab12cd-spawn', 'reply with ok'])
-    expect(inits[1]).toEqual({ timeoutMs: 60000 })
+  test('inside tmux it points at the tmux section', async ($, on) => {
+    answer(on, { TMUX: '/tmp/tmux-1/default,1,0' })
+    on('skill.prompt', async ($: any, e: any) => ({ text: e.text }))
+    const r = await $.skill.prompt({ skill: 'agentille:agt', text: 'base' })
+    expect(r.text).toContain('transport: tmux')
+    expect(r.text).toContain('"tmux transport"')
   })
 
-  test('herdr spawn closes the pane when start fails', async () => {
-    const { $, seen } = mk({ HERDR_PANE_ID: 'w1:p1' }, { 'herdr pane split': { stdout: JSON.stringify({ result: { pane: { pane_id: 'w1:p5' } } }) }, 'herdr agent start': { exitCode: 2 } })
-    await expect(spawnPane($, 'herdr', o)).rejects.toThrow()
-    expect(seen[seen.length - 1]).toEqual(['herdr', 'pane', 'close', 'w1:p5'])
-  })
-
-  test('refuses a bad name and no transport', async () => {
-    const { $ } = mk()
-    await expect(spawnPane($, 'tmux', { ...o, run: '../x' })).rejects.toThrow('bad pane name')
-    await expect(spawnPane($, 'none', o)).rejects.toThrow('no pane transport')
+  test('with no multiplexer it says so, and other skills are untouched', async ($, on) => {
+    answer(on, {}, { 'herdr --version': 127 })
+    on('skill.prompt', async ($: any, e: any) => ({ text: e.text }))
+    const r = await $.skill.prompt({ skill: 'agt', text: 'base' })
+    expect(r.text).toContain('transport: none')
+    expect(r.text).toContain('workflow, else subagent waves')
+    expect((await $.skill.prompt({ skill: 'commit', text: 'base' })).text).toBe('base')
   })
 })

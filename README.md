@@ -56,6 +56,7 @@ Skip it for one-file edits, typos, renames and questions: a plain prompt is chea
 | `/agt --formation duel\|gauntlet\|relay "task"` | Two builds and a judge, an adversary pass, or a contract-first parallel build |
 | `/agt-spawn "task" [--model …]` | One extra routed Claude pane (Herdr or tmux), yours to keep |
 | `/agt-routing` · `/agt-ledger` | Routing decisions · tokens per role this session |
+| `/agt-highlight on\|all\|off` | Essentials card and lit paths on `/agt` replies · on every long reply · off |
 | `/agentille-project` · `/agentille-claude-md` | Seed a repo's CLAUDE.md · tune an existing one |
 
 ## How it decides

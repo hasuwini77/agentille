@@ -2,6 +2,23 @@
 
 All notable changes to agentille are documented here.
 
+## [3.3.0] — 2026-10-04
+
+### Added
+
+- **`/agt-highlight all`.** The reply highlighter can now cover every long
+  reply, not only `/agt` turns: an essentials card on top (next action, what
+  needs you, what got done) and a dim body with paths, versions, refs and
+  numbers lit. Read off the text by code, no model call. `/agt-highlight on`
+  goes back to `/agt` turns only, which stays the default; the choice is
+  remembered.
+
+### Rationale
+
+The helper that makes a long answer quick to read stopped at the edge of an
+`/agt` run, so most replies never got it. It is opt-in so nobody's plain
+prompts change unasked.
+
 ## [3.2.0] — 2026-10-04
 
 ### Added

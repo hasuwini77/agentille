@@ -13,7 +13,7 @@ export const LIT_MAX = 10_000
 export const LIT_MEMO_MAX = 500
 export const MARK = { next: '→', flag: '⚑', done: '✓' }
 export const SPAN_COLOR = { path: '#7fd3e6', cmd: '#4f8ef7', version: '#a77bff', number: '#f2a33a', ref: '#3fb950' }
-export const HIGHLIGHT_USAGE = 'Usage: /agt-highlight [on|off]'
+export const HIGHLIGHT_USAGE = 'Usage: /agt-highlight [on|all|off]'
 
 const MAX_LINE = 96
 
@@ -206,13 +206,14 @@ export function litFor(memo, id, { on, agtTurn }) {
 export function parseHighlightArgs(args) {
   const a = String(args ?? '').trim().toLowerCase()
   if (!a) return { show: true }
-  if (a === 'on') return { on: true }
-  if (a === 'off') return { on: false }
+  if (a === 'on') return { on: true, all: false }
+  if (a === 'all') return { on: true, all: true }
+  if (a === 'off') return { on: false, all: false }
   return { error: HIGHLIGHT_USAGE }
 }
 
-export function highlightText(on) {
-  return on
-    ? 'Highlight: on — /agt replies get an essentials card and a dim body with paths, versions, refs and numbers lit.'
-    : 'Highlight: off — replies draw as usual. /agt-highlight on turns it back on.'
+export function highlightText(on, all = false) {
+  if (!on) return 'Highlight: off — replies draw as usual. /agt-highlight on turns it back on.'
+  const which = all ? 'all — every long reply gets' : 'on — /agt replies get'
+  return 'Highlight: ' + which + ' an essentials card and a dim body with paths, versions, refs and numbers lit.' + (all ? '' : ' /agt-highlight all covers plain prompts too.')
 }

@@ -4,6 +4,7 @@
 // $.process / $.env / $.fs call lives in register.js and only feeds these helpers.
 
 import { isAgtPrompt } from './live.js'
+import { ROLES, parseHeader } from './routing.js'
 
 export const SAFE_RUN = /^[A-Za-z0-9_-]{1,64}$/
 export const NAME_RE = /^[a-z][a-z0-9_-]{0,31}$/
@@ -26,6 +27,8 @@ export function pickTransport({ herdrOk, tmuxOk }) {
   return herdrOk ? 'herdr' : tmuxOk ? 'tmux' : 'none'
 }
 
+export const PANE_RULE = 'Pane rule: every executor slice (even a single one), the adversary, and any reviewer routed to opus or fable run as pane workers; planner, plan-reviewer, ui-prototyper, sonnet-routed reviewers and seo-reviewer stay subagents. Call spawn_pane with agent (the routing role) and header (this run\'s full [agt …] line): the mod picks model and effort, and refuses roles that stay subagents. A pane starts as a full Claude session (~55k tokens vs ~32k for a subagent; measured 1.12× the fresh tokens of the same workers as subagents): it buys a visible worker, not a saving. `--mode subagent` keeps every worker a subagent.'
+
 // The line appended to the /agt skill prompt so the model knows which transport is live,
 // and, when the mod registered them, that the pane tools replace the manual recipe.
 export function transportBlock(transport, tools = false) {
@@ -34,7 +37,7 @@ export function transportBlock(transport, tools = false) {
     tmux: 'Parallel slices run as tmux panes — see `panes-mode.md` → "tmux transport".',
   }[transport] ?? 'No pane transport here: parallel slices run as a workflow, else subagent waves.'
   const viaTools = tools && transport !== 'none'
-    ? 'Open each claude worker with mcp__agentille__spawn_pane and close it after harvest with mcp__agentille__close_pane — see `panes-mode.md` → "Through the mod\'s tools".\n'
+    ? 'Open each claude worker with mcp__agentille__spawn_pane and close it after harvest with mcp__agentille__close_pane — see `panes-mode.md` → "Through the mod\'s tools".\n' + PANE_RULE + '\n'
     : ''
   return '\n## Pane transport (agentille mod)\n\ntransport: ' + transport + '\n' + line + '\n' + viaTools
 }
@@ -186,14 +189,47 @@ export function reapPool(panes) {
 
 // ── spawning ──────────────────────────────────────────────────────────────────
 
-export function tmuxSplitArgv({ target, cwd, run, shell, model, name, task }) {
-  const head = ['tmux', 'split-window', '-d', '-h', '-P', '-F', '#{pane_id}', '-t', target, '-c', cwd.replace(/#/g, '##'), '-e', 'AGENTILLE_RUN=' + run]
+export const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max']
+const effortArgs = (effort) => (EFFORTS.includes(effort) ? ['--effort', effort] : [])
+// A routed worker runs as its agentille agent definition (instructions, tools, verdict format),
+// not as a bare session that only has the task prompt.
+const agentArgs = (agent) => (ROLES.includes(agent) ? ['--agent', 'agentille:agentille-' + agent] : [])
+
+export function tmuxSplitArgv({ target, cwd, run, shell, model, name, task, effort, direction, agent }) {
+  const head = ['tmux', 'split-window', '-d', direction === 'down' ? '-v' : '-h', '-P', '-F', '#{pane_id}', '-t', target, '-c', cwd.replace(/#/g, '##'), '-e', 'AGENTILLE_RUN=' + run]
   // `--` ends claude's options, so a task that starts with `-` is still just the prompt
-  const tail = ['--model', model, '-n', name, '--', task]
+  const tail = [...agentArgs(agent), '--model', model, ...effortArgs(effort), '-n', name, '--', task]
   const base = String(shell ?? '').split('/').pop()
   if (base === 'zsh' || base === 'bash') return [...head, shell, '-ic', 'claude "$@"', 'agt', ...tail]
   return [...head, 'claude', ...tail]
 }
+
+// Stacked layout: a narrow lead stacks workers below it; a wide one puts them beside it. Later
+// workers split the newest one across the first worker's axis. Only workers still live count; a right split that would
+// leave panes under MIN_SPLIT_COLS goes down instead.
+export const WIDE_COLS = 160
+export const MIN_SPLIT_COLS = 40
+
+export function splitPlan({ lead, leadWidth = null, newestWidth = null, opened = [], live = [] }) {
+  const alive = opened.filter((o) => live.some((p) => p.id === o.id))
+  if (!alive.length) {
+    const d = typeof leadWidth === 'number' && leadWidth < WIDE_COLS ? 'down' : 'right'
+    return { target: lead, direction: d, axis: d }
+  }
+  const n = alive[alive.length - 1]
+  let d = n.axis === 'right' ? 'down' : 'right'
+  if (d === 'right' && typeof newestWidth === 'number' && newestWidth / 2 < MIN_SPLIT_COLS) d = 'down'
+  return { target: n.id, direction: d, axis: n.axis }
+}
+
+export const tmuxWidthArgv = (pane) => ['tmux', 'display-message', '-p', '-t', pane, '#{pane_width}']
+
+export function widthOf(stdout) {
+  const n = Number(String(stdout ?? '').trim())
+  return Number.isInteger(n) && n > 0 ? n : null
+}
+
+export const tmuxEvenArgv = (id) => ['tmux', 'select-layout', '-E', '-t', id]
 
 export function tmuxTagArgvs(id, name) {
   return [
@@ -212,8 +248,8 @@ export function tmuxPaneIdOf(stdout) {
 export const tmuxKillArgv = (id) => ['tmux', 'kill-pane', '-t', id]
 
 // herdr: split beside the lead (never focused), start claude in it, then prompt it.
-export function herdrSplitArgv({ pane, cwd, run }) {
-  return ['herdr', 'pane', 'split', '--pane', pane, '--direction', 'right', '--cwd', cwd, '--env', 'AGENTILLE_RUN=' + run, '--no-focus']
+export function herdrSplitArgv({ pane, cwd, run, direction }) {
+  return ['herdr', 'pane', 'split', '--pane', pane, '--direction', direction === 'down' ? 'down' : 'right', '--cwd', cwd, '--env', 'AGENTILLE_RUN=' + run, '--no-focus']
 }
 
 export function herdrPaneIdOf(stdout) {
@@ -224,9 +260,26 @@ export function herdrPaneIdOf(stdout) {
   }
 }
 
-export const herdrStartArgv = ({ name, pane, model }) => ['herdr', 'agent', 'start', name, '--kind', 'claude', '--pane', pane, '--timeout', '45000', '--', '--model', model]
+export const herdrStartArgv = ({ name, pane, model, effort, agent }) => ['herdr', 'agent', 'start', name, '--kind', 'claude', '--pane', pane, '--timeout', '45000', '--', ...agentArgs(agent), '--model', model, ...effortArgs(effort)]
 export const herdrPromptArgv = (name, task) => ['herdr', 'agent', 'prompt', name, task]
 export const herdrCloseArgv = (id) => ['herdr', 'pane', 'close', id]
+
+const REVIEWERS = new Set(['code-reviewer', 'security-reviewer', 'design-reviewer', 'payments-reviewer', 'perf-reviewer'])
+const SUBAGENT_ONLY = new Set(['planner', 'plan-reviewer', 'ui-prototyper'])
+
+// Whether a routing role runs as a pane worker, given the routing decision for it.
+export function paneRole(agent, decision) {
+  const m = String(decision?.model ?? '')
+  if (agent === 'executor' || agent === 'adversary') return { pane: true, why: '' }
+  if (REVIEWERS.has(agent)) {
+    return /opus|fable/.test(m)
+      ? { pane: true, why: '' }
+      : { pane: false, why: `${agent} is routed to ${m || 'an unknown model'}: run it as a subagent; only opus or fable reviewers get a pane.` }
+  }
+  if (agent === 'seo-reviewer') return { pane: false, why: 'seo-reviewer stays a subagent: a short read-only pass does not pay back a pane\'s start-up.' }
+  if (SUBAGENT_ONLY.has(agent)) return { pane: false, why: `${agent} stays a subagent: its full answer feeds the next dispatch.` }
+  return { pane: false, why: `${agent} is not a routing role.` }
+}
 
 // ── pane tools: /agt panes mode opens and closes workers through the mod ──────
 
@@ -235,17 +288,19 @@ export const TOOL_MODELS = ['sonnet', 'opus', 'haiku']
 
 export const SPAWN_TOOL = {
   name: 'spawn_pane',
-  description: 'Open one agentille worker pane beside this session (Herdr or tmux, whichever is live), never focused, named agt-<run>-<role>, running Claude on the given model with the task as its first prompt. Use it for each panes-mode slice in place of raw herdr/tmux commands. The pane is reaped once it sits done; close it yourself with close_pane after harvesting.',
+  description: 'Open one agentille worker pane beside this session (Herdr or tmux, whichever is live), never focused, named agt-<run>-<role>, running Claude on the model and effort agentille routes for `agent`, with the task as its first prompt. Use it for each panes-mode slice in place of raw herdr/tmux commands. The pane is reaped once it sits done; close it yourself with close_pane after harvesting.',
   inputSchema: {
     type: 'object',
     properties: {
       run: { type: 'string', description: 'The run id from the [agt run=…] header (6 chars).' },
       role: { type: 'string', description: 'Slice role, lowercase letters, digits and dashes (exec-1, review). Not "spawn".' },
       task: { type: 'string', description: 'The full self-contained worker prompt.' },
-      model: { type: 'string', enum: TOOL_MODELS, description: 'Default sonnet.' },
+      agent: { type: 'string', enum: ROLES, description: 'Routing role (executor, code-reviewer, …): the mod routes model and effort from it.' },
+      header: { type: 'string', description: 'This run\'s full [agt run=… size=… risk=… mode=… fable=…] line.' },
+      model: { type: 'string', enum: TOOL_MODELS, description: 'Ignored: the mod routes model and effort from agent + header. Kept so older prompts validate.' },
       cwd: { type: 'string', description: 'Absolute directory to start in (the slice worktree). Default: this session\'s directory.' },
     },
-    required: ['run', 'role', 'task'],
+    required: ['run', 'role', 'task', 'agent', 'header'],
     additionalProperties: false,
   },
 }
@@ -261,7 +316,7 @@ export const CLOSE_TOOL = {
   },
 }
 
-// spawn_pane input → { run, role, name, model, task, cwd } or { error }. `live` is the
+// spawn_pane input → { run, role, name, agent, header, hdr, asked, model, task, cwd } or { error }. `live` is the
 // panes the mod sees now; a name already on screen is refused rather than doubled.
 export function spawnToolInput(input, live = []) {
   const i = input ?? {}
@@ -269,19 +324,26 @@ export function spawnToolInput(input, live = []) {
   const run = str(i.run)
   const role = str(i.role)
   const task = str(i.task)
-  const model = str(i.model) || DEFAULT_MODEL
+  const agent = str(i.agent)
+  const header = str(i.header)
+  const asked = str(i.model) || null
+  const model = asked ?? DEFAULT_MODEL
   const cwd = i.cwd === undefined ? null : str(i.cwd)
   if (!SAFE_RUN.test(run)) return { error: 'run must be the run id from the [agt run=…] header.' }
   if (!ROLE_RE.test(role)) return { error: 'role must be lowercase letters, digits and dashes.' }
   if (role === SPAWN_ROLE) return { error: '"spawn" is reserved for a typed /agt-spawn.' }
   const name = paneName(run, role)
   if (!name) return { error: 'agt-' + run + '-' + role + ' is not a valid pane name (max 32 chars).' }
+  if (!ROLES.includes(agent)) return { error: 'agent must be one of ' + ROLES.join(', ') + '.' }
+  const hdr = parseHeader(header)
+  if (!hdr) return { error: 'header must be the run\'s [agt run=… …] line.' }
+  if (hdr.run !== run) return { error: 'header run=' + hdr.run + ' does not match run ' + run + '.' }
   if (!TOOL_MODELS.includes(model)) return { error: 'model must be one of ' + TOOL_MODELS.join(', ') + '. Fable runs only through the routing guard or a typed /agt-spawn.' }
   if (!task) return { error: 'task is empty.' }
   if (BARE_WORD.test(task)) return { error: 'A one-word task would run as a claude subcommand. Send the full worker prompt.' }
   if (cwd !== null && (!cwd.startsWith('/') || cwd.includes('\0'))) return { error: 'cwd must be an absolute path.' }
   if (live.some((p) => p.name === name)) return { error: name + ' is already open. Pick another role or close it first.' }
-  return { run, role, name, model, task, cwd }
+  return { run, role, name, agent, header, hdr, asked, model, task, cwd }
 }
 
 // close_pane input → { pane } from the panes this session owns, or { error }. `tab`, when

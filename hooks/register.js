@@ -3,14 +3,15 @@
 // observes events, applies decisions, and draws.
 
 import { DEFAULTS, decide, formationOf, parseHeader, roleOf, verdictOf } from './routing.js'
-import { addUsage, effortBar, elapsed, endsOnQuestion, finish, isAgtPrompt, ledger, ledgerText, newAgent, paneAgents, reapable, reopenOnReply, shouldAutoOpen, short, summary, tokens, visible } from './live.js'
+import { ON_STAGE, addUsage, ageFarewells, effortBar, elapsed, endRoute, endsOnQuestion, finish, isAgtPrompt, ledger, ledgerText, newAgent, newTracker, paneAgents, paneByes, playing, reapable, reopenOnReply, shouldAutoOpen, short, stage, stripText, tokens } from './live.js'
 import { activeSquads, allPaths, depsOf, injection } from './squads.js'
-import { cells, MODEL_COLOR, modelKey } from './sprites.js'
+import { cells, hatOf, MODEL_COLOR, modelKey } from './sprites.js'
+import { MARK, SPAN_COLOR, highlight, highlightText, litFor, parseHighlightArgs, spans } from './highlight.js'
 import { BRIEF_SYSTEM, DEFAULT_FOCUS, briefPrompt, flagOf, focusText, paneFlags, parseBrief, parseFocusArgs, shouldBrief } from './focus.js'
 import {
   CLOSE_TOOL, HERDR_START_TIMEOUT, PROBE, SPAWN_TOOL, closeTarget, spawnToolInput, SAFE_RUN, SPAWN_ROLE, TMUX_LIST_ARGV, doneFile, herdrCloseArgv, herdrPaneIdOf, herdrPromptArgv, herdrSplitArgv, herdrStartArgv,
-  isFreshDone, isLead, newRunId, paneName, parseSpawnArgs, parseTmuxList, pickTransport, quietSpawn, reapPool, scopeRows, splitName, tmuxKillArgv, tmuxPaneAgents, tmuxPaneIdOf,
-  teamDirective, teamForce, teamNotice, tmuxSplitArgv, tmuxTagArgvs, transportBlock,
+  isFreshDone, isLead, newRunId, paneName, paneRole, parseSpawnArgs, parseTmuxList, pickTransport, quietSpawn, reapPool, scopeRows, splitName, splitPlan, tmuxEvenArgv, tmuxKillArgv, tmuxPaneAgents, tmuxPaneIdOf,
+  tmuxWidthArgv, widthOf, teamDirective, teamForce, teamNotice, tmuxSplitArgv, tmuxTagArgvs, transportBlock,
 } from './panes.js'
 
 const DECK = 'agt-deck'
@@ -25,6 +26,9 @@ const runs = new Map()       // run id → { revise, fixes, fable, log: [] }
 const live = new Map()       // agentId → live agent (live.js)
 const decisions = []         // this session, for /agt-routing
 let panes = []               // agt-* panes (herdr or tmux) other than this one
+const paneRoutes = []        // PaneRoute[], append-only: how each worker this lead opened was routed
+let opened = []              // { id, name, axis } of panes this lead opened via spawn_pane, in spawn order
+const tracker = newTracker() // who is on stage and who is waving goodbye (live.js)
 const paneSeen = new Map()   // reaper bookkeeping
 const tmuxFirstSeen = new Map() // tmux pane id → when this session first listed it
 let selfName = null          // this pane's name when it is an agt-* worker
@@ -38,6 +42,9 @@ let deckOpen = false
 let deckAuto = true          // open the deck on its own when a run starts
 let deckDismissedRun = null  // run whose deck the person closed by hand
 let deckWaiting = null       // { at, spawned }: a typed /agt whose first agent has not come yet
+let deckBy = null            // 'auto' | 'person': who opened the deck; a person's deck is never closed for them
+let closeAfterBye = null     // { asked }: close the deck once the last farewell has played
+let reopened = false         // the strip came back once on a reply; it does not chain past the run
 let tick = 0
 let pollTimer = null         // pane polling: runs only while panes may exist
 let quietPolls = 0
@@ -47,6 +54,8 @@ let brief = []               // [{ kind, text }] for the latest long answer
 let briefSeq = 0
 let flags = []               // [{ text, at }] from agent results this run
 let agtTurn = false          // this turn is part of an /agt run
+let highlightOn = true       // /agt replies get an essentials card and lit tokens
+const litMemo = new Map()    // message id → was it an /agt turn when first drawn
 const FLAG_TTL_MS = 30 * 60_000
 const FOCUS_COLOR = { next: '#3fb950', flag: '#f85149' }
 
@@ -114,6 +123,7 @@ async function autoDeck($) {
   deckOpen = true
   try {
     await $.ui.open({ id: DECK, title: 'agentille deck', closeOnEscape: true })
+    deckBy = 'auto'
   } catch {
     deckOpen = false
   }
@@ -126,6 +136,47 @@ async function writeRunFile($, runId, name, text) {
   } catch {
     // the run dir is the orchestrator's; logging never blocks a dispatch
   }
+}
+
+const busy = () => working() || playing({ agents: live, tracker })
+
+// Close the deck we opened, never one the person opened. A question keeps the strip waiting
+// for the reply, but only if there was a deck (or a wait) to bring back.
+async function closeDeck($, asked) {
+  const had = deckOpen || !!deckWaiting
+  if (deckOpen && deckBy !== 'person') {
+    deckOpen = false
+    deckBy = null
+    await $.ui.close({ id: DECK }).catch(() => {})
+  }
+  deckWaiting = asked && had && !reopened ? { at: Date.now() } : null
+}
+
+// The main turn ended: close the deck once nothing works and no farewell is still playing.
+async function endOfTurn($, asked) {
+  // The list can be a poll old: a worker started this turn may not read as working yet.
+  if (transport && transport !== 'none') await pollNow($, transport)
+  // A worker still running, or blocked on a prompt the person must see, keeps the deck.
+  if (working() || panes.some((p) => ON_STAGE.has(p.state))) return
+  if (deckBy === 'person') return
+  if (playing({ agents: live, tracker })) {
+    closeAfterBye = { asked }
+    ensureTicker($)
+    return
+  }
+  await closeDeck($, asked)
+}
+
+// Panes that left the stage this poll: end their route, refresh the ledger, start the wave.
+async function notePaneByes($) {
+  const left = paneByes(tracker, panes)
+  const touched = new Set()
+  for (const name of left) {
+    const r = endRoute(paneRoutes, name, Date.now())
+    if (r) touched.add(r.run)
+  }
+  for (const run of touched) await writeRunFile($, run, 'ledger.json', JSON.stringify(ledger(live, run, paneRoutes), null, 2) + '\n')
+  if (left.length) ensureTicker($)
 }
 
 async function pollHerdr($) {
@@ -143,6 +194,7 @@ async function pollHerdr($) {
   // Show the workspace's agt-* panes; reap only the lead's own tab, where herdr mode
   // splits its workers. Workers (panes that are themselves agt-*) never reap.
   panes = quietSpawn(paneAgents(list, selfPane).filter((p) => !me || p.workspace === me.workspace_id))
+  await notePaneByes($)
   if (me && !selfName) {
     const mine = panes.filter((p) => p.tab === me.tab_id)
     for (const p of reapable(reapPool(mine), paneSeen, await $.clock.now())) {
@@ -164,13 +216,15 @@ async function runOk($, argv, init) {
 }
 
 // One claude pane beside this one, named agt-<run>-<role>, never focused. A half-made
-// pane is closed again before the error goes up.
+// pane is closed again before the error goes up. `split` stacks it beside an earlier worker
+// instead of the lead. Returns the new pane id.
 async function openPane($, t, o) {
   if (t === 'tmux') {
-    const target = await $.env.get('TMUX_PANE')
-    if (!target) throw new Error('TMUX_PANE is not set')
+    const lead = await $.env.get('TMUX_PANE')
+    if (!lead) throw new Error('TMUX_PANE is not set')
+    const target = o.split?.target ?? lead
     const shell = (await $.env.get('SHELL')) ?? ''
-    const id = tmuxPaneIdOf((await runOk($, tmuxSplitArgv({ ...o, target, shell }), PROBE)).stdout)
+    const id = tmuxPaneIdOf((await runOk($, tmuxSplitArgv({ ...o, target, shell, direction: o.split?.direction }), PROBE)).stdout)
     if (!id) throw new Error('tmux gave no pane id')
     try {
       for (const argv of tmuxTagArgvs(id, o.name)) await runOk($, argv, PROBE)
@@ -178,19 +232,23 @@ async function openPane($, t, o) {
       await $.process.run(tmuxKillArgv(id), PROBE).catch(() => {})
       throw err
     }
-    return
+    // Even out the stack; a cosmetic failure never loses the worker.
+    if (o.split && o.split.target !== lead) await $.process.run(tmuxEvenArgv(id), PROBE).catch(() => {})
+    return id
   }
-  const pane = await $.env.get('HERDR_PANE_ID')
-  if (!pane) throw new Error('HERDR_PANE_ID is not set')
-  const id = herdrPaneIdOf((await runOk($, herdrSplitArgv({ pane, cwd: o.cwd, run: o.run }), PROBE)).stdout)
+  const lead = await $.env.get('HERDR_PANE_ID')
+  if (!lead) throw new Error('HERDR_PANE_ID is not set')
+  const pane = o.split?.target ?? lead
+  const id = herdrPaneIdOf((await runOk($, herdrSplitArgv({ pane, cwd: o.cwd, run: o.run, direction: o.split?.direction }), PROBE)).stdout)
   if (!id) throw new Error('herdr gave no pane id')
   try {
-    await runOk($, herdrStartArgv({ name: o.name, pane: id, model: o.model }), HERDR_START_TIMEOUT)
+    await runOk($, herdrStartArgv({ name: o.name, pane: id, model: o.model, effort: o.effort, agent: o.agent }), HERDR_START_TIMEOUT)
     await runOk($, herdrPromptArgv(o.name, o.task), PROBE)
   } catch (err) {
     await $.process.run(herdrCloseArgv(id), PROBE).catch(() => {})
     throw err
   }
+  return id
 }
 
 // tmux has no agent status, so a pane is working until its done-file appears or tmux
@@ -226,6 +284,7 @@ async function pollTmux($) {
     }
   }
   panes = tmuxPaneAgents(rows, selfPane, done)
+  await notePaneByes($)
   if (isLead(rows, selfPane)) {
     for (const p of reapable(reapPool(panes), paneSeen, now)) {
       try {
@@ -253,19 +312,25 @@ function ensurePolling($) {
   quietPolls = 0
   pollTimer = $.clock.every(5000, () => {
     pollNow($, transport).then(() => {
-      if (panes.length || working()) { quietPolls = 0; ensureTicker($); return }
+      if (panes.length || busy()) { quietPolls = 0; ensureTicker($); return }
       if (++quietPolls >= 12) { pollTimer?.cancel(); pollTimer = null }
     })
   })
 }
 
-// Redraw while something works (elapsed times tick, deck sprites bob); stop once idle.
+// Redraw while something works or waves goodbye (elapsed times tick, deck sprites bob); stop once idle.
 function ensureTicker($) {
   if (tickTimer) return
   tickTimer = $.clock.every(600, () => {
-    if (!working()) {
+    const still = ageFarewells({ agents: live, tracker })
+    if (!working() && !still) {
       tickTimer?.cancel()
       tickTimer = null
+      if (closeAfterBye) {
+        const { asked } = closeAfterBye
+        closeAfterBye = null
+        closeDeck($, asked)
+      }
     } else tick ^= 1
     $.ui.invalidate('ui.render')
   })
@@ -284,6 +349,25 @@ function focusLines(now) {
   return [...[...fresh, ...paneFlags(panes)].map((text) => ({ kind: 'flag', text })), ...brief.filter((b) => b.kind !== 'flag'), ...brief.filter((b) => b.kind === 'flag')].slice(0, 5)
 }
 
+// One Text per essentials item: a coloured mark, then the line with paths, versions and numbers lit.
+function cardBox(els, items) {
+  const { Box, Text } = els
+  return Box({
+    flexDirection: 'column',
+    children: items.map((item) => {
+      const color = FOCUS_COLOR[item.kind]
+      return Text({
+        ...(color ? { color } : { dimColor: true }),
+        wrap: 'truncate',
+        children: [
+          Text({ ...(color ? { color } : { dimColor: true }), children: [MARK[item.kind] + ' '] }),
+          ...spans(item.text).map((sp) => (sp.kind === 'plain' ? sp.text : Text({ color: SPAN_COLOR[sp.kind], children: [sp.text] }))),
+        ],
+      })
+    }),
+  })
+}
+
 function focusRow(els, line) {
   const mark = { next: '→', flag: '⚑', done: '✓' }[line.kind]
   const color = FOCUS_COLOR[line.kind]
@@ -293,38 +377,39 @@ function focusRow(els, line) {
 // ── drawing helpers (take resolved elements, never $) ─────────────────────────
 
 function modelText(Text, a) {
-  if (a.kind === 'pane') return Text({ color: hex(MODEL_COLOR.other), children: [(a.vendor + ' pane').padEnd(15)] })
+  if (a.kind === 'pane' && !a.model) return Text({ color: hex(MODEL_COLOR.other), children: [(a.vendor + ' pane').padEnd(15)] })
   const m = short(a.model)
   const label = (m === 'other' ? shortType(a.model).slice(0, 6) : m) + ' ' + effortBar(a.effort) + ' ' + (a.effort ?? '')
   return Text({ color: hex(MODEL_COLOR[modelKey(a.model)]), children: [label.padEnd(15)] })
 }
 
 function stateText(a, now) {
-  if (a.kind === 'pane') return a.state.padEnd(13)
+  if (a.bye > 0) return 'bye!'.padEnd(13)
+  if (a.kind === 'pane') return a.state === 'working' && a.start ? ('working ' + elapsed(now - a.start).padStart(5)) : a.state.padEnd(13)
   const t = elapsed((a.end ?? now) - a.start)
   return (a.state === 'working' ? 'working ' : 'done    ') + t.padStart(5)
 }
 
 function row(els, a, now) {
   const { Box, Text } = els
-  const working = a.kind === 'pane' ? a.state === 'working' : a.state === 'working'
-  const glyph = a.kind === 'pane' ? '▣' : working ? '●' : '✓'
-  const color = a.kind === 'pane' ? hex(MODEL_COLOR.other) : hex(MODEL_COLOR[modelKey(a.model)])
+  const working = a.state === 'working'
+  const leaving = a.bye > 0
+  const glyph = leaving ? '✓' : a.kind === 'pane' ? '▣' : working ? '●' : '✓'
+  const color = hex(MODEL_COLOR[modelKey(a.model)])
   const kids = [
     Text({ color, children: [glyph] }),
-    Text({ dimColor: !working, children: [a.role.slice(0, 18).padEnd(18)] }),
+    Text({ dimColor: !working && !leaving, children: [a.role.slice(0, 18).padEnd(18)] }),
     modelText(Text, a),
-    Text({ dimColor: !working, children: [stateText(a, now)] }),
+    Text({ dimColor: !working && !leaving, children: [stateText(a, now)] }),
     Text({ dimColor: true, children: [a.kind === 'pane' ? '' : tokens(a.input + a.output).padStart(7)] }),
   ]
   if (a.reason && a.reason !== 'table') kids.push(Text({ color: hex(MODEL_COLOR.fable), children: ['↑ ' + a.reason] }))
   return Box({ flexDirection: 'row', columnGap: 1, children: kids })
 }
 
-function header(els, rows) {
+function header(els, tally) {
   const { Text } = els
-  const s = summary(rows)
-  const parts = ['agentille', 'run ' + lastRun, s.working + ' working', s.done + ' done', tokens(s.tok) + ' tok']
+  const parts = ['agentille', 'run ' + lastRun, tally.working + ' working', tally.done + ' done', tokens(tally.tok) + ' tok']
   const formation = runs.get(lastRun)?.formation
   if (formation) parts.splice(2, 0, formation)
   if (squads.length) parts.push('squads: ' + squads.map((q) => q.name).join('+'))
@@ -335,14 +420,15 @@ function header(els, rows) {
 function card(els, a, i, now) {
   const { Box, Text, Raster } = els
   const working = a.state === 'working'
-  const frame = working ? (tick + i) % 2 : 0
-  const model = a.kind === 'pane' ? 'other' : a.model
+  const leaving = a.bye > 0
+  // Frames 2 and 3 are the farewell wave, alternating while it plays.
+  const frame = leaving ? 2 + (a.bye % 2) : working ? (tick + i) % 2 : 0
   return Box({
     flexDirection: 'column',
     width: 20,
     children: [
-      Raster({ key: 'sprite-' + i, columns: 16, rows: 8, cells: cells(a.role, model, frame) }),
-      Text({ wrap: 'truncate', children: [(working ? '● ' : a.kind === 'pane' ? '▣ ' : '✓ ') + a.role] }),
+      Raster({ key: 'sprite-' + i, columns: 16, rows: 8, cells: cells(hatOf(a), a.model ?? 'other', frame) }),
+      Text({ wrap: 'truncate', children: [(leaving ? '✓ ' : working ? '● ' : a.kind === 'pane' ? '▣ ' : '✓ ') + a.role] }),
       modelText(Text, a),
       Text({ dimColor: true, wrap: 'truncate', children: [stateText(a, now).replace(/\s+/g, ' ')] }),
       Text({ dimColor: true, children: [a.kind === 'pane' ? ' ' : tokens(a.input + a.output) + ' tok'] }),
@@ -356,6 +442,8 @@ export function register(on) {
     await loadSquads($)
     transport = await detectTransport($)
     deckOpen = (await $.ui.panes()).some((p) => p.id === DECK)
+    // Found open (a reload, a resume): treat it as the person's, never closed for them.
+    deckBy = deckOpen ? 'person' : null
     deckAuto = (await $.store.get('deck:auto')) !== false
     await $.command.register({ name: 'agt-routing', description: 'Show the model + effort agentille picked for each agent this session', immediate: true })
     await $.command.register({ name: 'agt-deck', description: 'Open the agentille deck now (it also opens on its own with /agt)', immediate: true })
@@ -363,6 +451,8 @@ export function register(on) {
     await $.command.register({ name: 'agt-spawn', description: 'Open a routed claude pane beside this one (Herdr or tmux); it is never reaped', argumentHint: '"task" [--model sonnet|opus|haiku|fable]' })
     await $.command.register({ name: 'agt-ledger', description: 'Tokens per agent role for the latest agentille run', immediate: true })
     focusMode = (await $.store.get('focus:mode')) ?? DEFAULT_FOCUS
+    highlightOn = (await $.store.get('highlight:on')) !== false
+    await $.command.register({ name: 'agt-highlight', description: 'Highlight /agt replies: an essentials card, paths, versions and numbers lit. on · off', argumentHint: '[on|off]', immediate: true })
     await $.command.register({ name: 'agt-focus', description: 'What needs you: agent flags and a short brief of long answers. all · agt · off', argumentHint: '[all|agt|off]', immediate: true })
     if (transport !== 'none') {
       // One look now: a lead restarted mid-run still reaps its leftover panes.
@@ -375,13 +465,13 @@ export function register(on) {
         paneTools = true
       }
     }
-    if (working()) ensureTicker($)
+    if (busy()) ensureTicker($)
     return next(e)
   })
 
   on('command.run', { command: 'agt-routing' }, async () => {
     if (decisions.length === 0) return { text: 'No agentille dispatches this session.' }
-    return { text: decisions.slice(-30).map((d) => d.role + ' → ' + d.model + ' · ' + d.effort + (d.reason === 'table' ? '' : '  (' + d.reason + ')')).join('\n') }
+    return { text: decisions.slice(-30).map((d) => d.role + ' → ' + d.model + ' · ' + d.effort + (d.reason === 'table' ? '' : '  (' + d.reason + ')') + (d.kind === 'pane' ? ' · pane' : '')).join('\n') }
   })
 
   // Typed only: a plugin, a scheduled task or a notification never opens a pane.
@@ -414,17 +504,49 @@ export function register(on) {
       const s = await $.fs.stat(cwd).catch(() => null)
       if (s?.kind !== 'dir') return { deny: cwd + ' is not a directory.' }
     }
+    agtTurn = true
+    lastRun = a.run
+    const run = runState(a.run)
+    run.formation = formationOf(a.hdr) ?? run.formation
+    // Counted only once the pane opens: a failed split is not a fix attempt.
+    const fixes = run.fixes + (a.agent === 'executor' && a.hdr.mode === 'fix' ? 1 : 0)
+    run.fable = Math.max(run.fable, Number((await $.store.get('fable:' + a.run)) ?? 0))
+    const d = decide({ role: a.agent, hdr: a.hdr, run: { ...run, fixes }, depth, settings, weeklyPct })
+    const r = paneRole(a.agent, d)
+    if (!r.pane) return { deny: r.why }
+    await pollNow($, t)
+    opened = opened.filter((o) => panes.some((p) => p.id === o.id))
+    const lead = t === 'tmux' ? await $.env.get('TMUX_PANE') : await $.env.get('HERDR_PANE_ID')
+    const probe = async (id) => widthOf((await $.process.run(tmuxWidthArgv(id), PROBE).catch(() => null))?.stdout)
+    const leadWidth = t === 'tmux' ? await probe(lead) : null
+    const newestWidth = t === 'tmux' && opened.length ? await probe(opened[opened.length - 1].id) : null
+    const plan = splitPlan({ lead, leadWidth, newestWidth, opened, live: panes })
+    let id
     try {
-      await openPane($, t, { run: a.run, name: a.name, model: a.model, task: a.task, cwd })
+      id = await openPane($, t, { run: a.run, name: a.name, agent: a.agent, model: d.model, effort: d.effort, task: a.task, cwd, split: { target: plan.target, direction: plan.direction } })
     } catch (err) {
       return { deny: 'Could not open a ' + t + ' pane: ' + String(err?.message ?? err).slice(0, 160) }
     }
+    run.fixes = fixes
+    if (d.fable) {
+      run.fable += 1
+      await $.store.set('fable:' + a.run, run.fable)
+    }
+    opened.push({ id, name: a.name, axis: plan.axis })
+    paneRoutes.push({ name: a.name, run: a.run, role: a.role, agent: a.agent, model: d.model, effort: d.effort, reason: d.reason, start: Date.now(), end: null })
+    const rec = { at: new Date().toISOString(), role: a.agent, model: d.model, effort: d.effort, reason: d.reason, asked: a.asked, agentId: null, kind: 'pane', pane: a.name }
+    decisions.push(rec)
+    run.log.push(JSON.stringify(rec))
+    await writeRunFile($, a.run, 'routing.jsonl', run.log.join('\n') + '\n')
     await pollNow($, t)
     ensurePolling($)
     ensureTicker($)
     deckWaiting = null
+    reopened = false
+    closeAfterBye = null
     await autoDeck($)
-    return { result: 'Opened ' + a.name + ' · ' + a.model + ' · ' + t + ' pane.' }
+    if (d.reason !== 'table') $.ui.toast('agt ↑ ' + a.agent + ' → ' + d.model + ' · ' + d.effort + ' — ' + d.reason)
+    return { result: 'Opened ' + a.name + ' · ' + d.model + ' · ' + d.effort + ' · ' + t + ' pane.' + (d.reason === 'table' ? '' : ' (' + d.reason + ')') }
   })
 
   on('tool.call', { tool: 'mcp__agentille__close_pane' }, async ($, e) => {
@@ -452,10 +574,22 @@ export function register(on) {
     return { text: focusText(focusMode, brief, focusLines(Date.now()).filter((l) => l.kind === 'flag' && !brief.includes(l)).map((l) => l.text)) }
   })
 
-  on('command.run', { command: 'agt-ledger' }, async () => ({ text: ledgerText(ledger(live, lastRun)) }))
+  on('command.run', { command: 'agt-highlight' }, async ($, e) => {
+    const a = parseHighlightArgs(e.args)
+    if (a.error) return { text: a.error }
+    if (a.on !== undefined) {
+      highlightOn = a.on
+      await $.store.set('highlight:on', a.on)
+      $.ui.invalidate('ui.render')
+    }
+    return { text: highlightText(highlightOn) }
+  })
+
+  on('command.run', { command: 'agt-ledger' }, async () => ({ text: ledgerText(ledger(live, lastRun, paneRoutes)) }))
 
   on('command.run', { command: 'agt-deck' }, async ($) => {
     deckOpen = true
+    deckBy = 'person'
     deckDismissedRun = null
     await $.ui.open({ id: DECK, title: 'agentille deck', focus: true, closeOnEscape: true })
     if (deckAuto) return {}
@@ -475,6 +609,7 @@ export function register(on) {
   on('ui.close', async ($, e, next) => {
     if (e.id === DECK) {
       deckOpen = false
+      deckBy = null
       // Closed by hand: stay closed until the next typed /agt or a new run.
       if (e.origin.kind === 'person') {
         deckDismissedRun = lastRun
@@ -487,6 +622,10 @@ export function register(on) {
   // A typed /agt opens the deck as a waiting strip (the only open Claude Code seats at any
   // width); the first agent fills it, a turn with none closes it.
   on('prompt.submit', async ($, e, next) => {
+    closeAfterBye = null
+    // A task notification, plugin or peer turn is not the person's prompt: the run's state stays.
+    const k = e.origin?.kind
+    if (k !== undefined && k !== 'composer' && k !== 'bridge') return next(e)
     brief = []
     agtTurn = isAgtPrompt(e.text)
     if (agtTurn) {
@@ -495,11 +634,15 @@ export function register(on) {
       deckDismissedRun = null
       flags = []   // a new run starts with a clean slate
       deckWaiting = { at: Date.now() }
+      reopened = false
       await autoDeck($)   // asked: seats at any width, as a waiting strip until an agent comes
     } else {
       pendingForce = null   // a force belongs to the /agt it was typed with
       // Answering the run's question: this prompt is asked too, so the strip comes back.
-      if (reopenOnReply({ waiting: deckWaiting, now: Date.now() })) await autoDeck($)
+      if (reopenOnReply({ waiting: deckWaiting, now: Date.now() })) {
+        reopened = true
+        await autoDeck($)
+      }
       else deckWaiting = null
     }
     return next(e)
@@ -529,7 +672,11 @@ export function register(on) {
       const res = await next(e)
       if (res.agentId) live.set(res.agentId, newAgent({ id: res.agentId, role: shortType(e.subagentType), routed: false, model: res.model, effort: null, reason: null, run: lastRun, now: Date.now() }))
       ensureTicker($)
-      if (agtTurn) deckWaiting = null
+      if (agtTurn) {
+        deckWaiting = null
+        reopened = false
+      }
+      closeAfterBye = null
       $.ui.invalidate('ui.render')
       return res
     }
@@ -559,6 +706,8 @@ export function register(on) {
     await writeRunFile($, runId, 'routing.jsonl', run.log.join('\n') + '\n')
     ensureTicker($)
     deckWaiting = null
+    reopened = false
+    closeAfterBye = null
     await autoDeck($)
     if (d.reason !== 'table') $.ui.toast('agt ↑ ' + role + ' → ' + short(res.model) + ' · ' + d.effort + ' — ' + d.reason)
     $.ui.invalidate('ui.render')
@@ -578,15 +727,8 @@ export function register(on) {
 
   on('turn.complete', async ($, e, next) => {
     const a = e.agentId ? live.get(e.agentId) : undefined
-    if (!e.agentId && deckWaiting) {
-      // No agent this turn: a solo run, or a question first. Close the strip either way;
-      // keep waiting only for a question, whose answer reopens it.
-      if (deckOpen) {
-        deckOpen = false
-        await $.ui.close({ id: DECK }).catch(() => {})
-      }
-      if (!endsOnQuestion(e.answer)) deckWaiting = null
-    }
+    // An interrupted turn keeps the deck: it could not reseat until the next typed prompt.
+    if (!e.agentId && e.reason === 'answer') await endOfTurn($, endsOnQuestion(e.answer))
     if (!e.agentId && e.reason === 'answer' && shouldBrief({ answer: e.answer, mode: focusMode, agtTurn })) {
       // Off the turn's path: the answer shows now, the brief lands a moment later.
       const seq = ++briefSeq
@@ -603,7 +745,8 @@ export function register(on) {
       if (a.role === 'plan-reviewer' && verdictOf(e.answer) === 'REVISE') runState(a.run).revise += 1
       if (a.input + a.output === 0) addUsage(a, e.usage)
       finish(a, Date.now(), e.durationMs)
-      await writeRunFile($, a.run, 'ledger.json', JSON.stringify(ledger(live, a.run), null, 2) + '\n')
+      await writeRunFile($, a.run, 'ledger.json', JSON.stringify(ledger(live, a.run, paneRoutes), null, 2) + '\n')
+      ensureTicker($)
       $.ui.invalidate('ui.render')
     }
     return next(e)
@@ -612,7 +755,7 @@ export function register(on) {
   // The band above the prompt: one row per agent of the latest run, plus herdr panes.
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     const now = Date.now()
-    const rows = visible(live, panes, now)
+    const { rows, tally } = stage({ agents: live, panes, routes: paneRoutes, tracker, run: lastRun })
     const focus = focusLines(now)
     if (rows.length === 0 && !selfName && focus.length === 0) return next(e)
     const els = $.ui.resolve(e)
@@ -620,12 +763,24 @@ export function register(on) {
     const kids = focus.map((l) => focusRow(els, l))
     if (selfName) kids.push(els.Text({ color: hex(MODEL_COLOR.opus), children: ['agentille worker · ' + selfName] }))
     if (rows.length) {
-      kids.push(header(els, rows))
+      kids.push(header(els, tally))
       for (const a of rows.slice(0, max)) kids.push(row(els, a, now))
       if (rows.length > max) kids.push(els.Text({ dimColor: true, children: ['+' + (rows.length - max) + ' more · /agt-deck'] }))
     }
     const theirs = await next(e)
     return els.Box({ flexDirection: 'column', children: [...kids, theirs] })
+  })
+
+  // A long /agt reply: an essentials card on top, the body dim with its tokens lit. The
+  // decision is memoised per message id so a reply does not restyle when a later turn changes.
+  on('ui.render', { component: 'AssistantMessage' }, async ($, e, next) => {
+    if (!litFor(litMemo, e.requestId, { on: highlightOn, agtTurn })) return next(e)
+    const h = highlight(e.props?.text)
+    if (!h) return next(e)
+    const els = $.ui.resolve(e)
+    if (!els.Markdown) return next(e)
+    const body = h.body !== null ? els.Markdown({ text: h.body, dimColor: true }) : await next(e)
+    return els.Box({ flexDirection: 'column', children: h.card.length ? [cardBox(els, h.card), body] : [body] })
   })
 
   // Main-session spinner: how many agents are working behind it.
@@ -640,14 +795,14 @@ export function register(on) {
     if (e.requestId !== DECK) return next(e)
     const now = Date.now()
     const els = $.ui.resolve(e)
-    const rows = visible(live, panes, now)
-    if (rows.length === 0) return els.Text({ dimColor: true, children: [deckWaiting ? 'agentille · waiting for the first agent…' : 'No agents yet. Run /agt and they show up here.'] })
-    if (e.surface !== 'terminal') return els.Box({ flexDirection: 'column', children: [header(els, rows), ...rows.map((a) => row(els, a, now))] })
+    const { rows, tally } = stage({ agents: live, panes, routes: paneRoutes, tracker, run: lastRun })
+    if (rows.length === 0) return els.Text({ dimColor: true, children: [stripText({ run: lastRun, tally, waiting: !!deckWaiting })] })
+    if (e.surface !== 'terminal') return els.Box({ flexDirection: 'column', children: [header(els, tally), ...rows.map((a) => row(els, a, now))] })
     const perRow = Math.max(1, Math.floor((e.props.bodyColumns ?? 80) / 21))
     const lines = []
     for (let i = 0; i < Math.min(rows.length, 24); i += perRow) {
       lines.push(els.Box({ flexDirection: 'row', columnGap: 1, children: rows.slice(i, i + perRow).map((a, j) => card(els, a, i + j, now)) }))
     }
-    return els.Box({ flexDirection: 'column', rowGap: 1, children: [header(els, rows), ...lines] })
+    return els.Box({ flexDirection: 'column', rowGap: 1, children: [header(els, tally), ...lines] })
   })
 }

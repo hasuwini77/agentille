@@ -32,7 +32,7 @@ Panes mode is the parallel transport whenever a pane transport is available; ava
 | Same parallelism bar, but no pane transport | **workflow** if the `Workflow` tool exists, else subagent waves |
 | No real parallelism | **subagent** / **solo**, exactly as today |
 
-The parallelism bar is unchanged and non-negotiable: **≥2 slices with disjoint file sets that can build at once.** Panes are cheaper to open than teammates, which is exactly why the bar must not drift — a pane per sequential step is theatre, not parallelism.
+The parallelism bar is unchanged and non-negotiable for **parallel fan-out**: **≥2 slices with disjoint file sets that can build at once.** Panes are cheaper to open than teammates, which is exactly why the bar must not drift — a pane per sequential step is theatre, not parallelism. The bar does not decide whether an executor gets a pane: with the pane tools live, a single-slice executor, an adversary and the `opus`/`fable` reviewers are pane workers anyway (see "Through the mod's tools"), and `--mode panes` with one slice is legitimate. `--mode subagent` keeps every worker a subagent.
 
 `--mode panes` (or the alias `--mode herdr`) forces it; teams (`--team` / `--mode team`) are legacy, opt-in only and never auto-selected. A forced panes mode with no disjoint slices gets the same honesty treatment as a forced team (see `team-mode.md` → "Honesty on a forced team").
 
@@ -104,7 +104,20 @@ close_pane { name: "agt-<run-id>-exec-1" }
 → Closed agt-<run-id>-exec-1.
 ```
 
-What the mod enforces, so you do not have to: the `agt-<run>-<role>` name and its 32-char limit, a duplicate name already on screen, an absolute `cwd` that exists, no focus change, and the model (`sonnet`, `opus` or `haiku` — Fable never goes through a tool, only through the routing guard). `close_pane` reaches only `agt-` panes in your own tab (Herdr) or window (tmux) and never a typed `/agt-spawn` pane. Worker panes get no tools, so a worker cannot fan out on its own.
+A routed worker names its role instead of a model. `agent` is the routing role, `header` the `[agt run=… size=… mode=…]` line; the mod runs `decide()` on them (the same table, effort and Fable guard as a subagent) and ignores any `model` you pass:
+
+```
+spawn_pane { run: "<run-id>", role: "exec-1", agent: "executor", header: "[agt run=<run-id> size=medium mode=build]", cwd: "<worktree>", task: "<full slice prompt>" }
+→ Opened agt-<run-id>-exec-1 · sonnet · medium · herdr pane.
+```
+
+The result line carries the routed model and effort. Roles that stay subagents (planner, plan-reviewer, ui-prototyper, `sonnet`/`haiku` reviewers) are denied with the reason; run them as subagents. A failed pane still falls back to a subagent, that path is never denied.
+
+Layout is the mod's call, not yours. tmux: the lead's width is probed; at 160 columns or more the first worker splits right, otherwise down, and each later worker splits the newest live worker on the other axis, then the layout is evened out. Herdr cannot report width, so it goes right, then down. Workers stack beside the lead instead of squeezing it.
+
+Pane answers never reach the mod's result hook, so a pane worker raises no `⚑` flag (a failed executor check, a reviewer FAIL): read the harvest yourself. Pane tokens are unknown and never shown. Cost: a pane opens at about 55k tokens against 32k for a subagent, 1.12× on the measured task, so it is not a saving; see "Cost".
+
+What the mod enforces, so you do not have to: the `agt-<run>-<role>` name and its 32-char limit, a duplicate name already on screen, an absolute `cwd` that exists, no focus change, and the model and effort: the mod routes them from `agent` + `header` through `decide()` and ignores any `model` you pass, so Fable reaches a pane only when the routing guard grants it (`--fable` or the evidence ladder), exactly as for a subagent. `close_pane` reaches only `agt-` panes in your own tab (Herdr) or window (tmux) and never a typed `/agt-spawn` pane. Worker panes get no tools, so a worker cannot fan out on its own.
 
 Still yours: isolation (step 1), the wait/read loop and the tmux done-file instruction in the slice prompt. Non-claude vendors and a session where the tools are absent use the manual recipe below.
 

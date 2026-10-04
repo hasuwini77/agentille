@@ -1,4 +1,5 @@
 import { describe, expect, mock, test } from 'claude-code/testing'
+import { words } from '../../hooks/focus.js'
 import { CARD_MIN_WORDS, LIT_MEMO_MAX, essentials, highlight, highlightText, lightTokens, litFor, parseHighlightArgs, spans } from '../../hooks/highlight.js'
 
 const T = '`'
@@ -84,6 +85,56 @@ describe('highlight: review fixes', () => {
 
   test('a second flag line never becomes the done line', async () => {
     expect(essentials('2 failed in api.test.js\n3 failed, 10 passed')).toEqual([{ kind: 'flag', text: '2 failed in api.test.js' }])
+  })
+})
+
+describe('highlight: the final card', () => {
+  const DONE = [
+    '✓ added a search filter  ·  3 files  ·  PR #12  ·  4m',
+    'verify: npm test → 31 passed, 0 failed',
+    'review: PASS — code-reviewer',
+    '⚑ migration needs a backup first',
+    'Open: ~/.agentille/state/run-ab12cd/report.md',
+    'Next: merge PR #12',
+  ].join('\n')
+  const FAILED = [
+    '✗ npm test fails in src/search.ts:42',
+    'verify: npm test → 2 failed',
+    'review: CONCERNS: 1 P1 — code-reviewer',
+    'Open: ~/.agentille/state/run-ab12cd/report.md',
+    'Next: fix src/search.ts:42, then re-run npm test',
+  ].join('\n')
+
+  test('both forms are under the word floor and still qualify, with no essentials card', async () => {
+    for (const card of [DONE, FAILED]) {
+      expect(words(card)).toBeLessThan(CARD_MIN_WORDS)
+      const h = highlight(card)!
+      expect(h.card).toEqual([])
+      expect(h.body).not.toBeNull()
+    }
+  })
+
+  test('the tokens are lit: the report path, the PR ref, the file:line', async () => {
+    expect(highlight(DONE)!.body).toContain('`~/.agentille/state/run-ab12cd/report.md`')
+    expect(highlight(DONE)!.body).toContain('PR `#12`')
+    expect(highlight(FAILED)!.body).toContain('`src/search.ts:42`')
+  })
+
+  test('a leading blank line does not hide it; text that only mentions ✓ is not a card', async () => {
+    expect(highlight('\n  ' + DONE)!.card).toEqual([])
+    expect(highlight('All good ✓ and merged')).toBeNull()
+    expect(highlight('✓')).toEqual({ card: [], body: '✓' })
+  })
+
+  test('a long answer that starts with ✓ gets no card either', async () => {
+    const long = '✓ shipped\nNext: tag v1.2.3\n' + Array.from({ length: 60 }, (_, i) => 'w' + i).join(' ')
+    expect(highlight(long)!.card).toEqual([])
+  })
+
+  test('✗ is a flag; 0 failed and 0 fail(s) are not', async () => {
+    expect(essentials('✗ build broke').map((i) => i.kind)).toEqual(['flag'])
+    for (const s of ['0 failed', '0 fail(s)', 'validate: 0 fail(s)', 'no failures']) expect(essentials(s).filter((i) => i.kind === 'flag')).toEqual([])
+    expect(essentials('2 fail(s)').map((i) => i.kind)).not.toContain('done')
   })
 })
 
@@ -174,6 +225,17 @@ describe('highlight: in the mod', () => {
     expect(await ui.find({ type: 'Text', text: /→ / })).toBeDefined()
     const md: any = await ui.find({ type: 'Markdown' })
     expect(md.props.text).toContain('`hooks/live.js`')
+    expect(md.props.dimColor).toBe(true)
+    await ui.unmount()
+  })
+
+  test('a final card in a typed /agt reply is lit but gets no essentials card', async ($, on) => {
+    setup(on)
+    await say($, '/agt tag the release')
+    const ui = await mount($, 'f1', '✓ tagged v2.6.0  ·  2 files  ·  PR #75  ·  3m\nOpen: ~/.agentille/state/run-ab12cd/report.md\nNext: restart Claude')
+    expect(await ui.find({ type: 'Text', text: /→ / })).toBeUndefined()
+    const md: any = await ui.find({ type: 'Markdown' })
+    expect(md.props.text).toContain('`v2.6.0`')
     expect(md.props.dimColor).toBe(true)
     await ui.unmount()
   })

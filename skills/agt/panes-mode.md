@@ -117,7 +117,7 @@ Layout is the mod's call, not yours. tmux: the lead's width is probed; at 160 co
 
 Pane answers never reach the mod's result hook, so a pane worker raises no `⚑` flag (a failed executor check, a reviewer FAIL): read the harvest yourself. Pane tokens are unknown and never shown. Cost: a pane opens at about 55k tokens against 32k for a subagent, 1.12× on the measured task, so it is not a saving; see "Cost".
 
-What the mod enforces, so you do not have to: the `agt-<run>-<role>` name and its 32-char limit, a duplicate name already on screen, an absolute `cwd` that exists, no focus change, and the model (`sonnet`, `opus` or `haiku` — Fable never goes through a tool, only through the routing guard). `close_pane` reaches only `agt-` panes in your own tab (Herdr) or window (tmux) and never a typed `/agt-spawn` pane. Worker panes get no tools, so a worker cannot fan out on its own.
+What the mod enforces, so you do not have to: the `agt-<run>-<role>` name and its 32-char limit, a duplicate name already on screen, an absolute `cwd` that exists, no focus change, and the model and effort: the mod routes them from `agent` + `header` through `decide()` and ignores any `model` you pass, so Fable reaches a pane only when the routing guard grants it (`--fable` or the evidence ladder), exactly as for a subagent. `close_pane` reaches only `agt-` panes in your own tab (Herdr) or window (tmux) and never a typed `/agt-spawn` pane. Worker panes get no tools, so a worker cannot fan out on its own.
 
 Still yours: isolation (step 1), the wait/read loop and the tmux done-file instruction in the slice prompt. Non-claude vendors and a session where the tools are absent use the manual recipe below.
 

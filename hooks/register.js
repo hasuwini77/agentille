@@ -3,7 +3,7 @@
 // observes events, applies decisions, and draws.
 
 import { DEFAULTS, decide, formationOf, parseHeader, roleOf, verdictOf } from './routing.js'
-import { addUsage, ageFarewells, effortBar, elapsed, endRoute, endsOnQuestion, finish, isAgtPrompt, ledger, ledgerText, newAgent, newTracker, paneAgents, paneByes, playing, reapable, reopenOnReply, shouldAutoOpen, short, stage, stripText, tokens } from './live.js'
+import { ON_STAGE, addUsage, ageFarewells, effortBar, elapsed, endRoute, endsOnQuestion, finish, isAgtPrompt, ledger, ledgerText, newAgent, newTracker, paneAgents, paneByes, playing, reapable, reopenOnReply, shouldAutoOpen, short, stage, stripText, tokens } from './live.js'
 import { activeSquads, allPaths, depsOf, injection } from './squads.js'
 import { cells, hatOf, MODEL_COLOR, modelKey } from './sprites.js'
 import { MARK, SPAN_COLOR, highlight, highlightText, litFor, parseHighlightArgs, spans } from './highlight.js'
@@ -44,6 +44,7 @@ let deckDismissedRun = null  // run whose deck the person closed by hand
 let deckWaiting = null       // { at, spawned }: a typed /agt whose first agent has not come yet
 let deckBy = null            // 'auto' | 'person': who opened the deck; a person's deck is never closed for them
 let closeAfterBye = null     // { asked }: close the deck once the last farewell has played
+let reopened = false         // the strip came back once on a reply; it does not chain past the run
 let tick = 0
 let pollTimer = null         // pane polling: runs only while panes may exist
 let quietPolls = 0
@@ -148,12 +149,15 @@ async function closeDeck($, asked) {
     deckBy = null
     await $.ui.close({ id: DECK }).catch(() => {})
   }
-  deckWaiting = asked && had ? { at: Date.now() } : null
+  deckWaiting = asked && had && !reopened ? { at: Date.now() } : null
 }
 
 // The main turn ended: close the deck once nothing works and no farewell is still playing.
 async function endOfTurn($, asked) {
-  if (working()) return // a later idle turn end closes it
+  // The list can be a poll old: a worker started this turn may not read as working yet.
+  if (transport && transport !== 'none') await pollNow($, transport)
+  // A worker still running, or blocked on a prompt the person must see, keeps the deck.
+  if (working() || panes.some((p) => ON_STAGE.has(p.state))) return
   if (deckBy === 'person') return
   if (playing({ agents: live, tracker })) {
     closeAfterBye = { asked }
@@ -438,6 +442,8 @@ export function register(on) {
     await loadSquads($)
     transport = await detectTransport($)
     deckOpen = (await $.ui.panes()).some((p) => p.id === DECK)
+    // Found open (a reload, a resume): treat it as the person's, never closed for them.
+    deckBy = deckOpen ? 'person' : null
     deckAuto = (await $.store.get('deck:auto')) !== false
     await $.command.register({ name: 'agt-routing', description: 'Show the model + effort agentille picked for each agent this session', immediate: true })
     await $.command.register({ name: 'agt-deck', description: 'Open the agentille deck now (it also opens on its own with /agt)', immediate: true })
@@ -536,6 +542,7 @@ export function register(on) {
     ensurePolling($)
     ensureTicker($)
     deckWaiting = null
+    reopened = false
     closeAfterBye = null
     await autoDeck($)
     if (d.reason !== 'table') $.ui.toast('agt ↑ ' + a.agent + ' → ' + d.model + ' · ' + d.effort + ' — ' + d.reason)
@@ -627,11 +634,15 @@ export function register(on) {
       deckDismissedRun = null
       flags = []   // a new run starts with a clean slate
       deckWaiting = { at: Date.now() }
+      reopened = false
       await autoDeck($)   // asked: seats at any width, as a waiting strip until an agent comes
     } else {
       pendingForce = null   // a force belongs to the /agt it was typed with
       // Answering the run's question: this prompt is asked too, so the strip comes back.
-      if (reopenOnReply({ waiting: deckWaiting, now: Date.now() })) await autoDeck($)
+      if (reopenOnReply({ waiting: deckWaiting, now: Date.now() })) {
+        reopened = true
+        await autoDeck($)
+      }
       else deckWaiting = null
     }
     return next(e)
@@ -661,7 +672,10 @@ export function register(on) {
       const res = await next(e)
       if (res.agentId) live.set(res.agentId, newAgent({ id: res.agentId, role: shortType(e.subagentType), routed: false, model: res.model, effort: null, reason: null, run: lastRun, now: Date.now() }))
       ensureTicker($)
-      if (agtTurn) deckWaiting = null
+      if (agtTurn) {
+        deckWaiting = null
+        reopened = false
+      }
       closeAfterBye = null
       $.ui.invalidate('ui.render')
       return res
@@ -692,6 +706,7 @@ export function register(on) {
     await writeRunFile($, runId, 'routing.jsonl', run.log.join('\n') + '\n')
     ensureTicker($)
     deckWaiting = null
+    reopened = false
     closeAfterBye = null
     await autoDeck($)
     if (d.reason !== 'table') $.ui.toast('agt ↑ ' + role + ' → ' + short(res.model) + ' · ' + d.effort + ' — ' + d.reason)
@@ -712,7 +727,8 @@ export function register(on) {
 
   on('turn.complete', async ($, e, next) => {
     const a = e.agentId ? live.get(e.agentId) : undefined
-    if (!e.agentId) await endOfTurn($, endsOnQuestion(e.answer))
+    // An interrupted turn keeps the deck: it could not reseat until the next typed prompt.
+    if (!e.agentId && e.reason === 'answer') await endOfTurn($, endsOnQuestion(e.answer))
     if (!e.agentId && e.reason === 'answer' && shouldBrief({ answer: e.answer, mode: focusMode, agtTurn })) {
       // Off the turn's path: the answer shows now, the brief lands a moment later.
       const seq = ++briefSeq
@@ -762,6 +778,7 @@ export function register(on) {
     const h = highlight(e.props?.text)
     if (!h) return next(e)
     const els = $.ui.resolve(e)
+    if (!els.Markdown) return next(e)
     const body = h.body !== null ? els.Markdown({ text: h.body, dimColor: true }) : await next(e)
     return els.Box({ flexDirection: 'column', children: h.card.length ? [cardBox(els, h.card), body] : [body] })
   })

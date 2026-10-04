@@ -44,12 +44,15 @@ function peel(token) {
 function fenceMask(lines) {
   let open = null
   return lines.map((l) => {
+    // Quoted code blocks fence the same way: `> ```` opens one too.
+    l = l.replace(/^\s*(?:>\s?)+/, '')
     if (open) {
       const c = /^\s*(`+|~+)\s*$/.exec(l)
       if (c && c[1][0] === open[0] && c[1].length >= open.length) open = null
       return true
     }
-    const m = /^\s*(`{3,}|~{3,})/.exec(l)
+    // A backtick fence's info string has no backtick, so ```npm test``` is inline code.
+    const m = /^\s*(`{3,})[^`]*$/.exec(l) ?? /^\s*(~{3,})/.exec(l)
     if (m) {
       open = m[1]
       return true
@@ -139,6 +142,7 @@ export function essentials(text) {
       if (t) found.flag = t
       return
     }
+    if (isFlag(line)) return // a second flag is still a flag, never the done line
     if (!found.done && isDone(line)) {
       const t = clip(line.replace(/^[✓✅]️?\s*/, ''))
       if (t) found.done = t

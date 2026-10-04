@@ -204,8 +204,8 @@ export function tmuxSplitArgv({ target, cwd, run, shell, model, name, task, effo
   return [...head, 'claude', ...tail]
 }
 
-// Stacked layout: a narrow lead stacks workers below it; a wide one puts them beside it, then
-// alternates around the newest worker. Only workers still live count; a right split that would
+// Stacked layout: a narrow lead stacks workers below it; a wide one puts them beside it. Later
+// workers split the newest one across the first worker's axis. Only workers still live count; a right split that would
 // leave panes under MIN_SPLIT_COLS goes down instead.
 export const WIDE_COLS = 160
 export const MIN_SPLIT_COLS = 40

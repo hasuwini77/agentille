@@ -18,7 +18,7 @@ Auto-detection is the **default**. Stage 1 checks a fast-path table (first match
 
 | What to type | Outcome |
 |---|---|
-| `/agt "task"` (no flags) | Auto-decides: solo (trivial / single file), subagent (sequential or single slice), review-team (verb = "review"), incident-team (verb = "debug"), or Stage 2 Opus classify for everything else |
+| `/agt "task"` (no flags) | Auto-decides: solo (trivial / single file), subagent (sequential or single slice; inside Herdr or tmux the executor and Opus-routed reviewers run as pane workers), review-team (verb = "review"), incident-team (verb = "debug"), or Stage 2 Opus classify for everything else |
 | `/agt "review …"` | Auto → `review-team` (Stage 1 fast-path, verb match) |
 | `/agt "debug …"` | Auto → `incident-team` (Stage 1 fast-path, verb match) |
 | `/agt --team <template> "task"` | **Force** a named team (`feature-team`, `review-team`, `incident-team`); overrides auto and profile default. If the work lacks ≥2 disjoint slices, `/agt` asks to downgrade (or flags the trade if `preTaskQuestioning: never`) |

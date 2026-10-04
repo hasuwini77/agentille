@@ -237,6 +237,30 @@ describe('deck', () => {
     expect(seen.length).toBe(2)
   })
 
+  test('the reply reopens the strip once: a second question on that reply does not chain it', async ($, on) => {
+    const { seen, clock } = opens(on)
+    await $.prompt.submit({ text: '/agt ship it', wait: false })
+    const r = await spawn($)
+    await finish($, r.agentId)
+    await end($, 'Merge now?')
+    await clock.advance(3000)
+    await $.prompt.submit({ text: 'what changed', wait: false })
+    expect(seen.length).toBe(2)
+    await end($, 'Anything else?')
+    await $.prompt.submit({ text: 'no thanks', wait: false })
+    expect(seen.length).toBe(2)
+  })
+
+  test('an interrupted turn keeps the deck: it could not reseat until a typed prompt', async ($, on) => {
+    const { closed, clock } = opens(on)
+    await $.prompt.submit({ text: '/agt ship it', wait: false })
+    const r = await spawn($)
+    await finish($, r.agentId)
+    await $.turn.complete({ answer: '', durationMs: 10, isAborted: true, turnId: 't', reason: 'aborted' })
+    await clock.advance(3000)
+    expect(closed.length).toBe(0)
+  })
+
   test('a question on a plain turn never brings a deck up for the reply', async ($, on) => {
     const { seen } = opens(on)
     await $.prompt.submit({ text: 'fix the header', wait: false })

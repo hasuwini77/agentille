@@ -70,6 +70,23 @@ describe('highlight: essentials', () => {
   })
 })
 
+describe('highlight: review fixes', () => {
+  test('a fence inside a blockquote stays verbatim', async () => {
+    const q = '> ```\n> v1.2.3\n> ```'
+    expect(lightTokens(q)).toBe(q)
+  })
+
+  test('a line opening with ```inline``` is inline code, not an unclosed fence', async () => {
+    const t = '```npm test``` is the command\nNext: tag v2.6.0 after hooks/live.js'
+    expect(lightTokens(t)).toBe('```npm test``` is the command\nNext: tag `v2.6.0` after `hooks/live.js`')
+    expect(essentials(t)).toEqual([{ kind: 'next', text: 'tag v2.6.0 after hooks/live.js' }])
+  })
+
+  test('a second flag line never becomes the done line', async () => {
+    expect(essentials('2 failed in api.test.js\n3 failed, 10 passed')).toEqual([{ kind: 'flag', text: '2 failed in api.test.js' }])
+  })
+})
+
 describe('highlight: spans', () => {
   test('code, paths, versions, refs, numbers, commands', async () => {
     expect(spans('run ' + T + 'npm test' + T + ' then edit hooks/live.js:74 for v2.6.0 (#75), 1.12×')).toEqual([

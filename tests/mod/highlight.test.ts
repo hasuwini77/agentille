@@ -131,3 +131,94 @@ describe('highlight: deciding', () => {
     expect(highlightText(false)).toContain('/agt-highlight on')
   })
 })
+
+describe('highlight: in the mod', () => {
+  const REPLY = 'Next: tag v2.6.0. The change is in hooks/live.js and it is green. ' + Array.from({ length: 40 }, (_, i) => 'w' + i).join(' ')
+  const SHORT = Array.from({ length: 30 }, (_, i) => 'w' + i).join(' ')
+
+  const setup = (on: any, stored: any[] = []) => {
+    on('store.get', async () => ({ value: undefined }))
+    on('store.set', async ($: any, e: any) => { stored.push(e); return { value: undefined } })
+    on('ui.panes', async () => ({ value: [] }))
+    on('ui.open', async () => ({ value: { isPlaced: true } }))
+    on('ui.close', async () => ({ value: undefined }))
+    on('prompt.submit', async ($: any, e: any) => ({ text: e.text }))
+    on('ui.render', async () => ({ type: 'engine', ref: 0 }) as never)
+    mock.clock(on, { now: 1_000_000 })
+  }
+  const say = ($: any, text: string, origin?: any) => $.prompt.submit({ text, wait: false, ...(origin ? { origin } : {}) })
+  const mount = ($: any, requestId: string, text = REPLY) =>
+    $.ui.mount({ plugin: 'agentille', surface: 'terminal', component: 'AssistantMessage', requestId, props: { text } as never })
+
+  test('a typed /agt reply gets the card and a dim body with its tokens lit', async ($, on) => {
+    setup(on)
+    await say($, '/agt tag the release')
+    const ui = await mount($, 'm1')
+    expect(await ui.find({ type: 'Text', text: /→ / })).toBeDefined()
+    const md: any = await ui.find({ type: 'Markdown' })
+    expect(md.props.text).toContain('`hooks/live.js`')
+    expect(md.props.dimColor).toBe(true)
+    await ui.unmount()
+  })
+
+  test('a plain prompt, /agt-highlight off and a 30-word reply all draw as the engine does', async ($, on) => {
+    const stored: any[] = []
+    setup(on, stored)
+    await say($, 'explain the diff')
+    let ui = await mount($, 'p1')
+    expect(await ui.find({ type: 'Text', text: /→ / })).toBeUndefined()
+    expect(await ui.find({ type: 'Markdown' })).toBeUndefined()
+    await ui.unmount()
+
+    await say($, '/agt tag the release')
+    ui = await mount($, 'p2', SHORT)
+    expect(await ui.find({ type: 'Markdown' })).toBeUndefined()
+    await ui.unmount()
+
+    expect((await $.command.run({ command: 'agt-highlight', args: 'off' })).text).toContain('Highlight: off')
+    expect(stored).toContainEqual(expect.objectContaining({ key: 'highlight:on', value: false }))
+    await say($, '/agt tag the release')
+    ui = await mount($, 'p3')
+    expect(await ui.find({ type: 'Text', text: /→ / })).toBeUndefined()
+    expect(await ui.find({ type: 'Markdown' })).toBeUndefined()
+    await ui.unmount()
+  })
+
+  test('a bad argument shows the usage and changes nothing', async ($, on) => {
+    const stored: any[] = []
+    setup(on, stored)
+    expect((await $.command.run({ command: 'agt-highlight', args: 'maybe' })).text).toBe('Usage: /agt-highlight [on|off]')
+    expect(stored.length).toBe(0)
+  })
+
+  test('a message first drawn in a plain turn stays plain when /agt starts', async ($, on) => {
+    setup(on)
+    await say($, 'explain the diff')
+    let ui = await mount($, 'm2')
+    await ui.unmount()
+    await say($, '/agt tag the release')
+    ui = await mount($, 'm2')
+    expect(await ui.find({ type: 'Text', text: /→ / })).toBeUndefined()
+    expect(await ui.find({ type: 'Markdown' })).toBeUndefined()
+    await ui.unmount()
+  })
+
+  test('a task notification does not end the /agt turn', async ($, on) => {
+    setup(on)
+    await say($, '/agt build it')
+    await say($, 'task finished', { kind: 'task-notification' })
+    const ui = await mount($, 'm9')
+    expect(await ui.find({ type: 'Text', text: /→ / })).toBeDefined()
+    await ui.unmount()
+  })
+
+  test('a typed prompt after /agt does', async ($, on) => {
+    setup(on)
+    await say($, '/agt build it')
+    await say($, 'thanks', { kind: 'composer' })
+    const ui = await mount($, 'm10')
+    expect(await ui.find({ type: 'Text', text: /→ / })).toBeUndefined()
+    expect(await ui.find({ type: 'Markdown' })).toBeUndefined()
+    await ui.unmount()
+  })
+})

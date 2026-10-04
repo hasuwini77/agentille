@@ -6,6 +6,7 @@ import { DEFAULTS, decide, formationOf, parseHeader, roleOf, verdictOf } from '.
 import { addUsage, ageFarewells, effortBar, elapsed, endRoute, endsOnQuestion, finish, isAgtPrompt, ledger, ledgerText, newAgent, newTracker, paneAgents, paneByes, playing, reapable, reopenOnReply, shouldAutoOpen, short, stage, stripText, tokens } from './live.js'
 import { activeSquads, allPaths, depsOf, injection } from './squads.js'
 import { cells, hatOf, MODEL_COLOR, modelKey } from './sprites.js'
+import { MARK, SPAN_COLOR, highlight, highlightText, litFor, parseHighlightArgs, spans } from './highlight.js'
 import { BRIEF_SYSTEM, DEFAULT_FOCUS, briefPrompt, flagOf, focusText, paneFlags, parseBrief, parseFocusArgs, shouldBrief } from './focus.js'
 import {
   CLOSE_TOOL, HERDR_START_TIMEOUT, PROBE, SPAWN_TOOL, closeTarget, spawnToolInput, SAFE_RUN, SPAWN_ROLE, TMUX_LIST_ARGV, doneFile, herdrCloseArgv, herdrPaneIdOf, herdrPromptArgv, herdrSplitArgv, herdrStartArgv,
@@ -52,6 +53,8 @@ let brief = []               // [{ kind, text }] for the latest long answer
 let briefSeq = 0
 let flags = []               // [{ text, at }] from agent results this run
 let agtTurn = false          // this turn is part of an /agt run
+let highlightOn = true       // /agt replies get an essentials card and lit tokens
+const litMemo = new Map()    // message id → was it an /agt turn when first drawn
 const FLAG_TTL_MS = 30 * 60_000
 const FOCUS_COLOR = { next: '#3fb950', flag: '#f85149' }
 
@@ -342,6 +345,25 @@ function focusLines(now) {
   return [...[...fresh, ...paneFlags(panes)].map((text) => ({ kind: 'flag', text })), ...brief.filter((b) => b.kind !== 'flag'), ...brief.filter((b) => b.kind === 'flag')].slice(0, 5)
 }
 
+// One Text per essentials item: a coloured mark, then the line with paths, versions and numbers lit.
+function cardBox(els, items) {
+  const { Box, Text } = els
+  return Box({
+    flexDirection: 'column',
+    children: items.map((item) => {
+      const color = FOCUS_COLOR[item.kind]
+      return Text({
+        ...(color ? { color } : { dimColor: true }),
+        wrap: 'truncate',
+        children: [
+          Text({ ...(color ? { color } : { dimColor: true }), children: [MARK[item.kind] + ' '] }),
+          ...spans(item.text).map((sp) => (sp.kind === 'plain' ? sp.text : Text({ color: SPAN_COLOR[sp.kind], children: [sp.text] }))),
+        ],
+      })
+    }),
+  })
+}
+
 function focusRow(els, line) {
   const mark = { next: '→', flag: '⚑', done: '✓' }[line.kind]
   const color = FOCUS_COLOR[line.kind]
@@ -423,6 +445,8 @@ export function register(on) {
     await $.command.register({ name: 'agt-spawn', description: 'Open a routed claude pane beside this one (Herdr or tmux); it is never reaped', argumentHint: '"task" [--model sonnet|opus|haiku|fable]' })
     await $.command.register({ name: 'agt-ledger', description: 'Tokens per agent role for the latest agentille run', immediate: true })
     focusMode = (await $.store.get('focus:mode')) ?? DEFAULT_FOCUS
+    highlightOn = (await $.store.get('highlight:on')) !== false
+    await $.command.register({ name: 'agt-highlight', description: 'Highlight /agt replies: an essentials card, paths, versions and numbers lit. on · off', argumentHint: '[on|off]', immediate: true })
     await $.command.register({ name: 'agt-focus', description: 'What needs you: agent flags and a short brief of long answers. all · agt · off', argumentHint: '[all|agt|off]', immediate: true })
     if (transport !== 'none') {
       // One look now: a lead restarted mid-run still reaps its leftover panes.
@@ -541,6 +565,17 @@ export function register(on) {
       $.ui.invalidate('ui.render')
     }
     return { text: focusText(focusMode, brief, focusLines(Date.now()).filter((l) => l.kind === 'flag' && !brief.includes(l)).map((l) => l.text)) }
+  })
+
+  on('command.run', { command: 'agt-highlight' }, async ($, e) => {
+    const a = parseHighlightArgs(e.args)
+    if (a.error) return { text: a.error }
+    if (a.on !== undefined) {
+      highlightOn = a.on
+      await $.store.set('highlight:on', a.on)
+      $.ui.invalidate('ui.render')
+    }
+    return { text: highlightText(highlightOn) }
   })
 
   on('command.run', { command: 'agt-ledger' }, async () => ({ text: ledgerText(ledger(live, lastRun, paneRoutes)) }))
@@ -718,6 +753,17 @@ export function register(on) {
     }
     const theirs = await next(e)
     return els.Box({ flexDirection: 'column', children: [...kids, theirs] })
+  })
+
+  // A long /agt reply: an essentials card on top, the body dim with its tokens lit. The
+  // decision is memoised per message id so a reply does not restyle when a later turn changes.
+  on('ui.render', { component: 'AssistantMessage' }, async ($, e, next) => {
+    if (!litFor(litMemo, e.requestId, { on: highlightOn, agtTurn })) return next(e)
+    const h = highlight(e.props?.text)
+    if (!h) return next(e)
+    const els = $.ui.resolve(e)
+    const body = h.body !== null ? els.Markdown({ text: h.body, dimColor: true }) : await next(e)
+    return els.Box({ flexDirection: 'column', children: h.card.length ? [cardBox(els, h.card), body] : [body] })
   })
 
   // Main-session spinner: how many agents are working behind it.

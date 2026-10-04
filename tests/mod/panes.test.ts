@@ -895,7 +895,7 @@ describe('pane tools: in the mod', () => {
   test('the routing record lands in routing.jsonl as a pane', async ($, on) => {
     setup(on, TMUX, { 'tmux split-window': { stdout: '%9\n' } })
     const writes: any[] = []
-    on('fs.write', async ($: any, e: any) => { writes.push(e); console.log(Object.keys(e)); return { value: undefined } })
+    on('fs.write', async ($: any, e: any) => { writes.push(e); return { value: undefined } })
     await $.session.start({ cwd: '/work/repo', surface: null, isInteractive: false })
     await spawn($, { run: 'k7f2ab', role: 'exec-1', task: 'build the filter', ...EXEC })
     const w = writes.find((x) => x.path.endsWith('routing.jsonl'))

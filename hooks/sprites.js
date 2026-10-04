@@ -73,6 +73,11 @@ LOOKS.adversary = {
   over: { 8: '___dkkddddkkd___' },
 }
 
+const WAVE = {
+  2: { 5: '_______________o', 6: '_______________o', 7: '_______________o', 8: '_______________o' },
+  3: { 5: '______________o_', 6: '______________o_', 7: '_______________o', 8: '_______________o' },
+}
+
 const NO_HAT = { hat: [BLANK, BLANK, BLANK, BLANK, BLANK, BLANK] }
 
 export function modelKey(model) {
@@ -89,7 +94,22 @@ export function pixels(role, frame = 0) {
     rows[i] = [...rows[i]].map((ch, c) => (line[c] === '_' ? ch : line[c])).join('')
   }
   // Frame 1 bobs the whole sprite down one pixel; the last row is always blank.
-  return frame === 1 ? [BLANK, ...rows.slice(0, 15)] : rows
+  if (frame === 1) return [BLANK, ...rows.slice(0, 15)]
+  // Frames 2 and 3 are the farewell wave: no bob, a raised arm drawn last.
+  const arm = WAVE[frame]
+  if (arm) for (const [r, line] of Object.entries(arm)) {
+    const i = Number(r)
+    rows[i] = [...rows[i]].map((ch, c) => (line[c] === '_' ? ch : line[c])).join('')
+  }
+  return rows
+}
+
+// The look a row wears: its routed agent, else its slice role, else the executor for exec-* slices.
+export function hatOf(row) {
+  if (row.agent && LOOKS[row.agent]) return row.agent
+  if (LOOKS[row.role]) return row.role
+  if (/^exec(utor)?(-|$)/.test(row.role)) return 'executor'
+  return row.role
 }
 
 // Packs 16×16 pixels into 16×8 half-block cells: [codepoint, fg, bg] per cell, base64.

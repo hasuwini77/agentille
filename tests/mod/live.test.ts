@@ -17,7 +17,7 @@ describe('live', () => {
     expect(paneAgents([{ ...herdr[0], tab_id: 'w1:t1', workspace_id: 'w1' }], null)[0]).toMatchObject({ tab: 'w1:t1', workspace: 'w1' })
   })
 
-  test('reaper waits out the grace and resets on a state change', async () => {
+  test('done reaps at 90 s, idle only between lead turns, a state change resets the clock', async () => {
     const seen = new Map()
     const p = paneAgents(herdr, 'w1:p1')
     expect(reapable(p, seen, 0)).toEqual([])
@@ -27,9 +27,15 @@ describe('live', () => {
     expect(reapable(bumped, seen, DONE_GRACE_MS + 1)).toEqual([])
     const idle = [{ ...p[0], state: 'idle', seq: 4 }]
     const s2 = new Map()
-    reapable(idle, s2, 0)
-    expect(reapable(idle, s2, IDLE_GRACE_MS - 1)).toEqual([])
-    expect(reapable(idle, s2, IDLE_GRACE_MS).length).toBe(1)
+    reapable(idle, s2, 0, false)
+    expect(reapable(idle, s2, IDLE_GRACE_MS - 1, false)).toEqual([])
+    expect(reapable(idle, s2, IDLE_GRACE_MS, false).length).toBe(1)
+    expect(reapable(idle, s2, IDLE_GRACE_MS * 10, true)).toEqual([])
+    expect(reapable(idle, s2, IDLE_GRACE_MS * 10).length).toBe(0)
+    const doneP = [{ ...p[1] }]
+    const s3 = new Map()
+    reapable(doneP, s3, 0, true)
+    expect(reapable(doneP, s3, DONE_GRACE_MS, true).length).toBe(1)
   })
 
   test('ledger sums tokens per role for one run', async () => {

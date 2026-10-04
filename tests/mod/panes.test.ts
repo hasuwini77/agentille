@@ -854,3 +854,53 @@ describe('pane tools: in the mod', () => {
     expect(seen.filter((a) => a[1] === 'kill-pane').length).toBe(1)
   })
 })
+
+describe('herdr reaper', () => {
+  const agents = (state: string, gone: boolean) => JSON.stringify({ result: { agents: [
+    { name: 'lead', pane_id: 'w1:p1', agent: 'claude', agent_status: 'working', state_change_seq: 1, tab_id: 'w1:t1', workspace_id: 'w1' },
+    ...(gone ? [] : [{ name: 'agt-r9-executor', pane_id: 'w1:p2', agent: 'claude', agent_status: state, state_change_seq: 4, tab_id: 'w1:t1', workspace_id: 'w1' }]),
+  ] } })
+
+  // session.start polls once and starts the 5 s poll; `closed` collects `herdr pane close` ids
+  const lead = async ($: any, on: any, state: string) => {
+    const closed: string[] = []
+    on('env.get', async ($: any, e: any) => ({ value: ({ HERDR_ENV: '1', HERDR_PANE_ID: 'w1:p1', HOME: '/h' } as any)[e.name] }))
+    on('session.start', async ($: any, e: any) => ({ cwd: e.cwd }))
+    on('command.register', async () => ({ value: undefined }))
+    on('tool.register', async () => ({ value: undefined }))
+    on('ui.toast', async () => ({ value: undefined }))
+    on('fs.read', async () => ({ deny: 'no profile' }))
+    on('store.get', async () => ({ value: undefined }))
+    on('turn.start', async ($: any, e: any) => ({ turnId: e.turnId }))
+    on('turn.complete', async ($: any, e: any) => ({ text: e.answer }))
+    on('process.run', async ($: any, e: any) => {
+      const cmd = e.argv.join(' ')
+      if (cmd.startsWith('herdr pane close')) closed.push(e.argv[3])
+      return { value: { exitCode: 0, stdout: cmd.startsWith('herdr agent list') ? agents(state, closed.length > 0) : '', stderr: '' } }
+    })
+    const clock = mock.clock(on, { now: 1_000_000 })
+    await $.session.start({ cwd: '/w', surface: null, isInteractive: false })
+    return { closed, clock }
+  }
+  const begin = ($: any) => $.turn.start({ text: 'go', turnId: 't1' })
+  const end = ($: any) => $.turn.complete({ answer: 'ok', durationMs: 10, isAborted: false, turnId: 't1', reason: 'answer' })
+
+  test('idle reaps only between lead turns, done reaps at 90 s', async ($, on) => {
+    const idle = await lead($, on, 'idle')
+    await begin($)
+    await idle.clock.advance(400_000)
+    expect(idle.closed).toEqual([])
+    await end($)
+    await idle.clock.advance(10_000)
+    expect(idle.closed).toEqual(['w1:p2'])
+  })
+
+  test('a done pane is reaped at 90 s even while the lead works', async ($, on) => {
+    const done = await lead($, on, 'done')
+    await begin($)
+    await done.clock.advance(85_000)
+    expect(done.closed).toEqual([])
+    await done.clock.advance(10_000)
+    expect(done.closed).toEqual(['w1:p2'])
+  })
+})

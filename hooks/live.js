@@ -37,8 +37,9 @@ export function paneAgents(list, selfPane) {
 }
 
 // Remembers when each pane entered its current state (by state_change_seq) and returns
-// the panes that sat in done ≥ 90s or idle ≥ 300s. Only agt-* panes ever reach here.
-export function reapable(panes, seen, now) {
+// the panes that sat in done ≥ 90s, or in idle ≥ 300s while the lead has no turn running (an
+// idle worker mid-run is waiting for review, not abandoned). Only agt-* panes ever reach here.
+export function reapable(panes, seen, now, leadBusy = true) {
   const out = []
   for (const p of panes) {
     const key = p.id
@@ -46,7 +47,7 @@ export function reapable(panes, seen, now) {
     if (!prev || prev.seq !== p.seq || prev.state !== p.state) seen.set(key, { seq: p.seq, state: p.state, since: now })
     const since = seen.get(key).since
     if (p.state === 'done' && now - since >= DONE_GRACE_MS) out.push(p)
-    else if (p.state === 'idle' && now - since >= IDLE_GRACE_MS) out.push(p)
+    else if (p.state === 'idle' && !leadBusy && now - since >= IDLE_GRACE_MS) out.push(p)
   }
   for (const key of [...seen.keys()]) if (!panes.some((p) => p.id === key)) seen.delete(key)
   return out

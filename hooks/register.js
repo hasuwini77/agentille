@@ -46,6 +46,7 @@ let brief = []               // [{ kind, text }] for the latest long answer
 let briefSeq = 0
 let flags = []               // [{ text, at }] from agent results this run
 let agtTurn = false          // this turn is part of an /agt run
+let leadTurn = false         // a main-loop turn is running: its idle panes are waiting for review
 const mascot = { greeted: false, hiUntil: 0, byeUntil: 0, working: false, start: 0, ms: null } // worker band, in $.clock.now() ms
 let highlightOn = true       // /agt replies get an essentials card and lit tokens
 const litMemo = new Map()    // message id → was it an /agt turn when first drawn
@@ -147,7 +148,7 @@ async function pollHerdr($) {
   await notePaneExits($)
   if (me && !selfName) {
     const mine = panes.filter((p) => p.tab === me.tab_id)
-    for (const p of reapable(reapPool(mine), paneSeen, await $.clock.now())) {
+    for (const p of reapable(reapPool(mine), paneSeen, await $.clock.now(), leadTurn)) {
       try {
         await $.process.run(['herdr', 'pane', 'close', p.id])
         $.ui.toast('agt reaped ' + p.name + ' (' + p.state + ')')
@@ -236,7 +237,7 @@ async function pollTmux($) {
   panes = tmuxPaneAgents(rows, selfPane, done)
   await notePaneExits($)
   if (isLead(rows, selfPane)) {
-    for (const p of reapable(reapPool(panes), paneSeen, now)) {
+    for (const p of reapable(reapPool(panes), paneSeen, now, leadTurn)) {
       try {
         await $.process.run(tmuxKillArgv(p.id), PROBE)
         $.ui.toast('agt reaped ' + p.name + ' (' + p.state + ')')
@@ -594,6 +595,7 @@ export function register(on) {
 
   // A main-loop turn began (a subagent's run raises none). A worker's first one plays hello.
   on('turn.start', async ($, e, next) => {
+    leadTurn = true
     if (worker) {
       const now = await $.clock.now()
       if (!mascot.greeted) {
@@ -612,6 +614,7 @@ export function register(on) {
 
   on('turn.complete', async ($, e, next) => {
     const a = e.agentId ? live.get(e.agentId) : undefined
+    if (!e.agentId) leadTurn = false
     if (!e.agentId && worker && mascot.working) {
       const now = await $.clock.now()
       mascot.working = false

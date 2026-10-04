@@ -188,7 +188,7 @@ describe('tmux panes', () => {
 describe('spawn', () => {
   test('tmux argv runs claude through an interactive zsh/bash, task as a plain argument', async () => {
     const argv = tmuxSplitArgv({ target: '%1', cwd: '/work/repo', run: 'ab12cd', shell: '/bin/zsh', model: 'haiku', name: 'agt-ab12cd-spawn', task: 'a "quoted"; $(thing)' })
-    expect(argv).toEqual(['tmux', 'split-window', '-d', '-h', '-P', '-F', '#{pane_id}', '-t', '%1', '-c', '/work/repo', '-e', 'AGENTILLE_RUN=ab12cd', '/bin/zsh', '-ic', 'claude "$@"', 'agt', '--model', 'haiku', '-n', 'agt-ab12cd-spawn', '--', 'a "quoted"; $(thing)'])
+    expect(argv).toEqual(['tmux', 'split-window', '-d', '-h', '-P', '-F', '#{pane_id}', '-t', '%1', '-c', '/work/repo', '-e', 'AGENTILLE_RUN=ab12cd', '-e', 'AGENTILLE_WORKER=spawn:haiku:', '/bin/zsh', '-ic', 'claude "$@"', 'agt', '--model', 'haiku', '-n', 'agt-ab12cd-spawn', '--', 'a "quoted"; $(thing)'])
   })
 
   test('a task that starts with a dash sits right behind --, never in claude\'s option list', async () => {
@@ -208,7 +208,7 @@ describe('spawn', () => {
 
   test('other shells exec claude directly', async () => {
     const argv = tmuxSplitArgv({ target: '%1', cwd: '/w', run: 'ab12cd', shell: '/usr/bin/fish', model: 'haiku', name: 'agt-ab12cd-spawn', task: 't' })
-    expect(argv.slice(13)).toEqual(['claude', '--model', 'haiku', '-n', 'agt-ab12cd-spawn', '--', 't'])
+    expect(argv.slice(15)).toEqual(['claude', '--model', 'haiku', '-n', 'agt-ab12cd-spawn', '--', 't'])
   })
 
   test('tmux tags the pane and pins its title', async () => {
@@ -230,7 +230,7 @@ describe('spawn', () => {
   })
 
   test('herdr: split beside the lead without focus, start claude, prompt it', async () => {
-    expect(herdrSplitArgv({ pane: 'w1:p1', cwd: '/work/repo', run: 'ab12cd' })).toEqual(['herdr', 'pane', 'split', '--pane', 'w1:p1', '--direction', 'right', '--cwd', '/work/repo', '--env', 'AGENTILLE_RUN=ab12cd', '--no-focus'])
+    expect(herdrSplitArgv({ pane: 'w1:p1', cwd: '/work/repo', run: 'ab12cd' })).toEqual(['herdr', 'pane', 'split', '--pane', 'w1:p1', '--direction', 'right', '--cwd', '/work/repo', '--env', 'AGENTILLE_RUN=ab12cd', '--env', 'AGENTILLE_WORKER=spawn::', '--no-focus'])
     expect(herdrStartArgv({ name: 'agt-ab12cd-spawn', pane: 'w1:p5', model: 'haiku' })).toEqual(['herdr', 'agent', 'start', 'agt-ab12cd-spawn', '--kind', 'claude', '--pane', 'w1:p5', '--timeout', '45000', '--', '--model', 'haiku'])
     expect(herdrPromptArgv('agt-ab12cd-spawn', 'reply with ok')).toEqual(['herdr', 'agent', 'prompt', 'agt-ab12cd-spawn', 'reply with ok'])
     expect(herdrCloseArgv('w1:p5')).toEqual(['herdr', 'pane', 'close', 'w1:p5'])
@@ -327,7 +327,7 @@ describe('tmux band', () => {
     await ui.unmount()
   })
 
-  test('a pane that vanishes waves bye for 2.4 s, then leaves the band', async ($, on) => {
+  test('a pane that vanishes leaves the band', async ($, on) => {
     on('ui.render', async () => ({ type: 'engine', ref: 0 }) as never)
     const rows = [row('%1', ''), row('%2', 'agt-r9-executor')]
     const { clock } = await start($, on, { rows })
@@ -335,8 +335,6 @@ describe('tmux band', () => {
     expect(await ui.find({ type: 'Text', text: /^working/ })).toBeDefined()
     rows.splice(1, 1)
     await clock.advance(5000)
-    expect(await ui.find({ type: 'Text', text: /bye!/ })).toBeDefined()
-    await clock.advance(2500)
     expect(await ui.find({ type: 'Text', text: /executor/ })).toBeUndefined()
     await ui.unmount()
   })

@@ -155,8 +155,11 @@ const effortArgs = (effort) => (EFFORTS.includes(effort) ? ['--effort', effort] 
 // not as a bare session that only has the task prompt.
 const agentArgs = (agent) => (ROLES.includes(agent) ? ['--agent', 'agentille:agentille-' + agent] : [])
 
+// Who the worker is, for its own mascot band: <agent>:<model>:<effort>. A typed /agt-spawn has no agent.
+export const workerEnv = ({ agent, model, effort }) => 'AGENTILLE_WORKER=' + [agent || SPAWN_ROLE, model, EFFORTS.includes(effort) ? effort : ''].join(':')
+
 export function tmuxSplitArgv({ target, cwd, run, shell, model, name, task, effort, direction, agent }) {
-  const head = ['tmux', 'split-window', '-d', direction === 'down' ? '-v' : '-h', '-P', '-F', '#{pane_id}', '-t', target, '-c', cwd.replace(/#/g, '##'), '-e', 'AGENTILLE_RUN=' + run]
+  const head = ['tmux', 'split-window', '-d', direction === 'down' ? '-v' : '-h', '-P', '-F', '#{pane_id}', '-t', target, '-c', cwd.replace(/#/g, '##'), '-e', 'AGENTILLE_RUN=' + run, '-e', workerEnv({ agent, model, effort })]
   // `--` ends claude's options, so a task that starts with `-` is still just the prompt
   const tail = [...agentArgs(agent), '--model', model, ...effortArgs(effort), '-n', name, '--', task]
   const base = String(shell ?? '').split('/').pop()
@@ -208,8 +211,8 @@ export function tmuxPaneIdOf(stdout) {
 export const tmuxKillArgv = (id) => ['tmux', 'kill-pane', '-t', id]
 
 // herdr: split beside the lead (never focused), start claude in it, then prompt it.
-export function herdrSplitArgv({ pane, cwd, run, direction }) {
-  return ['herdr', 'pane', 'split', '--pane', pane, '--direction', direction === 'down' ? 'down' : 'right', '--cwd', cwd, '--env', 'AGENTILLE_RUN=' + run, '--no-focus']
+export function herdrSplitArgv({ pane, cwd, run, direction, agent, model, effort }) {
+  return ['herdr', 'pane', 'split', '--pane', pane, '--direction', direction === 'down' ? 'down' : 'right', '--cwd', cwd, '--env', 'AGENTILLE_RUN=' + run, '--env', workerEnv({ agent, model, effort }), '--no-focus']
 }
 
 export function herdrPaneIdOf(stdout) {

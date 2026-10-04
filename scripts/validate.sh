@@ -82,26 +82,12 @@ done
 hdr "Agent reference integrity"
 resolves() { local stem="${1#agentille:}"; [ -f "agents/${stem}.md" ]; }
 
-# 4a. team YAML lead/role values must be agentille:agentille-* and resolve
-for y in .claude-plugin/teams/*.yaml; do
-  [ -e "$y" ] || continue
-  while IFS= read -r ref; do
-    if [[ "$ref" != agentille:agentille-* ]]; then
-      fail "$y: '$ref' is not a namespaced agentille:agentille-* ref"
-    elif resolves "$ref"; then
-      pass "$y: $ref → agents/${ref#agentille:}.md"
-    else
-      fail "$y: '$ref' resolves to no agent file"
-    fi
-  done < <(grep -hoE '(lead|role):[[:space:]]*[A-Za-z:_-]+' "$y" | sed -E 's/^(lead|role):[[:space:]]*//')
-done
-
-# 4b. any agentille:agentille-<x> token in skills/ must resolve (typo guard)
+# Any agentille:agentille-<x> token in skills/ or agents/ must resolve (typo guard)
 bad=0
 while IFS= read -r ref; do
-  resolves "$ref" || { fail "skills/: '$ref' resolves to no agent file"; bad=1; }
-done < <(grep -rhoE 'agentille:agentille-[a-z-]+' skills 2>/dev/null | sort -u)
-[ "$bad" = 0 ] && pass "all agentille:agentille-* refs in skills/ resolve"
+  resolves "$ref" || { fail "'$ref' resolves to no agent file"; bad=1; }
+done < <(grep -rhoE 'agentille:agentille-[a-z-]+' skills agents 2>/dev/null | sort -u)
+[ "$bad" = 0 ] && pass "all agentille:agentille-* refs in skills/ and agents/ resolve"
 
 # ── 5. EVERY hook script declared by hooks.json exists and is executable ─────
 # All of them, not just the first: a hook whose script is missing or lost its
@@ -146,14 +132,20 @@ for a in agentille-planner agentille-security-reviewer agentille-design-reviewer
   fi
 done
 
+# The orchestrator skill loads on every /agt run; keep it lean.
+SL=$(wc -l < skills/agt/SKILL.md | tr -d ' ')
+if [ "$SL" -le 120 ]; then pass "skills/agt/SKILL.md is $SL lines (budget 120)"; else fail "skills/agt/SKILL.md is $SL lines (budget 120)"; fi
+
 # ── 6. Doc cross-references (file exists = FAIL; section match = WARN) ────────
 hdr "Doc cross-references"
-# Pattern: `something.md` ... → "Section Title"  (skill docs lean on these)
+# Pattern: `something.md` ... → "Section Title" in skills, agents and the
+# text the mod injects (hooks/*.js), which the model reads just the same.
 missing_sec=0; checked=0
 while IFS=$'\t' read -r file section; do
   [ -n "$file" ] || continue
   target=""
-  for cand in "skills/agt/$file" "skills/$file" "$file"; do
+  section=${section//\\/}
+  for cand in "skills/agt/$file" "skills/$file" "agents/$file" "$file"; do
     [ -f "$cand" ] && { target="$cand"; break; }
   done
   if [ -z "$target" ]; then
@@ -167,12 +159,12 @@ while IFS=$'\t' read -r file section; do
     warn "cross-ref \"$section\" not found as a heading in $target"
     missing_sec=$((missing_sec+1))
   fi
-done < <(grep -rhoE '`[A-Za-z0-9._-]+\.md`[^"]*→[[:space:]]*"[^"]+"' skills 2>/dev/null \
+done < <(grep -rhoE '`[A-Za-z0-9._-]+\.md`[^"]*→[[:space:]]*"[^"]+"' skills agents hooks/*.js 2>/dev/null \
           | sed -E 's/`([A-Za-z0-9._-]+\.md)`[^"]*→[[:space:]]*"([^"]+)"/\1\t\2/')
 [ "$checked" -gt 0 ] && [ "$missing_sec" = 0 ] && pass "all $checked '→ \"Section\"' cross-refs resolve to a heading"
 
-# ── 6b. Routing mirror invariant (model-routing.md ↔ hooks/routing.js) ─────
-# The mod enforces hooks/routing.js; model-routing.md "Default routing" is its
+# ── 6b. Routing mirror invariant (routing.md ↔ hooks/routing.js) ──────────
+# The mod enforces hooks/routing.js; routing.md "Default routing" is its
 # human-readable spec. Every role and every model · effort cell must agree.
 # A doc cell of "—" means no override (null in code); "skipped" is not compared.
 hdr "Routing mirror invariant"
@@ -181,7 +173,7 @@ if ! command -v python3 >/dev/null 2>&1; then
 else
   mirror_out=$(python3 - <<'PY'
 import re, sys
-doc = open('skills/agt/model-routing.md').read()
+doc = open('skills/agt/routing.md').read()
 code = open('hooks/routing.js').read()
 sec = doc.split('## Default routing', 1)[1].split('\n## ', 1)[0]
 rows = {}
@@ -215,6 +207,8 @@ PY
   while IFS= read -r line; do
     case "$line" in PASS*) pass "mirror: ${line#PASS }";; FAIL*) fail "mirror: ${line#FAIL }";; esac
   done <<< "$mirror_out"
+  # A python error prints nothing; silence must not pass as agreement.
+  printf '%s\n' "$mirror_out" | grep -qE '^(PASS|FAIL)' || fail "mirror: comparison produced no result (is skills/agt/routing.md → \"Default routing\" intact?)"
 fi
 
 # ── 6c. The mod: Claude Code's own validator + its tests ────────────────────

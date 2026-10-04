@@ -2,6 +2,86 @@
 
 All notable changes to agentille are documented here.
 
+## [3.0.0] — 2026-10-04
+
+"Less is more": a lighter `/agt` that costs less than not using it.
+
+### Added
+
+- **Zero setup.** With no `~/.agentille/profile.json`, `/agt` runs on
+  built-in defaults (direct, peer-to-peer, ask only when ambiguous) and
+  prints one tip, once. The profile prefix is skipped when every value is a
+  default.
+- **Solo step-aside.** A small one-sentence task with no architectural verb,
+  no list of deliverables and no auth/money/data words is done directly:
+  one `solo · <why>` line, no agents, no run dir.
+- **One final card.** Every non-solo run ends on at most 8 lines: `✓`/`✗`
+  result, `verify:`, `review:`, an optional `⚑`, `Open:` and `Next:`.
+  Mid-run, the lead writes only the recon line and one `⚑` line per real
+  problem.
+- **report.md.** The full detail (plan, agents, findings, verification) goes
+  to `~/.agentille/state/run-<id>/report.md`, written once and never printed.
+  The mod saves each subagent's raw answer to `agents/<role>-<n>.md` beside
+  it at zero model tokens.
+- **Worker-pane mascot.** Each pane worker's own band shows a small
+  three-row mascot: hi on its first turn, stepping legs while it works, bye
+  when it answers, then a one-line caption. Pure strings, no model tokens; a
+  one-row caption where the band is too short.
+- **Verdict heads.** Every agent's output starts with a head the lead relays
+  instead of the body (`VERDICT: … · P0:n P1:n P2:n` plus `FIX:` lines;
+  `VERDICT: APPROVE|REVISE` for the plan-reviewer, `BROKEN: n · HELD: n` for
+  the adversary).
+- **validate.sh** fails when `skills/agt/SKILL.md` exceeds 120 lines, when
+  the routing mirror check produces no result, and now checks cross-refs in
+  agents and in the text the mod injects.
+
+### Changed
+
+- **Panes only when parallel.** Panes open for ≥2 disjoint slices, a typed
+  `--mode panes`, or `/agt-spawn`. Only executors and the adversary can be
+  panes; every reviewer is a subagent, and a single executor is a subagent.
+  The first worker splits right of the lead, later ones stack below.
+- **Idle reaper is gated.** An idle `agt-` pane is reaped only while the
+  lead has no turn running, so a worker waiting on review survives. The
+  done ≥ 90 s backstop is unchanged.
+- **Prompt pack cut from ~3,600 to ~1,200 lines.** `classifier.md`,
+  `roster.md` and `model-routing.md` merge into `routing.md`; `SKILL.md`
+  drops from 274 to under 100 lines; `display.md`, the mode docs, the agents
+  and the setup skills keep one home per rule.
+- **`/agentille-init`** asks at most five skippable questions and merges into
+  the existing profile instead of replacing it.
+- **Review gate wording** is `P0/P1 block; P2/P3 advisory` everywhere.
+- **Highlight** draws no essentials card over an answer that already starts
+  with `✓` or `✗`; it only lights the tokens. `✗` counts as a flag, "0
+  failed" does not.
+- **Duel and relay** run only on request; the gauntlet stays automatic on
+  auth/money/data work with a test runner.
+- **Release flow** is PR → merge → tag.
+
+### Removed
+
+- **Team mode** (`--team`, `--mode team`, `team-mode.md`, the team
+  manifests). Typing it prints one notice and resolves as if no flag was
+  given. This is the breaking change behind 3.0.0.
+- **The pixel deck** (`/agt-deck`, `/agt-nodeck`, auto-open, farewell
+  animations in the lead's band) and `sprites.js`.
+- **The Haiku focus brief.** The highlight card already summarises an
+  answer; agent and pane flags stay.
+- **The shipped log** (`./docs/agentille-log.md`): it wrote into the user's
+  repo unasked. Git and report.md cover it.
+- **The Mission Brief, per-phase pings, fanout block and diff-fence
+  verdicts.**
+- Width probing for pane splits, and the forced-team handling in the mod.
+
+### Rationale
+
+The plugin had grown heavier than the work it saved: ~10k tokens loaded
+before a solo task, ~40 lines of chrome before a result, a required setup
+step, and a team mode that cost ~4x for parallelism the panes already give.
+v3 keeps every protection (review gate, never targeting `main`, mandatory
+pane teardown, `neverDo`, executor never on Haiku, gated Fable) and cuts
+the rest.
+
 ## [2.6.0] — 2026-10-04
 
 ### Added

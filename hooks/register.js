@@ -11,7 +11,7 @@ import { BRIEF_SYSTEM, DEFAULT_FOCUS, briefPrompt, flagOf, focusText, paneFlags,
 import {
   CLOSE_TOOL, HERDR_START_TIMEOUT, PROBE, SPAWN_TOOL, closeTarget, spawnToolInput, SAFE_RUN, SPAWN_ROLE, TMUX_LIST_ARGV, doneFile, herdrCloseArgv, herdrPaneIdOf, herdrPromptArgv, herdrSplitArgv, herdrStartArgv,
   isFreshDone, isLead, newRunId, paneName, paneRole, parseSpawnArgs, parseTmuxList, pickTransport, quietSpawn, reapPool, scopeRows, splitName, splitPlan, tmuxEvenArgv, tmuxKillArgv, tmuxPaneAgents, tmuxPaneIdOf,
-  tmuxWidthArgv, widthOf, teamDirective, teamForce, teamNotice, tmuxSplitArgv, tmuxTagArgvs, transportBlock,
+  tmuxWidthArgv, widthOf, tmuxSplitArgv, tmuxTagArgvs, transportBlock,
 } from './panes.js'
 
 const DECK = 'agt-deck'
@@ -36,7 +36,6 @@ let selfTab = null           // herdr: the lead's own tab, where its workers spl
 let paneTools = false        // spawn_pane / close_pane registered for this lead
 let squads = []              // active squads for this repo
 let squadBlock = ''
-let pendingForce = null     // { template } from the last typed forced team, until the next agt skill.prompt
 let transport = null        // 'herdr' | 'tmux' | 'none', probed once at session start
 let deckOpen = false
 let deckAuto = true          // open the deck on its own when a run starts
@@ -629,15 +628,12 @@ export function register(on) {
     brief = []
     agtTurn = isAgtPrompt(e.text)
     if (agtTurn) {
-      pendingForce = teamForce(e.text)
-      if (pendingForce) $.ui.toast(teamNotice(await transportOf($)))
       deckDismissedRun = null
       flags = []   // a new run starts with a clean slate
       deckWaiting = { at: Date.now() }
       reopened = false
       await autoDeck($)   // asked: seats at any width, as a waiting strip until an agent comes
     } else {
-      pendingForce = null   // a force belongs to the /agt it was typed with
       // Answering the run's question: this prompt is asked too, so the strip comes back.
       if (reopenOnReply({ waiting: deckWaiting, now: Date.now() })) {
         reopened = true
@@ -653,9 +649,7 @@ export function register(on) {
     agtTurn = true
     const t = await transportOf($)
     if (t !== 'none') ensurePolling($)
-    const forced = pendingForce ? teamDirective(t) : ''
-    pendingForce = null
-    return next({ ...e, text: e.text + squadBlock + transportBlock(t, paneTools && !selfName) + forced })
+    return next({ ...e, text: e.text + squadBlock + transportBlock(t, paneTools && !selfName) })
   })
 
   on('session.measure', async ($, e, next) => {

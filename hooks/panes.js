@@ -3,7 +3,6 @@
 // Pure on purpose — the hooks loader never follows `$` across an import — so every
 // $.process / $.env / $.fs call lives in register.js and only feeds these helpers.
 
-import { isAgtPrompt } from './live.js'
 import { ROLES, parseHeader } from './routing.js'
 
 export const SAFE_RUN = /^[A-Za-z0-9_-]{1,64}$/
@@ -40,45 +39,6 @@ export function transportBlock(transport, tools = false) {
     ? 'Open each claude worker with mcp__agentille__spawn_pane and close it after harvest with mcp__agentille__close_pane — see `panes-mode.md` → "Through the mod\'s tools".\n' + PANE_RULE + '\n'
     : ''
   return '\n## Pane transport (agentille mod)\n\ntransport: ' + transport + '\n' + line + '\n' + viaTools
-}
-
-// A typed /agt that forces a team: `--team <name>` → { template: name }, `--mode team`
-// → { template: null }; anything else → null. --team wins when both appear.
-const TEAMS = new Set(['feature-team', 'review-team', 'incident-team'])
-
-// Only the leading flag run of a typed /agt counts: `/agt --plan --team review-team "x"`.
-// The first token that is not a flag ends it, so "--team" inside the task text is just text.
-export function teamForce(text) {
-  if (!isAgtPrompt(text)) return null
-  const toks = String(text).trim().split(/\s+/).slice(1)
-  let force = null
-  for (let i = 0; i < toks.length && toks[i].startsWith('--'); i++) {
-    const [flag, inline] = toks[i].split('=', 2)
-    const value = inline ?? (toks[i + 1] && !toks[i + 1].startsWith('--') ? toks[i + 1] : undefined)
-    if (flag === '--team') {
-      force = { template: TEAMS.has(value) ? value : null }
-      if (inline === undefined && value !== undefined) i++
-    } else if (flag === '--mode') {
-      if (value === 'team' && !force) force = { template: null }
-      if (inline === undefined && value !== undefined) i++
-    }
-  }
-  return force
-}
-
-// The toast shown when a team is forced: names where the run will actually land.
-export function teamNotice(transport) {
-  const where = { herdr: 'panes · herdr', tmux: 'panes · tmux' }[transport] ?? 'a team — no pane transport here'
-  return '--team is deprecated (removed in v3.0): running as ' + where + '.'
-}
-
-// Appended after the transport block when a team was forced: resolve it as panes (or
-// subagent) when a transport exists, else run the team as before and say so.
-export function teamDirective(transport) {
-  const line = transport === 'herdr' || transport === 'tmux'
-    ? 'A forced team (--team/--mode team) is deprecated: resolve it as panes when the task has ≥2 genuinely disjoint slices, else subagent (the existing honesty flow). Do not spawn an agent team.'
-    : 'A forced team is deprecated (removed in v3.0); no pane transport here, so run the team as before and print the deprecation line on the recon ping.'
-  return '\n## Forced team (agentille mod)\n\n' + line + '\n'
 }
 
 // ── names ─────────────────────────────────────────────────────────────────────

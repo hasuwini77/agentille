@@ -2,6 +2,66 @@
 
 All notable changes to agentille are documented here.
 
+## [2.6.0] — 2026-10-04
+
+### Added
+
+- **Routed pane workers.** Inside tmux or Herdr, `spawn_pane` takes `agent`
+  and `header` and routes the worker through `decide()`: model and
+  `claude --effort` follow the same table, escalation ladder and Fable guard
+  as a subagent, including the fix-attempt counter. The result line shows
+  model and effort. Pane decisions land in `routing.jsonl` with
+  `kind:"pane"`. The worker starts as `claude --agent agentille:agentille-<role>`,
+  so it runs the same agent definition a subagent would; `--model` overrides
+  the definition's own model (checked in a headless probe).
+- **Farewells.** Every subagent and pane worker waves "bye!" for about 2.4 s
+  (counted in ticks, so it is deterministic), then leaves the band and the
+  deck.
+- **Highlight.** A long /agt answer (40+ words) gets an essentials card
+  (`✓` done, `⚑` needs you, `→` next) and a dimmed body with paths,
+  versions, refs and numbers kept lit.
+- **`/agt-highlight [on|off]`**, on by default and remembered.
+
+### Changed
+
+- **Pane rule.** With the pane tools live, executor, adversary and
+  opus/fable reviewers are pane workers; other roles are denied by
+  `spawn_pane` and stay subagents. The ≥2-slice bar now gates parallel
+  fan-out only, and `--mode panes` with one slice is legitimate.
+  `--mode subagent` still means no panes.
+- **Layout.** tmux probes the lead's width: 160 columns or more splits
+  right, otherwise down; later workers split the newest worker on the other
+  axis. Herdr goes right, then down.
+- **Deck close rule.** Only working or blocked agents take space. The deck
+  shrinks to a strip and closes at the end of a main turn with nothing
+  working, never when a worker leaves and never when opened with
+  `/agt-deck`.
+- **`/agt-spawn` panes stay off the band and deck**: they are yours, not the
+  run's.
+- **`ledger.json` `panes`** entries carry a count and elapsed time; pane
+  tokens are n/a.
+- Known gaps: pane answers raise no `⚑` flags, and the highlight card and
+  the Haiku brief both summarize long answers.
+
+### Fixed
+
+- From the release's code review: a main turn end polls the panes first
+  and keeps the deck while a worker is working or blocked; an interrupted
+  turn keeps it too. A reply reopens the waiting strip at most once, and a
+  deck found open at session start is treated as yours. Highlight masks
+  fences inside blockquotes and reads a one-line ```code``` span as inline
+  code.
+
+### Rationale
+
+- A pane opens as a full Claude session at about 55k tokens against about
+  32k for a subagent: 1.12× the fresh tokens on the measured two-slice task.
+  Panes buy visibility, other vendors and per-worker effort, not a saving,
+  and the docs say so.
+- Claude Code seats a mod pane at narrow widths only when it answers a typed
+  prompt, so a deck closed mid-run cannot reopen. The deck therefore closes
+  only at a turn end with nothing working.
+
 ## [2.5.1] — 2026-10-04
 
 ### Fixed

@@ -21,8 +21,9 @@ node_modules/
 dist/
 build/
 
-# Local Claude Code state
-.claude/
+# Local Claude Code state (the contributor guide in .claude/CLAUDE.md is tracked)
+.claude/*
+!.claude/CLAUDE.md
 
 # Personal / local Claude instructions (the committed CLAUDE.md is the shared one)
 CLAUDE.local.md

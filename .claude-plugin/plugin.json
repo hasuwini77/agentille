@@ -2,7 +2,7 @@
   "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
   "name": "agentille",
   "displayName": "agentille",
-  "version": "3.0.0",
+  "version": "3.1.0",
   "description": "One command for Claude Code: /agt plans, builds and reviews with the right model per step, steps aside on small tasks, and ends on one short card. Zero setup.",
   "author": {
     "name": "Systown AI Lab",

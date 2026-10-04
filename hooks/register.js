@@ -3,9 +3,9 @@
 // focus.js; this file observes events, applies decisions, and draws.
 
 import { DEFAULTS, decide, formationOf, parseHeader, roleOf, verdictOf } from './routing.js'
-import { addUsage, effortBar, elapsed, endRoute, finish, isAgtPrompt, ledger, ledgerText, newAgent, paneAgents, panesLeft, reapable, short, stage, tokens } from './live.js'
+import { addUsage, effortBar, elapsed, endRoute, finish, isAgtPrompt, ledger, ledgerText, newAgent, paneAgents, panesLeft, reapable, short, stage, tokens, waving } from './live.js'
 import { activeSquads, allPaths, depsOf, injection } from './squads.js'
-import { BYE_MS, HELLO_MS, MASCOT_COLOR, MODEL_COLOR, caption, frame, modelKey, moodAt, parseWorker } from './mascot.js'
+import { BYE_MS, HELLO_MS, MASCOT_COLOR, MODEL_COLOR, agentMood, bandMascots, caption, frame, modelKey, moodAt, parseWorker } from './mascot.js'
 import { MARK, SPAN_COLOR, highlight, highlightText, litFor, parseHighlightArgs, spans } from './highlight.js'
 import { flagOf, focusText, paneFlags, parseFocusArgs } from './focus.js'
 import {
@@ -276,9 +276,9 @@ function ensurePolling($) {
   })
 }
 
-// Redraw while something works or a worker's mascot is animating (elapsed times tick, legs
-// step); the ticker cancels itself once both are idle.
-const animating = (now) => !!worker && moodAt({ ...mascot, now }) !== 'idle'
+// Redraw while something works, a worker's mascot is animating or a finished subagent is
+// still waving (elapsed times tick, legs step); the ticker cancels itself once all are idle.
+const animating = (now) => (!!worker && moodAt({ ...mascot, now }) !== 'idle') || [...live.values()].some((a) => waving(a, Date.now()))
 
 function ensureTicker($) {
   if (tickTimer) return
@@ -355,6 +355,20 @@ function row(els, a, now) {
   ]
   if (a.reason && a.reason !== 'table') kids.push(Text({ color: hex(MODEL_COLOR.fable), children: ['↑ ' + a.reason] }))
   return Box({ flexDirection: 'row', columnGap: 1, children: kids })
+}
+
+// A subagent's row in the lead's band with its mascot: three rows, the text row beside the body.
+const GREETING = { hi: '  hi!', bye: '  bye!' }
+function mascotRow(els, a, now) {
+  const { Box, Text } = els
+  const mood = agentMood(a, now)
+  const [head, body, legs] = frame(mood, tick)
+  const orange = hex(MASCOT_COLOR)
+  return [
+    Text({ color: orange, children: [head + (GREETING[mood] ?? '')] }),
+    Box({ flexDirection: 'row', children: [Text({ color: orange, children: [body.padEnd(13)] }), row(els, a, now)] }),
+    Text({ color: orange, children: [legs] }),
+  ]
 }
 
 function header(els, tally) {
@@ -629,6 +643,7 @@ export function register(on) {
       finish(a, Date.now(), e.durationMs)
       await writeReport($, a, e.answer)
       await writeRunFile($, a.run, 'ledger.json', JSON.stringify(ledger(live, a.run, paneRoutes), null, 2) + '\n')
+      ensureTicker($)
       $.ui.invalidate('ui.render')
     }
     return next(e)
@@ -637,7 +652,7 @@ export function register(on) {
   // The band above the prompt: one row per agent of the latest run, plus herdr panes.
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     const now = Date.now()
-    const { rows, tally } = stage({ agents: live, panes, routes: paneRoutes, run: lastRun })
+    const { rows, tally } = stage({ agents: live, panes, routes: paneRoutes, run: lastRun, now })
     const focus = focusLines(now)
     if (rows.length === 0 && !selfName && !worker && focus.length === 0) return next(e)
     const els = $.ui.resolve(e)
@@ -647,8 +662,13 @@ export function register(on) {
     else if (selfName) kids.push(els.Text({ color: hex(MODEL_COLOR.opus), children: ['agentille worker · ' + selfName] }))
     if (rows.length) {
       kids.push(header(els, tally))
-      for (const a of rows.slice(0, max)) kids.push(row(els, a, now))
-      if (rows.length > max) kids.push(els.Text({ dimColor: true, children: ['+' + (rows.length - max) + ' more'] }))
+      const room = (e.props.maxRows ?? 8) - 2 - focus.length - (worker || selfName ? 1 : 0)
+      if (e.surface === 'terminal' && bandMascots(rows, room)) {
+        for (const a of rows) kids.push(...(a.kind === 'sub' ? mascotRow(els, a, now) : [row(els, a, now)]))
+      } else {
+        for (const a of rows.slice(0, max)) kids.push(row(els, a, now))
+        if (rows.length > max) kids.push(els.Text({ dimColor: true, children: ['+' + (rows.length - max) + ' more'] }))
+      }
     }
     const theirs = await next(e)
     return els.Box({ flexDirection: 'column', children: [...kids, theirs] })

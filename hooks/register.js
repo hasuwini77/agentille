@@ -362,7 +362,7 @@ const GREETING = { hi: '  hi!', bye: '  bye!' }
 function mascotRow(els, a, now) {
   const { Box, Text } = els
   const mood = agentMood(a, now)
-  const [head, body, legs] = frame(mood, tick)
+  const [head, body, legs] = frame(mood, tick, a.role)
   const orange = hex(MASCOT_COLOR)
   return [
     Text({ color: orange, children: [head + (GREETING[mood] ?? '')] }),
@@ -388,7 +388,7 @@ function workerBand(els, e, now) {
   const cap = caption({ mood, ...worker, ms: mood === 'working' ? now - mascot.start : mascot.ms })
   const capText = Text({ color: hex(MODEL_COLOR[modelKey(worker.model)]), wrap: 'truncate', children: [cap] })
   if (mood === 'idle' || e.surface !== 'terminal' || (e.props.maxRows ?? 0) < 5) return [capText]
-  const [head, body, legs] = frame(mood, tick)
+  const [head, body, legs] = frame(mood, tick, worker.agent)
   const orange = hex(MASCOT_COLOR)
   return [Text({ color: orange, children: [head] }), Text({ color: orange, children: [body] }), Box({ flexDirection: 'row', children: [Text({ color: orange, children: [legs + '   '] }), capText] })]
 }

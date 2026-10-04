@@ -60,7 +60,7 @@ Skip it for one-file edits, typos, renames and questions: a plain prompt is chea
 
 ## How it decides
 
-- **Solo** for a small, one-sentence task. **Subagents** for sequential work. **Panes** (Herdr or tmux) only when 2+ slices can build at once; each worker pane shows a small mascot that says hi, walks while it works and waves bye. The pick is always printed with a one-line reason.
+- **Solo** for a small, one-sentence task. **Subagents** for sequential work. **Panes** (Herdr or tmux) only when 2+ slices can build at once; each worker pane shows a small mascot that says hi, walks while it works and waves bye. Subagents get the same mascot in the band above your prompt. The pick is always printed with a one-line reason.
 - **Routing**: planners and judgment reviewers on Opus, the executor on Sonnet (never Haiku), effort set per role by the bundled mod. Fable only after observed failures at Opus max, or when you type `--fable`.
 - **Review is a gate**: P0/P1 findings get fixed before the card says ✓.
 - **Squads**: in a saas, ecommerce, content or immersive repo, payments, SEO and performance specialists join the review when the diff touches their area.

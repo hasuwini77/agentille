@@ -1,7 +1,7 @@
 // What is running right now: in-process subagents and herdr agt-* panes.
 // Pure state + formatting; register.js feeds it events and draws the result.
 
-import { modelKey } from './mascot.js'
+import { BYE_MS, modelKey } from './mascot.js'
 
 export const DONE_GRACE_MS = 90_000
 export const IDLE_GRACE_MS = 300_000
@@ -10,7 +10,7 @@ const LEAVING = new Set(['done', 'idle'])
 const EFFORT_BAR = { low: '▂', medium: '▄', high: '▆', xhigh: '▇', max: '█' }
 
 export function newAgent({ id, role, routed, model, effort, reason, run, now }) {
-  return { id, kind: 'sub', role, routed, model, effort, reason, run, start: now, end: null, state: 'working', input: 0, output: 0, cacheRead: 0 }
+  return { id, kind: 'sub', role, routed, model, effort, reason, run, start: now, end: null, leftAt: null, state: 'working', input: 0, output: 0, cacheRead: 0 }
 }
 
 export function addUsage(a, u) {
@@ -24,6 +24,7 @@ export function finish(a, now, ms) {
   if (!a) return
   a.state = 'done'
   a.end = ms != null ? a.start + ms : now
+  a.leftAt = now
 }
 
 // herdr `agent list` rows → pane agents; `name` = agt-<run>-<role…>
@@ -139,10 +140,17 @@ export function endRoute(routes, name, now) {
   return r
 }
 
-export function stage({ agents, panes = [], routes = [], run }) {
+// With `now`, a subagent that finished less than BYE_MS ago stays on stage to wave bye.
+// leftAt is wall time; end can sit earlier when the harness reports a shorter duration.
+export function waving(a, now) {
+  return now != null && a.state === 'done' && a.leftAt != null && now - a.leftAt < BYE_MS
+}
+
+export function stage({ agents, panes = [], routes = [], run, now = null }) {
   const subs = [...agents.values()].filter((a) => a.run === run)
   const working = subs.filter((a) => a.state === 'working').sort((a, b) => a.start - b.start)
-  const rows = [...working, ...panes.filter((p) => ON_STAGE.has(p.state)).map((p) => withRoute(p, routes))]
+  const byes = subs.filter((a) => waving(a, now)).sort((a, b) => a.start - b.start)
+  const rows = [...working, ...byes, ...panes.filter((p) => ON_STAGE.has(p.state)).map((p) => withRoute(p, routes))]
   const tally = {
     working: working.length + panes.filter((p) => p.state === 'working').length,
     done: subs.filter((a) => a.state === 'done').length + routes.filter((r) => r.run === run && r.end != null).length,

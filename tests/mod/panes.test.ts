@@ -771,6 +771,7 @@ describe('pane tools: in the mod', () => {
     on('fs.stat', async ($: any, e: any) => (e.path.startsWith('/work/') ? { value: { kind: 'dir', size: 0, mtimeMs: 0, isLink: false } } : { deny: 'ENOENT' }))
     on('store.get', async () => ({ value: undefined }))
     on('ui.panes', async () => ({ value: [] }))
+    on('agent.spawn', async ($: any, e: any) => ({ model: e.model ?? 'sonnet', agentId: 'ag' + seen.length }))
     on('process.run', async ($: any, e: any) => {
       seen.push(e.argv)
       const key = Object.keys(table).find((k) => e.argv.join(' ').startsWith(k))
@@ -803,21 +804,123 @@ describe('pane tools: in the mod', () => {
     expect(a.tools).toEqual([])
   })
 
-  test('tmux: spawn opens a tagged pane in the worktree on the asked model', async ($, on) => {
+  test('tmux: spawn opens a tagged pane in the worktree on the routed model, not the asked one', async ($, on) => {
     const { seen } = setup(on, TMUX, { 'tmux split-window': { stdout: '%9\n' } })
     const r = await spawn($, { run: 'k7f2ab', role: 'exec-1', task: 'build the filter', model: 'haiku', cwd: '/work/wt-1', ...EXEC })
-    expect(r.result).toBe('Opened agt-k7f2ab-exec-1 · haiku · tmux pane.')
+    expect(r.result).toBe('Opened agt-k7f2ab-exec-1 · sonnet · medium · tmux pane.')
     const split = seen.find((a) => a[1] === 'split-window')!
     expect(split[split.indexOf('-c') + 1]).toBe('/work/wt-1')
-    expect(split.slice(-6)).toEqual(['--model', 'haiku', '-n', 'agt-k7f2ab-exec-1', '--', 'build the filter'])
+    expect(split.slice(-8)).toEqual(['--model', 'sonnet', '--effort', 'medium', '-n', 'agt-k7f2ab-exec-1', '--', 'build the filter'])
   })
 
-  test('herdr: spawn splits, starts and prompts', async ($, on) => {
+  test('herdr: spawn splits, starts with model and effort, and prompts', async ($, on) => {
     const { seen } = setup(on, { HERDR_ENV: '1', HERDR_PANE_ID: 'w1:p1' }, { 'herdr pane split': { stdout: JSON.stringify({ result: { pane: { pane_id: 'w1:p5' } } }) } })
     const r = await spawn($, { run: 'k7f2ab', role: 'review', task: 'review the diff', agent: 'code-reviewer', header: '[agt run=k7f2ab size=large mode=review]' })
-    expect(r.result).toBe('Opened agt-k7f2ab-review · sonnet · herdr pane.')
-    expect(seen.some((a) => a.slice(0, 4).join(' ') === 'herdr agent start agt-k7f2ab-review')).toBe(true)
+    expect(r.result).toBe('Opened agt-k7f2ab-review · opus · high · herdr pane.')
+    const start = seen.find((a) => a.slice(0, 4).join(' ') === 'herdr agent start agt-k7f2ab-review')!
+    expect(start.slice(-4)).toEqual(['--model', 'opus', '--effort', 'high'])
     expect(seen.some((a) => a.slice(0, 3).join(' ') === 'herdr agent prompt' && a[4] === 'review the diff')).toBe(true)
+  })
+
+  test('herdr: the second worker splits down from the first', async ($, on) => {
+    const { seen } = setup(on, { HERDR_ENV: '1', HERDR_PANE_ID: 'w1:p1' }, {
+      'herdr pane split': { stdout: JSON.stringify({ result: { pane: { pane_id: 'w1:p5' } } }) },
+      'herdr agent list': { stdout: JSON.stringify({ result: { agents: [{ name: 'agt-k7f2ab-exec-1', pane_id: 'w1:p5', agent: 'claude', agent_status: 'working', state_change_seq: 1 }] } }) },
+    })
+    await spawn($, { run: 'k7f2ab', role: 'exec-1', task: 'build one', ...EXEC })
+    await spawn($, { run: 'k7f2ab', role: 'exec-2', task: 'build two', ...EXEC })
+    const splits = seen.filter((a) => a.slice(0, 3).join(' ') === 'herdr pane split')
+    expect(splits[0].slice(splits[0].indexOf('--pane'), splits[0].indexOf('--pane') + 4)).toEqual(['--pane', 'w1:p1', '--direction', 'right'])
+    expect(splits[1].slice(splits[1].indexOf('--pane'), splits[1].indexOf('--pane') + 4)).toEqual(['--pane', 'w1:p5', '--direction', 'down'])
+  })
+
+  test('the routed model and effort win over the asked model', async ($, on) => {
+    const { seen } = setup(on, TMUX, { 'tmux split-window': { stdout: '%9\n' } })
+    const big = { run: 'k7f2ab', task: 'review the diff', header: '[agt run=k7f2ab size=large mode=review]' }
+    const r = await spawn($, { ...big, role: 'review', agent: 'code-reviewer' })
+    expect(r.result).toBe('Opened agt-k7f2ab-review · opus · high · tmux pane.')
+    const split = seen.find((a) => a[1] === 'split-window')!
+    expect(split.slice(-8, -4)).toEqual(['--model', 'opus', '--effort', 'high'])
+  })
+
+  test('a reviewer routed to sonnet, and the planning roles, are denied and open nothing', async ($, on) => {
+    const { seen } = setup(on, TMUX, { 'tmux split-window': { stdout: '%9\n' } })
+    const small = await spawn($, { run: 'k7f2ab', role: 'review', task: 'review the diff', agent: 'code-reviewer', header: '[agt run=k7f2ab size=small mode=review]' })
+    expect(small.deny).toContain('subagent')
+    const plan = await spawn($, { run: 'k7f2ab', role: 'plan', task: 'plan the work', agent: 'planner', header: '[agt run=k7f2ab size=large mode=build]' })
+    expect(plan.deny).toContain('planner')
+    expect(seen.some((a) => a[1] === 'split-window')).toBe(false)
+  })
+
+  test('a fix-mode executor reaches effort high on its second pane, with the reason', async ($, on) => {
+    setup(on, TMUX, { 'tmux split-window': { stdout: '%9\n' } })
+    const fix = { agent: 'executor', header: '[agt run=k7f2ab size=small mode=fix]' }
+    expect((await spawn($, { run: 'k7f2ab', role: 'fix-1', task: 'fix it', ...fix })).result).toBe('Opened agt-k7f2ab-fix-1 · sonnet · medium · tmux pane.')
+    expect((await spawn($, { run: 'k7f2ab', role: 'fix-2', task: 'fix it again', ...fix })).result).toBe('Opened agt-k7f2ab-fix-2 · sonnet · high · tmux pane. (fix attempt 2)')
+  })
+
+  test('a failed split is not a fix attempt', async ($, on) => {
+    setup(on, TMUX, { 'tmux split-window': { exitCode: 1 } })
+    const fix = { agent: 'executor', header: '[agt run=k7f2ab size=small mode=fix]' }
+    expect((await spawn($, { run: 'k7f2ab', role: 'fix-1', task: 'fix it', ...fix })).deny).toContain('Could not open')
+    await $.agent.spawn({ prompt: '[agt run=k7f2ab size=small mode=fix]\nfix', subagentType: 'agentille:agentille-executor' })
+    expect((await $.command.run({ command: 'agt-routing' })).text).toBe('executor → sonnet · medium')
+  })
+
+  test('a forced fable security-reviewer runs on fable and records it', async ($, on) => {
+    const { seen } = setup(on, TMUX, { 'tmux split-window': { stdout: '%9\n' } })
+    const sets: any[] = []
+    on('store.set', async ($: any, e: any) => { sets.push(e); return { value: undefined } })
+    const r = await spawn($, { run: 'k7f2ab', role: 'sec', task: 'audit the diff', agent: 'security-reviewer', header: '[agt run=k7f2ab size=large risk=auth mode=review fable=forced]' })
+    expect(r.result).toContain('fable · high')
+    const split = seen.find((a) => a[1] === 'split-window')!
+    expect(split.slice(-8, -4)).toEqual(['--model', 'fable', '--effort', 'high'])
+    expect(sets).toContainEqual(expect.objectContaining({ key: 'fable:k7f2ab', value: 1 }))
+  })
+
+  test('the routing record lands in routing.jsonl as a pane', async ($, on) => {
+    setup(on, TMUX, { 'tmux split-window': { stdout: '%9\n' } })
+    const writes: any[] = []
+    on('fs.write', async ($: any, e: any) => { writes.push(e); console.log(Object.keys(e)); return { value: undefined } })
+    await $.session.start({ cwd: '/work/repo', surface: null, isInteractive: false })
+    await spawn($, { run: 'k7f2ab', role: 'exec-1', task: 'build the filter', ...EXEC })
+    const w = writes.find((x) => x.path.endsWith('routing.jsonl'))
+    expect(w.text).toContain('"kind":"pane"')
+    expect(w.text).toContain('"pane":"agt-k7f2ab-exec-1"')
+  })
+
+  test('tmux layout: a narrow lead stacks down, the next worker splits beside the newest', async ($, on) => {
+    const rows = [['%1', '', 'claude', '0', '@1']]
+    const { seen } = setup(on, TMUX, {
+      'tmux display-message': { stdout: '83\n' },
+      'tmux split-window': { stdout: '%9\n' },
+      'tmux list-panes': () => ({ stdout: rows.map((r) => r.join(T)).join('\n') + '\n' }),
+    })
+    await spawn($, { run: 'k7f2ab', role: 'exec-1', task: 'build one', ...EXEC })
+    rows.push(['%9', 'agt-k7f2ab-exec-1', 'claude', '0', '@1'])
+    await spawn($, { run: 'k7f2ab', role: 'exec-2', task: 'build two', ...EXEC })
+    const splits = seen.filter((a) => a[1] === 'split-window')
+    expect(splits[0].slice(2, 3).concat(splits[0].slice(splits[0].indexOf('-t'), splits[0].indexOf('-t') + 2))).toEqual(['-d', '-t', '%1'])
+    expect(splits[0]).toContain('-v')
+    expect(splits[1]).toContain('-h')
+    expect(splits[1].slice(splits[1].indexOf('-t'), splits[1].indexOf('-t') + 2)).toEqual(['-t', '%9'])
+    expect(seen.some((a) => a.join(' ') === 'tmux select-layout -E -t %9')).toBe(true)
+  })
+
+  test('tmux layout: a wide lead splits right first, then down from the newest', async ($, on) => {
+    const rows = [['%1', '', 'claude', '0', '@1']]
+    const { seen } = setup(on, TMUX, {
+      'tmux display-message': { stdout: '200\n' },
+      'tmux split-window': { stdout: '%9\n' },
+      'tmux list-panes': () => ({ stdout: rows.map((r) => r.join(T)).join('\n') + '\n' }),
+    })
+    await spawn($, { run: 'k7f2ab', role: 'exec-1', task: 'build one', ...EXEC })
+    rows.push(['%9', 'agt-k7f2ab-exec-1', 'claude', '0', '@1'])
+    await spawn($, { run: 'k7f2ab', role: 'exec-2', task: 'build two', ...EXEC })
+    const splits = seen.filter((a) => a[1] === 'split-window')
+    expect(splits[0]).toContain('-h')
+    expect(splits[1]).toContain('-v')
+    expect(splits[1].slice(splits[1].indexOf('-t'), splits[1].indexOf('-t') + 2)).toEqual(['-t', '%9'])
   })
 
   test('refusals open nothing: fable, a missing directory, no transport', async ($, on) => {

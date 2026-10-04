@@ -9,8 +9,8 @@ import { cells, MODEL_COLOR, modelKey } from './sprites.js'
 import { BRIEF_SYSTEM, DEFAULT_FOCUS, briefPrompt, flagOf, focusText, paneFlags, parseBrief, parseFocusArgs, shouldBrief } from './focus.js'
 import {
   CLOSE_TOOL, HERDR_START_TIMEOUT, PROBE, SPAWN_TOOL, closeTarget, spawnToolInput, SAFE_RUN, SPAWN_ROLE, TMUX_LIST_ARGV, doneFile, herdrCloseArgv, herdrPaneIdOf, herdrPromptArgv, herdrSplitArgv, herdrStartArgv,
-  isFreshDone, isLead, newRunId, paneName, parseSpawnArgs, parseTmuxList, pickTransport, quietSpawn, reapPool, scopeRows, splitName, tmuxKillArgv, tmuxPaneAgents, tmuxPaneIdOf,
-  teamDirective, teamForce, teamNotice, tmuxSplitArgv, tmuxTagArgvs, transportBlock,
+  isFreshDone, isLead, newRunId, paneName, paneRole, parseSpawnArgs, parseTmuxList, pickTransport, quietSpawn, reapPool, scopeRows, splitName, splitPlan, tmuxEvenArgv, tmuxKillArgv, tmuxPaneAgents, tmuxPaneIdOf,
+  tmuxWidthArgv, widthOf, teamDirective, teamForce, teamNotice, tmuxSplitArgv, tmuxTagArgvs, transportBlock,
 } from './panes.js'
 
 const DECK = 'agt-deck'
@@ -25,6 +25,8 @@ const runs = new Map()       // run id → { revise, fixes, fable, log: [] }
 const live = new Map()       // agentId → live agent (live.js)
 const decisions = []         // this session, for /agt-routing
 let panes = []               // agt-* panes (herdr or tmux) other than this one
+const paneRoutes = []        // PaneRoute[], append-only: how each worker this lead opened was routed
+let opened = []              // { id, name, axis } of panes this lead opened via spawn_pane, in spawn order
 const paneSeen = new Map()   // reaper bookkeeping
 const tmuxFirstSeen = new Map() // tmux pane id → when this session first listed it
 let selfName = null          // this pane's name when it is an agt-* worker
@@ -164,13 +166,15 @@ async function runOk($, argv, init) {
 }
 
 // One claude pane beside this one, named agt-<run>-<role>, never focused. A half-made
-// pane is closed again before the error goes up.
+// pane is closed again before the error goes up. `split` stacks it beside an earlier worker
+// instead of the lead. Returns the new pane id.
 async function openPane($, t, o) {
   if (t === 'tmux') {
-    const target = await $.env.get('TMUX_PANE')
-    if (!target) throw new Error('TMUX_PANE is not set')
+    const lead = await $.env.get('TMUX_PANE')
+    if (!lead) throw new Error('TMUX_PANE is not set')
+    const target = o.split?.target ?? lead
     const shell = (await $.env.get('SHELL')) ?? ''
-    const id = tmuxPaneIdOf((await runOk($, tmuxSplitArgv({ ...o, target, shell }), PROBE)).stdout)
+    const id = tmuxPaneIdOf((await runOk($, tmuxSplitArgv({ ...o, target, shell, direction: o.split?.direction }), PROBE)).stdout)
     if (!id) throw new Error('tmux gave no pane id')
     try {
       for (const argv of tmuxTagArgvs(id, o.name)) await runOk($, argv, PROBE)
@@ -178,19 +182,23 @@ async function openPane($, t, o) {
       await $.process.run(tmuxKillArgv(id), PROBE).catch(() => {})
       throw err
     }
-    return
+    // Even out the stack; a cosmetic failure never loses the worker.
+    if (o.split && o.split.target !== lead) await $.process.run(tmuxEvenArgv(id), PROBE).catch(() => {})
+    return id
   }
-  const pane = await $.env.get('HERDR_PANE_ID')
-  if (!pane) throw new Error('HERDR_PANE_ID is not set')
-  const id = herdrPaneIdOf((await runOk($, herdrSplitArgv({ pane, cwd: o.cwd, run: o.run }), PROBE)).stdout)
+  const lead = await $.env.get('HERDR_PANE_ID')
+  if (!lead) throw new Error('HERDR_PANE_ID is not set')
+  const pane = o.split?.target ?? lead
+  const id = herdrPaneIdOf((await runOk($, herdrSplitArgv({ pane, cwd: o.cwd, run: o.run, direction: o.split?.direction }), PROBE)).stdout)
   if (!id) throw new Error('herdr gave no pane id')
   try {
-    await runOk($, herdrStartArgv({ name: o.name, pane: id, model: o.model }), HERDR_START_TIMEOUT)
+    await runOk($, herdrStartArgv({ name: o.name, pane: id, model: o.model, effort: o.effort }), HERDR_START_TIMEOUT)
     await runOk($, herdrPromptArgv(o.name, o.task), PROBE)
   } catch (err) {
     await $.process.run(herdrCloseArgv(id), PROBE).catch(() => {})
     throw err
   }
+  return id
 }
 
 // tmux has no agent status, so a pane is working until its done-file appears or tmux
@@ -381,7 +389,7 @@ export function register(on) {
 
   on('command.run', { command: 'agt-routing' }, async () => {
     if (decisions.length === 0) return { text: 'No agentille dispatches this session.' }
-    return { text: decisions.slice(-30).map((d) => d.role + ' → ' + d.model + ' · ' + d.effort + (d.reason === 'table' ? '' : '  (' + d.reason + ')')).join('\n') }
+    return { text: decisions.slice(-30).map((d) => d.role + ' → ' + d.model + ' · ' + d.effort + (d.reason === 'table' ? '' : '  (' + d.reason + ')') + (d.kind === 'pane' ? ' · pane' : '')).join('\n') }
   })
 
   // Typed only: a plugin, a scheduled task or a notification never opens a pane.
@@ -414,17 +422,47 @@ export function register(on) {
       const s = await $.fs.stat(cwd).catch(() => null)
       if (s?.kind !== 'dir') return { deny: cwd + ' is not a directory.' }
     }
+    agtTurn = true
+    lastRun = a.run
+    const run = runState(a.run)
+    run.formation = formationOf(a.hdr) ?? run.formation
+    // Counted only once the pane opens: a failed split is not a fix attempt.
+    const fixes = run.fixes + (a.agent === 'executor' && a.hdr.mode === 'fix' ? 1 : 0)
+    run.fable = Math.max(run.fable, Number((await $.store.get('fable:' + a.run)) ?? 0))
+    const d = decide({ role: a.agent, hdr: a.hdr, run: { ...run, fixes }, depth, settings, weeklyPct })
+    const r = paneRole(a.agent, d)
+    if (!r.pane) return { deny: r.why }
+    await pollNow($, t)
+    opened = opened.filter((o) => panes.some((p) => p.id === o.id))
+    const lead = t === 'tmux' ? await $.env.get('TMUX_PANE') : await $.env.get('HERDR_PANE_ID')
+    const probe = async (id) => widthOf((await $.process.run(tmuxWidthArgv(id), PROBE).catch(() => null))?.stdout)
+    const leadWidth = t === 'tmux' ? await probe(lead) : null
+    const newestWidth = t === 'tmux' && opened.length ? await probe(opened[opened.length - 1].id) : null
+    const plan = splitPlan({ lead, leadWidth, newestWidth, opened, live: panes })
+    let id
     try {
-      await openPane($, t, { run: a.run, name: a.name, model: a.model, task: a.task, cwd })
+      id = await openPane($, t, { run: a.run, name: a.name, model: d.model, effort: d.effort, task: a.task, cwd, split: { target: plan.target, direction: plan.direction } })
     } catch (err) {
       return { deny: 'Could not open a ' + t + ' pane: ' + String(err?.message ?? err).slice(0, 160) }
     }
+    run.fixes = fixes
+    if (d.fable) {
+      run.fable += 1
+      await $.store.set('fable:' + a.run, run.fable)
+    }
+    opened.push({ id, name: a.name, axis: plan.axis })
+    paneRoutes.push({ name: a.name, run: a.run, role: a.role, agent: a.agent, model: d.model, effort: d.effort, reason: d.reason, start: Date.now(), end: null })
+    const rec = { at: new Date().toISOString(), role: a.agent, model: d.model, effort: d.effort, reason: d.reason, asked: a.asked, agentId: null, kind: 'pane', pane: a.name }
+    decisions.push(rec)
+    run.log.push(JSON.stringify(rec))
+    await writeRunFile($, a.run, 'routing.jsonl', run.log.join('\n') + '\n')
     await pollNow($, t)
     ensurePolling($)
     ensureTicker($)
     deckWaiting = null
     await autoDeck($)
-    return { result: 'Opened ' + a.name + ' · ' + a.model + ' · ' + t + ' pane.' }
+    if (d.reason !== 'table') $.ui.toast('agt ↑ ' + a.agent + ' → ' + d.model + ' · ' + d.effort + ' — ' + d.reason)
+    return { result: 'Opened ' + a.name + ' · ' + d.model + ' · ' + d.effort + ' · ' + t + ' pane.' + (d.reason === 'table' ? '' : ' (' + d.reason + ')') }
   })
 
   on('tool.call', { tool: 'mcp__agentille__close_pane' }, async ($, e) => {
@@ -452,7 +490,7 @@ export function register(on) {
     return { text: focusText(focusMode, brief, focusLines(Date.now()).filter((l) => l.kind === 'flag' && !brief.includes(l)).map((l) => l.text)) }
   })
 
-  on('command.run', { command: 'agt-ledger' }, async () => ({ text: ledgerText(ledger(live, lastRun)) }))
+  on('command.run', { command: 'agt-ledger' }, async () => ({ text: ledgerText(ledger(live, lastRun, paneRoutes)) }))
 
   on('command.run', { command: 'agt-deck' }, async ($) => {
     deckOpen = true

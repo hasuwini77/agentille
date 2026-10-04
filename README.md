@@ -37,7 +37,8 @@ cd ~/your/repo
 
 - **Live band** above the prompt while agents exist: one row per agent with role, model and effort (model colored: haiku grey, sonnet blue, opus amber, fable violet; effort as a bar from low to max), state, elapsed time, tokens, and `↑ <reason>` when escalated. It covers in-process subagents and Herdr or tmux `agt-*` panes, and hides itself when nothing has run.
 - **Focus**, at the top of the band: what needs you, so you can skip the rest. `⚑` flags come straight off agent results (a revised plan, a FAIL or CONCERNS review, a failed or skipped check, an adversary that broke cases, a pane waiting on you) and also toast. After a long answer a Haiku pass adds `→` the next action, `✓` what got done, `⚑` what needs you. It clears on your next prompt. `/agt-focus all` briefs every long answer, `agt` (default) only /agt runs, `off` none.
-- **The deck** opens with your `/agt` as a one-line waiting strip, fills when the first agent spawns, and closes itself if the run ends with no agent: a pane with a pixel mini-Claude per agent. Hat shape is the role, hat color is the model, working agents bob. Terminals draw pixels; the desktop app gets a text fallback. Close it and it stays closed for that run. `/agt-nodeck` turns auto-open off for good; `/agt-deck` opens it by hand and turns it back on.
+- **The deck** opens with your `/agt` as a one-line waiting strip and fills when the first agent spawns: a pane with a pixel mini-Claude per agent. Hat shape is the role, hat color is the model, working agents bob; panes show the routed model and effort. Only working agents take space: a finished one waves "bye!" for about 2.4 s and leaves. With nothing working it shrinks to a strip and closes at the end of the turn, unless you opened it with `/agt-deck`. Terminals draw pixels; the desktop app gets a text fallback. Close it and it stays closed for that run. `/agt-nodeck` turns auto-open off for good.
+- **Highlight** puts an essentials card on top of a long /agt answer (`✓` done, `⚑` needs you, `→` next) and dims the body, keeping paths, versions, refs and numbers lit. `/agt-highlight off` turns it off.
 - **Ledger.** Tokens per agent and per role. `/agt-ledger` prints it, and the Debrief shows a per-role table read from `~/.agentille/state/run-<id>/ledger.json`.
 
 ```yaml
@@ -98,6 +99,7 @@ Agent teams are never auto-picked, and forcing one with `--team` is deprecated (
 | `/agt-nodeck` | Stop the deck from opening on its own |
 | `/agt-ledger` | Tokens per agent and per role |
 | `/agt-focus [all\|agt\|off]` | What needs you: agent flags and a brief of long answers |
+| `/agt-highlight [on\|off]` | Essentials card and dimmed body on long /agt answers |
 | `/agt-routing` | Routing decisions for this session |
 | `/agentille-init` | One-time global setup |
 | `/agentille-project` | Per-repo registration |

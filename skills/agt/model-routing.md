@@ -37,6 +37,10 @@ Two roles pick their model from the size of the work, not a flat default. Resolv
 
 When in genuine doubt about which tier a diff falls in, prefer Opus for the *review* (a missed regression costs more than the token delta) — but do not reflexively reach for Opus on a clearly small, single-file change.
 
+## Pane workers
+
+A pane worker opened by `spawn_pane` with `agent` and `header` is routed exactly like the subagent of the same role: the same table above, the same escalation ladder, the same Fable guard (`maxFablePerRun`, weekly budget) and the same per-run counters, including the `mode=fix` count that lifts effort to high and then max. The only difference is transport: the model and effort reach the worker as `claude --model <m> --effort <level>`. A `spawn_pane` decision is logged to `routing.jsonl` with `kind:"pane"`, so `/agt-routing` shows panes beside subagents. A denied or failed pane never consumes a Fable slot.
+
 ## Profile-driven overrides
 
 - **`thinkingDepth = quick`** → the last column of the table; **skip the `plan-reviewer`** entirely (quick = trust the plan and go). `design-reviewer` stays Opus — the one place agentille never trades down.

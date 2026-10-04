@@ -11,7 +11,7 @@ import { BRIEF_SYSTEM, DEFAULT_FOCUS, briefPrompt, flagOf, focusText, paneFlags,
 import {
   CLOSE_TOOL, HERDR_START_TIMEOUT, PROBE, SPAWN_TOOL, closeTarget, spawnToolInput, SAFE_RUN, SPAWN_ROLE, TMUX_LIST_ARGV, doneFile, herdrCloseArgv, herdrPaneIdOf, herdrPromptArgv, herdrSplitArgv, herdrStartArgv,
   isFreshDone, isLead, newRunId, paneName, paneRole, parseSpawnArgs, parseTmuxList, pickTransport, quietSpawn, reapPool, scopeRows, splitName, splitPlan, tmuxEvenArgv, tmuxKillArgv, tmuxPaneAgents, tmuxPaneIdOf,
-  tmuxWidthArgv, widthOf, tmuxSplitArgv, tmuxTagArgvs, transportBlock,
+  tmuxSplitArgv, tmuxTagArgvs, transportBlock,
 } from './panes.js'
 
 const hex = (n) => '#' + n.toString(16).padStart(6, '0')
@@ -26,7 +26,7 @@ const live = new Map()       // agentId → live agent (live.js)
 const decisions = []         // this session, for /agt-routing
 let panes = []               // agt-* panes (herdr or tmux) other than this one
 const paneRoutes = []        // PaneRoute[], append-only: how each worker this lead opened was routed
-let opened = []              // { id, name, axis } of panes this lead opened via spawn_pane, in spawn order
+let opened = []              // { id, name } of panes this lead opened via spawn_pane, in spawn order
 const staged = new Map()     // pane name → last pane seen on stage (live.js panesLeft)
 const paneSeen = new Map()   // reaper bookkeeping
 const tmuxFirstSeen = new Map() // tmux pane id → when this session first listed it
@@ -451,10 +451,7 @@ export function register(on) {
     await pollNow($, t)
     opened = opened.filter((o) => panes.some((p) => p.id === o.id))
     const lead = t === 'tmux' ? await $.env.get('TMUX_PANE') : await $.env.get('HERDR_PANE_ID')
-    const probe = async (id) => widthOf((await $.process.run(tmuxWidthArgv(id), PROBE).catch(() => null))?.stdout)
-    const leadWidth = t === 'tmux' ? await probe(lead) : null
-    const newestWidth = t === 'tmux' && opened.length ? await probe(opened[opened.length - 1].id) : null
-    const plan = splitPlan({ lead, leadWidth, newestWidth, opened, live: panes })
+    const plan = splitPlan({ lead, opened, live: panes })
     let id
     try {
       id = await openPane($, t, { run: a.run, name: a.name, agent: a.agent, model: d.model, effort: d.effort, task: a.task, cwd, split: { target: plan.target, direction: plan.direction } })
@@ -466,7 +463,7 @@ export function register(on) {
       run.fable += 1
       await $.store.set('fable:' + a.run, run.fable)
     }
-    opened.push({ id, name: a.name, axis: plan.axis })
+    opened.push({ id, name: a.name })
     paneRoutes.push({ name: a.name, run: a.run, role: a.role, agent: a.agent, model: d.model, effort: d.effort, reason: d.reason, start: Date.now(), end: null })
     const rec = { at: new Date().toISOString(), role: a.agent, model: d.model, effort: d.effort, reason: d.reason, asked: a.asked, agentId: null, kind: 'pane', pane: a.name }
     decisions.push(rec)

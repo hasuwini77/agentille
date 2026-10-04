@@ -167,29 +167,11 @@ export function tmuxSplitArgv({ target, cwd, run, shell, model, name, task, effo
   return [...head, 'claude', ...tail]
 }
 
-// Stacked layout: a narrow lead stacks workers below it; a wide one puts them beside it. Later
-// workers split the newest one across the first worker's axis. Only workers still live count; a right split that would
-// leave panes under MIN_SPLIT_COLS goes down instead.
-export const WIDE_COLS = 160
-export const MIN_SPLIT_COLS = 40
-
-export function splitPlan({ lead, leadWidth = null, newestWidth = null, opened = [], live = [] }) {
+// Stacked layout: the first worker splits right of the lead, each later one splits down from the
+// newest worker still live. No width probing: a stack always has room for one more row.
+export function splitPlan({ lead, opened = [], live = [] }) {
   const alive = opened.filter((o) => live.some((p) => p.id === o.id))
-  if (!alive.length) {
-    const d = typeof leadWidth === 'number' && leadWidth < WIDE_COLS ? 'down' : 'right'
-    return { target: lead, direction: d, axis: d }
-  }
-  const n = alive[alive.length - 1]
-  let d = n.axis === 'right' ? 'down' : 'right'
-  if (d === 'right' && typeof newestWidth === 'number' && newestWidth / 2 < MIN_SPLIT_COLS) d = 'down'
-  return { target: n.id, direction: d, axis: n.axis }
-}
-
-export const tmuxWidthArgv = (pane) => ['tmux', 'display-message', '-p', '-t', pane, '#{pane_width}']
-
-export function widthOf(stdout) {
-  const n = Number(String(stdout ?? '').trim())
-  return Number.isInteger(n) && n > 0 ? n : null
+  return alive.length ? { target: alive[alive.length - 1].id, direction: 'down' } : { target: lead, direction: 'right' }
 }
 
 export const tmuxEvenArgv = (id) => ['tmux', 'select-layout', '-E', '-t', id]

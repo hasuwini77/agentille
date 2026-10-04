@@ -2,6 +2,29 @@
 
 All notable changes to agentille are documented here.
 
+## [3.1.0] — 2026-10-04
+
+### Added
+
+- **Mascot in the lead's band.** Each working subagent's row in the band
+  above the prompt now carries the same three-row mascot as a worker pane:
+  hi for its first 2.4 s, stepping legs while it works, bye for 2.4 s after
+  it finishes, then the row leaves. Pure strings, no model tokens.
+
+### Changed
+
+- A finished subagent stays in the band for the bye window instead of
+  leaving at once. Pane rows are unchanged (text): a pane shows its own
+  mascot.
+- With more than three subagents working, or a band too short for three
+  rows each, or off a terminal, the band keeps its text rows.
+
+### Rationale
+
+Panes open only for parallel slices, so on the common single-slice run no
+mascot was ever visible. The band is already on screen at any width, which
+makes it the cheapest place to show who is working.
+
 ## [3.0.0] — 2026-10-04
 
 "Less is more": a lighter `/agt` that costs less than not using it.

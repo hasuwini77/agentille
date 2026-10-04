@@ -24,9 +24,24 @@ const BODY = ' ▝▜█████▛▘'
 const LEGS = ['   ▘▘ ▝▝', '   ▝▝ ▘▘']
 const ARM = { hi: ' ╱', bye: ' ╲' }
 
+// One small accessory per role, so the band shows who is who: a swapped head or body row,
+// same width class, single-cell glyphs only. A role without an entry wears nothing.
+export const ACCESSORY = {
+  executor: { head: '  ▟▛███▜▙' },             // hard hat
+  planner: { head: '  ▐▛█▲█▜▌' },              // thinking cap
+  'plan-reviewer': { head: '  ▐▛███◉▌' },      // monocle
+  'code-reviewer': { head: '  ▐▛○─○▜▌' },      // glasses
+  'security-reviewer': { body: ' ▝▜█▚▄▞█▛▘' }, // moustache
+  'design-reviewer': { body: ' ▝▜█▶▪◀█▛▘' },    // bow tie
+  adversary: { head: ' ◥▐▛███▜▌◤' },           // horns
+  'payments-reviewer': { body: ' ▝▜██$██▛▘' }, // dollar sign
+  'perf-reviewer': { head: '  ▌▛███▜▐' },      // headphones
+}
+
 // mood: 'hi' | 'working' | 'bye'. Three rows; the legs step on every other tick while working.
-export function frame(mood, tick = 0) {
-  return [HEAD + (ARM[mood] ?? ''), BODY, LEGS[mood === 'working' ? tick & 1 : 0]]
+export function frame(mood, tick = 0, role = '') {
+  const wear = ACCESSORY[role] ?? {}
+  return [(wear.head ?? HEAD) + (ARM[mood] ?? ''), wear.body ?? BODY, LEGS[mood === 'working' ? tick & 1 : 0]]
 }
 
 const mmss = (ms) => {

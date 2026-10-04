@@ -1,5 +1,5 @@
 import { describe, expect, mock, test } from 'claude-code/testing'
-import { BYE_MS, HELLO_MS, MASCOT_COLOR, MAX_BAND_MASCOTS, MODEL_COLOR, agentMood, bandMascots, caption, frame, modelKey, moodAt, parseWorker } from '../../hooks/mascot.js'
+import { ACCESSORY, BYE_MS, HELLO_MS, MASCOT_COLOR, MAX_BAND_MASCOTS, MODEL_COLOR, agentMood, bandMascots, caption, frame, modelKey, moodAt, parseWorker } from '../../hooks/mascot.js'
 import { herdrSplitArgv, tmuxSplitArgv, workerEnv } from '../../hooks/panes.js'
 
 describe('mascot frames', () => {
@@ -59,6 +59,24 @@ describe('mood', () => {
     expect(parseWorker('executor:sonnet:high')).toEqual({ agent: 'executor', model: 'sonnet', effort: 'high' })
     expect(parseWorker('spawn:haiku:')).toEqual({ agent: 'spawn', model: 'haiku', effort: '' })
     for (const bad of [undefined, '', 'executor', 'Exec:sonnet:high', ':sonnet:', 'executor::high', 'a b:c:d']) expect(parseWorker(bad)).toBe(null)
+  })
+})
+
+describe('accessories', () => {
+  test('a role swaps one row and keeps the arm, the legs and the width', async () => {
+    expect(frame('hi', 0, 'executor')).toEqual(['  ▟▛███▜▙ ╱', ' ▝▜█████▛▘', '   ▘▘ ▝▝'])
+    expect(frame('bye', 0, 'code-reviewer')[0]).toBe('  ▐▛○─○▜▌ ╲')
+    expect(frame('working', 1, 'security-reviewer')).toEqual(['  ▐▛███▜▌', ' ▝▜█▚▄▞█▛▘', '   ▝▝ ▘▘'])
+    expect(frame('hi', 0, 'adversary')[0]).toBe(' ◥▐▛███▜▌◤ ╱')
+    expect(frame('working', 0, 'seo-reviewer')).toEqual(frame('working', 0))
+    expect(frame('working', 0, 'toString')).toEqual(frame('working', 0))
+    const plain = frame('working', 0)
+    for (const [role, wear] of Object.entries(ACCESSORY)) {
+      const f = frame('working', 0, role)
+      expect([...f[1]].length).toBe([...plain[1]].length)
+      expect([...f[0]].length).toBeLessThanOrEqual([...plain[0]].length + 1)
+      expect(Object.keys(wear).every((k) => k === 'head' || k === 'body')).toBe(true)
+    }
   })
 })
 
@@ -128,7 +146,7 @@ describe('worker band', () => {
 
     await begin($)
     await shows(ui, /hi! executor · sonnet · high/)
-    await shows(ui, /▐▛███▜▌ ╱/)
+    await shows(ui, /▟▛███▜▙ ╱/)
     await shows(ui, /▝▜█████▛▘/)
 
     await clock.advance(HELLO_MS + 1)
@@ -146,11 +164,11 @@ describe('worker band', () => {
     await shows(ui, /executor · working 1:\d\d/)
     await finish($)
     await shows(ui, /bye! ✓ done 1:/)
-    await shows(ui, /▐▛███▜▌ ╲/)
+    await shows(ui, /▟▛███▜▙ ╲/)
 
     await clock.advance(BYE_MS + 600)
     expect(await has(ui, /bye!/)).toBe(false)
-    expect(await has(ui, /▐▛███▜▌/)).toBe(false)
+    expect(await has(ui, /▝▜█████▛▘/)).toBe(false)
     await shows(ui, /^executor · sonnet · high · done 1:/)
 
     await clock.advance(1200)
@@ -193,11 +211,11 @@ describe('worker band', () => {
     await clock.advance(HELLO_MS + 1)
     const short = await mount($, { maxRows: 4 })
     await shows(short, /executor · working/)
-    expect(await has(short, /▐▛███▜▌/)).toBe(false)
+    expect(await has(short, /▝▜█████▛▘/)).toBe(false)
     await short.unmount()
     const desktop = await mount($, {}, 'desktop')
     await shows(desktop, /executor · working/)
-    expect(await has(desktop, /▐▛███▜▌/)).toBe(false)
+    expect(await has(desktop, /▝▜█████▛▘/)).toBe(false)
     await desktop.unmount()
   })
 
@@ -208,7 +226,7 @@ describe('worker band', () => {
     await begin($)
     await clock.advance(10_000)
     await finish($)
-    expect(await has(ui, /▐▛███▜▌/)).toBe(false)
+    expect(await has(ui, /▝▜█████▛▘/)).toBe(false)
     expect(invalidations()).toBe(0)
     await ui.unmount()
   })

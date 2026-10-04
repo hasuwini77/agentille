@@ -238,7 +238,7 @@ async function openPane($, t, o) {
   const id = herdrPaneIdOf((await runOk($, herdrSplitArgv({ pane, cwd: o.cwd, run: o.run, direction: o.split?.direction }), PROBE)).stdout)
   if (!id) throw new Error('herdr gave no pane id')
   try {
-    await runOk($, herdrStartArgv({ name: o.name, pane: id, model: o.model, effort: o.effort }), HERDR_START_TIMEOUT)
+    await runOk($, herdrStartArgv({ name: o.name, pane: id, model: o.model, effort: o.effort, agent: o.agent }), HERDR_START_TIMEOUT)
     await runOk($, herdrPromptArgv(o.name, o.task), PROBE)
   } catch (err) {
     await $.process.run(herdrCloseArgv(id), PROBE).catch(() => {})
@@ -517,7 +517,7 @@ export function register(on) {
     const plan = splitPlan({ lead, leadWidth, newestWidth, opened, live: panes })
     let id
     try {
-      id = await openPane($, t, { run: a.run, name: a.name, model: d.model, effort: d.effort, task: a.task, cwd, split: { target: plan.target, direction: plan.direction } })
+      id = await openPane($, t, { run: a.run, name: a.name, agent: a.agent, model: d.model, effort: d.effort, task: a.task, cwd, split: { target: plan.target, direction: plan.direction } })
     } catch (err) {
       return { deny: 'Could not open a ' + t + ' pane: ' + String(err?.message ?? err).slice(0, 160) }
     }

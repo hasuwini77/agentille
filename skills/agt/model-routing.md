@@ -39,7 +39,7 @@ When in genuine doubt about which tier a diff falls in, prefer Opus for the *rev
 
 ## Pane workers
 
-A pane worker opened by `spawn_pane` with `agent` and `header` is routed exactly like the subagent of the same role: the same table above, the same escalation ladder, the same Fable guard (`maxFablePerRun`, weekly budget) and the same per-run counters, including the `mode=fix` count that lifts effort to high and then max. The only difference is transport: the model and effort reach the worker as `claude --model <m> --effort <level>`. A `spawn_pane` decision is logged to `routing.jsonl` with `kind:"pane"`, so `/agt-routing` shows panes beside subagents. A denied or failed pane never consumes a Fable slot.
+A pane worker opened by `spawn_pane` with `agent` and `header` is routed exactly like the subagent of the same role: the same table above, the same escalation ladder, the same Fable guard (`maxFablePerRun`, weekly budget) and the same per-run counters, including the `mode=fix` count that lifts effort to high and then max. The only difference is transport: the worker starts as `claude --agent agentille:agentille-<role> --model <m> --effort <level>`, so it runs the same agent definition (instructions, tools, verdict format) a subagent would. A `spawn_pane` decision is logged to `routing.jsonl` with `kind:"pane"`, so `/agt-routing` shows panes beside subagents. A denied or failed pane never consumes a Fable slot.
 
 ## Profile-driven overrides
 

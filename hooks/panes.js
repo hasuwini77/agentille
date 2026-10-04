@@ -191,11 +191,14 @@ export function reapPool(panes) {
 
 export const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max']
 const effortArgs = (effort) => (EFFORTS.includes(effort) ? ['--effort', effort] : [])
+// A routed worker runs as its agentille agent definition (instructions, tools, verdict format),
+// not as a bare session that only has the task prompt.
+const agentArgs = (agent) => (ROLES.includes(agent) ? ['--agent', 'agentille:agentille-' + agent] : [])
 
-export function tmuxSplitArgv({ target, cwd, run, shell, model, name, task, effort, direction }) {
+export function tmuxSplitArgv({ target, cwd, run, shell, model, name, task, effort, direction, agent }) {
   const head = ['tmux', 'split-window', '-d', direction === 'down' ? '-v' : '-h', '-P', '-F', '#{pane_id}', '-t', target, '-c', cwd.replace(/#/g, '##'), '-e', 'AGENTILLE_RUN=' + run]
   // `--` ends claude's options, so a task that starts with `-` is still just the prompt
-  const tail = ['--model', model, ...effortArgs(effort), '-n', name, '--', task]
+  const tail = [...agentArgs(agent), '--model', model, ...effortArgs(effort), '-n', name, '--', task]
   const base = String(shell ?? '').split('/').pop()
   if (base === 'zsh' || base === 'bash') return [...head, shell, '-ic', 'claude "$@"', 'agt', ...tail]
   return [...head, 'claude', ...tail]
@@ -257,7 +260,7 @@ export function herdrPaneIdOf(stdout) {
   }
 }
 
-export const herdrStartArgv = ({ name, pane, model, effort }) => ['herdr', 'agent', 'start', name, '--kind', 'claude', '--pane', pane, '--timeout', '45000', '--', '--model', model, ...effortArgs(effort)]
+export const herdrStartArgv = ({ name, pane, model, effort, agent }) => ['herdr', 'agent', 'start', name, '--kind', 'claude', '--pane', pane, '--timeout', '45000', '--', ...agentArgs(agent), '--model', model, ...effortArgs(effort)]
 export const herdrPromptArgv = (name, task) => ['herdr', 'agent', 'prompt', name, task]
 export const herdrCloseArgv = (id) => ['herdr', 'pane', 'close', id]
 

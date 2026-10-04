@@ -632,6 +632,15 @@ describe('effort and layout', () => {
     expect(tmuxSplitArgv({ ...base, shell: '/bin/zsh', effort: 'turbo' })).not.toContain('--effort')
   })
 
+  test('a routed worker runs as its agentille agent definition; unknown agents add nothing', async () => {
+    const start = ['herdr', 'agent', 'start', 'n', '--kind', 'claude', '--pane', 'w1:p5', '--timeout', '45000', '--']
+    expect(herdrStartArgv({ name: 'n', pane: 'w1:p5', model: 'opus', effort: 'high', agent: 'code-reviewer' })).toEqual([...start, '--agent', 'agentille:agentille-code-reviewer', '--model', 'opus', '--effort', 'high'])
+    expect(herdrStartArgv({ name: 'n', pane: 'w1:p5', model: 'opus', agent: 'boss' })).toEqual([...start, '--model', 'opus'])
+    const z = tmuxSplitArgv({ ...base, shell: '/bin/zsh', effort: 'medium', agent: 'executor' })
+    expect(z.slice(-11)).toEqual(['agt', '--agent', 'agentille:agentille-executor', '--model', 'sonnet', '--effort', 'medium', '-n', base.name, '--', 't'])
+    expect(tmuxSplitArgv({ ...base, shell: '/bin/zsh' })).not.toContain('--agent')
+  })
+
   test('direction picks the tmux and herdr split axis', async () => {
     expect(tmuxSplitArgv({ ...base, shell: '/bin/zsh', direction: 'down' })[3]).toBe('-v')
     for (const d of [undefined, 'right', 'bogus']) expect(tmuxSplitArgv({ ...base, shell: '/bin/zsh', direction: d })[3]).toBe('-h')
@@ -824,7 +833,7 @@ describe('pane tools: in the mod', () => {
     expect(r.result).toBe('Opened agt-k7f2ab-exec-1 · sonnet · medium · tmux pane.')
     const split = seen.find((a) => a[1] === 'split-window')!
     expect(split[split.indexOf('-c') + 1]).toBe('/work/wt-1')
-    expect(split.slice(-8)).toEqual(['--model', 'sonnet', '--effort', 'medium', '-n', 'agt-k7f2ab-exec-1', '--', 'build the filter'])
+    expect(split.slice(-10)).toEqual(['--agent', 'agentille:agentille-executor', '--model', 'sonnet', '--effort', 'medium', '-n', 'agt-k7f2ab-exec-1', '--', 'build the filter'])
   })
 
   test('herdr: spawn splits, starts with model and effort, and prompts', async ($, on) => {
@@ -832,7 +841,7 @@ describe('pane tools: in the mod', () => {
     const r = await spawn($, { run: 'k7f2ab', role: 'review', task: 'review the diff', agent: 'code-reviewer', header: '[agt run=k7f2ab size=large mode=review]' })
     expect(r.result).toBe('Opened agt-k7f2ab-review · opus · high · herdr pane.')
     const start = seen.find((a) => a.slice(0, 4).join(' ') === 'herdr agent start agt-k7f2ab-review')!
-    expect(start.slice(-4)).toEqual(['--model', 'opus', '--effort', 'high'])
+    expect(start.slice(-6)).toEqual(['--agent', 'agentille:agentille-code-reviewer', '--model', 'opus', '--effort', 'high'])
     expect(seen.some((a) => a.slice(0, 3).join(' ') === 'herdr agent prompt' && a[4] === 'review the diff')).toBe(true)
   })
 

@@ -7,7 +7,7 @@ import { addUsage, effortBar, elapsed, endRoute, finish, isAgtPrompt, ledger, le
 import { activeSquads, allPaths, depsOf, injection } from './squads.js'
 import { BYE_MS, HELLO_MS, MASCOT_COLOR, MODEL_COLOR, caption, frame, modelKey, moodAt, parseWorker } from './mascot.js'
 import { MARK, SPAN_COLOR, highlight, highlightText, litFor, parseHighlightArgs, spans } from './highlight.js'
-import { BRIEF_SYSTEM, DEFAULT_FOCUS, briefPrompt, flagOf, focusText, paneFlags, parseBrief, parseFocusArgs, shouldBrief } from './focus.js'
+import { flagOf, focusText, paneFlags, parseFocusArgs } from './focus.js'
 import {
   CLOSE_TOOL, HERDR_START_TIMEOUT, PROBE, SPAWN_TOOL, closeTarget, spawnToolInput, SAFE_RUN, SPAWN_ROLE, TMUX_LIST_ARGV, doneFile, herdrCloseArgv, herdrPaneIdOf, herdrPromptArgv, herdrSplitArgv, herdrStartArgv,
   isFreshDone, isLead, newRunId, paneName, paneRole, parseSpawnArgs, parseTmuxList, pickTransport, quietSpawn, reapPool, scopeRows, splitName, splitPlan, tmuxEvenArgv, tmuxKillArgv, tmuxPaneAgents, tmuxPaneIdOf,
@@ -41,9 +41,7 @@ let tick = 0
 let pollTimer = null         // pane polling: runs only while panes may exist
 let quietPolls = 0
 let tickTimer = null         // redraw ticker: runs only while something works
-let focusMode = DEFAULT_FOCUS
-let brief = []               // [{ kind, text }] for the latest long answer
-let briefSeq = 0
+let focusOn = true           // agent flags show above the prompt
 let flags = []               // [{ text, at }] from agent results this run
 let agtTurn = false          // this turn is part of an /agt run
 let leadTurn = false         // a main-loop turn is running: its idle panes are waiting for review
@@ -293,8 +291,9 @@ function addFlag($, text) {
 }
 
 function focusLines(now) {
+  if (!focusOn) return []
   const fresh = flags.filter((f) => now - f.at < FLAG_TTL_MS).map((f) => f.text)
-  return [...[...fresh, ...paneFlags(panes)].map((text) => ({ kind: 'flag', text })), ...brief.filter((b) => b.kind !== 'flag'), ...brief.filter((b) => b.kind === 'flag')].slice(0, 5)
+  return [...fresh, ...paneFlags(panes)].slice(0, 5)
 }
 
 // One Text per essentials item: a coloured mark, then the line with paths, versions and numbers lit.
@@ -316,11 +315,7 @@ function cardBox(els, items) {
   })
 }
 
-function focusRow(els, line) {
-  const mark = { next: '→', flag: '⚑', done: '✓' }[line.kind]
-  const color = FOCUS_COLOR[line.kind]
-  return els.Text({ ...(color ? { color } : { dimColor: true }), wrap: 'truncate', children: [mark + ' ' + line.text] })
-}
+const focusRow = (els, text) => els.Text({ color: FOCUS_COLOR.flag, wrap: 'truncate', children: ['⚑ ' + text] })
 
 // ── drawing helpers (take resolved elements, never $) ─────────────────────────
 
@@ -384,10 +379,10 @@ export function register(on) {
     await $.command.register({ name: 'agt-routing', description: 'Show the model + effort agentille picked for each agent this session', immediate: true })
     await $.command.register({ name: 'agt-spawn', description: 'Open a routed claude pane beside this one (Herdr or tmux); it is never reaped', argumentHint: '"task" [--model sonnet|opus|haiku|fable]' })
     await $.command.register({ name: 'agt-ledger', description: 'Tokens per agent role for the latest agentille run', immediate: true })
-    focusMode = (await $.store.get('focus:mode')) ?? DEFAULT_FOCUS
+    focusOn = (await $.store.get('focus:mode')) !== 'off'
     highlightOn = (await $.store.get('highlight:on')) !== false
     await $.command.register({ name: 'agt-highlight', description: 'Highlight /agt replies: an essentials card, paths, versions and numbers lit. on · off', argumentHint: '[on|off]', immediate: true })
-    await $.command.register({ name: 'agt-focus', description: 'What needs you: agent flags and a short brief of long answers. all · agt · off', argumentHint: '[all|agt|off]', immediate: true })
+    await $.command.register({ name: 'agt-focus', description: 'Show agent flags above the prompt (a REVISE, a FAIL, a blocked pane). on · off', argumentHint: '[on|off]', immediate: true })
     if (transport !== 'none') {
       // One look now: a lead restarted mid-run still reaps its leftover panes.
       await pollNow($, transport)
@@ -492,13 +487,12 @@ export function register(on) {
   on('command.run', { command: 'agt-focus' }, async ($, e) => {
     const a = parseFocusArgs(e.args)
     if (a.error) return { text: a.error }
-    if (a.mode) {
-      focusMode = a.mode
-      await $.store.set('focus:mode', a.mode)
-      if (a.mode === 'off') brief = []
+    if (a.on !== undefined) {
+      focusOn = a.on
+      await $.store.set('focus:mode', a.on ? 'on' : 'off')
       $.ui.invalidate('ui.render')
     }
-    return { text: focusText(focusMode, brief, focusLines(Date.now()).filter((l) => l.kind === 'flag' && !brief.includes(l)).map((l) => l.text)) }
+    return { text: focusText(focusOn, focusLines(Date.now())) }
   })
 
   on('command.run', { command: 'agt-highlight' }, async ($, e) => {
@@ -518,7 +512,6 @@ export function register(on) {
   on('prompt.submit', async ($, e, next) => {
     const k = e.origin?.kind
     if (k !== undefined && k !== 'composer' && k !== 'bridge') return next(e)
-    brief = []
     agtTurn = isAgtPrompt(e.text)
     if (agtTurn) flags = []   // a new run starts with a clean slate
     return next(e)
@@ -619,17 +612,6 @@ export function register(on) {
       if (e.reason === 'answer') mascot.byeUntil = now + BYE_MS
       ensureTicker($)
       $.ui.invalidate('ui.render')
-    }
-    if (!e.agentId && e.reason === 'answer' && shouldBrief({ answer: e.answer, mode: focusMode, agtTurn })) {
-      // Off the turn's path: the answer shows now, the brief lands a moment later.
-      const seq = ++briefSeq
-      const answer = e.answer
-      $.clock.after(0, async () => {
-        const r = await $.model.complete({ model: 'haiku', system: BRIEF_SYSTEM, prompt: briefPrompt(answer), maxTokens: 300, effort: 'low', timeoutMs: 30_000 }).catch(() => null)
-        if (seq !== briefSeq || !r?.isAnswered) return
-        brief = parseBrief(r.text)
-        $.ui.invalidate('ui.render')
-      })
     }
     if (a) {
       if (a.routed) addFlag($, flagOf(a.role, e.answer))

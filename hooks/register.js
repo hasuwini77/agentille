@@ -446,7 +446,7 @@ export function register(on) {
     const fixes = run.fixes + (a.agent === 'executor' && a.hdr.mode === 'fix' ? 1 : 0)
     run.fable = Math.max(run.fable, Number((await $.store.get('fable:' + a.run)) ?? 0))
     const d = decide({ role: a.agent, hdr: a.hdr, run: { ...run, fixes }, depth, settings, weeklyPct })
-    const r = paneRole(a.agent, d)
+    const r = paneRole(a.agent)
     if (!r.pane) return { deny: r.why }
     await pollNow($, t)
     opened = opened.filter((o) => panes.some((p) => p.id === o.id))

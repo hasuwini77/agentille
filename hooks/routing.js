@@ -1,6 +1,6 @@
 // agentille routing policy — pure functions, no mods API.
 // register.js feeds it what the mod observed; it returns { model, effort, reason }.
-// The table and ladder mirror skills/agt/model-routing.md (that doc is the spec).
+// The table and ladder mirror skills/agt/routing.md → "Default routing" (that doc is the spec).
 
 const ROLE_PREFIX = 'agentille:agentille-'
 

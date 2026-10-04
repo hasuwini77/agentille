@@ -26,19 +26,13 @@ export function pickTransport({ herdrOk, tmuxOk }) {
   return herdrOk ? 'herdr' : tmuxOk ? 'tmux' : 'none'
 }
 
-export const PANE_RULE = 'Pane rule: every executor slice (even a single one), the adversary, and any reviewer routed to opus or fable run as pane workers; planner, plan-reviewer, ui-prototyper, sonnet-routed reviewers and seo-reviewer stay subagents. Call spawn_pane with agent (the routing role) and header (this run\'s full [agt …] line): the mod picks model and effort, and refuses roles that stay subagents. A pane starts as a full Claude session (~55k tokens vs ~32k for a subagent; measured 1.12× the fresh tokens of the same workers as subagents): it buys a visible worker, not a saving. `--mode subagent` keeps every worker a subagent.'
+export const PANE_RULE = 'Pane rule: panes only when ≥2 slices build at once or `--mode panes`: each slice\'s executor (and the adversary) via spawn_pane (agent + header); everyone else is a subagent. close_pane after harvest.'
 
-// The line appended to the /agt skill prompt so the model knows which transport is live,
-// and, when the mod registered them, that the pane tools replace the manual recipe.
+// The block appended to the /agt skill prompt: which transport is live and, when the mod
+// registered the pane tools, the rule for using them.
 export function transportBlock(transport, tools = false) {
-  const line = {
-    herdr: 'Parallel slices run as Herdr panes — see `panes-mode.md` → "Spawning a worker".',
-    tmux: 'Parallel slices run as tmux panes — see `panes-mode.md` → "tmux transport".',
-  }[transport] ?? 'No pane transport here: parallel slices run as a workflow, else subagent waves.'
-  const viaTools = tools && transport !== 'none'
-    ? 'Open each claude worker with mcp__agentille__spawn_pane and close it after harvest with mcp__agentille__close_pane — see `panes-mode.md` → "Through the mod\'s tools".\n' + PANE_RULE + '\n'
-    : ''
-  return '\n## Pane transport (agentille mod)\n\ntransport: ' + transport + '\n' + line + '\n' + viaTools
+  const note = transport === 'none' ? 'No pane transport here: parallel slices run as a workflow, else subagent waves.\n' : tools ? PANE_RULE + '\n' : ''
+  return '\n## Pane transport (agentille mod)\n\ntransport: ' + transport + '\n' + note
 }
 
 // ── names ─────────────────────────────────────────────────────────────────────
@@ -209,21 +203,12 @@ export const herdrStartArgv = ({ name, pane, model, effort, agent }) => ['herdr'
 export const herdrPromptArgv = (name, task) => ['herdr', 'agent', 'prompt', name, task]
 export const herdrCloseArgv = (id) => ['herdr', 'pane', 'close', id]
 
-const REVIEWERS = new Set(['code-reviewer', 'security-reviewer', 'design-reviewer', 'payments-reviewer', 'perf-reviewer'])
-const SUBAGENT_ONLY = new Set(['planner', 'plan-reviewer', 'ui-prototyper'])
-
-// Whether a routing role runs as a pane worker, given the routing decision for it.
-export function paneRole(agent, decision) {
-  const m = String(decision?.model ?? '')
-  if (agent === 'executor' || agent === 'adversary') return { pane: true, why: '' }
-  if (REVIEWERS.has(agent)) {
-    return /opus|fable/.test(m)
-      ? { pane: true, why: '' }
-      : { pane: false, why: `${agent} is routed to ${m || 'an unknown model'}: run it as a subagent; only opus or fable reviewers get a pane.` }
-  }
-  if (agent === 'seo-reviewer') return { pane: false, why: 'seo-reviewer stays a subagent: a short read-only pass does not pay back a pane\'s start-up.' }
-  if (SUBAGENT_ONLY.has(agent)) return { pane: false, why: `${agent} stays a subagent: its full answer feeds the next dispatch.` }
-  return { pane: false, why: `${agent} is not a routing role.` }
+// Whether a routing role runs as a pane worker: only an executor or the adversary. Reviewers and the
+// planning roles stay subagents: their flags, token counts and full answers exist only there.
+export function paneRole(agent) {
+  return agent === 'executor' || agent === 'adversary'
+    ? { pane: true, why: '' }
+    : { pane: false, why: `${agent} runs as a subagent: only an executor or the adversary gets a pane.` }
 }
 
 // ── pane tools: /agt panes mode opens and closes workers through the mod ──────

@@ -11,19 +11,13 @@ describe('transport', () => {
     expect(pickTransport({ herdrOk: false, tmuxOk: false })).toBe('none')
   })
 
-  test('block names the transport and the matching playbook section', async () => {
-    expect(transportBlock('herdr')).toContain('transport: herdr')
-    expect(transportBlock('herdr')).toContain('"Spawning a worker"')
-    expect(transportBlock('tmux')).toContain('"tmux transport"')
+  test('the block names the transport and cites no playbook section', async () => {
+    for (const t of ['herdr', 'tmux', 'none']) {
+      expect(transportBlock(t, true).startsWith('\n## Pane transport (agentille mod)\n\ntransport: ' + t + '\n')).toBe(true)
+      expect(transportBlock(t, true)).not.toContain('panes-mode.md')
+    }
     expect(transportBlock('none')).toContain('No pane transport here: parallel slices run as a workflow, else subagent waves.')
-    expect(transportBlock('none').startsWith('\n## Pane transport (agentille mod)\n\ntransport: none\n')).toBe(true)
-  })
-
-  test('with the tools registered, the block points at them; never on none', async () => {
-    expect(transportBlock('herdr')).not.toContain('spawn_pane')
-    expect(transportBlock('tmux', true)).toContain('mcp__agentille__spawn_pane')
-    expect(transportBlock('tmux', true)).toContain('"Through the mod\'s tools"')
-    expect(transportBlock('none', true)).not.toContain('spawn_pane')
+    expect(transportBlock('herdr')).toBe('\n## Pane transport (agentille mod)\n\ntransport: herdr\n')
   })
 
   test('the pane rule rides with the tools, on tmux and herdr only', async () => {
@@ -31,10 +25,16 @@ describe('transport', () => {
     expect(transportBlock('herdr', true)).toContain(PANE_RULE)
     expect(transportBlock('tmux')).not.toContain('Pane rule')
     expect(transportBlock('none', true)).not.toContain('Pane rule')
-    expect(PANE_RULE).toContain('1.12×')
-    expect(PANE_RULE).toContain('--mode subagent')
-    expect(PANE_RULE).toContain('header')
-    expect(PANE_RULE).not.toContain('deprecated')
+    expect(transportBlock('none', true)).not.toContain('spawn_pane')
+  })
+
+  test('the pane rule: parallel slices or --mode panes, executor and adversary only, close after harvest', async () => {
+    expect(PANE_RULE).toContain('≥2 slices')
+    expect(PANE_RULE).toContain('--mode panes')
+    expect(PANE_RULE).toContain('executor (and the adversary)')
+    expect(PANE_RULE).toContain('everyone else is a subagent')
+    expect(PANE_RULE).toContain('close_pane after harvest')
+    expect(PANE_RULE.length).toBeLessThan(260)
   })
 })
 
@@ -251,15 +251,14 @@ describe('skill prompt', () => {
     on('skill.prompt', async ($: any, e: any) => ({ text: e.text }))
     const r = await $.skill.prompt({ skill: 'agt', text: 'base' })
     expect(r.text).toContain('\n## Pane transport (agentille mod)\n\ntransport: herdr\n')
-    expect(r.text).toContain('"Spawning a worker"')
+    expect(r.text).not.toContain('panes-mode.md')
   })
 
-  test('inside tmux it points at the tmux section', async ($, on) => {
+  test('inside tmux it names tmux', async ($, on) => {
     answer(on, { TMUX: '/tmp/tmux-1/default,1,0' })
     on('skill.prompt', async ($: any, e: any) => ({ text: e.text }))
     const r = await $.skill.prompt({ skill: 'agentille:agt', text: 'base' })
     expect(r.text).toContain('transport: tmux')
-    expect(r.text).toContain('"tmux transport"')
   })
 
   test('HERDR_ENV=1 but herdr does not answer, no tmux: none', async ($, on) => {
@@ -557,37 +556,18 @@ describe('routing roles', () => {
 })
 
 describe('paneRole', () => {
-  const on = (model: string) => ({ model })
-
-  test('executor and adversary are always panes', async () => {
-    expect(paneRole('executor', on('sonnet')).pane).toBe(true)
-    expect(paneRole('adversary', on('sonnet')).pane).toBe(true)
-    expect(paneRole('executor', undefined).pane).toBe(true)
+  test('executor and adversary are panes', async () => {
+    expect(paneRole('executor').pane).toBe(true)
+    expect(paneRole('adversary').pane).toBe(true)
   })
 
-  test('reviewers get a pane only on opus or fable', async () => {
-    expect(paneRole('code-reviewer', on('opus')).pane).toBe(true)
-    expect(paneRole('code-reviewer', on('fable')).pane).toBe(true)
-    const s = paneRole('code-reviewer', on('sonnet'))
-    expect(s.pane).toBe(false)
-    expect(s.why).toContain('routed to sonnet')
-    expect(s.why).toContain('subagent')
-    for (const r of ['security-reviewer', 'design-reviewer', 'payments-reviewer']) expect(paneRole(r, on('opus')).pane).toBe(true)
-    expect(paneRole('perf-reviewer', on('sonnet')).pane).toBe(false)
-    expect(paneRole('perf-reviewer', on('opus')).pane).toBe(true)
-    expect(paneRole('code-reviewer', undefined).pane).toBe(false)
-  })
-
-  test('seo-reviewer and the planning roles stay subagents', async () => {
-    const seo = paneRole('seo-reviewer', on('opus'))
-    expect(seo.pane).toBe(false)
-    expect(seo.why).toContain('seo-reviewer stays a subagent')
-    for (const r of ['planner', 'plan-reviewer', 'ui-prototyper']) {
-      const p = paneRole(r, on('opus'))
+  test('every other role is a subagent, reviewers included, whatever model they route to', async () => {
+    for (const r of ROLES.filter((r) => r !== 'executor' && r !== 'adversary')) {
+      const p = paneRole(r)
       expect(p.pane).toBe(false)
-      expect(p.why).toContain('feeds the next dispatch')
+      expect(p.why).toContain(r + ' runs as a subagent')
     }
-    expect(paneRole('boss', on('opus')).why).toContain('not a routing role')
+    expect(paneRole('boss').pane).toBe(false)
   })
 })
 
@@ -707,11 +687,13 @@ describe('pane tools: in the mod', () => {
 
   test('herdr: spawn splits, starts with model and effort, and prompts', async ($, on) => {
     const { seen } = setup(on, { HERDR_ENV: '1', HERDR_PANE_ID: 'w1:p1' }, { 'herdr pane split': { stdout: JSON.stringify({ result: { pane: { pane_id: 'w1:p5' } } }) } })
-    const r = await spawn($, { run: 'k7f2ab', role: 'review', task: 'review the diff', agent: 'code-reviewer', header: '[agt run=k7f2ab size=large mode=review]' })
-    expect(r.result).toBe('Opened agt-k7f2ab-review · opus · high · herdr pane.')
-    const start = seen.find((a) => a.slice(0, 4).join(' ') === 'herdr agent start agt-k7f2ab-review')!
-    expect(start.slice(-6)).toEqual(['--agent', 'agentille:agentille-code-reviewer', '--model', 'opus', '--effort', 'high'])
-    expect(seen.some((a) => a.slice(0, 3).join(' ') === 'herdr agent prompt' && a[4] === 'review the diff')).toBe(true)
+    const r = await spawn($, { run: 'k7f2ab', role: 'exec-1', task: 'build the filter', ...EXEC })
+    expect(r.result).toBe('Opened agt-k7f2ab-exec-1 · sonnet · medium · herdr pane.')
+    const start = seen.find((a) => a.slice(0, 4).join(' ') === 'herdr agent start agt-k7f2ab-exec-1')!
+    expect(start.slice(-6)).toEqual(['--agent', 'agentille:agentille-executor', '--model', 'sonnet', '--effort', 'medium'])
+    expect(seen.some((a) => a.slice(0, 3).join(' ') === 'herdr agent prompt' && a[4] === 'build the filter')).toBe(true)
+    const split = seen.find((a) => a.slice(0, 3).join(' ') === 'herdr pane split')!
+    expect(split[split.indexOf('AGENTILLE_WORKER=executor:sonnet:medium') - 1]).toBe('--env')
   })
 
   test('herdr: the second worker splits down from the first', async ($, on) => {
@@ -726,17 +708,18 @@ describe('pane tools: in the mod', () => {
     expect(splits[1].slice(splits[1].indexOf('--pane'), splits[1].indexOf('--pane') + 4)).toEqual(['--pane', 'w1:p5', '--direction', 'down'])
   })
 
-  test('the routed model and effort win over the asked model', async ($, on) => {
+  test('the adversary is a pane too, and the worker env names its agent', async ($, on) => {
     const { seen } = setup(on, TMUX, { 'tmux split-window': { stdout: '%9\n' } })
-    const big = { run: 'k7f2ab', task: 'review the diff', header: '[agt run=k7f2ab size=large mode=review]' }
-    const r = await spawn($, { ...big, role: 'review', agent: 'code-reviewer' })
-    expect(r.result).toBe('Opened agt-k7f2ab-review · opus · high · tmux pane.')
+    const r = await spawn($, { run: 'k7f2ab', role: 'adv', task: 'break the filter', agent: 'adversary', header: '[agt run=k7f2ab size=small mode=build]' })
+    expect(r.result).toMatch(/^Opened agt-k7f2ab-adv · \w+ · \w+ · tmux pane\./)
     const split = seen.find((a) => a[1] === 'split-window')!
-    expect(split.slice(-8, -4)).toEqual(['--model', 'opus', '--effort', 'high'])
+    expect(split.some((x) => x.startsWith('AGENTILLE_WORKER=adversary:'))).toBe(true)
   })
 
-  test('a reviewer routed to sonnet, and the planning roles, are denied and open nothing', async ($, on) => {
+  test('reviewers, even on opus, and the planning roles are denied and open nothing', async ($, on) => {
     const { seen } = setup(on, TMUX, { 'tmux split-window': { stdout: '%9\n' } })
+    const big = await spawn($, { run: 'k7f2ab', role: 'review', task: 'review the diff', agent: 'code-reviewer', header: '[agt run=k7f2ab size=large mode=review]' })
+    expect(big.deny).toContain('code-reviewer runs as a subagent')
     const small = await spawn($, { run: 'k7f2ab', role: 'review', task: 'review the diff', agent: 'code-reviewer', header: '[agt run=k7f2ab size=small mode=review]' })
     expect(small.deny).toContain('subagent')
     const plan = await spawn($, { run: 'k7f2ab', role: 'plan', task: 'plan the work', agent: 'planner', header: '[agt run=k7f2ab size=large mode=build]' })
@@ -759,15 +742,14 @@ describe('pane tools: in the mod', () => {
     expect((await $.command.run({ command: 'agt-routing' })).text).toBe('executor → sonnet · medium')
   })
 
-  test('a forced fable security-reviewer runs on fable and records it', async ($, on) => {
+  test('a forced fable security-reviewer is refused as a pane and records nothing', async ($, on) => {
     const { seen } = setup(on, TMUX, { 'tmux split-window': { stdout: '%9\n' } })
     const sets: any[] = []
     on('store.set', async ($: any, e: any) => { sets.push(e); return { value: undefined } })
     const r = await spawn($, { run: 'k7f2ab', role: 'sec', task: 'audit the diff', agent: 'security-reviewer', header: '[agt run=k7f2ab size=large risk=auth mode=review fable=forced]' })
-    expect(r.result).toContain('fable · high')
-    const split = seen.find((a) => a[1] === 'split-window')!
-    expect(split.slice(-8, -4)).toEqual(['--model', 'fable', '--effort', 'high'])
-    expect(sets).toContainEqual(expect.objectContaining({ key: 'fable:k7f2ab', value: 1 }))
+    expect(r.deny).toContain('security-reviewer runs as a subagent')
+    expect(seen.some((a) => a[1] === 'split-window')).toBe(false)
+    expect(sets).toEqual([])
   })
 
   test('the routing record lands in routing.jsonl as a pane', async ($, on) => {

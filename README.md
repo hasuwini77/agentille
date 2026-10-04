@@ -29,6 +29,23 @@ Everything else (plan, findings, each agent's full report) is in that `report.md
 
 Make it sound like you (optional, 1 minute): `/agentille-init`. Powered by [Systown AI Lab](https://systown.ai).
 
+## When to use it
+
+Plain Claude is one developer. `/agt` is that developer plus a planner and a reviewer, brought in only when the task is big or risky enough to pay for them.
+
+| Good fit | Example |
+|---|---|
+| A multi-step feature | `/agt "add a dark mode toggle to settings, persisted per user, with tests"` |
+| Two independent parts | `/agt "add a CSV export endpoint and a download button on the reports page"` |
+| A risky change (auth, payments, data) | `/agt "add webhook handling for subscription cancellations"` |
+| A review before merge | `/agt "review the changes on this branch"` |
+| A bug across several files | `/agt "debug why checkout totals are off by one cent"` |
+| Unsure of the scope | `/agt --plan "migrate the auth pages to the app router"` |
+
+What you get over a plain prompt: a separate reviewer checks the work instead of the model that wrote it, each step runs on the model that fits it, independent parts build at the same time, and risky diffs get a red-team pass.
+
+Skip it for one-file edits, typos, renames and questions: a plain prompt is cheaper. Any run that is not solo costs more tokens than a plain prompt. What you buy is fewer wrong or unreviewed changes, not a lower bill.
+
 ## Options
 
 | You type | You get |

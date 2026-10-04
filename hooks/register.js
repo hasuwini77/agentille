@@ -47,6 +47,7 @@ let agtTurn = false          // this turn is part of an /agt run
 let leadTurn = false         // a main-loop turn is running: its idle panes are waiting for review
 const mascot = { greeted: false, hiUntil: 0, byeUntil: 0, working: false, start: 0, ms: null } // worker band, in $.clock.now() ms
 let highlightOn = true       // /agt replies get an essentials card and lit tokens
+let highlightAll = false     // …and so does every other long reply (/agt-highlight all)
 const litMemo = new Map()    // message id → was it an /agt turn when first drawn
 const FLAG_TTL_MS = 30 * 60_000
 const FOCUS_COLOR = { next: '#3fb950', flag: '#f85149' }
@@ -404,7 +405,8 @@ export function register(on) {
     await $.command.register({ name: 'agt-ledger', description: 'Tokens per agent role for the latest agentille run', immediate: true })
     focusOn = (await $.store.get('focus:mode')) !== 'off'
     highlightOn = (await $.store.get('highlight:on')) !== false
-    await $.command.register({ name: 'agt-highlight', description: 'Highlight /agt replies: an essentials card, paths, versions and numbers lit. on · off', argumentHint: '[on|off]', immediate: true })
+    highlightAll = (await $.store.get('highlight:all')) === true
+    await $.command.register({ name: 'agt-highlight', description: 'Highlight replies: an essentials card, paths, versions and numbers lit. on (/agt only) · all · off', argumentHint: '[on|all|off]', immediate: true })
     await $.command.register({ name: 'agt-focus', description: 'Show agent flags above the prompt (a REVISE, a FAIL, a blocked pane). on · off', argumentHint: '[on|off]', immediate: true })
     if (transport !== 'none') {
       // One look now: a lead restarted mid-run still reaps its leftover panes.
@@ -523,10 +525,12 @@ export function register(on) {
     if (a.error) return { text: a.error }
     if (a.on !== undefined) {
       highlightOn = a.on
+      highlightAll = a.all
       await $.store.set('highlight:on', a.on)
+      await $.store.set('highlight:all', a.all)
       $.ui.invalidate('ui.render')
     }
-    return { text: highlightText(highlightOn) }
+    return { text: highlightText(highlightOn, highlightAll) }
   })
 
   on('command.run', { command: 'agt-ledger' }, async () => ({ text: ledgerText(ledger(live, lastRun, paneRoutes)) }))
@@ -677,7 +681,7 @@ export function register(on) {
   // A long /agt reply: an essentials card on top, the body dim with its tokens lit. The
   // decision is memoised per message id so a reply does not restyle when a later turn changes.
   on('ui.render', { component: 'AssistantMessage' }, async ($, e, next) => {
-    if (!litFor(litMemo, e.requestId, { on: highlightOn, agtTurn })) return next(e)
+    if (!litFor(litMemo, e.requestId, { on: highlightOn, agtTurn: agtTurn || highlightAll })) return next(e)
     const h = highlight(e.props?.text)
     if (!h) return next(e)
     const els = $.ui.resolve(e)

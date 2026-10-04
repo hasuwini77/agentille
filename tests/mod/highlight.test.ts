@@ -192,10 +192,13 @@ describe('highlight: deciding', () => {
 
   test('args and text', async () => {
     expect(parseHighlightArgs('  ')).toEqual({ show: true })
-    expect(parseHighlightArgs('ON')).toEqual({ on: true })
-    expect(parseHighlightArgs('off')).toEqual({ on: false })
-    expect(parseHighlightArgs('maybe')).toEqual({ error: 'Usage: /agt-highlight [on|off]' })
+    expect(parseHighlightArgs('ON')).toEqual({ on: true, all: false })
+    expect(parseHighlightArgs('all')).toEqual({ on: true, all: true })
+    expect(parseHighlightArgs('off')).toEqual({ on: false, all: false })
+    expect(parseHighlightArgs('maybe')).toEqual({ error: 'Usage: /agt-highlight [on|all|off]' })
     expect(highlightText(true)).toContain('Highlight: on')
+    expect(highlightText(true)).toContain('/agt-highlight all')
+    expect(highlightText(true, true)).toContain('Highlight: all — every long reply')
     expect(highlightText(false)).toContain('/agt-highlight on')
   })
 })
@@ -263,10 +266,34 @@ describe('highlight: in the mod', () => {
     await ui.unmount()
   })
 
+  test('/agt-highlight all covers a plain prompt, and on goes back to /agt only', async ($, on) => {
+    const stored: any[] = []
+    setup(on, stored)
+    expect((await $.command.run({ command: 'agt-highlight', args: 'all' })).text).toContain('Highlight: all')
+    expect(stored).toContainEqual(expect.objectContaining({ key: 'highlight:all', value: true }))
+    await say($, 'explain the diff')
+    let ui = await mount($, 'a1')
+    expect(await ui.find({ type: 'Text', text: /→ / })).toBeDefined()
+    const md: any = await ui.find({ type: 'Markdown' })
+    expect(md.props.dimColor).toBe(true)
+    await ui.unmount()
+
+    ui = await mount($, 'a2', SHORT)
+    expect(await ui.find({ type: 'Markdown' })).toBeUndefined()
+    await ui.unmount()
+
+    expect((await $.command.run({ command: 'agt-highlight', args: 'on' })).text).toContain('Highlight: on')
+    expect(stored).toContainEqual(expect.objectContaining({ key: 'highlight:all', value: false }))
+    await say($, 'explain the diff again')
+    ui = await mount($, 'a3')
+    expect(await ui.find({ type: 'Markdown' })).toBeUndefined()
+    await ui.unmount()
+  })
+
   test('a bad argument shows the usage and changes nothing', async ($, on) => {
     const stored: any[] = []
     setup(on, stored)
-    expect((await $.command.run({ command: 'agt-highlight', args: 'maybe' })).text).toBe('Usage: /agt-highlight [on|off]')
+    expect((await $.command.run({ command: 'agt-highlight', args: 'maybe' })).text).toBe('Usage: /agt-highlight [on|all|off]')
     expect(stored.length).toBe(0)
   })
 

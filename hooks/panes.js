@@ -189,14 +189,44 @@ export function reapPool(panes) {
 
 // ── spawning ──────────────────────────────────────────────────────────────────
 
-export function tmuxSplitArgv({ target, cwd, run, shell, model, name, task }) {
-  const head = ['tmux', 'split-window', '-d', '-h', '-P', '-F', '#{pane_id}', '-t', target, '-c', cwd.replace(/#/g, '##'), '-e', 'AGENTILLE_RUN=' + run]
+export const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max']
+const effortArgs = (effort) => (EFFORTS.includes(effort) ? ['--effort', effort] : [])
+
+export function tmuxSplitArgv({ target, cwd, run, shell, model, name, task, effort, direction }) {
+  const head = ['tmux', 'split-window', '-d', direction === 'down' ? '-v' : '-h', '-P', '-F', '#{pane_id}', '-t', target, '-c', cwd.replace(/#/g, '##'), '-e', 'AGENTILLE_RUN=' + run]
   // `--` ends claude's options, so a task that starts with `-` is still just the prompt
-  const tail = ['--model', model, '-n', name, '--', task]
+  const tail = ['--model', model, ...effortArgs(effort), '-n', name, '--', task]
   const base = String(shell ?? '').split('/').pop()
   if (base === 'zsh' || base === 'bash') return [...head, shell, '-ic', 'claude "$@"', 'agt', ...tail]
   return [...head, 'claude', ...tail]
 }
+
+// Stacked layout: a narrow lead stacks workers below it; a wide one puts them beside it, then
+// alternates around the newest worker. Only workers still live count; a right split that would
+// leave panes under MIN_SPLIT_COLS goes down instead.
+export const WIDE_COLS = 160
+export const MIN_SPLIT_COLS = 40
+
+export function splitPlan({ lead, leadWidth = null, newestWidth = null, opened = [], live = [] }) {
+  const alive = opened.filter((o) => live.some((p) => p.id === o.id))
+  if (!alive.length) {
+    const d = typeof leadWidth === 'number' && leadWidth < WIDE_COLS ? 'down' : 'right'
+    return { target: lead, direction: d, axis: d }
+  }
+  const n = alive[alive.length - 1]
+  let d = n.axis === 'right' ? 'down' : 'right'
+  if (d === 'right' && typeof newestWidth === 'number' && newestWidth / 2 < MIN_SPLIT_COLS) d = 'down'
+  return { target: n.id, direction: d, axis: n.axis }
+}
+
+export const tmuxWidthArgv = (pane) => ['tmux', 'display-message', '-p', '-t', pane, '#{pane_width}']
+
+export function widthOf(stdout) {
+  const n = Number(String(stdout ?? '').trim())
+  return Number.isInteger(n) && n > 0 ? n : null
+}
+
+export const tmuxEvenArgv = (id) => ['tmux', 'select-layout', '-E', '-t', id]
 
 export function tmuxTagArgvs(id, name) {
   return [
@@ -215,8 +245,8 @@ export function tmuxPaneIdOf(stdout) {
 export const tmuxKillArgv = (id) => ['tmux', 'kill-pane', '-t', id]
 
 // herdr: split beside the lead (never focused), start claude in it, then prompt it.
-export function herdrSplitArgv({ pane, cwd, run }) {
-  return ['herdr', 'pane', 'split', '--pane', pane, '--direction', 'right', '--cwd', cwd, '--env', 'AGENTILLE_RUN=' + run, '--no-focus']
+export function herdrSplitArgv({ pane, cwd, run, direction }) {
+  return ['herdr', 'pane', 'split', '--pane', pane, '--direction', direction === 'down' ? 'down' : 'right', '--cwd', cwd, '--env', 'AGENTILLE_RUN=' + run, '--no-focus']
 }
 
 export function herdrPaneIdOf(stdout) {
@@ -227,7 +257,7 @@ export function herdrPaneIdOf(stdout) {
   }
 }
 
-export const herdrStartArgv = ({ name, pane, model }) => ['herdr', 'agent', 'start', name, '--kind', 'claude', '--pane', pane, '--timeout', '45000', '--', '--model', model]
+export const herdrStartArgv = ({ name, pane, model, effort }) => ['herdr', 'agent', 'start', name, '--kind', 'claude', '--pane', pane, '--timeout', '45000', '--', '--model', model, ...effortArgs(effort)]
 export const herdrPromptArgv = (name, task) => ['herdr', 'agent', 'prompt', name, task]
 export const herdrCloseArgv = (id) => ['herdr', 'pane', 'close', id]
 

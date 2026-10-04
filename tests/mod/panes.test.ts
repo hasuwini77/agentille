@@ -1,5 +1,5 @@
 import { describe, expect, mock, test } from 'claude-code/testing'
-import { PANE_RULE, SPAWN_TOOL, closeTarget, paneRole, doneFile, spawnToolInput, TOOL_MODELS, herdrCloseArgv, herdrPaneIdOf, herdrPromptArgv, herdrSplitArgv, herdrStartArgv, isFreshDone, isLead, newRunId, paneName, parseSpawnArgs, parseTmuxList, pickTransport, quietSpawn, reapPool, scopeRows, splitName, tmuxKillArgv, tmuxPaneAgents, tmuxPaneIdOf, tmuxSplitArgv, tmuxTagArgvs, teamDirective, teamForce, teamNotice, transportBlock, TMUX_LIST_FORMAT } from '../../hooks/panes.js'
+import { EFFORTS, PANE_RULE, splitPlan, tmuxEvenArgv, tmuxWidthArgv, widthOf, SPAWN_TOOL, closeTarget, paneRole, doneFile, spawnToolInput, TOOL_MODELS, herdrCloseArgv, herdrPaneIdOf, herdrPromptArgv, herdrSplitArgv, herdrStartArgv, isFreshDone, isLead, newRunId, paneName, parseSpawnArgs, parseTmuxList, pickTransport, quietSpawn, reapPool, scopeRows, splitName, tmuxKillArgv, tmuxPaneAgents, tmuxPaneIdOf, tmuxSplitArgv, tmuxTagArgvs, teamDirective, teamForce, teamNotice, transportBlock, TMUX_LIST_FORMAT } from '../../hooks/panes.js'
 import { reapable } from '../../hooks/live.js'
 import { ROLES, roleOf } from '../../hooks/routing.js'
 
@@ -593,6 +593,67 @@ describe('/agt-spawn', () => {
     await run($, 'do the thing')
     const split = seen.find((a) => a[1] === 'split-window')!
     expect(split[split.indexOf('-c') + 1]).toBe('/work/c##sharp')
+  })
+})
+
+describe('effort and layout', () => {
+  const base = { target: '%1', cwd: '/w', run: 'ab12cd', model: 'sonnet', name: 'agt-ab12cd-exec-1', task: 't' }
+
+  test('effort is valid only from the list', async () => {
+    expect(EFFORTS).toEqual(['low', 'medium', 'high', 'xhigh', 'max'])
+    const start = ['herdr', 'agent', 'start', 'n', '--kind', 'claude', '--pane', 'w1:p5', '--timeout', '45000', '--', '--model', 'opus']
+    expect(herdrStartArgv({ name: 'n', pane: 'w1:p5', model: 'opus', effort: 'high' })).toEqual([...start, '--effort', 'high'])
+    expect(herdrStartArgv({ name: 'n', pane: 'w1:p5', model: 'opus' })).toEqual(start)
+    expect(herdrStartArgv({ name: 'n', pane: 'w1:p5', model: 'opus', effort: 'turbo' })).toEqual(start)
+  })
+
+  test('tmux puts --effort after --model, and -- stays second to last', async () => {
+    const name = base.name
+    const z = tmuxSplitArgv({ ...base, shell: '/bin/zsh', effort: 'medium' })
+    expect(z.slice(-9)).toEqual(['agt', '--model', 'sonnet', '--effort', 'medium', '-n', name, '--', 't'])
+    const f = tmuxSplitArgv({ ...base, shell: '/usr/bin/fish', effort: 'medium' })
+    expect(f.slice(-9)).toEqual(['claude', '--model', 'sonnet', '--effort', 'medium', '-n', name, '--', 't'])
+    const dash = tmuxSplitArgv({ ...base, shell: '/bin/zsh', effort: 'high', task: '-rf' })
+    expect(dash[dash.length - 2]).toBe('--')
+    expect(tmuxSplitArgv({ ...base, shell: '/bin/zsh', effort: 'turbo' })).not.toContain('--effort')
+  })
+
+  test('direction picks the tmux and herdr split axis', async () => {
+    expect(tmuxSplitArgv({ ...base, shell: '/bin/zsh', direction: 'down' })[3]).toBe('-v')
+    for (const d of [undefined, 'right', 'bogus']) expect(tmuxSplitArgv({ ...base, shell: '/bin/zsh', direction: d })[3]).toBe('-h')
+    const h = (direction?: string) => herdrSplitArgv({ pane: 'w1:p1', cwd: '/w', run: 'ab12cd', direction })
+    expect(h('down')[h('down').indexOf('--direction') + 1]).toBe('down')
+    for (const d of [undefined, 'left']) expect(h(d)[h(d).indexOf('--direction') + 1]).toBe('right')
+  })
+
+  test('splitPlan from the lead follows the lead width', async () => {
+    expect(splitPlan({ lead: '%1', leadWidth: 83 })).toEqual({ target: '%1', direction: 'down', axis: 'down' })
+    expect(splitPlan({ lead: '%1', leadWidth: 159 }).direction).toBe('down')
+    for (const w of [160, 200, null]) expect(splitPlan({ lead: '%1', leadWidth: w }).direction).toBe('right')
+  })
+
+  test('splitPlan alternates around the newest live worker and keeps panes wide enough', async () => {
+    const opened = [{ id: '%2', axis: 'down' }]
+    const live = [{ id: '%2' }]
+    expect(splitPlan({ lead: '%1', opened, live })).toEqual({ target: '%2', direction: 'right', axis: 'down' })
+    for (const w of [83, 80]) expect(splitPlan({ lead: '%1', opened, live, newestWidth: w }).direction).toBe('right')
+    for (const w of [79, 41]) expect(splitPlan({ lead: '%1', opened, live, newestWidth: w })).toEqual({ target: '%2', direction: 'down', axis: 'down' })
+    const two = [{ id: '%2', axis: 'right' }, { id: '%3', axis: 'right' }]
+    expect(splitPlan({ lead: '%1', opened: two, live: [{ id: '%2' }, { id: '%3' }] })).toEqual({ target: '%3', direction: 'down', axis: 'right' })
+    expect(splitPlan({ lead: '%1', opened: two, live: [{ id: '%2' }, { id: '%3' }], newestWidth: 20 }).direction).toBe('down')
+    expect(splitPlan({ lead: '%1', opened: two, live: [{ id: '%2' }] })).toMatchObject({ target: '%2', direction: 'down' })
+  })
+
+  test('with nothing live, splitPlan returns to the lead and ignores newestWidth', async () => {
+    expect(splitPlan({ lead: '%1', leadWidth: 83, newestWidth: 200, opened: [{ id: '%2', axis: 'right' }], live: [] })).toEqual({ target: '%1', direction: 'down', axis: 'down' })
+    expect(splitPlan({ lead: '%1', leadWidth: 200, newestWidth: 10, opened: [{ id: '%2', axis: 'down' }], live: [] })).toEqual({ target: '%1', direction: 'right', axis: 'right' })
+  })
+
+  test('widthOf reads a positive integer, tmux probes are pinned', async () => {
+    expect(widthOf('83\n')).toBe(83)
+    for (const v of ['', 'abc', '0', '-5', undefined]) expect(widthOf(v as never)).toBe(null)
+    expect(tmuxWidthArgv('%1')).toEqual(['tmux', 'display-message', '-p', '-t', '%1', '#{pane_width}'])
+    expect(tmuxEvenArgv('%9')).toEqual(['tmux', 'select-layout', '-E', '-t', '%9'])
   })
 })
 

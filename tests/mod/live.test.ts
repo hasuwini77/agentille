@@ -103,6 +103,75 @@ describe('band', () => {
   })
 })
 
+describe('raw reports', () => {
+  const setup = (on: any, home = '/h') => {
+    const writes: Record<string, string> = {}
+    let n = 0
+    on('env.get', async ($: any, e: any) => ({ value: ({ HOME: home } as any)[e.name] }))
+    on('session.start', async ($: any, e: any) => ({ cwd: e.cwd }))
+    on('command.register', async () => ({ value: undefined }))
+    on('fs.read', async () => ({ deny: 'no profile' }))
+    on('fs.write', async ($: any, e: any) => { writes[e.path] = e.text; return { value: undefined } })
+    on('store.get', async () => ({ value: undefined }))
+    on('agent.spawn', async ($: any, e: any) => ({ model: e.model ?? 'sonnet', agentId: 'a' + n++ }))
+    on('turn.complete', async ($: any, e: any) => ({ text: e.answer }))
+    on('ui.render', async () => ({ type: 'engine', ref: 0 }) as never)
+    mock.clock(on, { now: 1_000_000 })
+    return writes
+  }
+  const spawn = ($: any, role: string, run = 'rr1') => $.agent.spawn({ prompt: '[agt run=' + run + ' size=small mode=build]\nwork', subagentType: 'agentille:agentille-' + role })
+  const done = ($: any, agentId: string, answer: string) => $.turn.complete({ agentId, answer, durationMs: 10, isAborted: false, turnId: 't' + agentId, reason: 'answer' })
+  const DIR = '/h/.agentille/state/run-rr1/agents/'
+
+  test('a finished agent leaves its answer verbatim in the run dir, numbered per role', async ($, on) => {
+    const writes = setup(on)
+    await $.session.start({ cwd: '/w', surface: null, isInteractive: false })
+    const a = await spawn($, 'code-reviewer')
+    const b = await spawn($, 'code-reviewer')
+    const c = await spawn($, 'executor')
+    await done($, b.agentId, 'VERDICT: PASS · P0:0 P1:0 P2:0\n\nbody two')
+    await done($, a.agentId, 'VERDICT: CONCERNS · P0:0 P1:1 P2:0\nFIX: a.ts:1 fix it\n\nbody one')
+    await done($, c.agentId, 'VERIFICATION: npm test → ok')
+    expect(writes[DIR + 'code-reviewer-1.md']).toBe('VERDICT: PASS · P0:0 P1:0 P2:0\n\nbody two')
+    expect(writes[DIR + 'code-reviewer-2.md']).toBe('VERDICT: CONCERNS · P0:0 P1:1 P2:0\nFIX: a.ts:1 fix it\n\nbody one')
+    expect(writes[DIR + 'executor-1.md']).toBe('VERIFICATION: npm test → ok')
+  })
+
+  test('the same agent finishing again rewrites its file, not a new one', async ($, on) => {
+    const writes = setup(on)
+    await $.session.start({ cwd: '/w', surface: null, isInteractive: false })
+    const a = await spawn($, 'planner')
+    await done($, a.agentId, 'first')
+    await done($, a.agentId, 'second')
+    expect(Object.keys(writes).filter((k) => k.includes('/agents/'))).toEqual([DIR + 'planner-1.md'])
+    expect(writes[DIR + 'planner-1.md']).toBe('second')
+  })
+
+  test('numbers are per run', async ($, on) => {
+    const writes = setup(on)
+    await $.session.start({ cwd: '/w', surface: null, isInteractive: false })
+    await done($, (await spawn($, 'planner', 'rr1')).agentId, 'x')
+    await done($, (await spawn($, 'planner', 'rr2')).agentId, 'y')
+    expect(writes['/h/.agentille/state/run-rr2/agents/planner-1.md']).toBe('y')
+  })
+
+  test('nothing is written for a non-agentille agent, an empty answer, an unknown run or no home', async ($, on) => {
+    const writes = setup(on)
+    await $.session.start({ cwd: '/w', surface: null, isInteractive: false })
+    await done($, (await $.agent.spawn({ prompt: 'look around', subagentType: 'Explore' })).agentId, 'found it')
+    await done($, (await spawn($, 'planner')).agentId, '')
+    await done($, (await $.agent.spawn({ prompt: 'no header\nplan', subagentType: 'agentille:agentille-planner' })).agentId, 'plan')
+    expect(Object.keys(writes).filter((k) => k.includes('/agents/'))).toEqual([])
+  })
+
+  test('with no HOME the mod writes nothing and does not fail', async ($, on) => {
+    const writes = setup(on, '')
+    await $.session.start({ cwd: '/w', surface: null, isInteractive: false })
+    await done($, (await spawn($, 'planner')).agentId, 'plan')
+    expect(Object.keys(writes)).toEqual([])
+  })
+})
+
 describe('typed /agt', () => {
   test('only a typed /agt run counts', async () => {
     expect(isAgtPrompt('/agt add a search filter')).toBe(true)

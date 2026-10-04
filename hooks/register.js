@@ -21,7 +21,7 @@ let depth = null
 let home = null
 let weeklyPct = null
 let lastRun = 'adhoc'
-const runs = new Map()       // run id → { revise, fixes, fable, log: [] }
+const runs = new Map()       // run id → { revise, fixes, fable, formation, log: [], reports: { role → count } }
 const live = new Map()       // agentId → live agent (live.js)
 const decisions = []         // this session, for /agt-routing
 let panes = []               // agt-* panes (herdr or tmux) other than this one
@@ -52,7 +52,7 @@ const FLAG_TTL_MS = 30 * 60_000
 const FOCUS_COLOR = { next: '#3fb950', flag: '#f85149' }
 
 function runState(id) {
-  if (!runs.has(id)) runs.set(id, { revise: 0, fixes: 0, fable: 0, formation: null, log: [] })
+  if (!runs.has(id)) runs.set(id, { revise: 0, fixes: 0, fable: 0, formation: null, log: [], reports: {} })
   return runs.get(id)
 }
 
@@ -250,6 +250,15 @@ async function pollTmux($) {
 async function pollNow($, t) {
   if (t === 'herdr') await pollHerdr($)
   else if (t === 'tmux') await pollTmux($)
+}
+
+// A subagent's raw answer goes to run-<id>/agents/<role>-<n>.md, written here so the lead spends
+// no tokens copying it. n counts per role in the run; a second turn of the same agent overwrites.
+async function writeReport($, a, answer) {
+  if (!a.routed || !answer) return
+  const counts = runState(a.run).reports
+  a.report ??= a.role + '-' + (counts[a.role] = (counts[a.role] ?? 0) + 1) + '.md'
+  await writeRunFile($, a.run, 'agents/' + a.report, answer)
 }
 
 const working = () => [...live.values()].some((a) => a.state === 'working') || panes.some((p) => p.state === 'working')
@@ -618,6 +627,7 @@ export function register(on) {
       if (a.role === 'plan-reviewer' && verdictOf(e.answer) === 'REVISE') runState(a.run).revise += 1
       if (a.input + a.output === 0) addUsage(a, e.usage)
       finish(a, Date.now(), e.durationMs)
+      await writeReport($, a, e.answer)
       await writeRunFile($, a.run, 'ledger.json', JSON.stringify(ledger(live, a.run, paneRoutes), null, 2) + '\n')
       $.ui.invalidate('ui.render')
     }

@@ -73,24 +73,6 @@ export function effortBar(effort) {
   return EFFORT_BAR[effort] ?? ' '
 }
 
-// Rows to show: the latest run's subagents (working first), then live panes. Done
-// subagents stay visible for 10 minutes so the band reads as a record, not a flicker.
-export function visible(agents, panes, now) {
-  const subs = [...agents.values()]
-  const latest = subs.reduce((m, a) => (a.start > (m?.start ?? -1) ? a : m), null)
-  const run = latest?.run
-  const keep = subs.filter((a) => a.run === run && (a.state === 'working' || now - (a.end ?? now) < 600_000))
-  keep.sort((a, b) => (a.state === b.state ? a.start - b.start : a.state === 'working' ? -1 : 1))
-  return [...keep, ...panes]
-}
-
-export function summary(rows) {
-  const working = rows.filter((r) => r.state === 'working').length
-  const done = rows.filter((r) => r.state === 'done').length
-  const tok = rows.reduce((s, r) => s + (r.input ?? 0) + (r.output ?? 0), 0)
-  return { working, done, tok }
-}
-
 export function ledger(agents, run, routes = []) {
   const roles = {}
   const panes = {}

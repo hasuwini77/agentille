@@ -433,9 +433,23 @@ describe('tmux band', () => {
     await start($, on, { mtimes: { '/h/.agentille/state/run-r9/done-planner': FRESH } })
     const ui = await $.ui.mount({ plugin: 'agentille', surface: 'terminal', component: 'AbovePrompt', props: { hasSurvey: false, isWorking: true, maxRows: 10, bodyColumns: 100 } as never })
     expect(await ui.find({ type: 'Text', text: /executor/ })).toBeDefined()
-    expect(await ui.find({ type: 'Text', text: /planner/ })).toBeDefined()
-    expect(await ui.find({ type: 'Text', text: /1 working · 2 done/ })).toBeDefined()
-    expect(await ui.find({ type: 'Text', text: /^open\s*$/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /1 working · 0 done/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /planner/ })).toBeUndefined()
+    expect(await ui.find({ type: 'Text', text: /^open\s*$/ })).toBeUndefined()
+    await ui.unmount()
+  })
+
+  test('a pane that vanishes waves bye for 2.4 s, then leaves the band', async ($, on) => {
+    on('ui.render', async () => ({ type: 'engine', ref: 0 }) as never)
+    const rows = [row('%1', ''), row('%2', 'agt-r9-executor')]
+    const { clock } = await start($, on, { rows })
+    const ui = await $.ui.mount({ plugin: 'agentille', surface: 'terminal', component: 'AbovePrompt', props: { hasSurvey: false, isWorking: true, maxRows: 10, bodyColumns: 100 } as never })
+    expect(await ui.find({ type: 'Text', text: /^working/ })).toBeDefined()
+    rows.splice(1, 1)
+    await clock.advance(5000)
+    expect(await ui.find({ type: 'Text', text: /bye!/ })).toBeDefined()
+    await clock.advance(2500)
+    expect(await ui.find({ type: 'Text', text: /executor/ })).toBeUndefined()
     await ui.unmount()
   })
 

@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'claude-code/testing'
+import { describe, expect, mock, test } from 'claude-code/testing'
 import { decide, formationOf, parseHeader, roleOf, verdictOf } from '../../hooks/routing.js'
 
 const fresh = () => ({ revise: 0, fixes: 0, fable: 0 })
@@ -116,11 +116,15 @@ describe('deck', () => {
     on('ui.close', async ($: any, e: any) => { closed.push(e); return { value: undefined } })
     on('prompt.submit', async ($: any, e: any) => ({ text: e.text }))
     on('turn.complete', async ($: any, e: any) => ({ text: e.answer }))
-    on('agent.spawn', async ($: any, e: any) => ({ model: e.model ?? 'sonnet', agentId: 'x' + Math.random() }))
-    return { seen, closed }
+    let n = 0
+    on('agent.spawn', async ($: any, e: any) => ({ model: e.model ?? 'sonnet', agentId: 'x' + n++ }))
+    const clock = mock.clock(on, { now: 1_000_000 })
+    return { seen, closed, clock }
   }
   const spawn = ($: any, type = 'agentille:agentille-executor') =>
     $.agent.spawn({ prompt: '[agt run=d1 size=small mode=build]\nbuild', subagentType: type, model: 'sonnet' })
+  const finish = ($: any, agentId: string) =>
+    $.turn.complete({ agentId, answer: 'APPROVE', durationMs: 10, isAborted: false, turnId: 't' + agentId, reason: 'answer' })
   const end = ($: any, answer = 'Done: one file changed.') =>
     $.turn.complete({ answer, durationMs: 10, isAborted: false, turnId: 't', reason: 'answer' })
 
@@ -185,5 +189,59 @@ describe('deck', () => {
     await spawn($)
     expect(seen.length).toBe(0)
     expect(stored).toContainEqual(expect.objectContaining({ key: 'deck:auto', value: false }))
+  })
+
+  test('the deck closes after the last farewell, not at the turn end', async ($, on) => {
+    const { closed, clock } = opens(on)
+    await $.prompt.submit({ text: '/agt add a search filter', wait: false })
+    const r = await spawn($)
+    await finish($, r.agentId)
+    await end($)
+    expect(closed.length).toBe(0)
+    await clock.advance(3000)
+    expect(closed.length).toBe(1)
+  })
+
+  test('a turn that ends while an agent still works leaves the deck; the idle turn end closes it', async ($, on) => {
+    const { closed, clock } = opens(on)
+    await $.prompt.submit({ text: '/agt add a search filter', wait: false })
+    const r = await spawn($)
+    await end($)
+    expect(closed.length).toBe(0)
+    await finish($, r.agentId)
+    await clock.advance(3000)
+    expect(closed.length).toBe(0)
+    await end($)
+    expect(closed.length).toBe(1)
+  })
+
+  test('a deck the person opened with /agt-deck is never closed for them', async ($, on) => {
+    const { closed, clock } = opens(on)
+    await $.command.run({ command: 'agt-deck' })
+    const r = await spawn($)
+    await finish($, r.agentId)
+    await end($)
+    await clock.advance(3000)
+    expect(closed.length).toBe(0)
+  })
+
+  test('a question after the agents closes the deck, and the reply reopens it', async ($, on) => {
+    const { seen, closed, clock } = opens(on)
+    await $.prompt.submit({ text: '/agt ship it', wait: false })
+    const r = await spawn($)
+    await finish($, r.agentId)
+    await end($, 'Merge now?')
+    await clock.advance(3000)
+    expect(closed.length).toBe(1)
+    await $.prompt.submit({ text: 'yes', wait: false })
+    expect(seen.length).toBe(2)
+  })
+
+  test('a question on a plain turn never brings a deck up for the reply', async ($, on) => {
+    const { seen } = opens(on)
+    await $.prompt.submit({ text: 'fix the header', wait: false })
+    await end($, 'Commit it?')
+    await $.prompt.submit({ text: 'yes', wait: false })
+    expect(seen.length).toBe(0)
   })
 })

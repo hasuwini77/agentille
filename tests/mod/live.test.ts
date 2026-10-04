@@ -1,6 +1,6 @@
-import { describe, expect, test } from 'claude-code/testing'
+import { describe, expect, mock, test } from 'claude-code/testing'
 import { cells, pixels } from '../../hooks/sprites.js'
-import { DONE_GRACE_MS, IDLE_GRACE_MS, isAgtPrompt, shouldAutoOpen, ledger, newAgent, addUsage, finish, paneAgents, reapable, visible, endsOnQuestion, reopenOnReply, WAIT_TTL_MS, FAREWELL_TICKS, newTracker, paneByes, withRoute, endRoute, stage, playing, ageFarewells, stripText, ledgerText } from '../../hooks/live.js'
+import { DONE_GRACE_MS, IDLE_GRACE_MS, isAgtPrompt, shouldAutoOpen, ledger, newAgent, addUsage, finish, paneAgents, reapable, endsOnQuestion, reopenOnReply, WAIT_TTL_MS, FAREWELL_TICKS, newTracker, paneByes, withRoute, endRoute, stage, playing, ageFarewells, stripText, ledgerText } from '../../hooks/live.js'
 import { activeSquads, depsOf, injection } from '../../hooks/squads.js'
 
 const ROLES = ['planner', 'plan-reviewer', 'ui-prototyper', 'executor', 'code-reviewer', 'design-reviewer', 'security-reviewer', 'payments-reviewer', 'seo-reviewer', 'perf-reviewer', 'Explore']
@@ -64,7 +64,7 @@ describe('live', () => {
     const l = ledger(m, 'r1')
     expect(l.roles.executor).toEqual({ agents: 2, input: 13, output: 6, cacheRead: 100, ms: 4000 })
     expect(l.roles.planner).toBe(undefined)
-    expect(visible(m, [], 5000).map((x) => x.id)).toEqual(['b', 'a'])
+    expect(stage({ agents: m, run: 'r1' }).rows.map((x: any) => x.id)).toEqual(['b', 'a'])
   })
 })
 
@@ -100,6 +100,21 @@ describe('band', () => {
     expect(await ui.find({ type: 'Text', text: /code-reviewer/ })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: /opus ▆ high/ })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: /run bandrun/ })).toBeDefined()
+    await ui.unmount()
+  })
+
+  test('a finished subagent waves bye, then leaves the band', async ($, on) => {
+    on('store.get', async () => ({ value: null }))
+    on('agent.spawn', async ($, e) => ({ model: 'claude-opus-5-5', agentId: 'band2' }))
+    on('turn.complete', async ($, e) => ({ text: e.answer }) as never)
+    on('ui.render', async () => ({ type: 'engine', ref: 0 }) as never)
+    const clock = mock.clock(on, { now: 1_000_000 })
+    await $.agent.spawn({ prompt: '[agt run=byerun size=large mode=review]\nreview', subagentType: 'agentille:agentille-code-reviewer' })
+    await $.turn.complete({ agentId: 'band2', answer: 'APPROVE', durationMs: 10, isAborted: false, turnId: 't', reason: 'answer' } as never)
+    const ui = await $.ui.mount({ plugin: 'agentille', surface: 'terminal', component: 'AbovePrompt', props: { hasSurvey: false, isWorking: true, maxRows: 10, bodyColumns: 100 } as never })
+    expect(await ui.find({ type: 'Text', text: /bye!/ })).toBeDefined()
+    await clock.advance(2500)
+    expect(await ui.find({ type: 'Text', text: /code-reviewer/ })).toBeUndefined()
     await ui.unmount()
   })
 })

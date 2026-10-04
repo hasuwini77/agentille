@@ -1,6 +1,7 @@
 import { describe, expect, mock, test } from 'claude-code/testing'
 import { DONE_GRACE_MS, IDLE_GRACE_MS, isAgtPrompt, ledger, newAgent, addUsage, finish, paneAgents, reapable, panesLeft, withRoute, endRoute, stage, ledgerText } from '../../hooks/live.js'
 import { activeSquads, depsOf, injection } from '../../hooks/squads.js'
+import { BYE_MS } from '../../hooks/mascot.js'
 
 describe('live', () => {
   const herdr = [
@@ -86,10 +87,23 @@ describe('band', () => {
     expect(await ui.find({ type: 'Text', text: /code-reviewer/ })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: /opus ▆ high/ })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: /run bandrun/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /▐▛███▜▌ ╱  hi!/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /▝▜█████▛▘/ })).toBeDefined()
     await ui.unmount()
   })
 
-  test('a finished subagent leaves the band', async ($, on) => {
+  test('a band too short for the mascot keeps the text row', async ($, on) => {
+    on('store.get', async () => ({ value: null }))
+    on('agent.spawn', async ($, e) => ({ model: 'claude-opus-5-5', agentId: 'band3' }))
+    on('ui.render', async () => ({ type: 'engine', ref: 0 }) as never)
+    await $.agent.spawn({ prompt: '[agt run=shortrun size=large mode=review]\nreview', subagentType: 'agentille:agentille-code-reviewer' })
+    const ui = await $.ui.mount({ plugin: 'agentille', surface: 'terminal', component: 'AbovePrompt', props: { hasSurvey: false, isWorking: true, maxRows: 5, bodyColumns: 100 } as never })
+    expect(await ui.find({ type: 'Text', text: /code-reviewer/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /▐▛███▜▌/ })).toBeUndefined()
+    await ui.unmount()
+  })
+
+  test('a finished subagent waves bye before it leaves the band', async ($, on) => {
     on('store.get', async () => ({ value: null }))
     on('agent.spawn', async ($, e) => ({ model: 'claude-opus-5-5', agentId: 'band2' }))
     on('turn.complete', async ($, e) => ({ text: e.answer }) as never)
@@ -98,7 +112,8 @@ describe('band', () => {
     await $.agent.spawn({ prompt: '[agt run=byerun size=large mode=review]\nreview', subagentType: 'agentille:agentille-code-reviewer' })
     await $.turn.complete({ agentId: 'band2', answer: 'APPROVE', durationMs: 10, isAborted: false, turnId: 't', reason: 'answer' } as never)
     const ui = await $.ui.mount({ plugin: 'agentille', surface: 'terminal', component: 'AbovePrompt', props: { hasSurvey: false, isWorking: true, maxRows: 10, bodyColumns: 100 } as never })
-    expect(await ui.find({ type: 'Text', text: /code-reviewer/ })).toBeUndefined()
+    expect(await ui.find({ type: 'Text', text: /▐▛███▜▌ ╲  bye!/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /code-reviewer/ })).toBeDefined()
     await ui.unmount()
   })
 })
@@ -196,6 +211,17 @@ describe('leaves the band', () => {
     finish(a, 20)
     expect(a.end).toBe(20)
     expect(stage({ agents: new Map([['a', a]]), run: 'r1' }).rows).toEqual([])
+  })
+
+  test('with a clock, a finished subagent stays on stage for the bye window only', async () => {
+    const a = newAgent({ id: 'a', role: 'executor', routed: true, model: 'sonnet', effort: 'medium', reason: 'table', run: 'r1', now: 0 })
+    finish(a, 5000, 10)
+    expect(a.end).toBe(10)
+    const at = (now: number) => stage({ agents: new Map([['a', a]]), run: 'r1', now }).rows.map((x: any) => x.id)
+    expect(at(5000)).toEqual(['a'])
+    expect(at(5000 + BYE_MS - 1)).toEqual(['a'])
+    expect(at(5000 + BYE_MS)).toEqual([])
+    expect(stage({ agents: new Map([['a', a]]), run: 'r1', now: 5000 }).tally).toEqual({ working: 0, done: 1, tok: 0 })
   })
 
   test('panesLeft: a pane that finishes, idles or vanishes leaves once', async () => {

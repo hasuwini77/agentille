@@ -2,6 +2,22 @@
 
 All notable changes to agentille are documented here.
 
+## [3.2.0] — 2026-10-04
+
+### Added
+
+- **Mascot accessories.** Each role's mascot wears one small accessory, in
+  the lead's band and in worker panes: a hard hat (executor), a thinking cap
+  (planner), a monocle (plan-reviewer), glasses (code-reviewer), a moustache
+  (security-reviewer), a bow tie (design-reviewer), horns (adversary), a
+  dollar sign (payments-reviewer) and headphones (perf-reviewer). Other
+  roles stay plain. One swapped glyph row, still three rows, no model tokens.
+
+### Rationale
+
+With every mascot identical, the band showed that agents were working but
+not which was which without reading the row.
+
 ## [3.1.0] — 2026-10-04
 
 ### Added

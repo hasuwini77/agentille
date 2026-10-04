@@ -1,6 +1,6 @@
 // agentille routing policy — pure functions, no mods API.
 // register.js feeds it what the mod observed; it returns { model, effort, reason }.
-// The table and ladder mirror skills/agt/model-routing.md (that doc is the spec).
+// The table and ladder mirror skills/agt/routing.md → "Default routing" (that doc is the spec).
 
 const ROLE_PREFIX = 'agentille:agentille-'
 
@@ -25,7 +25,7 @@ export const ROLES = Object.keys(TABLE)
 const FABLE_ROLES = new Set(['planner', 'ui-prototyper', 'design-reviewer', 'security-reviewer', 'payments-reviewer', 'code-reviewer', 'plan-reviewer'])
 const FORCED_FABLE_NEEDS_LARGE = new Set(['code-reviewer', 'plan-reviewer'])
 
-// Run shapes beyond the plain roster (skills/agt/formations.md); shown on the deck header.
+// Run shapes beyond the plain roster (skills/agt/formations.md); shown in the band header.
 export const FORMATIONS = new Set(['duel', 'gauntlet', 'relay'])
 
 export function formationOf(hdr) {

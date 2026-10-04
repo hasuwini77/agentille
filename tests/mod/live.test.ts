@@ -1,26 +1,6 @@
 import { describe, expect, mock, test } from 'claude-code/testing'
-import { cells, pixels } from '../../hooks/sprites.js'
-import { DONE_GRACE_MS, IDLE_GRACE_MS, isAgtPrompt, shouldAutoOpen, ledger, newAgent, addUsage, finish, paneAgents, reapable, endsOnQuestion, reopenOnReply, WAIT_TTL_MS, FAREWELL_TICKS, newTracker, paneByes, withRoute, endRoute, stage, playing, ageFarewells, stripText, ledgerText } from '../../hooks/live.js'
+import { DONE_GRACE_MS, IDLE_GRACE_MS, isAgtPrompt, ledger, newAgent, addUsage, finish, paneAgents, reapable, panesLeft, withRoute, endRoute, stage, ledgerText } from '../../hooks/live.js'
 import { activeSquads, depsOf, injection } from '../../hooks/squads.js'
-
-const ROLES = ['planner', 'plan-reviewer', 'ui-prototyper', 'executor', 'code-reviewer', 'design-reviewer', 'security-reviewer', 'payments-reviewer', 'seo-reviewer', 'perf-reviewer', 'Explore']
-
-describe('sprites', () => {
-  test('every role is a 16×16 sprite in both frames', async () => {
-    for (const role of ROLES) for (const f of [0, 1]) {
-      const px = pixels(role, f)
-      expect(px.length).toBe(16)
-      for (const line of px) expect(line.length).toBe(16)
-    }
-  })
-
-  test('hat color follows the model, frames differ', async () => {
-    const len = cells('executor', 'claude-opus-5-5').length
-    expect(len).toBe(2048) // 16×8 cells × 3 u32 → 1536 bytes → base64
-    expect(cells('executor', 'claude-opus-5-5')).not.toBe(cells('executor', 'claude-sonnet-5-5'))
-    expect(cells('planner', 'opus', 0)).not.toBe(cells('planner', 'opus', 1))
-  })
-})
 
 describe('live', () => {
   const herdr = [
@@ -37,7 +17,7 @@ describe('live', () => {
     expect(paneAgents([{ ...herdr[0], tab_id: 'w1:t1', workspace_id: 'w1' }], null)[0]).toMatchObject({ tab: 'w1:t1', workspace: 'w1' })
   })
 
-  test('reaper waits out the grace and resets on a state change', async () => {
+  test('done reaps at 90 s, idle only between lead turns, a state change resets the clock', async () => {
     const seen = new Map()
     const p = paneAgents(herdr, 'w1:p1')
     expect(reapable(p, seen, 0)).toEqual([])
@@ -47,9 +27,15 @@ describe('live', () => {
     expect(reapable(bumped, seen, DONE_GRACE_MS + 1)).toEqual([])
     const idle = [{ ...p[0], state: 'idle', seq: 4 }]
     const s2 = new Map()
-    reapable(idle, s2, 0)
-    expect(reapable(idle, s2, IDLE_GRACE_MS - 1)).toEqual([])
-    expect(reapable(idle, s2, IDLE_GRACE_MS).length).toBe(1)
+    reapable(idle, s2, 0, false)
+    expect(reapable(idle, s2, IDLE_GRACE_MS - 1, false)).toEqual([])
+    expect(reapable(idle, s2, IDLE_GRACE_MS, false).length).toBe(1)
+    expect(reapable(idle, s2, IDLE_GRACE_MS * 10, true)).toEqual([])
+    expect(reapable(idle, s2, IDLE_GRACE_MS * 10).length).toBe(0)
+    const doneP = [{ ...p[1] }]
+    const s3 = new Map()
+    reapable(doneP, s3, 0, true)
+    expect(reapable(doneP, s3, DONE_GRACE_MS, true).length).toBe(1)
   })
 
   test('ledger sums tokens per role for one run', async () => {
@@ -64,7 +50,7 @@ describe('live', () => {
     const l = ledger(m, 'r1')
     expect(l.roles.executor).toEqual({ agents: 2, input: 13, output: 6, cacheRead: 100, ms: 4000 })
     expect(l.roles.planner).toBe(undefined)
-    expect(stage({ agents: m, run: 'r1' }).rows.map((x: any) => x.id)).toEqual(['b', 'a'])
+    expect(stage({ agents: m, run: 'r1' }).rows.map((x: any) => x.id)).toEqual(['b'])
   })
 })
 
@@ -103,107 +89,142 @@ describe('band', () => {
     await ui.unmount()
   })
 
-  test('a finished subagent waves bye, then leaves the band', async ($, on) => {
+  test('a finished subagent leaves the band', async ($, on) => {
     on('store.get', async () => ({ value: null }))
     on('agent.spawn', async ($, e) => ({ model: 'claude-opus-5-5', agentId: 'band2' }))
     on('turn.complete', async ($, e) => ({ text: e.answer }) as never)
     on('ui.render', async () => ({ type: 'engine', ref: 0 }) as never)
-    const clock = mock.clock(on, { now: 1_000_000 })
+    mock.clock(on, { now: 1_000_000 })
     await $.agent.spawn({ prompt: '[agt run=byerun size=large mode=review]\nreview', subagentType: 'agentille:agentille-code-reviewer' })
     await $.turn.complete({ agentId: 'band2', answer: 'APPROVE', durationMs: 10, isAborted: false, turnId: 't', reason: 'answer' } as never)
     const ui = await $.ui.mount({ plugin: 'agentille', surface: 'terminal', component: 'AbovePrompt', props: { hasSurvey: false, isWorking: true, maxRows: 10, bodyColumns: 100 } as never })
-    expect(await ui.find({ type: 'Text', text: /bye!/ })).toBeDefined()
-    await clock.advance(2500)
     expect(await ui.find({ type: 'Text', text: /code-reviewer/ })).toBeUndefined()
     await ui.unmount()
   })
 })
 
-describe('deck auto-open', () => {
+describe('raw reports', () => {
+  const setup = (on: any, home = '/h') => {
+    const writes: Record<string, string> = {}
+    let n = 0
+    on('env.get', async ($: any, e: any) => ({ value: ({ HOME: home } as any)[e.name] }))
+    on('session.start', async ($: any, e: any) => ({ cwd: e.cwd }))
+    on('command.register', async () => ({ value: undefined }))
+    on('fs.read', async () => ({ deny: 'no profile' }))
+    on('fs.write', async ($: any, e: any) => { writes[e.path] = e.text; return { value: undefined } })
+    on('store.get', async () => ({ value: undefined }))
+    on('agent.spawn', async ($: any, e: any) => ({ model: e.model ?? 'sonnet', agentId: 'a' + n++ }))
+    on('turn.complete', async ($: any, e: any) => ({ text: e.answer }))
+    on('ui.render', async () => ({ type: 'engine', ref: 0 }) as never)
+    mock.clock(on, { now: 1_000_000 })
+    return writes
+  }
+  const spawn = ($: any, role: string, run = 'rr1') => $.agent.spawn({ prompt: '[agt run=' + run + ' size=small mode=build]\nwork', subagentType: 'agentille:agentille-' + role })
+  const done = ($: any, agentId: string, answer: string) => $.turn.complete({ agentId, answer, durationMs: 10, isAborted: false, turnId: 't' + agentId, reason: 'answer' })
+  const DIR = '/h/.agentille/state/run-rr1/agents/'
+
+  test('a finished agent leaves its answer verbatim in the run dir, numbered per role', async ($, on) => {
+    const writes = setup(on)
+    await $.session.start({ cwd: '/w', surface: null, isInteractive: false })
+    const a = await spawn($, 'code-reviewer')
+    const b = await spawn($, 'code-reviewer')
+    const c = await spawn($, 'executor')
+    await done($, b.agentId, 'VERDICT: PASS · P0:0 P1:0 P2:0\n\nbody two')
+    await done($, a.agentId, 'VERDICT: CONCERNS · P0:0 P1:1 P2:0\nFIX: a.ts:1 fix it\n\nbody one')
+    await done($, c.agentId, 'VERIFICATION: npm test → ok')
+    expect(writes[DIR + 'code-reviewer-1.md']).toBe('VERDICT: PASS · P0:0 P1:0 P2:0\n\nbody two')
+    expect(writes[DIR + 'code-reviewer-2.md']).toBe('VERDICT: CONCERNS · P0:0 P1:1 P2:0\nFIX: a.ts:1 fix it\n\nbody one')
+    expect(writes[DIR + 'executor-1.md']).toBe('VERIFICATION: npm test → ok')
+  })
+
+  test('the same agent finishing again rewrites its file, not a new one', async ($, on) => {
+    const writes = setup(on)
+    await $.session.start({ cwd: '/w', surface: null, isInteractive: false })
+    const a = await spawn($, 'planner')
+    await done($, a.agentId, 'first')
+    await done($, a.agentId, 'second')
+    expect(Object.keys(writes).filter((k) => k.includes('/agents/'))).toEqual([DIR + 'planner-1.md'])
+    expect(writes[DIR + 'planner-1.md']).toBe('second')
+  })
+
+  test('numbers are per run', async ($, on) => {
+    const writes = setup(on)
+    await $.session.start({ cwd: '/w', surface: null, isInteractive: false })
+    await done($, (await spawn($, 'planner', 'rr1')).agentId, 'x')
+    await done($, (await spawn($, 'planner', 'rr2')).agentId, 'y')
+    expect(writes['/h/.agentille/state/run-rr2/agents/planner-1.md']).toBe('y')
+  })
+
+  test('nothing is written for a non-agentille agent, an empty answer, an unknown run or no home', async ($, on) => {
+    const writes = setup(on)
+    await $.session.start({ cwd: '/w', surface: null, isInteractive: false })
+    await done($, (await $.agent.spawn({ prompt: 'look around', subagentType: 'Explore' })).agentId, 'found it')
+    await done($, (await spawn($, 'planner')).agentId, '')
+    await done($, (await $.agent.spawn({ prompt: 'no header\nplan', subagentType: 'agentille:agentille-planner' })).agentId, 'plan')
+    expect(Object.keys(writes).filter((k) => k.includes('/agents/'))).toEqual([])
+  })
+
+  test('with no HOME the mod writes nothing and does not fail', async ($, on) => {
+    const writes = setup(on, '')
+    await $.session.start({ cwd: '/w', surface: null, isInteractive: false })
+    await done($, (await spawn($, 'planner')).agentId, 'plan')
+    expect(Object.keys(writes)).toEqual([])
+  })
+})
+
+describe('typed /agt', () => {
   test('only a typed /agt run counts', async () => {
     expect(isAgtPrompt('/agt add a search filter')).toBe(true)
     expect(isAgtPrompt('/agt')).toBe(true)
     expect(isAgtPrompt('/agentille:agt "review the diff"')).toBe(true)
-    expect(isAgtPrompt('/agt-deck')).toBe(false)
-    expect(isAgtPrompt('/agt-nodeck')).toBe(false)
+    expect(isAgtPrompt('/agt-ledger')).toBe(false)
     expect(isAgtPrompt('/agentille-init')).toBe(false)
     expect(isAgtPrompt('run /agt later')).toBe(false)
     expect(isAgtPrompt(undefined)).toBe(false)
-  })
-
-  test('opens unless off, already open, or closed by hand this run', async () => {
-    expect(shouldAutoOpen({ auto: undefined, open: false, dismissedRun: null, run: 'r1' })).toBe(true)
-    expect(shouldAutoOpen({ auto: true, open: false, dismissedRun: 'r0', run: 'r1' })).toBe(true)
-    expect(shouldAutoOpen({ auto: false, open: false, dismissedRun: null, run: 'r1' })).toBe(false)
-    expect(shouldAutoOpen({ auto: true, open: true, dismissedRun: null, run: 'r1' })).toBe(false)
-    expect(shouldAutoOpen({ auto: true, open: false, dismissedRun: 'r1', run: 'r1' })).toBe(false)
-  })
-})
-
-describe('waiting deck', () => {
-  test('a question at the end keeps the deck waiting for the reply', async () => {
-    expect(endsOnQuestion('Stripe or Paddle?')).toBe(true)
-    expect(endsOnQuestion('Which one do you want? **')).toBe(true)
-    expect(endsOnQuestion('Is it fine? Done, merged.')).toBe(false)
-    expect(endsOnQuestion('')).toBe(false)
-  })
-
-  test('a reply reopens only while the wait is fresh', async () => {
-    expect(reopenOnReply({ waiting: { at: 0 }, now: 60_000 })).toBe(true)
-    expect(reopenOnReply({ waiting: { at: 0 }, now: WAIT_TTL_MS + 1 })).toBe(false)
-    expect(reopenOnReply({ waiting: null, now: 0 })).toBe(false)
   })
 })
 
 const pane = (name: string, state: string) => ({ id: name, kind: 'pane', name, role: name.split('-').slice(2).join('-'), run: name.split('-')[1], vendor: 'claude', state, seq: 1, tab: null, workspace: null })
 const sub = (id: string, run: string, state: string, extra = {}) => ({ ...newAgent({ id, role: 'executor', routed: true, model: 'sonnet', effort: 'medium', reason: 'table', run, now: 0 }), state, ...extra })
 
-describe('farewell', () => {
-  test('finish starts a farewell once', async () => {
+describe('leaves the band', () => {
+  test('finish ends the row at once: no farewell state', async () => {
     const a = newAgent({ id: 'a', role: 'executor', routed: true, model: 'sonnet', effort: 'medium', reason: 'table', run: 'r1', now: 0 })
-    expect(a.bye).toBe(0)
+    expect('bye' in a).toBe(false)
     finish(a, 10)
-    expect(a.bye).toBe(FAREWELL_TICKS)
-    expect(a.bye).toBe(4)
-    a.bye = 1
+    expect(a.state).toBe('done')
     finish(a, 20)
-    expect(a.bye).toBe(1)
     expect(a.end).toBe(20)
+    expect(stage({ agents: new Map([['a', a]]), run: 'r1' }).rows).toEqual([])
   })
 
-  test('paneByes: leaving the stage says bye once', async () => {
+  test('panesLeft: a pane that finishes, idles or vanishes leaves once', async () => {
     for (const next of [[pane('agt-r1-exec-1', 'done')], [pane('agt-r1-exec-1', 'idle')], []]) {
-      const t = newTracker()
-      paneByes(t, [pane('agt-r1-exec-1', 'working')])
-      expect(paneByes(t, next)).toEqual(['agt-r1-exec-1'])
-      expect(t.byes.get('agt-r1-exec-1')).toMatchObject({ bye: 4, pane: { state: 'done' } })
-      expect(t.staged.size).toBe(0)
-      expect(paneByes(t, next)).toEqual([])
+      const staged = new Map()
+      panesLeft(staged, [pane('agt-r1-exec-1', 'working')])
+      expect(staged.size).toBe(1)
+      expect(panesLeft(staged, next)).toEqual(['agt-r1-exec-1'])
+      expect(staged.size).toBe(0)
+      expect(panesLeft(staged, next)).toEqual([])
     }
   })
 
-  test('paneByes: blocked and unknown stay on stage until done', async () => {
-    const t = newTracker()
+  test('panesLeft: blocked and unknown stay on stage until done', async () => {
     const n = 'agt-r1-review'
-    paneByes(t, [pane(n, 'working')])
-    expect(paneByes(t, [pane(n, 'blocked')])).toEqual([])
-    expect(paneByes(t, [pane(n, 'unknown')])).toEqual([])
-    expect(paneByes(t, [pane(n, 'done')])).toEqual([n])
-    const u = newTracker()
-    paneByes(u, [pane(n, 'working')])
-    expect(paneByes(u, [pane(n, 'unknown')])).toEqual([])
-    expect(paneByes(u, [pane(n, 'done')])).toEqual([n])
+    const staged = new Map()
+    panesLeft(staged, [pane(n, 'working')])
+    expect(panesLeft(staged, [pane(n, 'blocked')])).toEqual([])
+    expect(panesLeft(staged, [pane(n, 'unknown')])).toEqual([])
+    expect(panesLeft(staged, [pane(n, 'done')])).toEqual([n])
   })
 
-  test('paneByes: done at first sight and open never say bye; a return clears the bye', async () => {
-    const t = newTracker()
-    expect(paneByes(t, [pane('agt-r1-a', 'done'), pane('agt-r1-b', 'open')])).toEqual([])
-    paneByes(t, [pane('agt-r1-c', 'working')])
-    paneByes(t, [pane('agt-r1-c', 'done')])
-    expect(t.byes.has('agt-r1-c')).toBe(true)
-    paneByes(t, [pane('agt-r1-c', 'working')])
-    expect(t.byes.has('agt-r1-c')).toBe(false)
-    expect(t.staged.has('agt-r1-c')).toBe(true)
+  test('panesLeft: done at first sight and open never leave; a return stages it again', async () => {
+    const staged = new Map()
+    expect(panesLeft(staged, [pane('agt-r1-a', 'done'), pane('agt-r1-b', 'open')])).toEqual([])
+    panesLeft(staged, [pane('agt-r1-c', 'working')])
+    expect(panesLeft(staged, [pane('agt-r1-c', 'done')])).toEqual(['agt-r1-c'])
+    panesLeft(staged, [pane('agt-r1-c', 'working')])
+    expect(staged.has('agt-r1-c')).toBe(true)
   })
 
   test('withRoute copies the newest route and never mutates', async () => {
@@ -230,45 +251,21 @@ describe('farewell', () => {
 
   test('stage orders rows and tallies', async () => {
     const a = sub('a', 'r1', 'working', { start: 0, input: 1, output: 2 })
-    const b = sub('b', 'r1', 'done', { bye: 2, input: 3, output: 4 })
-    const c = sub('c', 'r1', 'done', { bye: 0, input: 5, output: 6 })
+    const b = sub('b', 'r1', 'done', { input: 3, output: 4 })
     const d = sub('d', 'r0', 'working')
-    const agents = new Map([['a', a], ['b', b], ['c', c], ['d', d]])
+    const agents = new Map([['a', a], ['b', b], ['d', d]])
     const p1 = pane('agt-r1-exec-1', 'working')
     const p2 = pane('agt-r1-review', 'blocked')
     const p3 = pane('agt-r1-exec-2', 'done')
     const p4 = pane('agt-r1-spawn', 'open')
-    const tracker = newTracker()
-    tracker.byes.set('agt-r1-exec-0', { pane: { ...pane('agt-r1-exec-0', 'done') }, bye: 3 })
     const r = (role: string, extra: object) => ({ name: 'agt-r1-' + role, run: 'r1', role, agent: null, model: 'opus', effort: 'high', reason: '', start: 0, end: null, ...extra })
     const routes = [r('exec-1', { agent: 'executor', model: 'sonnet', effort: 'medium', start: 100 }), r('exec-0', { end: 900 }), r('exec-2', { end: 800 })]
-    const { rows, tally } = stage({ agents, panes: [p1, p2, p3, p4], routes, tracker, run: 'r1' })
-    expect(rows.map((x: any) => x.name ?? x.id)).toEqual(['a', 'agt-r1-exec-1', 'agt-r1-review', 'b', 'agt-r1-exec-0'])
+    const { rows, tally } = stage({ agents, panes: [p1, p2, p3, p4], routes, run: 'r1' })
+    expect(rows.map((x: any) => x.name ?? x.id)).toEqual(['a', 'agt-r1-exec-1', 'agt-r1-review'])
     expect(rows[0]).toBe(a)
-    expect(rows[3]).toBe(b)
-    expect(rows[1]).toMatchObject({ agent: 'executor', model: 'sonnet', start: 100, bye: 0 })
-    expect(rows[4]).toMatchObject({ bye: 3 })
-    expect(tally).toEqual({ working: 2, done: 4, tok: 21 })
+    expect(rows[1]).toMatchObject({ agent: 'executor', model: 'sonnet', start: 100 })
+    expect(tally).toEqual({ working: 2, done: 3, tok: 10 })
     expect(stage({ agents: new Map(), run: 'r1' })).toEqual({ rows: [], tally: { working: 0, done: 0, tok: 0 } })
-  })
-
-  test('playing and ageFarewells drain to false', async () => {
-    const agents = new Map([['x', sub('x', 'r1', 'done', { bye: 2 })]])
-    const tracker = newTracker()
-    tracker.byes.set('agt-r1-y', { pane: pane('agt-r1-y', 'done'), bye: 1 })
-    expect(playing({ agents, tracker })).toBe(true)
-    expect(ageFarewells({ agents, tracker })).toBe(true)
-    expect(tracker.byes.size).toBe(0)
-    expect(ageFarewells({ agents, tracker })).toBe(false)
-    expect(ageFarewells({ agents, tracker })).toBe(false)
-    expect(agents.get('x')!.bye).toBe(0)
-  })
-
-  test('stripText covers every branch', async () => {
-    expect(stripText({ run: 'r1', tally: { working: 0, done: 0, tok: 0 }, waiting: true })).toBe('agentille · waiting for agents…')
-    expect(stripText({ run: 'r1', tally: { working: 0, done: 3, tok: 0 }, waiting: true })).toBe('agentille · waiting for agents…')
-    expect(stripText({ run: 'r1', tally: { working: 0, done: 3, tok: 0 }, waiting: false })).toBe('agentille · run r1 · 3 done · /agt-ledger')
-    expect(stripText({ run: 'r1', tally: { working: 0, done: 0, tok: 0 }, waiting: false })).toBe('No agents yet. Run /agt and they show up here.')
   })
 
   test('ledger counts pane routes, tokens n/a', async () => {

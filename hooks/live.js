@@ -1,17 +1,16 @@
 // What is running right now: in-process subagents and herdr agt-* panes.
 // Pure state + formatting; register.js feeds it events and draws the result.
 
-import { modelKey } from './sprites.js'
+import { modelKey } from './mascot.js'
 
 export const DONE_GRACE_MS = 90_000
 export const IDLE_GRACE_MS = 300_000
-export const FAREWELL_TICKS = 4 // × the 600 ms redraw ticker ≈ 2.4 s
 export const ON_STAGE = new Set(['working', 'blocked'])
 const LEAVING = new Set(['done', 'idle'])
 const EFFORT_BAR = { low: '▂', medium: '▄', high: '▆', xhigh: '▇', max: '█' }
 
 export function newAgent({ id, role, routed, model, effort, reason, run, now }) {
-  return { id, kind: 'sub', role, routed, model, effort, reason, run, start: now, end: null, state: 'working', input: 0, output: 0, cacheRead: 0, bye: 0 }
+  return { id, kind: 'sub', role, routed, model, effort, reason, run, start: now, end: null, state: 'working', input: 0, output: 0, cacheRead: 0 }
 }
 
 export function addUsage(a, u) {
@@ -23,7 +22,6 @@ export function addUsage(a, u) {
 
 export function finish(a, now, ms) {
   if (!a) return
-  if (a.state !== 'done') a.bye = FAREWELL_TICKS
   a.state = 'done'
   a.end = ms != null ? a.start + ms : now
 }
@@ -39,8 +37,9 @@ export function paneAgents(list, selfPane) {
 }
 
 // Remembers when each pane entered its current state (by state_change_seq) and returns
-// the panes that sat in done ≥ 90s or idle ≥ 300s. Only agt-* panes ever reach here.
-export function reapable(panes, seen, now) {
+// the panes that sat in done ≥ 90s, or in idle ≥ 300s while the lead has no turn running (an
+// idle worker mid-run is waiting for review, not abandoned). Only agt-* panes ever reach here.
+export function reapable(panes, seen, now, leadBusy = true) {
   const out = []
   for (const p of panes) {
     const key = p.id
@@ -48,7 +47,7 @@ export function reapable(panes, seen, now) {
     if (!prev || prev.seq !== p.seq || prev.state !== p.state) seen.set(key, { seq: p.seq, state: p.state, since: now })
     const since = seen.get(key).since
     if (p.state === 'done' && now - since >= DONE_GRACE_MS) out.push(p)
-    else if (p.state === 'idle' && now - since >= IDLE_GRACE_MS) out.push(p)
+    else if (p.state === 'idle' && !leadBusy && now - since >= IDLE_GRACE_MS) out.push(p)
   }
   for (const key of [...seen.keys()]) if (!panes.some((p) => p.id === key)) seen.delete(key)
   return out
@@ -104,28 +103,19 @@ export function ledgerText(l) {
   return ['run ' + l.run, ...names.sort().map((n) => line(n, l.roles[n])), ...paneNames.sort().map((n) => paneLine(n, panes[n])), line('total', l.total)].join('\n')
 }
 
-// ── stage: who is on screen, who is waving goodbye ───────────────────────────
+// ── stage: who is on screen ──────────────────────────────────────────────────
 
-export function newTracker() {
-  return { staged: new Map(), byes: new Map() }
-}
-
-// Names that started a farewell this call. A pane leaves the stage by finishing,
-// idling or vanishing; unknown/open panes are unreadable, so they keep their slot.
-export function paneByes(tracker, next) {
+// Names of the panes that left the stage this call: they finished, went idle or vanished.
+// Unknown/open panes are unreadable, so they keep their slot. `staged` maps name → last pane.
+export function panesLeft(staged, next) {
   const out = []
-  for (const [name, last] of [...tracker.staged]) {
+  for (const [name, last] of [...staged]) {
     const q = next.find((p) => p.name === name)
     if (q && !LEAVING.has(q.state)) continue
-    tracker.staged.delete(name)
-    tracker.byes.set(name, { pane: { ...(q ?? last), state: 'done' }, bye: FAREWELL_TICKS })
+    staged.delete(name)
     out.push(name)
   }
-  for (const q of next) {
-    if (!ON_STAGE.has(q.state)) continue
-    tracker.staged.set(q.name, q)
-    tracker.byes.delete(q.name)
-  }
+  for (const q of next) if (ON_STAGE.has(q.state)) staged.set(q.name, q)
   return out
 }
 
@@ -149,15 +139,10 @@ export function endRoute(routes, name, now) {
   return r
 }
 
-export function stage({ agents, panes = [], routes = [], tracker = newTracker(), run }) {
+export function stage({ agents, panes = [], routes = [], run }) {
   const subs = [...agents.values()].filter((a) => a.run === run)
   const working = subs.filter((a) => a.state === 'working').sort((a, b) => a.start - b.start)
-  const rows = [
-    ...working,
-    ...panes.filter((p) => ON_STAGE.has(p.state)).map((p) => ({ ...withRoute(p, routes), bye: 0 })),
-    ...subs.filter((a) => a.state === 'done' && a.bye > 0),
-    ...[...tracker.byes.values()].filter((b) => b.bye > 0).map((b) => ({ ...withRoute(b.pane, routes), bye: b.bye })),
-  ]
+  const rows = [...working, ...panes.filter((p) => ON_STAGE.has(p.state)).map((p) => withRoute(p, routes))]
   const tally = {
     working: working.length + panes.filter((p) => p.state === 'working').length,
     done: subs.filter((a) => a.state === 'done').length + routes.filter((r) => r.run === run && r.end != null).length,
@@ -166,48 +151,7 @@ export function stage({ agents, panes = [], routes = [], tracker = newTracker(),
   return { rows, tally }
 }
 
-export function playing({ agents, tracker }) {
-  return [...agents.values()].some((a) => a.bye > 0) || [...tracker.byes.values()].some((b) => b.bye > 0)
-}
-
-export function ageFarewells({ agents, tracker }) {
-  for (const a of agents.values()) if (a.bye > 0) a.bye -= 1
-  for (const [name, b] of [...tracker.byes]) {
-    if (b.bye > 0) b.bye -= 1
-    if (b.bye <= 0) tracker.byes.delete(name)
-  }
-  return playing({ agents, tracker })
-}
-
-export function stripText({ run, tally, waiting }) {
-  if (waiting) return 'agentille · waiting for agents…'
-  if (tally.done > 0) return `agentille · run ${run} · ${tally.done} done · /agt-ledger`
-  return 'No agents yet. Run /agt and they show up here.'
-}
-
-// ── deck auto-open policy ─────────────────────────────────────────────────────
-
-// A typed /agt run (bare or plugin-qualified), never /agt-deck, /agt-ledger, …
+// A typed /agt run (bare or plugin-qualified), never /agt-ledger, …
 export function isAgtPrompt(text) {
   return /^\s*\/(agentille:)?agt(\s|$)/.test(String(text ?? ''))
-}
-
-// Open the deck unasked? Only with auto on, not already open, and not after the
-// person closed it by hand during this same run.
-export function shouldAutoOpen({ auto, open, dismissedRun, run }) {
-  return auto !== false && !open && dismissedRun !== run
-}
-
-// Claude Code seats a pane only at any width when it answers the person's own prompt;
-// opened from a spawn it needs 144 columns. So the deck opens on the typed /agt as a
-// waiting strip. A turn that ends with no agent closes the strip, unless it ended on a
-// question: the person's reply (another asked prompt) reopens it.
-export const WAIT_TTL_MS = 30 * 60_000
-
-export function endsOnQuestion(answer) {
-  return /\?\s*(\*|`|_)*\s*$/.test(String(answer ?? '').trim().slice(-400))
-}
-
-export function reopenOnReply({ waiting, now }) {
-  return !!waiting && now - waiting.at < WAIT_TTL_MS
 }

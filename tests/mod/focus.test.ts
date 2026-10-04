@@ -1,35 +1,25 @@
 import { describe, expect, mock, test } from 'claude-code/testing'
-import { BRIEF_MIN_WORDS, briefPrompt, flagOf, focusText, paneFlags, parseBrief, parseFocusArgs, shouldBrief, words } from '../../hooks/focus.js'
+import { flagOf, focusText, paneFlags, parseFocusArgs, words } from '../../hooks/focus.js'
 
-const LONG = Array.from({ length: BRIEF_MIN_WORDS + 5 }, (_, i) => 'word' + i).join(' ')
+const LONG = Array.from({ length: 200 }, (_, i) => 'word' + i).join(' ')
 
-describe('focus: deciding', () => {
-  test('only long answers, and only in /agt turns unless mode is all', async () => {
+describe('focus: reading', () => {
+  test('words counts whitespace-separated tokens', async () => {
     expect(words('a b  c\nd')).toBe(4)
-    expect(shouldBrief({ answer: LONG, mode: 'agt', agtTurn: true })).toBe(true)
-    expect(shouldBrief({ answer: LONG, mode: 'agt', agtTurn: false })).toBe(false)
-    expect(shouldBrief({ answer: LONG, mode: 'all', agtTurn: false })).toBe(true)
-    expect(shouldBrief({ answer: LONG, mode: 'off', agtTurn: true })).toBe(false)
-    expect(shouldBrief({ answer: 'short answer', mode: 'all', agtTurn: true })).toBe(false)
+    expect(words('')).toBe(0)
+    expect(words(undefined)).toBe(0)
   })
 
-  test('a very long answer keeps its head and its tail', async () => {
-    const p = briefPrompt('HEAD ' + 'x'.repeat(30_000) + ' TAIL')
-    expect(p.length).toBeLessThan(13_000)
-    expect(p).toContain('HEAD')
-    expect(p).toContain('TAIL')
-    expect(p).toContain('[…]')
+  test('/agt-focus takes on or off, nothing else', async () => {
+    expect(parseFocusArgs('')).toEqual({ show: true })
+    expect(parseFocusArgs('on')).toEqual({ on: true })
+    expect(parseFocusArgs(' OFF ')).toEqual({ on: false })
+    for (const bad of ['all', 'agt', 'maybe']) expect(parseFocusArgs(bad)).toEqual({ error: 'Usage: /agt-focus [on|off]' })
   })
-})
 
-describe('focus: parsing the brief', () => {
-  test('keeps marked lines, next first, at most three, clipped', async () => {
-    const out = parseBrief('Sure! Here it is:\n✓ v2.4.0 shipped\n⚑ PR #22 is stale\n- → Restart Claude to load it\n→ second next\n' + '✓ ' + 'y'.repeat(200))
-    expect(out.map((l) => l.kind)).toEqual(['next', 'next', 'flag'])
-    expect(out[0]).toEqual({ kind: 'next', text: 'Restart Claude to load it' })
-    expect(parseBrief('✓ ' + 'y'.repeat(200))[0].text.length).toBe(96)
-    expect(parseBrief('nothing useful here')).toEqual([])
-    expect(parseBrief('⚑\uFE0F token in a log')).toEqual([{ kind: 'flag', text: 'token in a log' }])
+  test('focusText lists the flags, or says there are none', async () => {
+    expect(focusText(true, ['a is blocked'])).toBe('focus: on (agent flags show above the prompt)\n⚑ a is blocked')
+    expect(focusText(false, [])).toBe('focus: off (no flags above the prompt)\nNothing to flag right now.')
   })
 })
 
@@ -60,18 +50,10 @@ describe('focus: flags from agent results', () => {
   test('a blocked pane waits on the person', async () => {
     expect(paneFlags([{ name: 'agt-r1-exec-1', state: 'blocked' }, { name: 'agt-r1-exec-2', state: 'working' }])).toEqual(['agt-r1-exec-1 is waiting on you'])
   })
-
-  test('/agt-focus arguments and its readout', async () => {
-    expect(parseFocusArgs('')).toEqual({ show: true })
-    expect(parseFocusArgs(' ALL ')).toEqual({ mode: 'all' })
-    expect(parseFocusArgs('loud').error).toContain('Usage')
-    expect(focusText('agt', [], [])).toContain('Nothing to flag')
-    expect(focusText('all', [{ kind: 'next', text: 'run it' }], ['code-reviewer: FAIL'])).toBe('focus: all (every long answer)\n⚑ code-reviewer: FAIL\n→ run it')
-  })
 })
 
 describe('focus: in the mod', () => {
-  const setup = (on: any, reply = '→ Restart Claude\n✓ v2.5.0 shipped') => {
+  const setup = (on: any) => {
     const asked: any[] = []
     const toasts: string[] = []
     const stored: any[] = []
@@ -82,7 +64,7 @@ describe('focus: in the mod', () => {
     on('ui.toast', async ($: any, e: any) => { toasts.push(e.text ?? String(e)); return { value: undefined } })
     on('ui.render', async () => ({ type: 'engine', ref: 0 }) as never)
     on('prompt.submit', async ($: any, e: any) => ({ text: e.text }))
-    on('model.complete', async ($: any, e: any) => { asked.push(e); return { value: { isAnswered: true, text: reply, usage: {} } } })
+    on('model.complete', async ($: any, e: any) => { asked.push(e); return { value: { isAnswered: true, text: '', usage: {} } } })
     on('agent.spawn', async ($: any, e: any) => ({ model: e.model ?? 'sonnet', agentId: 'r1' }))
     on('turn.complete', async ($: any, e: any) => ({ text: e.answer }))
     const clock = mock.clock(on, { now: 1_000_000 })
@@ -101,40 +83,27 @@ describe('focus: in the mod', () => {
     await ui.unmount()
   })
 
-  test('a long /agt answer gets a Haiku brief above the prompt', async ($, on) => {
+  test('a long /agt answer costs no model call', async ($, on) => {
     const { asked, clock } = setup(on)
     await $.prompt.submit({ text: '/agt ship it', wait: false })
     await complete($, LONG)
-    await clock.advance(10)
-    expect(asked.length).toBe(1)
-    expect(asked[0]).toMatchObject({ model: 'haiku', effort: 'low' })
-    const ui = await band($)
-    expect(await ui.find({ type: 'Text', text: /→ Restart Claude/ })).toBeDefined()
-    await ui.unmount()
-  })
-
-  test('outside /agt nothing is briefed until /agt-focus all, which is remembered', async ($, on) => {
-    const { asked, stored, clock } = setup(on)
-    await $.prompt.submit({ text: 'explain the reaper', wait: false })
-    await complete($, LONG)
-    await clock.advance(10)
+    await clock.advance(10_000)
     expect(asked.length).toBe(0)
-    await $.command.run({ command: 'agt-focus', args: 'all' })
-    expect(stored).toContainEqual(expect.objectContaining({ key: 'focus:mode', value: 'all' }))
-    await complete($, LONG)
-    await clock.advance(10)
-    expect(asked.length).toBe(1)
   })
 
-  test('the next prompt clears the brief', async ($, on) => {
-    const { clock } = setup(on)
-    await $.prompt.submit({ text: '/agt ship it', wait: false })
-    await complete($, LONG)
-    await clock.advance(10)
-    await $.prompt.submit({ text: 'thanks', wait: false })
-    const ui = await band($)
-    expect(await ui.find({ type: 'Text', text: /Restart Claude/ })).toBeUndefined()
-    await ui.unmount()
+  test('/agt-focus off hides the flags, is remembered, and on brings them back', async ($, on) => {
+    const { stored } = setup(on)
+    await $.agent.spawn({ prompt: '[agt run=f2 size=small mode=review]\nreview', subagentType: 'agentille:agentille-code-reviewer', model: 'sonnet' })
+    await complete($, 'VERDICT: CONCERNS\nP1: unchecked input', 'r1')
+    await $.command.run({ command: 'agt-focus', args: 'off' })
+    expect(stored).toContainEqual(expect.objectContaining({ key: 'focus:mode', value: 'off' }))
+    const hidden = await band($)
+    expect(await hidden.find({ type: 'Text', text: /⚑ code-reviewer/ })).toBeUndefined()
+    await hidden.unmount()
+    expect((await $.command.run({ command: 'agt-focus', args: 'on' })).text).toContain('⚑ code-reviewer: CONCERNS')
+    const shown = await band($)
+    expect(await shown.find({ type: 'Text', text: /⚑ code-reviewer: CONCERNS/ })).toBeDefined()
+    await shown.unmount()
   })
 })
 

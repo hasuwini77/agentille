@@ -3,7 +3,6 @@
 // Pure on purpose — the hooks loader never follows `$` across an import — so every
 // $.process / $.env / $.fs call lives in register.js and only feeds these helpers.
 
-import { isAgtPrompt } from './live.js'
 import { ROLES, parseHeader } from './routing.js'
 
 export const SAFE_RUN = /^[A-Za-z0-9_-]{1,64}$/
@@ -27,58 +26,13 @@ export function pickTransport({ herdrOk, tmuxOk }) {
   return herdrOk ? 'herdr' : tmuxOk ? 'tmux' : 'none'
 }
 
-export const PANE_RULE = 'Pane rule: every executor slice (even a single one), the adversary, and any reviewer routed to opus or fable run as pane workers; planner, plan-reviewer, ui-prototyper, sonnet-routed reviewers and seo-reviewer stay subagents. Call spawn_pane with agent (the routing role) and header (this run\'s full [agt …] line): the mod picks model and effort, and refuses roles that stay subagents. A pane starts as a full Claude session (~55k tokens vs ~32k for a subagent; measured 1.12× the fresh tokens of the same workers as subagents): it buys a visible worker, not a saving. `--mode subagent` keeps every worker a subagent.'
+export const PANE_RULE = 'Pane rule: panes only when ≥2 slices build at once or `--mode panes`: each slice\'s executor (and the adversary) via spawn_pane (agent + header); everyone else is a subagent. close_pane after harvest.'
 
-// The line appended to the /agt skill prompt so the model knows which transport is live,
-// and, when the mod registered them, that the pane tools replace the manual recipe.
+// The block appended to the /agt skill prompt: which transport is live and, when the mod
+// registered the pane tools, the rule for using them.
 export function transportBlock(transport, tools = false) {
-  const line = {
-    herdr: 'Parallel slices run as Herdr panes — see `panes-mode.md` → "Spawning a worker".',
-    tmux: 'Parallel slices run as tmux panes — see `panes-mode.md` → "tmux transport".',
-  }[transport] ?? 'No pane transport here: parallel slices run as a workflow, else subagent waves.'
-  const viaTools = tools && transport !== 'none'
-    ? 'Open each claude worker with mcp__agentille__spawn_pane and close it after harvest with mcp__agentille__close_pane — see `panes-mode.md` → "Through the mod\'s tools".\n' + PANE_RULE + '\n'
-    : ''
-  return '\n## Pane transport (agentille mod)\n\ntransport: ' + transport + '\n' + line + '\n' + viaTools
-}
-
-// A typed /agt that forces a team: `--team <name>` → { template: name }, `--mode team`
-// → { template: null }; anything else → null. --team wins when both appear.
-const TEAMS = new Set(['feature-team', 'review-team', 'incident-team'])
-
-// Only the leading flag run of a typed /agt counts: `/agt --plan --team review-team "x"`.
-// The first token that is not a flag ends it, so "--team" inside the task text is just text.
-export function teamForce(text) {
-  if (!isAgtPrompt(text)) return null
-  const toks = String(text).trim().split(/\s+/).slice(1)
-  let force = null
-  for (let i = 0; i < toks.length && toks[i].startsWith('--'); i++) {
-    const [flag, inline] = toks[i].split('=', 2)
-    const value = inline ?? (toks[i + 1] && !toks[i + 1].startsWith('--') ? toks[i + 1] : undefined)
-    if (flag === '--team') {
-      force = { template: TEAMS.has(value) ? value : null }
-      if (inline === undefined && value !== undefined) i++
-    } else if (flag === '--mode') {
-      if (value === 'team' && !force) force = { template: null }
-      if (inline === undefined && value !== undefined) i++
-    }
-  }
-  return force
-}
-
-// The toast shown when a team is forced: names where the run will actually land.
-export function teamNotice(transport) {
-  const where = { herdr: 'panes · herdr', tmux: 'panes · tmux' }[transport] ?? 'a team — no pane transport here'
-  return '--team is deprecated (removed in v3.0): running as ' + where + '.'
-}
-
-// Appended after the transport block when a team was forced: resolve it as panes (or
-// subagent) when a transport exists, else run the team as before and say so.
-export function teamDirective(transport) {
-  const line = transport === 'herdr' || transport === 'tmux'
-    ? 'A forced team (--team/--mode team) is deprecated: resolve it as panes when the task has ≥2 genuinely disjoint slices, else subagent (the existing honesty flow). Do not spawn an agent team.'
-    : 'A forced team is deprecated (removed in v3.0); no pane transport here, so run the team as before and print the deprecation line on the recon ping.'
-  return '\n## Forced team (agentille mod)\n\n' + line + '\n'
+  const note = transport === 'none' ? 'No pane transport here: parallel slices run as a workflow, else subagent waves.\n' : tools ? PANE_RULE + '\n' : ''
+  return '\n## Pane transport (agentille mod)\n\ntransport: ' + transport + '\n' + note
 }
 
 // ── names ─────────────────────────────────────────────────────────────────────
@@ -195,8 +149,11 @@ const effortArgs = (effort) => (EFFORTS.includes(effort) ? ['--effort', effort] 
 // not as a bare session that only has the task prompt.
 const agentArgs = (agent) => (ROLES.includes(agent) ? ['--agent', 'agentille:agentille-' + agent] : [])
 
+// Who the worker is, for its own mascot band: <agent>:<model>:<effort>. A typed /agt-spawn has no agent.
+export const workerEnv = ({ agent, model, effort }) => 'AGENTILLE_WORKER=' + [agent || SPAWN_ROLE, model, EFFORTS.includes(effort) ? effort : ''].join(':')
+
 export function tmuxSplitArgv({ target, cwd, run, shell, model, name, task, effort, direction, agent }) {
-  const head = ['tmux', 'split-window', '-d', direction === 'down' ? '-v' : '-h', '-P', '-F', '#{pane_id}', '-t', target, '-c', cwd.replace(/#/g, '##'), '-e', 'AGENTILLE_RUN=' + run]
+  const head = ['tmux', 'split-window', '-d', direction === 'down' ? '-v' : '-h', '-P', '-F', '#{pane_id}', '-t', target, '-c', cwd.replace(/#/g, '##'), '-e', 'AGENTILLE_RUN=' + run, '-e', workerEnv({ agent, model, effort })]
   // `--` ends claude's options, so a task that starts with `-` is still just the prompt
   const tail = [...agentArgs(agent), '--model', model, ...effortArgs(effort), '-n', name, '--', task]
   const base = String(shell ?? '').split('/').pop()
@@ -204,29 +161,11 @@ export function tmuxSplitArgv({ target, cwd, run, shell, model, name, task, effo
   return [...head, 'claude', ...tail]
 }
 
-// Stacked layout: a narrow lead stacks workers below it; a wide one puts them beside it. Later
-// workers split the newest one across the first worker's axis. Only workers still live count; a right split that would
-// leave panes under MIN_SPLIT_COLS goes down instead.
-export const WIDE_COLS = 160
-export const MIN_SPLIT_COLS = 40
-
-export function splitPlan({ lead, leadWidth = null, newestWidth = null, opened = [], live = [] }) {
+// Stacked layout: the first worker splits right of the lead, each later one splits down from the
+// newest worker still live. No width probing: a stack always has room for one more row.
+export function splitPlan({ lead, opened = [], live = [] }) {
   const alive = opened.filter((o) => live.some((p) => p.id === o.id))
-  if (!alive.length) {
-    const d = typeof leadWidth === 'number' && leadWidth < WIDE_COLS ? 'down' : 'right'
-    return { target: lead, direction: d, axis: d }
-  }
-  const n = alive[alive.length - 1]
-  let d = n.axis === 'right' ? 'down' : 'right'
-  if (d === 'right' && typeof newestWidth === 'number' && newestWidth / 2 < MIN_SPLIT_COLS) d = 'down'
-  return { target: n.id, direction: d, axis: n.axis }
-}
-
-export const tmuxWidthArgv = (pane) => ['tmux', 'display-message', '-p', '-t', pane, '#{pane_width}']
-
-export function widthOf(stdout) {
-  const n = Number(String(stdout ?? '').trim())
-  return Number.isInteger(n) && n > 0 ? n : null
+  return alive.length ? { target: alive[alive.length - 1].id, direction: 'down' } : { target: lead, direction: 'right' }
 }
 
 export const tmuxEvenArgv = (id) => ['tmux', 'select-layout', '-E', '-t', id]
@@ -248,8 +187,8 @@ export function tmuxPaneIdOf(stdout) {
 export const tmuxKillArgv = (id) => ['tmux', 'kill-pane', '-t', id]
 
 // herdr: split beside the lead (never focused), start claude in it, then prompt it.
-export function herdrSplitArgv({ pane, cwd, run, direction }) {
-  return ['herdr', 'pane', 'split', '--pane', pane, '--direction', direction === 'down' ? 'down' : 'right', '--cwd', cwd, '--env', 'AGENTILLE_RUN=' + run, '--no-focus']
+export function herdrSplitArgv({ pane, cwd, run, direction, agent, model, effort }) {
+  return ['herdr', 'pane', 'split', '--pane', pane, '--direction', direction === 'down' ? 'down' : 'right', '--cwd', cwd, '--env', 'AGENTILLE_RUN=' + run, '--env', workerEnv({ agent, model, effort }), '--no-focus']
 }
 
 export function herdrPaneIdOf(stdout) {
@@ -264,21 +203,12 @@ export const herdrStartArgv = ({ name, pane, model, effort, agent }) => ['herdr'
 export const herdrPromptArgv = (name, task) => ['herdr', 'agent', 'prompt', name, task]
 export const herdrCloseArgv = (id) => ['herdr', 'pane', 'close', id]
 
-const REVIEWERS = new Set(['code-reviewer', 'security-reviewer', 'design-reviewer', 'payments-reviewer', 'perf-reviewer'])
-const SUBAGENT_ONLY = new Set(['planner', 'plan-reviewer', 'ui-prototyper'])
-
-// Whether a routing role runs as a pane worker, given the routing decision for it.
-export function paneRole(agent, decision) {
-  const m = String(decision?.model ?? '')
-  if (agent === 'executor' || agent === 'adversary') return { pane: true, why: '' }
-  if (REVIEWERS.has(agent)) {
-    return /opus|fable/.test(m)
-      ? { pane: true, why: '' }
-      : { pane: false, why: `${agent} is routed to ${m || 'an unknown model'}: run it as a subagent; only opus or fable reviewers get a pane.` }
-  }
-  if (agent === 'seo-reviewer') return { pane: false, why: 'seo-reviewer stays a subagent: a short read-only pass does not pay back a pane\'s start-up.' }
-  if (SUBAGENT_ONLY.has(agent)) return { pane: false, why: `${agent} stays a subagent: its full answer feeds the next dispatch.` }
-  return { pane: false, why: `${agent} is not a routing role.` }
+// Whether a routing role runs as a pane worker: only an executor or the adversary. Reviewers and the
+// planning roles stay subagents: their flags, token counts and full answers exist only there.
+export function paneRole(agent) {
+  return agent === 'executor' || agent === 'adversary'
+    ? { pane: true, why: '' }
+    : { pane: false, why: `${agent} runs as a subagent: only an executor or the adversary gets a pane.` }
 }
 
 // ── pane tools: /agt panes mode opens and closes workers through the mod ──────

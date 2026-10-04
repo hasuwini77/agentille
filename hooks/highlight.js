@@ -2,6 +2,7 @@
 // draws; these helpers decide what to light and what goes on the essentials card.
 //
 //   essentials — the next action, the one flag, the one done line, read off the text. No model.
+//                 Skipped for a final card (an answer opening with ✓ or ✗): it would repeat it.
 //   lightTokens — wrap paths, versions, refs and numbers in backticks so the dim body
 //                 shows them lit. Code, links and fences are never touched.
 
@@ -97,7 +98,7 @@ const NEGATED = /\b(0|no|zero|without)\s+(\w+\s+)?(failures?|failed|failing|fail
 function isFlag(line) {
   const t = line.replace(NEGATED, '')
   return (
-    t.includes('⚑') ||
+    /[⚑✗]/.test(t) ||
     /\b(blockers?|blocked|failed|failing)\b/i.test(t) ||
     /\b(FAIL|CONCERNS|REVISE)\b/.test(t) ||
     /needs you/i.test(t) ||
@@ -177,9 +178,14 @@ export function spans(line) {
   return out
 }
 
+// The run's final card opens with ✓ (done) or ✗ (failed): it is its own summary, so no
+// essentials card and no word floor, only the tokens lit.
+const isFinalCard = (text) => /^[✓✗]/.test(String(text ?? '').trimStart())
+
 export function highlight(text) {
-  if (words(text) < CARD_MIN_WORDS) return null
-  const card = essentials(text)
+  const final = isFinalCard(text)
+  if (!final && words(text) < CARD_MIN_WORDS) return null
+  const card = final ? [] : essentials(text)
   const lit = lightTokens(text)
   const body = lit.length <= LIT_MAX ? lit : null
   if (!card.length && body === null) return null

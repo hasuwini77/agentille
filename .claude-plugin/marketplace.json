@@ -8,7 +8,7 @@
   "plugins": [
     {
       "name": "agentille",
-      "description": "Personal AI coding orchestrator for Claude Code (trigger: /agt). See your agents work: a live band above the prompt and a pixel team deck show every agent's role, model, effort, state and tokens. A routing mod enforces model + effort per role and escalates to Fable only on observed failure. Project-aware squads (saas, ecommerce, content, immersive) add payments, SEO and performance specialists. Subagent-first dispatch, panes (Herdr or tmux) or workflows for parallel work, agent teams only when forced.",
+      "description": "One command for Claude Code: /agt plans, builds and reviews with the right model per step, steps aside on small tasks, and ends on one short card. Zero setup.",
       "author": {
         "name": "Systown AI Lab"
       },

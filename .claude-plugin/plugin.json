@@ -2,8 +2,8 @@
   "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
   "name": "agentille",
   "displayName": "agentille",
-  "version": "2.6.0",
-  "description": "Personal AI coding orchestrator for Claude Code (trigger: /agt). See your agents work: a live band above the prompt and a pixel team deck show every agent's role, model, effort, state and tokens. A routing mod enforces model + effort per role and escalates to Fable only on observed failure. Finished agents wave goodbye and leave. A focus block flags what needs you, and /agt replies get a colored essentials card over a dimmed body. Formations (duel, gauntlet with an adversary agent, relay) for harder work. Project-aware squads (saas, ecommerce, content, immersive) add payments, SEO and performance specialists. Inside Herdr or tmux, executors and Opus-routed reviewers run as routed Claude panes (model, effort and agent definition); subagents elsewhere, workflows for parallel work without a multiplexer, agent teams deprecated (removed in v3.0).",
+  "version": "3.0.0",
+  "description": "One command for Claude Code: /agt plans, builds and reviews with the right model per step, steps aside on small tasks, and ends on one short card. Zero setup.",
   "author": {
     "name": "Systown AI Lab",
     "url": "https://systown.ai"

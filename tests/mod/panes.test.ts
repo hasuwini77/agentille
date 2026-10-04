@@ -1,5 +1,5 @@
 import { describe, expect, mock, test } from 'claude-code/testing'
-import { EFFORTS, PANE_RULE, splitPlan, tmuxEvenArgv, tmuxWidthArgv, widthOf, SPAWN_TOOL, closeTarget, paneRole, doneFile, spawnToolInput, TOOL_MODELS, herdrCloseArgv, herdrPaneIdOf, herdrPromptArgv, herdrSplitArgv, herdrStartArgv, isFreshDone, isLead, newRunId, paneName, parseSpawnArgs, parseTmuxList, pickTransport, quietSpawn, reapPool, scopeRows, splitName, tmuxKillArgv, tmuxPaneAgents, tmuxPaneIdOf, tmuxSplitArgv, tmuxTagArgvs, teamDirective, teamForce, teamNotice, transportBlock, TMUX_LIST_FORMAT } from '../../hooks/panes.js'
+import { EFFORTS, PANE_RULE, splitPlan, tmuxEvenArgv, SPAWN_TOOL, closeTarget, paneRole, doneFile, spawnToolInput, TOOL_MODELS, herdrCloseArgv, herdrPaneIdOf, herdrPromptArgv, herdrSplitArgv, herdrStartArgv, isFreshDone, isLead, newRunId, paneName, parseSpawnArgs, parseTmuxList, pickTransport, quietSpawn, reapPool, scopeRows, splitName, tmuxKillArgv, tmuxPaneAgents, tmuxPaneIdOf, tmuxSplitArgv, tmuxTagArgvs, transportBlock, TMUX_LIST_FORMAT } from '../../hooks/panes.js'
 import { reapable } from '../../hooks/live.js'
 import { ROLES, roleOf } from '../../hooks/routing.js'
 
@@ -11,19 +11,13 @@ describe('transport', () => {
     expect(pickTransport({ herdrOk: false, tmuxOk: false })).toBe('none')
   })
 
-  test('block names the transport and the matching playbook section', async () => {
-    expect(transportBlock('herdr')).toContain('transport: herdr')
-    expect(transportBlock('herdr')).toContain('"Spawning a worker"')
-    expect(transportBlock('tmux')).toContain('"tmux transport"')
+  test('the block names the transport and cites no playbook section', async () => {
+    for (const t of ['herdr', 'tmux', 'none']) {
+      expect(transportBlock(t, true).startsWith('\n## Pane transport (agentille mod)\n\ntransport: ' + t + '\n')).toBe(true)
+      expect(transportBlock(t, true)).not.toContain('panes-mode.md')
+    }
     expect(transportBlock('none')).toContain('No pane transport here: parallel slices run as a workflow, else subagent waves.')
-    expect(transportBlock('none').startsWith('\n## Pane transport (agentille mod)\n\ntransport: none\n')).toBe(true)
-  })
-
-  test('with the tools registered, the block points at them; never on none', async () => {
-    expect(transportBlock('herdr')).not.toContain('spawn_pane')
-    expect(transportBlock('tmux', true)).toContain('mcp__agentille__spawn_pane')
-    expect(transportBlock('tmux', true)).toContain('"Through the mod\'s tools"')
-    expect(transportBlock('none', true)).not.toContain('spawn_pane')
+    expect(transportBlock('herdr')).toBe('\n## Pane transport (agentille mod)\n\ntransport: herdr\n')
   })
 
   test('the pane rule rides with the tools, on tmux and herdr only', async () => {
@@ -31,46 +25,16 @@ describe('transport', () => {
     expect(transportBlock('herdr', true)).toContain(PANE_RULE)
     expect(transportBlock('tmux')).not.toContain('Pane rule')
     expect(transportBlock('none', true)).not.toContain('Pane rule')
-    expect(PANE_RULE).toContain('1.12×')
-    expect(PANE_RULE).toContain('--mode subagent')
-    expect(PANE_RULE).toContain('header')
-    expect(PANE_RULE).not.toContain('deprecated')
-  })
-})
-
-describe('teamForce', () => {
-  test('--team <name> and --mode team on a typed /agt', async () => {
-    expect(teamForce('/agt --team feature-team build it')).toEqual({ template: 'feature-team' })
-    expect(teamForce('/agentille:agt --team=review-team x')).toEqual({ template: 'review-team' })
-    expect(teamForce('/agt --mode team build it')).toEqual({ template: null })
-    expect(teamForce('/agt --mode team --team incident-team x')).toEqual({ template: 'incident-team' })
+    expect(transportBlock('none', true)).not.toContain('spawn_pane')
   })
 
-  test('everything else is null', async () => {
-    expect(teamForce('/agt add a search filter')).toBe(null)
-    expect(teamForce('/agt --mode subagent x')).toBe(null)
-    expect(teamForce('/agt --mode teams x')).toBe(null)
-    expect(teamForce('fix it --team feature-team')).toBe(null)
-    expect(teamForce('/agt-ledger --team a')).toBe(null)
-    expect(teamForce(undefined)).toBe(null)
-  })
-
-  test('only the leading flags of /agt count, templates are validated', async () => {
-    expect(teamForce('/agt explain the --team flag')).toBe(null)
-    expect(teamForce('/agt why does "--mode team" fail')).toBe(null)
-    expect(teamForce('/agt fix "--team foo"')).toBe(null)
-    expect(teamForce('/agt --plan --team review-team "audit"')).toEqual({ template: 'review-team' })
-    expect(teamForce('/agt --team --plan x')).toEqual({ template: null })
-    expect(teamForce('/agt --team bogus-team x')).toEqual({ template: null })
-    expect(teamForce('/agt --fable --mode=team x')).toEqual({ template: null })
-  })
-})
-
-describe('teamNotice', () => {
-  test('names the transport the forced team lands on', async () => {
-    expect(teamNotice('herdr')).toBe('--team is deprecated (removed in v3.0): running as panes · herdr.')
-    expect(teamNotice('tmux')).toBe('--team is deprecated (removed in v3.0): running as panes · tmux.')
-    expect(teamNotice('none')).toBe('--team is deprecated (removed in v3.0): running as a team — no pane transport here.')
+  test('the pane rule: parallel slices or --mode panes, executor and adversary only, close after harvest', async () => {
+    expect(PANE_RULE).toContain('≥2 slices')
+    expect(PANE_RULE).toContain('--mode panes')
+    expect(PANE_RULE).toContain('executor (and the adversary)')
+    expect(PANE_RULE).toContain('everyone else is a subagent')
+    expect(PANE_RULE).toContain('close_pane after harvest')
+    expect(PANE_RULE.length).toBeLessThan(260)
   })
 })
 
@@ -224,7 +188,7 @@ describe('tmux panes', () => {
 describe('spawn', () => {
   test('tmux argv runs claude through an interactive zsh/bash, task as a plain argument', async () => {
     const argv = tmuxSplitArgv({ target: '%1', cwd: '/work/repo', run: 'ab12cd', shell: '/bin/zsh', model: 'haiku', name: 'agt-ab12cd-spawn', task: 'a "quoted"; $(thing)' })
-    expect(argv).toEqual(['tmux', 'split-window', '-d', '-h', '-P', '-F', '#{pane_id}', '-t', '%1', '-c', '/work/repo', '-e', 'AGENTILLE_RUN=ab12cd', '/bin/zsh', '-ic', 'claude "$@"', 'agt', '--model', 'haiku', '-n', 'agt-ab12cd-spawn', '--', 'a "quoted"; $(thing)'])
+    expect(argv).toEqual(['tmux', 'split-window', '-d', '-h', '-P', '-F', '#{pane_id}', '-t', '%1', '-c', '/work/repo', '-e', 'AGENTILLE_RUN=ab12cd', '-e', 'AGENTILLE_WORKER=spawn:haiku:', '/bin/zsh', '-ic', 'claude "$@"', 'agt', '--model', 'haiku', '-n', 'agt-ab12cd-spawn', '--', 'a "quoted"; $(thing)'])
   })
 
   test('a task that starts with a dash sits right behind --, never in claude\'s option list', async () => {
@@ -244,7 +208,7 @@ describe('spawn', () => {
 
   test('other shells exec claude directly', async () => {
     const argv = tmuxSplitArgv({ target: '%1', cwd: '/w', run: 'ab12cd', shell: '/usr/bin/fish', model: 'haiku', name: 'agt-ab12cd-spawn', task: 't' })
-    expect(argv.slice(13)).toEqual(['claude', '--model', 'haiku', '-n', 'agt-ab12cd-spawn', '--', 't'])
+    expect(argv.slice(15)).toEqual(['claude', '--model', 'haiku', '-n', 'agt-ab12cd-spawn', '--', 't'])
   })
 
   test('tmux tags the pane and pins its title', async () => {
@@ -266,7 +230,7 @@ describe('spawn', () => {
   })
 
   test('herdr: split beside the lead without focus, start claude, prompt it', async () => {
-    expect(herdrSplitArgv({ pane: 'w1:p1', cwd: '/work/repo', run: 'ab12cd' })).toEqual(['herdr', 'pane', 'split', '--pane', 'w1:p1', '--direction', 'right', '--cwd', '/work/repo', '--env', 'AGENTILLE_RUN=ab12cd', '--no-focus'])
+    expect(herdrSplitArgv({ pane: 'w1:p1', cwd: '/work/repo', run: 'ab12cd' })).toEqual(['herdr', 'pane', 'split', '--pane', 'w1:p1', '--direction', 'right', '--cwd', '/work/repo', '--env', 'AGENTILLE_RUN=ab12cd', '--env', 'AGENTILLE_WORKER=spawn::', '--no-focus'])
     expect(herdrStartArgv({ name: 'agt-ab12cd-spawn', pane: 'w1:p5', model: 'haiku' })).toEqual(['herdr', 'agent', 'start', 'agt-ab12cd-spawn', '--kind', 'claude', '--pane', 'w1:p5', '--timeout', '45000', '--', '--model', 'haiku'])
     expect(herdrPromptArgv('agt-ab12cd-spawn', 'reply with ok')).toEqual(['herdr', 'agent', 'prompt', 'agt-ab12cd-spawn', 'reply with ok'])
     expect(herdrCloseArgv('w1:p5')).toEqual(['herdr', 'pane', 'close', 'w1:p5'])
@@ -287,15 +251,14 @@ describe('skill prompt', () => {
     on('skill.prompt', async ($: any, e: any) => ({ text: e.text }))
     const r = await $.skill.prompt({ skill: 'agt', text: 'base' })
     expect(r.text).toContain('\n## Pane transport (agentille mod)\n\ntransport: herdr\n')
-    expect(r.text).toContain('"Spawning a worker"')
+    expect(r.text).not.toContain('panes-mode.md')
   })
 
-  test('inside tmux it points at the tmux section', async ($, on) => {
+  test('inside tmux it names tmux', async ($, on) => {
     answer(on, { TMUX: '/tmp/tmux-1/default,1,0' })
     on('skill.prompt', async ($: any, e: any) => ({ text: e.text }))
     const r = await $.skill.prompt({ skill: 'agentille:agt', text: 'base' })
     expect(r.text).toContain('transport: tmux')
-    expect(r.text).toContain('"tmux transport"')
   })
 
   test('HERDR_ENV=1 but herdr does not answer, no tmux: none', async ($, on) => {
@@ -311,82 +274,6 @@ describe('skill prompt', () => {
     expect(r.text).toContain('transport: none')
     expect(r.text).toContain('workflow, else subagent waves')
     expect((await $.skill.prompt({ skill: 'commit', text: 'base' })).text).toBe('base')
-  })
-})
-
-describe('forced team notice', () => {
-  const setup = (on: any, vars: Record<string, string>) => {
-    const toasts: string[] = []
-    on('env.get', async ($: any, e: any) => ({ value: vars[e.name] }))
-    on('process.run', async () => ({ value: { exitCode: 0, stdout: '', stderr: '' } }))
-    on('store.get', async () => ({ value: undefined }))
-    on('store.set', async () => ({ value: undefined }))
-    on('ui.panes', async () => ({ value: [] }))
-    on('ui.open', async () => ({ value: { isPlaced: true } }))
-    on('ui.toast', async ($: any, e: any) => { toasts.push(e.text ?? e.message ?? String(e)); return { value: undefined } })
-    on('prompt.submit', async ($: any, e: any) => ({ text: e.text }))
-    return toasts
-  }
-
-  test('a typed forced team toasts the notice', async ($, on) => {
-    const toasts = setup(on, { HERDR_ENV: '1' })
-    await $.prompt.submit({ text: '/agt --team feature-team build it', wait: false })
-    expect(toasts.some((t) => t.includes('--team is deprecated (removed in v3.0): running as panes · herdr.'))).toBe(true)
-  })
-
-  test('a plain /agt stays quiet', async ($, on) => {
-    const toasts = setup(on, { HERDR_ENV: '1' })
-    await $.prompt.submit({ text: '/agt build it', wait: false })
-    expect(toasts.some((t) => t.includes('deprecated'))).toBe(false)
-  })
-})
-
-describe('forced team directive', () => {
-  const DEPRECATED = 'A forced team (--team/--mode team) is deprecated: resolve it as panes when the task has ≥2 genuinely disjoint slices, else subagent (the existing honesty flow). Do not spawn an agent team.'
-  const NO_PANES = 'A forced team is deprecated (removed in v3.0); no pane transport here, so run the team as before and print the deprecation line on the recon ping.'
-
-  test('directive text follows the transport', async () => {
-    expect(teamDirective('herdr')).toContain(DEPRECATED)
-    expect(teamDirective('tmux')).toContain(DEPRECATED)
-    expect(teamDirective('none')).toContain(NO_PANES)
-    expect(teamDirective('none')).not.toContain('Do not spawn')
-  })
-
-  const wire = (on: any, vars: Record<string, string>) => {
-    on('env.get', async ($: any, e: any) => ({ value: vars[e.name] }))
-    on('process.run', async () => ({ value: { exitCode: 0, stdout: '', stderr: '' } }))
-    on('store.get', async () => ({ value: undefined }))
-    on('store.set', async () => ({ value: undefined }))
-    on('ui.panes', async () => ({ value: [] }))
-    on('ui.open', async () => ({ value: { isPlaced: true } }))
-    on('ui.toast', async () => ({ value: undefined }))
-    on('prompt.submit', async ($: any, e: any) => ({ text: e.text }))
-    on('skill.prompt', async ($: any, e: any) => ({ text: e.text }))
-  }
-
-  test('the next agt skill prompt carries it after the transport block, then it clears', async ($, on) => {
-    wire(on, { HERDR_ENV: '1' })
-    await $.prompt.submit({ text: '/agt --team feature-team build it', wait: false })
-    const first = (await $.skill.prompt({ skill: 'agt', text: 'base' })).text
-    expect(first).toContain(DEPRECATED)
-    expect(first.indexOf('transport: herdr')).toBeLessThan(first.indexOf(DEPRECATED))
-    const second = (await $.skill.prompt({ skill: 'agt', text: 'base' })).text
-    expect(second).not.toContain('deprecated')
-  })
-
-  test('with no transport the team runs as before and says so', async ($, on) => {
-    wire(on, {})
-    await $.prompt.submit({ text: '/agt --mode team build it', wait: false })
-    expect((await $.skill.prompt({ skill: 'agt', text: 'base' })).text).toContain(NO_PANES)
-  })
-
-  test('a plain /agt gets no directive, and other skills never consume the force', async ($, on) => {
-    wire(on, { HERDR_ENV: '1' })
-    await $.prompt.submit({ text: '/agt build it', wait: false })
-    expect((await $.skill.prompt({ skill: 'agt', text: 'base' })).text).not.toContain('Forced team')
-    await $.prompt.submit({ text: '/agt --team feature-team x', wait: false })
-    expect((await $.skill.prompt({ skill: 'commit', text: 'base' })).text).toBe('base')
-    expect((await $.skill.prompt({ skill: 'agt', text: 'base' })).text).toContain(DEPRECATED)
   })
 })
 
@@ -439,7 +326,7 @@ describe('tmux band', () => {
     await ui.unmount()
   })
 
-  test('a pane that vanishes waves bye for 2.4 s, then leaves the band', async ($, on) => {
+  test('a pane that vanishes leaves the band', async ($, on) => {
     on('ui.render', async () => ({ type: 'engine', ref: 0 }) as never)
     const rows = [row('%1', ''), row('%2', 'agt-r9-executor')]
     const { clock } = await start($, on, { rows })
@@ -447,8 +334,6 @@ describe('tmux band', () => {
     expect(await ui.find({ type: 'Text', text: /^working/ })).toBeDefined()
     rows.splice(1, 1)
     await clock.advance(5000)
-    expect(await ui.find({ type: 'Text', text: /bye!/ })).toBeDefined()
-    await clock.advance(2500)
     expect(await ui.find({ type: 'Text', text: /executor/ })).toBeUndefined()
     await ui.unmount()
   })
@@ -649,33 +534,16 @@ describe('effort and layout', () => {
     for (const d of [undefined, 'left']) expect(h(d)[h(d).indexOf('--direction') + 1]).toBe('right')
   })
 
-  test('splitPlan from the lead follows the lead width', async () => {
-    expect(splitPlan({ lead: '%1', leadWidth: 83 })).toEqual({ target: '%1', direction: 'down', axis: 'down' })
-    expect(splitPlan({ lead: '%1', leadWidth: 159 }).direction).toBe('down')
-    for (const w of [160, 200, null]) expect(splitPlan({ lead: '%1', leadWidth: w }).direction).toBe('right')
+  test('splitPlan: the first worker goes right of the lead, later ones down from the newest live worker', async () => {
+    expect(splitPlan({ lead: '%1' })).toEqual({ target: '%1', direction: 'right' })
+    const two = [{ id: '%2' }, { id: '%3' }]
+    expect(splitPlan({ lead: '%1', opened: two.slice(0, 1), live: [{ id: '%2' }] })).toEqual({ target: '%2', direction: 'down' })
+    expect(splitPlan({ lead: '%1', opened: two, live: two })).toEqual({ target: '%3', direction: 'down' })
+    expect(splitPlan({ lead: '%1', opened: two, live: [{ id: '%2' }] })).toEqual({ target: '%2', direction: 'down' })
   })
 
-  test('splitPlan alternates around the newest live worker and keeps panes wide enough', async () => {
-    const opened = [{ id: '%2', axis: 'down' }]
-    const live = [{ id: '%2' }]
-    expect(splitPlan({ lead: '%1', opened, live })).toEqual({ target: '%2', direction: 'right', axis: 'down' })
-    for (const w of [83, 80]) expect(splitPlan({ lead: '%1', opened, live, newestWidth: w }).direction).toBe('right')
-    for (const w of [79, 41]) expect(splitPlan({ lead: '%1', opened, live, newestWidth: w })).toEqual({ target: '%2', direction: 'down', axis: 'down' })
-    const two = [{ id: '%2', axis: 'right' }, { id: '%3', axis: 'right' }]
-    expect(splitPlan({ lead: '%1', opened: two, live: [{ id: '%2' }, { id: '%3' }] })).toEqual({ target: '%3', direction: 'down', axis: 'right' })
-    expect(splitPlan({ lead: '%1', opened: two, live: [{ id: '%2' }, { id: '%3' }], newestWidth: 20 }).direction).toBe('down')
-    expect(splitPlan({ lead: '%1', opened: two, live: [{ id: '%2' }] })).toMatchObject({ target: '%2', direction: 'down' })
-  })
-
-  test('with nothing live, splitPlan returns to the lead and ignores newestWidth', async () => {
-    expect(splitPlan({ lead: '%1', leadWidth: 83, newestWidth: 200, opened: [{ id: '%2', axis: 'right' }], live: [] })).toEqual({ target: '%1', direction: 'down', axis: 'down' })
-    expect(splitPlan({ lead: '%1', leadWidth: 200, newestWidth: 10, opened: [{ id: '%2', axis: 'down' }], live: [] })).toEqual({ target: '%1', direction: 'right', axis: 'right' })
-  })
-
-  test('widthOf reads a positive integer, tmux probes are pinned', async () => {
-    expect(widthOf('83\n')).toBe(83)
-    for (const v of ['', 'abc', '0', '-5', undefined]) expect(widthOf(v as never)).toBe(null)
-    expect(tmuxWidthArgv('%1')).toEqual(['tmux', 'display-message', '-p', '-t', '%1', '#{pane_width}'])
+  test('with nothing live, splitPlan returns to the lead', async () => {
+    expect(splitPlan({ lead: '%1', opened: [{ id: '%2' }], live: [] })).toEqual({ target: '%1', direction: 'right' })
     expect(tmuxEvenArgv('%9')).toEqual(['tmux', 'select-layout', '-E', '-t', '%9'])
   })
 })
@@ -688,37 +556,18 @@ describe('routing roles', () => {
 })
 
 describe('paneRole', () => {
-  const on = (model: string) => ({ model })
-
-  test('executor and adversary are always panes', async () => {
-    expect(paneRole('executor', on('sonnet')).pane).toBe(true)
-    expect(paneRole('adversary', on('sonnet')).pane).toBe(true)
-    expect(paneRole('executor', undefined).pane).toBe(true)
+  test('executor and adversary are panes', async () => {
+    expect(paneRole('executor').pane).toBe(true)
+    expect(paneRole('adversary').pane).toBe(true)
   })
 
-  test('reviewers get a pane only on opus or fable', async () => {
-    expect(paneRole('code-reviewer', on('opus')).pane).toBe(true)
-    expect(paneRole('code-reviewer', on('fable')).pane).toBe(true)
-    const s = paneRole('code-reviewer', on('sonnet'))
-    expect(s.pane).toBe(false)
-    expect(s.why).toContain('routed to sonnet')
-    expect(s.why).toContain('subagent')
-    for (const r of ['security-reviewer', 'design-reviewer', 'payments-reviewer']) expect(paneRole(r, on('opus')).pane).toBe(true)
-    expect(paneRole('perf-reviewer', on('sonnet')).pane).toBe(false)
-    expect(paneRole('perf-reviewer', on('opus')).pane).toBe(true)
-    expect(paneRole('code-reviewer', undefined).pane).toBe(false)
-  })
-
-  test('seo-reviewer and the planning roles stay subagents', async () => {
-    const seo = paneRole('seo-reviewer', on('opus'))
-    expect(seo.pane).toBe(false)
-    expect(seo.why).toContain('seo-reviewer stays a subagent')
-    for (const r of ['planner', 'plan-reviewer', 'ui-prototyper']) {
-      const p = paneRole(r, on('opus'))
+  test('every other role is a subagent, reviewers included, whatever model they route to', async () => {
+    for (const r of ROLES.filter((r) => r !== 'executor' && r !== 'adversary')) {
+      const p = paneRole(r)
       expect(p.pane).toBe(false)
-      expect(p.why).toContain('feeds the next dispatch')
+      expect(p.why).toContain(r + ' runs as a subagent')
     }
-    expect(paneRole('boss', on('opus')).why).toContain('not a routing role')
+    expect(paneRole('boss').pane).toBe(false)
   })
 })
 
@@ -838,11 +687,13 @@ describe('pane tools: in the mod', () => {
 
   test('herdr: spawn splits, starts with model and effort, and prompts', async ($, on) => {
     const { seen } = setup(on, { HERDR_ENV: '1', HERDR_PANE_ID: 'w1:p1' }, { 'herdr pane split': { stdout: JSON.stringify({ result: { pane: { pane_id: 'w1:p5' } } }) } })
-    const r = await spawn($, { run: 'k7f2ab', role: 'review', task: 'review the diff', agent: 'code-reviewer', header: '[agt run=k7f2ab size=large mode=review]' })
-    expect(r.result).toBe('Opened agt-k7f2ab-review · opus · high · herdr pane.')
-    const start = seen.find((a) => a.slice(0, 4).join(' ') === 'herdr agent start agt-k7f2ab-review')!
-    expect(start.slice(-6)).toEqual(['--agent', 'agentille:agentille-code-reviewer', '--model', 'opus', '--effort', 'high'])
-    expect(seen.some((a) => a.slice(0, 3).join(' ') === 'herdr agent prompt' && a[4] === 'review the diff')).toBe(true)
+    const r = await spawn($, { run: 'k7f2ab', role: 'exec-1', task: 'build the filter', ...EXEC })
+    expect(r.result).toBe('Opened agt-k7f2ab-exec-1 · sonnet · medium · herdr pane.')
+    const start = seen.find((a) => a.slice(0, 4).join(' ') === 'herdr agent start agt-k7f2ab-exec-1')!
+    expect(start.slice(-6)).toEqual(['--agent', 'agentille:agentille-executor', '--model', 'sonnet', '--effort', 'medium'])
+    expect(seen.some((a) => a.slice(0, 3).join(' ') === 'herdr agent prompt' && a[4] === 'build the filter')).toBe(true)
+    const split = seen.find((a) => a.slice(0, 3).join(' ') === 'herdr pane split')!
+    expect(split[split.indexOf('AGENTILLE_WORKER=executor:sonnet:medium') - 1]).toBe('--env')
   })
 
   test('herdr: the second worker splits down from the first', async ($, on) => {
@@ -857,17 +708,18 @@ describe('pane tools: in the mod', () => {
     expect(splits[1].slice(splits[1].indexOf('--pane'), splits[1].indexOf('--pane') + 4)).toEqual(['--pane', 'w1:p5', '--direction', 'down'])
   })
 
-  test('the routed model and effort win over the asked model', async ($, on) => {
+  test('the adversary is a pane too, and the worker env names its agent', async ($, on) => {
     const { seen } = setup(on, TMUX, { 'tmux split-window': { stdout: '%9\n' } })
-    const big = { run: 'k7f2ab', task: 'review the diff', header: '[agt run=k7f2ab size=large mode=review]' }
-    const r = await spawn($, { ...big, role: 'review', agent: 'code-reviewer' })
-    expect(r.result).toBe('Opened agt-k7f2ab-review · opus · high · tmux pane.')
+    const r = await spawn($, { run: 'k7f2ab', role: 'adv', task: 'break the filter', agent: 'adversary', header: '[agt run=k7f2ab size=small mode=build]' })
+    expect(r.result).toMatch(/^Opened agt-k7f2ab-adv · \w+ · \w+ · tmux pane\./)
     const split = seen.find((a) => a[1] === 'split-window')!
-    expect(split.slice(-8, -4)).toEqual(['--model', 'opus', '--effort', 'high'])
+    expect(split.some((x) => x.startsWith('AGENTILLE_WORKER=adversary:'))).toBe(true)
   })
 
-  test('a reviewer routed to sonnet, and the planning roles, are denied and open nothing', async ($, on) => {
+  test('reviewers, even on opus, and the planning roles are denied and open nothing', async ($, on) => {
     const { seen } = setup(on, TMUX, { 'tmux split-window': { stdout: '%9\n' } })
+    const big = await spawn($, { run: 'k7f2ab', role: 'review', task: 'review the diff', agent: 'code-reviewer', header: '[agt run=k7f2ab size=large mode=review]' })
+    expect(big.deny).toContain('code-reviewer runs as a subagent')
     const small = await spawn($, { run: 'k7f2ab', role: 'review', task: 'review the diff', agent: 'code-reviewer', header: '[agt run=k7f2ab size=small mode=review]' })
     expect(small.deny).toContain('subagent')
     const plan = await spawn($, { run: 'k7f2ab', role: 'plan', task: 'plan the work', agent: 'planner', header: '[agt run=k7f2ab size=large mode=build]' })
@@ -890,15 +742,14 @@ describe('pane tools: in the mod', () => {
     expect((await $.command.run({ command: 'agt-routing' })).text).toBe('executor → sonnet · medium')
   })
 
-  test('a forced fable security-reviewer runs on fable and records it', async ($, on) => {
+  test('a forced fable security-reviewer is refused as a pane and records nothing', async ($, on) => {
     const { seen } = setup(on, TMUX, { 'tmux split-window': { stdout: '%9\n' } })
     const sets: any[] = []
     on('store.set', async ($: any, e: any) => { sets.push(e); return { value: undefined } })
     const r = await spawn($, { run: 'k7f2ab', role: 'sec', task: 'audit the diff', agent: 'security-reviewer', header: '[agt run=k7f2ab size=large risk=auth mode=review fable=forced]' })
-    expect(r.result).toContain('fable · high')
-    const split = seen.find((a) => a[1] === 'split-window')!
-    expect(split.slice(-8, -4)).toEqual(['--model', 'fable', '--effort', 'high'])
-    expect(sets).toContainEqual(expect.objectContaining({ key: 'fable:k7f2ab', value: 1 }))
+    expect(r.deny).toContain('security-reviewer runs as a subagent')
+    expect(seen.some((a) => a[1] === 'split-window')).toBe(false)
+    expect(sets).toEqual([])
   })
 
   test('the routing record lands in routing.jsonl as a pane', async ($, on) => {
@@ -912,10 +763,9 @@ describe('pane tools: in the mod', () => {
     expect(w.text).toContain('"pane":"agt-k7f2ab-exec-1"')
   })
 
-  test('tmux layout: a narrow lead stacks down, the next worker splits beside the newest', async ($, on) => {
+  test('tmux layout: right of the lead first, then down from the newest worker, evened out', async ($, on) => {
     const rows = [['%1', '', 'claude', '0', '@1']]
     const { seen } = setup(on, TMUX, {
-      'tmux display-message': { stdout: '83\n' },
       'tmux split-window': { stdout: '%9\n' },
       'tmux list-panes': () => ({ stdout: rows.map((r) => r.join(T)).join('\n') + '\n' }),
     })
@@ -923,27 +773,13 @@ describe('pane tools: in the mod', () => {
     rows.push(['%9', 'agt-k7f2ab-exec-1', 'claude', '0', '@1'])
     await spawn($, { run: 'k7f2ab', role: 'exec-2', task: 'build two', ...EXEC })
     const splits = seen.filter((a) => a[1] === 'split-window')
-    expect(splits[0].slice(2, 3).concat(splits[0].slice(splits[0].indexOf('-t'), splits[0].indexOf('-t') + 2))).toEqual(['-d', '-t', '%1'])
-    expect(splits[0]).toContain('-v')
-    expect(splits[1]).toContain('-h')
-    expect(splits[1].slice(splits[1].indexOf('-t'), splits[1].indexOf('-t') + 2)).toEqual(['-t', '%9'])
-    expect(seen.some((a) => a.join(' ') === 'tmux select-layout -E -t %9')).toBe(true)
-  })
-
-  test('tmux layout: a wide lead splits right first, then down from the newest', async ($, on) => {
-    const rows = [['%1', '', 'claude', '0', '@1']]
-    const { seen } = setup(on, TMUX, {
-      'tmux display-message': { stdout: '200\n' },
-      'tmux split-window': { stdout: '%9\n' },
-      'tmux list-panes': () => ({ stdout: rows.map((r) => r.join(T)).join('\n') + '\n' }),
-    })
-    await spawn($, { run: 'k7f2ab', role: 'exec-1', task: 'build one', ...EXEC })
-    rows.push(['%9', 'agt-k7f2ab-exec-1', 'claude', '0', '@1'])
-    await spawn($, { run: 'k7f2ab', role: 'exec-2', task: 'build two', ...EXEC })
-    const splits = seen.filter((a) => a[1] === 'split-window')
+    const target = (a: string[]) => a.slice(a.indexOf('-t'), a.indexOf('-t') + 2)
     expect(splits[0]).toContain('-h')
+    expect(target(splits[0])).toEqual(['-t', '%1'])
     expect(splits[1]).toContain('-v')
-    expect(splits[1].slice(splits[1].indexOf('-t'), splits[1].indexOf('-t') + 2)).toEqual(['-t', '%9'])
+    expect(target(splits[1])).toEqual(['-t', '%9'])
+    expect(seen.some((a) => a.join(' ') === 'tmux select-layout -E -t %9')).toBe(true)
+    expect(seen.some((a) => a[1] === 'display-message')).toBe(false)
   })
 
   test('refusals open nothing: fable, a missing directory, no transport', async ($, on) => {
@@ -966,5 +802,55 @@ describe('pane tools: in the mod', () => {
     expect((await close($, 'agt-k7f2ab-spawn')).deny).toContain('typed /agt-spawn')
     expect((await close($, 'agt-k7f2ab-exec-2')).deny).toContain('No pane named')
     expect(seen.filter((a) => a[1] === 'kill-pane').length).toBe(1)
+  })
+})
+
+describe('herdr reaper', () => {
+  const agents = (state: string, gone: boolean) => JSON.stringify({ result: { agents: [
+    { name: 'lead', pane_id: 'w1:p1', agent: 'claude', agent_status: 'working', state_change_seq: 1, tab_id: 'w1:t1', workspace_id: 'w1' },
+    ...(gone ? [] : [{ name: 'agt-r9-executor', pane_id: 'w1:p2', agent: 'claude', agent_status: state, state_change_seq: 4, tab_id: 'w1:t1', workspace_id: 'w1' }]),
+  ] } })
+
+  // session.start polls once and starts the 5 s poll; `closed` collects `herdr pane close` ids
+  const lead = async ($: any, on: any, state: string) => {
+    const closed: string[] = []
+    on('env.get', async ($: any, e: any) => ({ value: ({ HERDR_ENV: '1', HERDR_PANE_ID: 'w1:p1', HOME: '/h' } as any)[e.name] }))
+    on('session.start', async ($: any, e: any) => ({ cwd: e.cwd }))
+    on('command.register', async () => ({ value: undefined }))
+    on('tool.register', async () => ({ value: undefined }))
+    on('ui.toast', async () => ({ value: undefined }))
+    on('fs.read', async () => ({ deny: 'no profile' }))
+    on('store.get', async () => ({ value: undefined }))
+    on('turn.start', async ($: any, e: any) => ({ turnId: e.turnId }))
+    on('turn.complete', async ($: any, e: any) => ({ text: e.answer }))
+    on('process.run', async ($: any, e: any) => {
+      const cmd = e.argv.join(' ')
+      if (cmd.startsWith('herdr pane close')) closed.push(e.argv[3])
+      return { value: { exitCode: 0, stdout: cmd.startsWith('herdr agent list') ? agents(state, closed.length > 0) : '', stderr: '' } }
+    })
+    const clock = mock.clock(on, { now: 1_000_000 })
+    await $.session.start({ cwd: '/w', surface: null, isInteractive: false })
+    return { closed, clock }
+  }
+  const begin = ($: any) => $.turn.start({ text: 'go', turnId: 't1' })
+  const end = ($: any) => $.turn.complete({ answer: 'ok', durationMs: 10, isAborted: false, turnId: 't1', reason: 'answer' })
+
+  test('idle reaps only between lead turns, done reaps at 90 s', async ($, on) => {
+    const idle = await lead($, on, 'idle')
+    await begin($)
+    await idle.clock.advance(400_000)
+    expect(idle.closed).toEqual([])
+    await end($)
+    await idle.clock.advance(10_000)
+    expect(idle.closed).toEqual(['w1:p2'])
+  })
+
+  test('a done pane is reaped at 90 s even while the lead works', async ($, on) => {
+    const done = await lead($, on, 'done')
+    await begin($)
+    await done.clock.advance(85_000)
+    expect(done.closed).toEqual([])
+    await done.clock.advance(10_000)
+    expect(done.closed).toEqual(['w1:p2'])
   })
 })

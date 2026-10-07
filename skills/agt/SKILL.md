@@ -75,5 +75,5 @@ Communicate: <deliveryStyle>, <tone>.
 - **At most 3 executors at once.** Batch the rest in waves.
 - **Executor is never Haiku**; Haiku only classifies (`routing.md` → "Hard rules"). Fable comes only from the ladder or `--fable`.
 - **Foreground when it gates.** A dispatch whose result feeds the next step uses `run_in_background: false`; background is only for parallel spawns.
-- **Mods off still works.** Nothing here depends on the mod; it only adds the live band, routing and raw reports.
+- **Mods off still works.** Nothing here depends on the mod; it only adds the switchboard, routing, the wire between panes and raw reports.
 - **Never close a pane you did not open.** The `agt-` prefix is ownership; a `/agt-spawn` pane is the user's.

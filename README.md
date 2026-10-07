@@ -55,20 +55,25 @@ Skip it for one-file edits, typos, renames and questions: a plain prompt is chea
 | `/agt --fable "task"` | The top model tier on judgment roles for one run |
 | `/agt --formation duel\|gauntlet\|relay "task"` | Two builds and a judge, an adversary pass, or a contract-first parallel build |
 | `/agt-spawn "task" [--model …]` | One extra routed Claude pane (Herdr or tmux), yours to keep |
+| `/agt-deck [auto\|off]` | A side pane with the run's cast, routing timeline, wire log and token bars · open it on every `/agt` · stop |
+| `/agt-tell <worker> <message>` | Message a worker pane over the wire |
 | `/agt-routing` · `/agt-ledger` | Routing decisions · tokens per role this session |
 | `/agt-highlight on\|all\|off` | Essentials card and lit paths on `/agt` replies · on every long reply · off |
 | `/agentille-project` · `/agentille-claude-md` | Seed a repo's CLAUDE.md · tune an existing one |
 
 ## How it decides
 
-- **Solo** for a small, one-sentence task. **Subagents** for sequential work. **Panes** (Herdr or tmux) only when 2+ slices can build at once; each worker pane shows a small mascot that says hi, walks while it works and waves bye. Subagents get the same mascot in the band above your prompt. The pick is always printed with a one-line reason.
+- **Solo** for a small, one-sentence task. **Subagents** for sequential work. **Panes** (Herdr or tmux) only when 2+ slices can build at once; each worker pane shows a small mascot that says hi, walks while it works and waves bye. The pick is always printed with a one-line reason.
+- **The switchboard**: a framed dispatch tree above your prompt, rooted at your session. Each subagent (`◇`) and pane session (`▣`) gets a row with its model pill, the tool it is running, elapsed time and tokens; `↑` marks an escalated route. Drawn by the mod, zero model tokens.
+- **The wire**: pane workers report to your session when they finish, so it wakes on its own; their live status reaches your band through a shared store.
+- **Best with Herdr**: workers are labeled in Herdr's sidebar and a row's `↗` jumps to its pane. tmux works with the same band; without a multiplexer you get the subagent tree.
 - **Routing**: planners and judgment reviewers on Opus, the executor on Sonnet (never Haiku), effort set per role by the bundled mod. Fable only after observed failures at Opus max, or when you type `--fable`.
 - **Review is a gate**: P0/P1 findings get fixed before the card says ✓.
 - **Squads**: in a saas, ecommerce, content or immersive repo, payments, SEO and performance specialists join the review when the diff touches their area.
 
 ## Requirements
 
-Claude Code 2.1.287+ for the mod (live band, routing, pane tools, mascot). Without it the skill still runs, with explicit models. No profile file needed.
+Claude Code 2.1.292+ for the mod (switchboard, routing, the wire, pane tools, deck). Without it the skill still runs, with explicit models. No profile file needed.
 
 ## Acknowledgments
 

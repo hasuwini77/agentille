@@ -15,7 +15,7 @@ recon: <mode> · <one-clause reason>   [agentille v<version>]
 
 ## Progress spine
 
-Before the first dispatch, seed TodoWrite with one todo per phase the roster actually has (e.g. plan · build · review · ship). Mark each in progress, then done, as it moves. That is the whole live view you write. With the mod loaded, a band above the prompt also shows every working agent and pane worker; you do nothing for it.
+Before the first dispatch, seed TodoWrite with one todo per phase the roster actually has (e.g. plan · build · review · ship). Mark each in progress, then done, as it moves. That is the whole live view you write. With the mod loaded, the switchboard above the prompt shows the dispatch tree (each subagent `◇` and pane session `▣`, its model, live tool, elapsed and tokens) and the newest wire message; `/agt-deck` opens a fuller view. You do nothing for either.
 
 ## Agent heads
 

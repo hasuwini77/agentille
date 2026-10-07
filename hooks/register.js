@@ -1,15 +1,18 @@
-// agentille mod — routing, the live band, squads, the pane reaper (herdr and tmux), the worker
-// mascot and focus. Policy and state live in routing.js / live.js / squads.js / mascot.js /
-// focus.js; this file observes events, applies decisions, and draws.
+// agentille mod — routing, the switchboard band, the wire between sessions, the /agt-deck pane,
+// squads, the pane reaper (herdr and tmux), the worker mascot and focus. Policy and state live in
+// routing.js / live.js / board.js / wire.js / squads.js / mascot.js / focus.js; this file
+// observes events, applies decisions, and draws.
 
 import { DEFAULTS, decide, formationOf, parseHeader, roleOf, verdictOf } from './routing.js'
-import { addUsage, effortBar, elapsed, endRoute, finish, isAgtPrompt, ledger, ledgerText, newAgent, paneAgents, panesLeft, reapable, short, stage, tokens, waving } from './live.js'
+import { addUsage, elapsed, endRoute, finish, isAgtPrompt, ledger, ledgerText, newAgent, paneAgents, panesLeft, reapable, short, stage, waving } from './live.js'
+import { ACCENT, FRAME_COLOR, WIRE_COLOR, boardRows, cast, castColumns, chip, colorOf, header, leadLine, routingLines, tokenBars, toolLabel, wireLines, wireRow } from './board.js'
+import { PUBLISH_MS, doneMessage, freshStatus, logWire, parseTellArgs, parseWire, shortName, statusKey, validLead, wireEnv, workerStatus } from './wire.js'
 import { activeSquads, allPaths, depsOf, injection } from './squads.js'
-import { BYE_MS, HELLO_MS, MASCOT_COLOR, MODEL_COLOR, agentMood, bandMascots, caption, frame, modelKey, moodAt, parseWorker } from './mascot.js'
+import { BYE_MS, HELLO_MS, MASCOT_COLOR, MODEL_COLOR, agentMood, caption, frame, modelKey, moodAt, parseWorker } from './mascot.js'
 import { MARK, SPAN_COLOR, highlight, highlightText, litFor, parseHighlightArgs, spans } from './highlight.js'
 import { flagOf, focusText, paneFlags, parseFocusArgs } from './focus.js'
 import {
-  CLOSE_TOOL, HERDR_START_TIMEOUT, PROBE, SPAWN_TOOL, closeTarget, spawnToolInput, SAFE_RUN, SPAWN_ROLE, TMUX_LIST_ARGV, doneFile, herdrCloseArgv, herdrPaneIdOf, herdrPromptArgv, herdrSplitArgv, herdrStartArgv,
+  CLOSE_TOOL, HERDR_START_TIMEOUT, PROBE, SPAWN_TOOL, closeTarget, focusArgv, herdrMetaArgv, spawnToolInput, SAFE_RUN, SPAWN_ROLE, TMUX_LIST_ARGV, doneFile, herdrCloseArgv, herdrPaneIdOf, herdrPromptArgv, herdrSplitArgv, herdrStartArgv,
   isFreshDone, isLead, newRunId, paneName, paneRole, parseSpawnArgs, parseTmuxList, pickTransport, quietSpawn, reapPool, scopeRows, splitName, splitPlan, tmuxEvenArgv, tmuxKillArgv, tmuxPaneAgents, tmuxPaneIdOf,
   tmuxSplitArgv, tmuxTagArgvs, transportBlock,
 } from './panes.js'
@@ -49,6 +52,16 @@ const mascot = { greeted: false, hiUntil: 0, byeUntil: 0, working: false, start:
 let highlightOn = true       // /agt replies get an essentials card and lit tokens
 let highlightAll = false     // …and so does every other long reply (/agt-highlight all)
 const litMemo = new Map()    // message id → was it an /agt turn when first drawn
+let sessionId = null         // this session's id: workers it opens send their results here
+let leadModel = null         // the main loop's model, for the tree's root
+const wireLog = []           // [{ from, to, kind, summary, at }] messages between sessions, newest last
+const wireStatus = new Map() // pane name → what its worker last published (wire.js workerStatus)
+let wireName = null          // worker: its own agt- name (AGENTILLE_NAME), where it publishes
+let leadSession = null       // worker: the lead's session id (AGENTILLE_LEAD), where it reports
+const pub = { state: 'starting', tool: null, tok: 0, model: null, effort: null, start: null, at: 0 } // worker's published status
+let lastMeta = ''            // worker: the last Herdr sidebar title it reported
+let deckAuto = false         // /agt-deck auto: the deck opens on every typed /agt
+const DECK = 'agt-deck'
 const FLAG_TTL_MS = 30 * 60_000
 const FOCUS_COLOR = { next: '#3fb950', flag: '#f85149' }
 
@@ -174,7 +187,7 @@ async function openPane($, t, o) {
     if (!lead) throw new Error('TMUX_PANE is not set')
     const target = o.split?.target ?? lead
     const shell = (await $.env.get('SHELL')) ?? ''
-    const id = tmuxPaneIdOf((await runOk($, tmuxSplitArgv({ ...o, target, shell, direction: o.split?.direction }), PROBE)).stdout)
+    const id = tmuxPaneIdOf((await runOk($, tmuxSplitArgv({ ...o, target, shell, direction: o.split?.direction, env: wireEnv({ name: o.name, lead: sessionId }) }), PROBE)).stdout)
     if (!id) throw new Error('tmux gave no pane id')
     try {
       for (const argv of tmuxTagArgvs(id, o.name)) await runOk($, argv, PROBE)
@@ -189,7 +202,7 @@ async function openPane($, t, o) {
   const lead = await $.env.get('HERDR_PANE_ID')
   if (!lead) throw new Error('HERDR_PANE_ID is not set')
   const pane = o.split?.target ?? lead
-  const id = herdrPaneIdOf((await runOk($, herdrSplitArgv({ pane, cwd: o.cwd, run: o.run, direction: o.split?.direction, agent: o.agent, model: o.model, effort: o.effort }), PROBE)).stdout)
+  const id = herdrPaneIdOf((await runOk($, herdrSplitArgv({ pane, cwd: o.cwd, run: o.run, direction: o.split?.direction, agent: o.agent, model: o.model, effort: o.effort, env: wireEnv({ name: o.name, lead: sessionId }) }), PROBE)).stdout)
   if (!id) throw new Error('herdr gave no pane id')
   try {
     await runOk($, herdrStartArgv({ name: o.name, pane: id, model: o.model, effort: o.effort, agent: o.agent }), HERDR_START_TIMEOUT)
@@ -198,6 +211,9 @@ async function openPane($, t, o) {
     await $.process.run(herdrCloseArgv(id), PROBE).catch(() => {})
     throw err
   }
+  // Herdr's sidebar names the worker by role and route; cosmetic, so a failure is ignored.
+  const meta = herdrMetaArgv(id, { display: '▣ ' + shortName(o.name) + ' · ' + o.model })
+  if (meta) await $.process.run(meta, PROBE).catch(() => {})
   return id
 }
 
@@ -283,11 +299,12 @@ const animating = (now) => (!!worker && moodAt({ ...mascot, now }) !== 'idle') |
 
 function ensureTicker($) {
   if (tickTimer) return
-  tickTimer = $.clock.every(600, async () => {
+  tickTimer = $.clock.every(300, async () => {
     if (!working() && !animating(await $.clock.now())) {
       tickTimer?.cancel()
       tickTimer = null
-    } else tick ^= 1
+    } else tick += 1
+    if (panes.length && tick % 3 === 0) await readWire($)
     $.ui.invalidate('ui.render')
   })
 }
@@ -327,59 +344,94 @@ function cardBox(els, items) {
 
 const focusRow = (els, text) => els.Text({ color: FOCUS_COLOR.flag, wrap: 'truncate', children: ['⚑ ' + text] })
 
-// ── drawing helpers (take resolved elements, never $) ─────────────────────────
+// ── the wire (worker side publishes and reports; lead side reads) ─────────────
 
-function modelText(Text, a) {
-  if (a.kind === 'pane' && !a.model) return Text({ color: hex(MODEL_COLOR.other), children: [(a.vendor + ' pane').padEnd(15)] })
-  const m = short(a.model)
-  const label = (m === 'other' ? shortType(a.model).slice(0, 6) : m) + ' ' + effortBar(a.effort) + ' ' + (a.effort ?? '')
-  return Text({ color: hex(MODEL_COLOR[modelKey(a.model)]), children: [label.padEnd(15)] })
+// Worker: what it is doing, into the shared store, at most once per PUBLISH_MS unless forced.
+async function publish($, force = false) {
+  if (!wireName) return
+  const now = Date.now()
+  if (!force && now - pub.at < PUBLISH_MS) return
+  pub.at = now
+  await $.store.set(statusKey(wireName), workerStatus({ name: wireName, session: sessionId, ...pub, now })).catch(() => {})
+  if (transport !== 'herdr') return
+  // Herdr's sidebar follows the worker: its route, then what it is doing. Changes only.
+  const title = pub.state === 'done' ? '✓ done ' + elapsed(pub.ms ?? 0) : pub.tool ?? pub.state
+  if (title === lastMeta) return
+  lastMeta = title
+  const pane = await $.env.get('HERDR_PANE_ID')
+  const argv = pane && herdrMetaArgv(pane, { display: '▣ ' + shortName(wireName) + ' · ' + (worker?.model ?? short(pub.model)), title })
+  if (argv) await $.process.run(argv, PROBE).catch(() => {})
 }
 
-function stateText(a, now) {
-  if (a.kind === 'pane') return a.state === 'working' && a.start ? ('working ' + elapsed(now - a.start).padStart(5)) : a.state.padEnd(13)
-  const t = elapsed((a.end ?? now) - a.start)
-  return (a.state === 'working' ? 'working ' : 'done    ') + t.padStart(5)
+// Worker: a finished turn saves the full answer under the run and messages the lead its head,
+// so the lead wakes on its own and never scrapes the pane.
+async function reportDone($, answer) {
+  const n = splitName(wireName)
+  let reportPath = null
+  if (n && answer && home) {
+    await writeRunFile($, n.run, 'agents/pane-' + n.role + '.md', answer)
+    reportPath = home + '/.agentille/state/run-' + n.run + '/agents/pane-' + n.role + '.md'
+  }
+  if (!leadSession) return
+  const text = doneMessage({ name: wireName, ms: pub.ms ?? 0, model: worker?.model ?? short(pub.model), effort: worker?.effort || pub.effort, tok: pub.tok, answer, reportPath })
+  const r = await $.session.send({ to: { sessionId: leadSession }, text }).catch((err) => ({ isDelivered: false, reason: String(err?.message ?? err) }))
+  if (r.isDelivered) logWire(wireLog, { from: shortName(wireName), to: 'lead', kind: 'done', summary: 'reported to the lead', at: Date.now() })
+  else $.ui.toast('agt wire: the lead did not get the result (' + String(r.reason).slice(0, 80) + ')')
 }
 
-function row(els, a, now) {
+// Lead: what each visible worker last published.
+async function readWire($) {
+  const now = Date.now()
+  for (const p of panes) {
+    const rec = await $.store.get(statusKey(p.name)).catch(() => null)
+    if (freshStatus(rec, p.name, now)) wireStatus.set(p.name, rec)
+  }
+  for (const k of [...wireStatus.keys()]) if (!panes.some((p) => p.name === k)) wireStatus.delete(k)
+}
+
+// ── drawing (takes resolved elements, never $) ────────────────────────────────
+
+const INK = '#14161c'
+
+function boardHeader(els, h) {
   const { Box, Text } = els
-  const working = a.state === 'working'
-  const glyph = a.kind === 'pane' ? '▣' : working ? '●' : '✓'
-  const color = hex(MODEL_COLOR[modelKey(a.model)])
-  const kids = [
-    Text({ color, children: [glyph] }),
-    Text({ dimColor: !working, children: [a.role.slice(0, 18).padEnd(18)] }),
-    modelText(Text, a),
-    Text({ dimColor: !working, children: [stateText(a, now)] }),
-    Text({ dimColor: true, children: [a.kind === 'pane' ? '' : tokens(a.input + a.output).padStart(7)] }),
-  ]
-  if (a.reason && a.reason !== 'table') kids.push(Text({ color: hex(MODEL_COLOR.fable), children: ['↑ ' + a.reason] }))
+  return Box({
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    children: [
+      Text({ wrap: 'truncate', children: [Text({ color: hex(ACCENT), children: ['◆ agentille'] }), Text({ dimColor: true, children: ['  ' + h.left] })] }),
+      Text({ dimColor: true, children: [h.right] }),
+    ],
+  })
+}
+
+function leadRow(els, l) {
+  const { Text } = els
+  return Text({ wrap: 'truncate', children: [Text({ color: l.color, children: ['◉ '] }), l.text, Text({ dimColor: true, children: ['  ' + l.state] })] })
+}
+
+// One agent: tree · kind glyph · role · transport · model pill · effort · spinner + what it does ·
+// elapsed · tokens, and a ↗ that jumps to a pane worker.
+function boardRow(els, r, onFocus) {
+  const { Box, Text, Button } = els
+  const kids = [Text({ dimColor: true, children: [r.tree] }), Text({ color: r.glyphColor, children: [r.glyph] }), Text({ dimColor: r.dim, children: [r.role] })]
+  if (r.kind) kids.push(Text({ dimColor: true, children: [r.kind] }))
+  kids.push(r.dim ? Text({ color: r.chipColor, dimColor: true, children: [r.chip] }) : Text({ color: INK, backgroundColor: r.chipColor, children: [r.chip] }))
+  kids.push(Text({ color: colorOf('fable'), children: [r.escalated ? '↑' : ' '] }))
+  if (r.effort) kids.push(Text({ dimColor: true, children: [r.effort] }))
+  kids.push(Box({ flexGrow: 1, flexShrink: 1, children: [Text({ wrap: 'truncate', dimColor: r.dim, children: [Text({ color: r.glyphColor, children: [r.spinner + ' '] }), r.activity] })] }))
+  kids.push(Text({ dimColor: true, children: [r.time] }))
+  if (r.tok) kids.push(Text({ dimColor: true, children: [r.tok] }))
+  if (onFocus) kids.push(Button({ label: '↗', plain: true, dimColor: true, onPress: onFocus }))
   return Box({ flexDirection: 'row', columnGap: 1, children: kids })
 }
 
-// A subagent's row in the lead's band with its mascot: three rows, the text row beside the body.
-const GREETING = { hi: '  hi!', bye: '  bye!' }
-function mascotRow(els, a, now) {
-  const { Box, Text } = els
-  const mood = agentMood(a, now)
-  const [head, body, legs] = frame(mood, tick, a.role)
-  const orange = hex(MASCOT_COLOR)
-  return [
-    Text({ color: orange, children: [head + (GREETING[mood] ?? '')] }),
-    Box({ flexDirection: 'row', children: [Text({ color: orange, children: [body.padEnd(13)] }), row(els, a, now)] }),
-    Text({ color: orange, children: [legs] }),
-  ]
+function wireLine(els, w) {
+  const { Text } = els
+  return Text({ wrap: 'truncate', children: [Text({ color: hex(WIRE_COLOR), children: ['⇄ ' + w.arrow + '  '] }), w.text, Text({ dimColor: true, children: ['  ' + w.ago] })] })
 }
 
-function header(els, tally) {
-  const { Text } = els
-  const parts = ['agentille', 'run ' + lastRun, tally.working + ' working', tally.done + ' done', tokens(tally.tok) + ' tok']
-  const formation = runs.get(lastRun)?.formation
-  if (formation) parts.splice(2, 0, formation)
-  if (squads.length) parts.push('squads: ' + squads.map((q) => q.name).join('+'))
-  return Text({ dimColor: true, children: [parts.join(' · ')] })
-}
+const rule = (els, label) => els.Text({ dimColor: true, children: ['── ' + label + ' ' + '─'.repeat(Math.max(0, 40 - label.length))] })
 
 // A worker's own band: the mascot's three rows over a caption, or the caption alone when the
 // band is short, off a terminal, or nothing is animating.
@@ -389,7 +441,7 @@ function workerBand(els, e, now) {
   const cap = caption({ mood, ...worker, ms: mood === 'working' ? now - mascot.start : mascot.ms })
   const capText = Text({ color: hex(MODEL_COLOR[modelKey(worker.model)]), wrap: 'truncate', children: [cap] })
   if (mood === 'idle' || e.surface !== 'terminal' || (e.props.maxRows ?? 0) < 5) return [capText]
-  const [head, body, legs] = frame(mood, tick, worker.agent)
+  const [head, body, legs] = frame(mood, tick >> 1, worker.agent)
   const orange = hex(MASCOT_COLOR)
   return [Text({ color: orange, children: [head] }), Text({ color: orange, children: [body] }), Box({ flexDirection: 'row', children: [Text({ color: orange, children: [legs + '   '] }), capText] })]
 }
@@ -400,6 +452,13 @@ export function register(on) {
     await loadSquads($)
     transport = await detectTransport($)
     worker = parseWorker(await $.env.get('AGENTILLE_WORKER'))
+    sessionId = validLead(await $.session.id().catch(() => null))
+    wireName = /^agt-[A-Za-z0-9_-]+$/.test((await $.env.get('AGENTILLE_NAME')) ?? '') ? await $.env.get('AGENTILLE_NAME') : null
+    leadSession = wireName ? validLead(await $.env.get('AGENTILLE_LEAD')) : null
+    if (worker) { pub.model = worker.model; pub.effort = worker.effort || null }
+    deckAuto = (await $.store.get('deck:auto')) === true
+    await $.command.register({ name: 'agt-deck', description: 'Open the agentille deck: the cast, routing timeline, wire log and tokens. auto = open on every /agt · off', argumentHint: '[auto|off]', immediate: true })
+    await $.command.register({ name: 'agt-tell', description: 'Send a message to a worker pane over the wire', argumentHint: '<worker> <message>', immediate: true })
     await $.command.register({ name: 'agt-routing', description: 'Show the model + effort agentille picked for each agent this session', immediate: true })
     await $.command.register({ name: 'agt-spawn', description: 'Open a routed claude pane beside this one (Herdr or tmux); it is never reaped', argumentHint: '"task" [--model sonnet|opus|haiku|fable]' })
     await $.command.register({ name: 'agt-ledger', description: 'Tokens per agent role for the latest agentille run', immediate: true })
@@ -420,7 +479,39 @@ export function register(on) {
       }
     }
     if (working()) ensureTicker($)
+    if (wireName) await publish($, true)
     return next(e)
+  })
+
+  on('command.run', { command: 'agt-deck' }, async ($, e) => {
+    const a = String(e.args ?? '').trim().toLowerCase()
+    if (a && a !== 'auto' && a !== 'off') return { text: 'Usage: /agt-deck [auto|off]' }
+    if (a) {
+      deckAuto = a === 'auto'
+      await $.store.set('deck:auto', deckAuto)
+      if (!deckAuto) return { text: 'deck: opens only when you type /agt-deck' }
+    }
+    await $.ui.open({ id: DECK, title: 'agentille' })
+    return { text: 'deck open' + (deckAuto ? ' · opens on every /agt (/agt-deck off to stop)' : '') }
+  })
+
+  // Typed only. The worker gets it as a peer message over the wire; a Herdr worker without the
+  // mod still gets it as a prompt.
+  on('command.run', { command: 'agt-tell' }, async ($, e) => {
+    if (!['composer', 'bridge'].includes(e.origin?.kind)) return { text: '/agt-tell runs only when typed.' }
+    const t = await transportOf($)
+    if (t !== 'none') await pollNow($, t)
+    const a = parseTellArgs(e.args, panes)
+    if (a.usage || a.error) return { text: a.usage ?? a.error }
+    const rec = await $.store.get(statusKey(a.name)).catch(() => null)
+    const sid = freshStatus(rec, a.name, Date.now()) ? validLead(rec.session) : null
+    let sent = false
+    if (sid) sent = (await $.session.send({ to: { sessionId: sid }, text: '[agt wire] lead note · ' + a.text }).catch(() => ({ isDelivered: false }))).isDelivered
+    if (!sent && t === 'herdr') sent = (await $.process.run(herdrPromptArgv(a.name, a.text), PROBE).catch(() => null))?.exitCode === 0
+    if (!sent) return { text: 'Could not reach ' + a.name + '.' }
+    logWire(wireLog, { from: 'lead', to: shortName(a.name), kind: 'note', summary: a.text, at: Date.now() })
+    $.ui.invalidate('ui.render')
+    return { text: '⇄ sent to ' + a.name }
   })
 
   on('command.run', { command: 'agt-routing' }, async () => {
@@ -541,6 +632,7 @@ export function register(on) {
     if (k !== undefined && k !== 'composer' && k !== 'bridge') return next(e)
     agtTurn = isAgtPrompt(e.text)
     if (agtTurn) flags = []   // a new run starts with a clean slate
+    if (agtTurn && deckAuto) void $.ui.open({ id: DECK, title: 'agentille' })
     return next(e)
   })
 
@@ -550,6 +642,32 @@ export function register(on) {
     const t = await transportOf($)
     if (t !== 'none') ensurePolling($)
     return next({ ...e, text: e.text + squadBlock + transportBlock(t, paneTools && !selfName) })
+  })
+
+  // Worker results arrive as peer messages: log them for the band and the deck, then let the
+  // model read them (that delivery is what wakes the lead).
+  on('session.receive', async ($, e, next) => {
+    const w = parseWire(e.text)
+    if (w) {
+      const from = shortName(w.from)
+      logWire(wireLog, { from, to: wireName ? shortName(wireName) : 'lead', kind: w.kind, summary: w.summary, at: Date.now() })
+      $.ui.toast('⇄ ' + from + ' ' + w.kind)
+      $.ui.invalidate('ui.render')
+    }
+    return next(e)
+  })
+
+  // What each agent is doing right now, for its band row: a subagent's call carries its agentId;
+  // a worker pane's own main loop publishes for its lead. Observe only.
+  on('tool.call', async ($, e, next) => {
+    if (e.agentId) {
+      const a = live.get(e.agentId)
+      if (a) a.tool = toolLabel(e.tool, e)
+    } else if (wireName) {
+      pub.tool = toolLabel(e.tool, e)
+      await publish($)
+    }
+    return next(e)
   })
 
   on('session.measure', async ($, e, next) => {
@@ -601,7 +719,14 @@ export function register(on) {
 
   on('turn.step', async function* ($, e, next) {
     const a = e.agentId ? live.get(e.agentId) : undefined
+    if (!e.agentId) leadModel = e.model
     const result = yield* next(a && a.routed ? { ...e, effort: a.effort } : e)
+    if (!e.agentId && wireName && result?.usage) {
+      const u = result.usage
+      pub.tok += (u.input_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0) + (u.output_tokens ?? 0)
+      pub.model = e.model
+      await publish($)
+    }
     if (a) {
       if (!a.effort && e.effort) a.effort = String(e.effort)
       addUsage(a, result?.usage)
@@ -626,6 +751,10 @@ export function register(on) {
       ensureTicker($)
       $.ui.invalidate('ui.render')
     }
+    if (wireName) {
+      Object.assign(pub, { state: 'working', tool: null, start: Date.now(), ms: null })
+      await publish($, true)
+    }
     return next(e)
   })
 
@@ -640,7 +769,13 @@ export function register(on) {
       ensureTicker($)
       $.ui.invalidate('ui.render')
     }
+    if (!e.agentId && wireName && pub.state === 'working') {
+      Object.assign(pub, { state: 'done', tool: null, ms: Date.now() - (pub.start ?? Date.now()) })
+      await publish($, true)
+      if (e.reason === 'answer') await reportDone($, e.answer)
+    }
     if (a) {
+      a.tool = null
       if (a.routed) addFlag($, flagOf(a.role, e.answer))
       if (a.role === 'plan-reviewer' && verdictOf(e.answer) === 'REVISE') runState(a.run).revise += 1
       if (a.input + a.output === 0) addUsage(a, e.usage)
@@ -653,29 +788,75 @@ export function register(on) {
     return next(e)
   })
 
-  // The band above the prompt: one row per agent of the latest run, plus herdr panes.
+  // The switchboard above the prompt: a framed dispatch tree rooted at the lead, one row per
+  // subagent (◇) and pane session (▣), the newest wire message, and any agent flags.
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     const now = Date.now()
-    const { rows, tally } = stage({ agents: live, panes, routes: paneRoutes, run: lastRun, now })
+    const staged = stage({ agents: live, panes, routes: paneRoutes, run: lastRun, now })
     const focus = focusLines(now)
-    if (rows.length === 0 && !selfName && !worker && focus.length === 0) return next(e)
+    const wire = wireRow(wireLog, now)
+    if (staged.rows.length === 0 && !selfName && !worker && focus.length === 0 && !wire) return next(e)
     const els = $.ui.resolve(e)
-    const max = Math.max(2, Math.min(8, (e.props.maxRows ?? 8) - 2 - focus.length))
     const kids = focus.map((l) => focusRow(els, l))
     if (worker) kids.push(...workerBand(els, e, await $.clock.now()))
     else if (selfName) kids.push(els.Text({ color: hex(MODEL_COLOR.opus), children: ['agentille worker · ' + selfName] }))
-    if (rows.length) {
-      kids.push(header(els, tally))
-      const room = (e.props.maxRows ?? 8) - 2 - focus.length - (worker || selfName ? 1 : 0)
-      if (e.surface === 'terminal' && bandMascots(rows, room)) {
-        for (const a of rows) kids.push(...(a.kind === 'sub' ? mascotRow(els, a, now) : [row(els, a, now)]))
-      } else {
-        for (const a of rows.slice(0, max)) kids.push(row(els, a, now))
-        if (rows.length > max) kids.push(els.Text({ dimColor: true, children: ['+' + (rows.length - max) + ' more'] }))
-      }
-    }
     const theirs = await next(e)
-    return els.Box({ flexDirection: 'column', children: [...kids, theirs] })
+    if (staged.rows.length === 0 && !wire) return els.Box({ flexDirection: 'column', children: [...kids, theirs] })
+
+    const rows = cast(staged, live, lastRun)
+    const cols = (e.props.bodyColumns ?? 80) - 4
+    const view = boardRows(rows, { now, tick, cols, wire: wireStatus, transport })
+    const room = Math.max(1, (e.props.maxRows ?? 10) - 4 - kids.length - (wire ? 1 : 0))
+    const waiting = rows.filter((r) => r.state === 'working').length
+    const inner = [boardHeader(els, header({ run: lastRun, formation: runs.get(lastRun)?.formation, squads: squads.map((q) => q.name), rows, tally: staged.tally }))]
+    if (rows.length) inner.push(leadRow(els, leadLine({ model: leadModel, busy: e.props.isWorking, waiting })))
+    for (const r of view.slice(0, room)) {
+      const argv = r.pane ? focusArgv(transport, rows.find((x) => x.id === r.id)) : null
+      inner.push(boardRow(els, r, argv ? () => { $.process.run(argv, PROBE).catch(() => {}) } : null))
+    }
+    if (view.length > room) inner.push(els.Text({ dimColor: true, children: ['   +' + (view.length - room) + ' more · /agt-deck'] }))
+    if (wire) inner.push(wireLine(els, wire))
+    const board = els.Box({ flexDirection: 'column', borderStyle: 'round', borderColor: hex(FRAME_COLOR), paddingX: 1, children: inner })
+    return els.Box({ flexDirection: 'column', children: [...kids, board, theirs] })
+  })
+
+  // The deck: the whole run at a glance, drawn only while the person keeps it open.
+  on('ui.render', { component: 'Pane', requestId: DECK }, async ($, e) => {
+    const els = $.ui.resolve(e)
+    const { Box, Text } = els
+    const now = Date.now()
+    const staged = stage({ agents: live, panes, routes: paneRoutes, run: lastRun, now })
+    const rows = cast({ rows: [...staged.rows, ...[...live.values()].filter((a) => a.run === lastRun && !staged.rows.includes(a))], tally: { working: 0 } }, live, lastRun)
+    const cols = e.props.bodyColumns ?? 80
+    const kids = [boardHeader(els, header({ run: lastRun, formation: runs.get(lastRun)?.formation, squads: squads.map((q) => q.name), rows, tally: staged.tally }))]
+    if (rows.length === 0 && decisions.length === 0 && wireLog.length === 0) {
+      kids.push(Text({ dimColor: true, children: ['No agents yet. Type /agt "task": every dispatch shows up here.'] }))
+      return Box({ flexDirection: 'column', children: kids })
+    }
+    if (rows.length) {
+      kids.push(rule(els, 'cast'))
+      const c = castColumns(rows, { cols, tick: tick >> 1, frameOf: frame, moodOf: (r) => (r.kind === 'sub' ? agentMood(r, now) : r.state === 'working' ? 'working' : 'bye') })
+      const orange = hex(MASCOT_COLOR)
+      const line = (pick) => Box({ flexDirection: 'row', children: c.cells.map(pick) })
+      for (const i of [0, 1, 2]) kids.push(line((m) => Text({ color: orange, dimColor: m.dim, children: [m.lines[i]] })))
+      kids.push(line((m) => Text({ dimColor: m.dim, children: [(m.glyph + ' ' + m.role).padEnd(14)] })))
+      kids.push(line((m) => Box({ width: 14, children: [m.model ? Text({ color: INK, backgroundColor: colorOf(m.model), children: [chip(m.model)] }) : Text({ dimColor: true, children: ['pane'] })] })))
+      if (c.more > 0) kids.push(Text({ dimColor: true, children: ['+' + c.more + ' more'] }))
+    }
+    if (decisions.length) {
+      kids.push(rule(els, 'routing'))
+      for (const d of routingLines(decisions)) kids.push(Text({ wrap: 'truncate', children: [Text({ dimColor: true, children: [d.at + '  '] }), d.who + '  ', Text({ color: d.color, children: [d.route] }), Text({ color: d.escalated ? colorOf('fable') : undefined, dimColor: !d.escalated, children: [d.reason] })] }))
+    }
+    if (wireLog.length) {
+      kids.push(rule(els, 'wire'))
+      for (const w of wireLines(wireLog)) kids.push(Text({ wrap: 'truncate', children: [Text({ dimColor: true, children: [w.at + '  '] }), Text({ color: hex(WIRE_COLOR), children: [w.arrow + ' '] }), Text({ dimColor: true, children: [w.kind + ' '] }), w.text] }))
+    }
+    const bars = tokenBars(ledger(live, lastRun, paneRoutes), Math.max(8, Math.min(30, cols - 30)))
+    if (bars.length) {
+      kids.push(rule(els, 'tokens'))
+      for (const b of bars) kids.push(Text({ children: [b.name + ' ', Text({ color: hex(ACCENT), children: [b.bar] }), Text({ dimColor: true, children: [' ' + b.tok] })] }))
+    }
+    return Box({ flexDirection: 'column', children: kids })
   })
 
   // A long /agt reply: an essentials card on top, the body dim with its tokens lit. The
@@ -690,10 +871,12 @@ export function register(on) {
     return els.Box({ flexDirection: 'column', children: h.card.length ? [cardBox(els, h.card), body] : [body] })
   })
 
-  // Main-session spinner: how many agents are working behind it.
+  // Main-session spinner: how many subagents (◇) and pane sessions (▣) work behind it.
   on('ui.render', { component: 'Spinner' }, async ($, e, next) => {
-    const n = [...live.values()].filter((a) => a.state === 'working').length + panes.filter((p) => p.state === 'working').length
-    if (n === 0) return next(e)
-    return next({ ...e, props: { ...e.props, suffix: ' · ' + n + ' agent' + (n > 1 ? 's' : '') + ' working…' } })
+    const subs = [...live.values()].filter((a) => a.state === 'working').length
+    const sessions = panes.filter((p) => p.state === 'working').length
+    if (subs + sessions === 0) return next(e)
+    const parts = [subs ? '◇' + subs : '', sessions ? '▣' + sessions : ''].filter(Boolean).join(' ')
+    return next({ ...e, props: { ...e.props, suffix: ' · ' + parts + ' working' } })
   })
 }

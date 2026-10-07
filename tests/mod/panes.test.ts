@@ -864,11 +864,40 @@ describe('switchboard pane helpers', () => {
     expect(h[h.length - 1]).toBe('--no-focus')
     const t = tsplit2({ target: '%1', cwd: '/r', run: 'r1', shell: '/bin/sh', model: 'sonnet', name: 'agt-r1-exec-1', task: 'do it', env: ['AGENTILLE_LEAD=s1'] })
     expect(t).toContain('AGENTILLE_LEAD=s1')
-    expect(herdrMetaArgv('w:p2', { display: '▣ exec-1 · sonnet' })).toEqual(['herdr', 'pane', 'report-metadata', '--source', 'agentille', '--display-agent', '▣ exec-1 · sonnet', 'w:p2'])
+    expect(herdrMetaArgv('w:p2', { display: '▣ exec-1 · sonnet' })).toEqual(['herdr', 'pane', 'report-metadata', 'w:p2', '--source', 'agentille', '--display-agent', '▣ exec-1 · sonnet'])
     expect(herdrMetaArgv('w:p2', {})).toBe(null)
     expect(focusArgv('herdr', { name: 'agt-r1-exec-1' })).toEqual(['herdr', 'agent', 'focus', 'agt-r1-exec-1'])
     expect(focusArgv('tmux', { id: '%4' })).toEqual(['tmux', 'select-pane', '-t', '%4'])
     expect(focusArgv('tmux', { id: 'bad' })).toBe(null)
     expect(focusArgv('none', { name: 'x' })).toBe(null)
+  })
+})
+
+describe('herdr start race', () => {
+  test('a pane still busy with its shell start is retried, then the worker starts', async ($, on) => {
+    const seen: string[][] = []
+    let busy = 2
+    on('env.get', async ($: any, e: any) => ({ value: ({ HERDR_ENV: '1', HERDR_PANE_ID: 'w1:p1', HOME: '/h' } as any)[e.name] }))
+    on('session.start', async ($: any, e: any) => ({ cwd: e.cwd }))
+    on('session.cwd', async () => ({ value: '/w' }))
+    on('command.register', async () => ({ value: undefined }))
+    on('fs.read', async () => ({ deny: 'no profile' }))
+    on('store.get', async () => ({ value: undefined }))
+    on('process.run', async ($: any, e: any) => {
+      seen.push(e.argv)
+      const cmd = e.argv.slice(0, 3).join(' ')
+      if (cmd === 'herdr pane split') return { value: { exitCode: 0, stdout: JSON.stringify({ result: { pane: { pane_id: 'w1:p5' } } }), stderr: '' } }
+      if (cmd === 'herdr agent start' && busy-- > 0) return { value: { exitCode: 1, stdout: '', stderr: '{"error":{"code":"agent_pane_busy"}}' } }
+      if (cmd === 'herdr agent list') return { value: { exitCode: 0, stdout: JSON.stringify({ result: { agents: [] } }), stderr: '' } }
+      return { value: { exitCode: 0, stdout: '', stderr: '' } }
+    })
+    const clock = mock.clock(on, { now: 1_000_000 })
+    await $.session.start({ cwd: '/w', surface: null, isInteractive: false })
+    const pending = $.command.run({ command: 'agt-spawn', args: '"do the thing"', origin: { kind: 'composer' } } as never)
+    for (let i = 0; i < 4; i++) await clock.advance(500)
+    const r = await pending
+    expect(r.text).toMatch(/^Opened agt-[a-z0-9]{6}-spawn · sonnet · herdr pane\.$/)
+    expect(seen.filter((a) => a.slice(0, 3).join(' ') === 'herdr agent start').length).toBe(3)
+    expect(seen.some((a) => a[1] === 'pane' && a[2] === 'close')).toBe(false)
   })
 })

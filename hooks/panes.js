@@ -205,10 +205,11 @@ export const herdrCloseArgv = (id) => ['herdr', 'pane', 'close', id]
 
 // Herdr's sidebar label for a worker pane (display-only; a failure changes nothing).
 export function herdrMetaArgv(pane, { display = null, title = null } = {}) {
-  const argv = ['herdr', 'pane', 'report-metadata', '--source', 'agentille']
+  // herdr reads the pane id before the options
+  const argv = ['herdr', 'pane', 'report-metadata', pane, '--source', 'agentille']
   if (display) argv.push('--display-agent', String(display).slice(0, 48))
   if (title) argv.push('--title', String(title).slice(0, 64))
-  return argv.length > 5 ? [...argv, pane] : null
+  return argv.length > 6 ? argv : null
 }
 
 // Jump to a worker from its band row: Herdr focuses the agent by name, tmux selects the pane.

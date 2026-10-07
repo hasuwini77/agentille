@@ -174,7 +174,7 @@ async function pollHerdr($) {
 
 async function runOk($, argv, init) {
   const r = await $.process.run(argv, init)
-  if (r.exitCode !== 0) throw new Error(argv.slice(0, 3).join(' ') + ' exited ' + r.exitCode)
+  if (r.exitCode !== 0) throw new Error(argv.slice(0, 3).join(' ') + ' exited ' + r.exitCode + (r.stderr ? ': ' + String(r.stderr).trim().slice(0, 120) : ''))
   return r
 }
 
@@ -205,7 +205,14 @@ async function openPane($, t, o) {
   const id = herdrPaneIdOf((await runOk($, herdrSplitArgv({ pane, cwd: o.cwd, run: o.run, direction: o.split?.direction, agent: o.agent, model: o.model, effort: o.effort, env: wireEnv({ name: o.name, lead: sessionId }) }), PROBE)).stdout)
   if (!id) throw new Error('herdr gave no pane id')
   try {
-    await runOk($, herdrStartArgv({ name: o.name, pane: id, model: o.model, effort: o.effort, agent: o.agent }), HERDR_START_TIMEOUT)
+    // A fresh pane is busy while its shell starts up (a login banner, a slow rc): herdr says
+    // agent_pane_busy, so wait and try again for up to ~10s.
+    for (let attempt = 0; ; attempt++) {
+      const r = await $.process.run(herdrStartArgv({ name: o.name, pane: id, model: o.model, effort: o.effort, agent: o.agent }), HERDR_START_TIMEOUT)
+      if (r.exitCode === 0) break
+      if (!/agent_pane_busy/.test(r.stderr ?? '') || attempt >= 20) throw new Error('herdr agent start exited ' + r.exitCode + (r.stderr ? ': ' + String(r.stderr).trim().slice(0, 120) : ''))
+      await $.clock.sleep(500)
+    }
     await runOk($, herdrPromptArgv(o.name, o.task), PROBE)
   } catch (err) {
     await $.process.run(herdrCloseArgv(id), PROBE).catch(() => {})

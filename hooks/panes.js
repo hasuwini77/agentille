@@ -152,8 +152,8 @@ const agentArgs = (agent) => (ROLES.includes(agent) ? ['--agent', 'agentille:age
 // Who the worker is, for its own mascot band: <agent>:<model>:<effort>. A typed /agt-spawn has no agent.
 export const workerEnv = ({ agent, model, effort }) => 'AGENTILLE_WORKER=' + [agent || SPAWN_ROLE, model, EFFORTS.includes(effort) ? effort : ''].join(':')
 
-export function tmuxSplitArgv({ target, cwd, run, shell, model, name, task, effort, direction, agent }) {
-  const head = ['tmux', 'split-window', '-d', direction === 'down' ? '-v' : '-h', '-P', '-F', '#{pane_id}', '-t', target, '-c', cwd.replace(/#/g, '##'), '-e', 'AGENTILLE_RUN=' + run, '-e', workerEnv({ agent, model, effort })]
+export function tmuxSplitArgv({ target, cwd, run, shell, model, name, task, effort, direction, agent, env = [] }) {
+  const head = ['tmux', 'split-window', '-d', direction === 'down' ? '-v' : '-h', '-P', '-F', '#{pane_id}', '-t', target, '-c', cwd.replace(/#/g, '##'), '-e', 'AGENTILLE_RUN=' + run, '-e', workerEnv({ agent, model, effort }), ...env.flatMap((v) => ['-e', v])]
   // `--` ends claude's options, so a task that starts with `-` is still just the prompt
   const tail = [...agentArgs(agent), '--model', model, ...effortArgs(effort), '-n', name, '--', task]
   const base = String(shell ?? '').split('/').pop()
@@ -187,8 +187,8 @@ export function tmuxPaneIdOf(stdout) {
 export const tmuxKillArgv = (id) => ['tmux', 'kill-pane', '-t', id]
 
 // herdr: split beside the lead (never focused), start claude in it, then prompt it.
-export function herdrSplitArgv({ pane, cwd, run, direction, agent, model, effort }) {
-  return ['herdr', 'pane', 'split', '--pane', pane, '--direction', direction === 'down' ? 'down' : 'right', '--cwd', cwd, '--env', 'AGENTILLE_RUN=' + run, '--env', workerEnv({ agent, model, effort }), '--no-focus']
+export function herdrSplitArgv({ pane, cwd, run, direction, agent, model, effort, env = [] }) {
+  return ['herdr', 'pane', 'split', '--pane', pane, '--direction', direction === 'down' ? 'down' : 'right', '--cwd', cwd, '--env', 'AGENTILLE_RUN=' + run, '--env', workerEnv({ agent, model, effort }), ...env.flatMap((v) => ['--env', v]), '--no-focus']
 }
 
 export function herdrPaneIdOf(stdout) {
@@ -202,6 +202,21 @@ export function herdrPaneIdOf(stdout) {
 export const herdrStartArgv = ({ name, pane, model, effort, agent }) => ['herdr', 'agent', 'start', name, '--kind', 'claude', '--pane', pane, '--timeout', '45000', '--', ...agentArgs(agent), '--model', model, ...effortArgs(effort)]
 export const herdrPromptArgv = (name, task) => ['herdr', 'agent', 'prompt', name, task]
 export const herdrCloseArgv = (id) => ['herdr', 'pane', 'close', id]
+
+// Herdr's sidebar label for a worker pane (display-only; a failure changes nothing).
+export function herdrMetaArgv(pane, { display = null, title = null } = {}) {
+  const argv = ['herdr', 'pane', 'report-metadata', '--source', 'agentille']
+  if (display) argv.push('--display-agent', String(display).slice(0, 48))
+  if (title) argv.push('--title', String(title).slice(0, 64))
+  return argv.length > 5 ? [...argv, pane] : null
+}
+
+// Jump to a worker from its band row: Herdr focuses the agent by name, tmux selects the pane.
+export function focusArgv(transport, pane) {
+  if (transport === 'herdr' && pane?.name) return ['herdr', 'agent', 'focus', pane.name]
+  if (transport === 'tmux' && /^%\d+$/.test(String(pane?.id ?? ''))) return ['tmux', 'select-pane', '-t', pane.id]
+  return null
+}
 
 // Whether a routing role runs as a pane worker: only an executor or the adversary. Reviewers and the
 // planning roles stay subagents: their flags, token counts and full answers exist only there.

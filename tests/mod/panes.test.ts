@@ -320,7 +320,7 @@ describe('tmux band', () => {
     await start($, on, { mtimes: { '/h/.agentille/state/run-r9/done-planner': FRESH } })
     const ui = await $.ui.mount({ plugin: 'agentille', surface: 'terminal', component: 'AbovePrompt', props: { hasSurvey: false, isWorking: true, maxRows: 10, bodyColumns: 100 } as never })
     expect(await ui.find({ type: 'Text', text: /executor/ })).toBeDefined()
-    expect(await ui.find({ type: 'Text', text: /1 working · 0 done/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /◇0 ▣1/ })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: /planner/ })).toBeUndefined()
     expect(await ui.find({ type: 'Text', text: /^open\s*$/ })).toBeUndefined()
     await ui.unmount()
@@ -331,7 +331,7 @@ describe('tmux band', () => {
     const rows = [row('%1', ''), row('%2', 'agt-r9-executor')]
     const { clock } = await start($, on, { rows })
     const ui = await $.ui.mount({ plugin: 'agentille', surface: 'terminal', component: 'AbovePrompt', props: { hasSurvey: false, isWorking: true, maxRows: 10, bodyColumns: 100 } as never })
-    expect(await ui.find({ type: 'Text', text: /^working/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /working$/ })).toBeDefined()
     rows.splice(1, 1)
     await clock.advance(5000)
     expect(await ui.find({ type: 'Text', text: /executor/ })).toBeUndefined()
@@ -418,7 +418,7 @@ describe('/agt-spawn', () => {
     const seen = setup(on, { HERDR_ENV: '1', HERDR_PANE_ID: 'w1:p1' }, { 'herdr pane split': { stdout: JSON.stringify({ result: { pane: { pane_id: 'w1:p5' } } }) } })
     const r = await run($, 'do the thing')
     expect(r.text).toMatch(/^Opened agt-[a-z0-9]{6}-spawn · sonnet · herdr pane\.$/)
-    expect(seen.map((a) => a.slice(0, 3).join(' '))).toEqual(['herdr --version', 'herdr pane split', 'herdr agent start', 'herdr agent prompt'])
+    expect(seen.map((a) => a.slice(0, 3).join(' '))).toEqual(['herdr --version', 'herdr pane split', 'herdr agent start', 'herdr agent prompt', 'herdr pane report-metadata'])
     expect(seen[1]).toContain('--no-focus')
   })
 
@@ -852,5 +852,23 @@ describe('herdr reaper', () => {
     expect(done.closed).toEqual([])
     await done.clock.advance(10_000)
     expect(done.closed).toEqual(['w1:p2'])
+  })
+})
+
+import { focusArgv, herdrMetaArgv, herdrSplitArgv as split2, tmuxSplitArgv as tsplit2 } from '../../hooks/panes.js'
+
+describe('switchboard pane helpers', () => {
+  test('wire env rides the split; herdr metadata and focus argv', async () => {
+    const h = split2({ pane: 'w:p1', cwd: '/r', run: 'r1', agent: 'executor', model: 'sonnet', effort: 'high', env: ['AGENTILLE_NAME=agt-r1-exec-1'] })
+    expect(h.slice(h.indexOf('AGENTILLE_NAME=agt-r1-exec-1') - 1, h.indexOf('AGENTILLE_NAME=agt-r1-exec-1') + 1)).toEqual(['--env', 'AGENTILLE_NAME=agt-r1-exec-1'])
+    expect(h[h.length - 1]).toBe('--no-focus')
+    const t = tsplit2({ target: '%1', cwd: '/r', run: 'r1', shell: '/bin/sh', model: 'sonnet', name: 'agt-r1-exec-1', task: 'do it', env: ['AGENTILLE_LEAD=s1'] })
+    expect(t).toContain('AGENTILLE_LEAD=s1')
+    expect(herdrMetaArgv('w:p2', { display: '▣ exec-1 · sonnet' })).toEqual(['herdr', 'pane', 'report-metadata', '--source', 'agentille', '--display-agent', '▣ exec-1 · sonnet', 'w:p2'])
+    expect(herdrMetaArgv('w:p2', {})).toBe(null)
+    expect(focusArgv('herdr', { name: 'agt-r1-exec-1' })).toEqual(['herdr', 'agent', 'focus', 'agt-r1-exec-1'])
+    expect(focusArgv('tmux', { id: '%4' })).toEqual(['tmux', 'select-pane', '-t', '%4'])
+    expect(focusArgv('tmux', { id: 'bad' })).toBe(null)
+    expect(focusArgv('none', { name: 'x' })).toBe(null)
   })
 })

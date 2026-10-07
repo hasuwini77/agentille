@@ -419,7 +419,7 @@ function leadRow(els, l) {
 
 // One agent: tree · kind glyph · role · transport · model pill · effort · spinner + what it does ·
 // elapsed · tokens, and a ↗ that jumps to a pane worker.
-function boardRow(els, r, onFocus) {
+function boardRow(els, r, onFocus, slot = false) {
   const { Box, Text, Button } = els
   const kids = [Text({ dimColor: true, children: [r.tree] }), Text({ color: r.glyphColor, children: [r.glyph] }), Text({ dimColor: r.dim, children: [r.role] })]
   if (r.kind) kids.push(Text({ dimColor: true, children: [r.kind] }))
@@ -430,6 +430,7 @@ function boardRow(els, r, onFocus) {
   kids.push(Text({ dimColor: true, children: [r.time] }))
   if (r.tok) kids.push(Text({ dimColor: true, children: [r.tok] }))
   if (onFocus) kids.push(Button({ label: '↗', plain: true, dimColor: true, onPress: onFocus }))
+  else if (slot) kids.push(Text({ children: [' '] })) // keeps the columns of rows without a ↗ in line
   return Box({ flexDirection: 'row', columnGap: 1, children: kids })
 }
 
@@ -808,7 +809,8 @@ export function register(on) {
     if (worker) kids.push(...workerBand(els, e, await $.clock.now()))
     else if (selfName) kids.push(els.Text({ color: hex(MODEL_COLOR.opus), children: ['agentille worker · ' + selfName] }))
     const theirs = await next(e)
-    if (staged.rows.length === 0 && !wire) return els.Box({ flexDirection: 'column', children: [...kids, theirs] })
+    // No agent rows: the newest wire message alone, no frame.
+    if (staged.rows.length === 0) return els.Box({ flexDirection: 'column', children: [...kids, ...(wire ? [wireLine(els, wire)] : []), theirs] })
 
     const rows = cast(staged, live, lastRun)
     const cols = (e.props.bodyColumns ?? 80) - 4
@@ -817,10 +819,10 @@ export function register(on) {
     const waiting = rows.filter((r) => r.state === 'working').length
     const inner = [boardHeader(els, header({ run: lastRun, formation: runs.get(lastRun)?.formation, squads: squads.map((q) => q.name), rows, tally: staged.tally }))]
     if (rows.length) inner.push(leadRow(els, leadLine({ model: leadModel, busy: e.props.isWorking, waiting })))
-    for (const r of view.slice(0, room)) {
-      const argv = r.pane ? focusArgv(transport, rows.find((x) => x.id === r.id)) : null
-      inner.push(boardRow(els, r, argv ? () => { $.process.run(argv, PROBE).catch(() => {}) } : null))
-    }
+    const shown = view.slice(0, room)
+    const argvs = shown.map((r) => (r.pane ? focusArgv(transport, rows.find((x) => x.id === r.id)) : null))
+    const slot = argvs.some(Boolean)
+    shown.forEach((r, i) => inner.push(boardRow(els, r, argvs[i] ? () => { $.process.run(argvs[i], PROBE).catch(() => {}) } : null, slot)))
     if (view.length > room) inner.push(els.Text({ dimColor: true, children: ['   +' + (view.length - room) + ' more · /agt-deck'] }))
     if (wire) inner.push(wireLine(els, wire))
     const board = els.Box({ flexDirection: 'column', borderStyle: 'round', borderColor: hex(FRAME_COLOR), paddingX: 1, children: inner })
@@ -833,7 +835,8 @@ export function register(on) {
     const { Box, Text } = els
     const now = Date.now()
     const staged = stage({ agents: live, panes, routes: paneRoutes, run: lastRun, now })
-    const rows = cast({ rows: [...staged.rows, ...[...live.values()].filter((a) => a.run === lastRun && !staged.rows.includes(a))], tally: { working: 0 } }, live, lastRun)
+    const all = [...staged.rows, ...[...live.values()].filter((a) => a.run === lastRun && !staged.rows.includes(a))]
+    const rows = cast({ rows: all.map((r) => (r.kind === 'pane' && !r.model ? { ...r, model: wireStatus.get(r.name)?.model ?? null } : r)), tally: { working: 0 } }, live, lastRun)
     const cols = e.props.bodyColumns ?? 80
     const kids = [boardHeader(els, header({ run: lastRun, formation: runs.get(lastRun)?.formation, squads: squads.map((q) => q.name), rows, tally: staged.tally }))]
     if (rows.length === 0 && decisions.length === 0 && wireLog.length === 0) {

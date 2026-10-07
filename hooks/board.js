@@ -93,7 +93,7 @@ export function boardRows(rows, { now, tick = 0, cols = 80, wire = new Map(), tr
     if (r.state === 'blocked') activity = '⚑ waiting on you'
     else if (done) activity = r.kind === 'sub' ? 'done' : r.state
     else if (r.state === 'open') activity = 'open'
-    else activity = tool ?? (r.reason && r.reason !== 'table' ? '↑ ' + r.reason : r.kind === 'pane' ? 'working' : 'starting')
+    else activity = tool ?? (r.reason && r.reason !== 'table' ? '↑ ' + r.reason : r.kind === 'pane' ? 'working' : 'thinking')
     return {
       id: r.id,
       name: r.name ?? null,
@@ -157,7 +157,7 @@ export function castColumns(rows, { cols, tick = 0, frameOf, moodOf }) {
     cells: shown.map((r) => {
       const mood = moodOf(r)
       const [head, body, legs] = frameOf(mood, tick, r.kind === 'sub' ? r.role : 'executor')
-      return { lines: [head, body, legs].map((l) => l.padEnd(CAST_WIDTH)), role: cut(String(r.role ?? '?'), CAST_WIDTH - 2), model: r.model ?? null, glyph: r.state === 'done' ? DONE_GLYPH : KIND_GLYPH[r.kind] ?? '·', dim: r.state === 'done' || r.state === 'idle' }
+      return { lines: [head, body, legs].map((l) => l.padEnd(CAST_WIDTH)), role: cut(String(r.role ?? '?'), CAST_WIDTH - 4), model: r.model ?? null, glyph: r.state === 'done' ? DONE_GLYPH : KIND_GLYPH[r.kind] ?? '·', dim: r.state === 'done' || r.state === 'idle' }
     }),
     more: rows.length - shown.length,
   }
@@ -173,7 +173,7 @@ export function routingLines(decisions, n = 8) {
   return decisions.slice(-n).map((d) => ({
     at: clock(d.at),
     who: cut(String(d.role), 16).padEnd(16) + (d.kind === 'pane' ? ' ▣' : ' ◇'),
-    route: (prettyModel(d.model) + ' · ' + (d.effort ?? '')).padEnd(18),
+    route: (prettyModel(d.model) + ' · ' + (d.effort ?? '')).padEnd(21),
     color: colorOf(d.model),
     reason: d.reason && d.reason !== 'table' ? '↑ ' + d.reason : 'table',
     escalated: !!(d.reason && d.reason !== 'table'),

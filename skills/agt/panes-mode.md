@@ -25,11 +25,25 @@ close_pane { name: "agt-<run-id>-exec-1" }
 
 The mod routes model and effort from `agent` + `header` through the same table as a subagent (`routing.md` → "Default routing") and ignores any `model` you pass. Roles that must stay subagents are denied with the reason; run them as subagents. A failed pane falls back to a subagent.
 
-Layout is the mod's call: the first worker splits right of the lead; later workers stack below the previous worker. Each worker pane's own band shows a small mascot (hello, working, bye) drawn by the mod at zero model tokens; the lead keeps plain rows.
+Layout is the mod's call: the first worker splits right of the lead; later workers stack below the previous worker. Each worker pane's own band shows a small mascot (hello, working, bye) drawn by the mod at zero model tokens. The lead's band lists every worker as a `▣` row beside its `◇` subagents, with the tool the worker is running and its tokens, and Herdr's sidebar labels each worker by role and model.
 
 The mod enforces the `agt-<run>-<role>` name (32 chars max), no duplicate name, an absolute existing `cwd`, no focus change. `close_pane` reaches only `agt-` panes in your own tab or window, never a `/agt-spawn` pane. Worker panes get no tools, so they cannot fan out.
 
-Pane answers never reach the mod's result hook, so a pane worker raises no `⚑`: read the harvest yourself. Still yours: isolation (one worktree per slice), the wait/read loop, and the tmux done-file instruction.
+Pane answers never reach the mod's result hook, so a pane worker raises no `⚑`: read the harvest yourself. Still yours: isolation (one worktree per slice) and the tmux done-file instruction.
+
+## The wire — workers report back on their own
+
+With the mod in both sessions, a worker that finishes a turn saves its full answer to `~/.agentille/state/run-<run>/agents/pane-<role>.md` and sends you one peer message:
+
+```
+[agt wire] agt-<run>-exec-1 done · 1:42 · sonnet medium · 31.2k tok
+<the head of its answer>
+Full answer: ~/.agentille/state/run-<run>/agents/pane-exec-1.md
+```
+
+That message starts your next turn, so after spawning a wave, **end your turn**: no background `herdr agent wait` loop, no polling. Harvest from the message (read the file only when the head is not enough), then `close_pane`. A `blocked` worker needs the person, not you: the band flags it and Herdr notifies. The person can steer a worker with `/agt-tell <worker> <message>`.
+
+No wire message within the slice's expected time (a worker without the mod, a crash): fall back to the read loop below.
 
 ## Spawning a worker
 
@@ -54,6 +68,8 @@ Completion is a read, not a promise:
 | `done` | finished, unseen | harvest → close |
 | `idle` | ready for input, already seen | harvest → close once its slice is consumed |
 | `unknown` | unclassified | never reap; re-read before deciding |
+
+Fallback only, when the wire is silent:
 
 ```bash
 herdr agent wait "agt-<run>-exec-1" --until done --until blocked --timeout 600000

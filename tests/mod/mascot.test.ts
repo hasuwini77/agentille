@@ -1,5 +1,5 @@
 import { describe, expect, mock, test } from 'claude-code/testing'
-import { ACCESSORY, BYE_MS, HELLO_MS, MASCOT_COLOR, MAX_BAND_MASCOTS, MODEL_COLOR, agentMood, bandMascots, caption, frame, modelKey, moodAt, parseWorker } from '../../hooks/mascot.js'
+import { ACCESSORY, BYE_MS, HELLO_MS, MASCOT_COLOR, MODEL_COLOR, agentMood, caption, frame, modelKey, moodAt, parseWorker } from '../../hooks/mascot.js'
 import { herdrSplitArgv, tmuxSplitArgv, workerEnv } from '../../hooks/panes.js'
 
 describe('mascot frames', () => {
@@ -87,18 +87,6 @@ describe('lead band mascots', () => {
     expect(agentMood(a, 1000 + HELLO_MS - 1)).toBe('hi')
     expect(agentMood(a, 1000 + HELLO_MS)).toBe('working')
     expect(agentMood({ state: 'done', start: 1000 }, 99_999)).toBe('bye')
-  })
-
-  test('mascots draw only when every subagent fits, three rows each plus the header', async () => {
-    const sub = { kind: 'sub' }
-    const pane = { kind: 'pane' }
-    expect(bandMascots([sub], 4)).toBe(true)
-    expect(bandMascots([sub], 3)).toBe(false)
-    expect(bandMascots([sub, sub, pane], 8)).toBe(true)
-    expect(bandMascots([sub, sub, pane], 7)).toBe(false)
-    expect(bandMascots(Array(MAX_BAND_MASCOTS + 1).fill(sub), 99)).toBe(false)
-    expect(bandMascots([pane, pane], 99)).toBe(false)
-    expect(bandMascots([], 99)).toBe(false)
   })
 })
 

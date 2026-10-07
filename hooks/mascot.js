@@ -64,19 +64,11 @@ export function moodAt({ hiUntil = 0, byeUntil = 0, working = false, now }) {
   return working ? 'working' : 'idle'
 }
 
-// The lead's band: a subagent says hi for its first HELLO_MS, steps while it works, and waves
-// bye for BYE_MS after it finishes (live.js keeps it on stage that long).
+// The deck's cast: a subagent says hi for its first HELLO_MS, steps while it works, and waves
+// bye once it finishes.
 export function agentMood(a, now) {
   if (a.state !== 'working') return 'bye'
   return now - a.start < HELLO_MS ? 'hi' : 'working'
-}
-
-// Mascots are all or nothing: at most MAX_BAND_MASCOTS subagents, and only when the header,
-// three rows per subagent and one row per pane fit in `room`. Otherwise the band is text rows.
-export const MAX_BAND_MASCOTS = 3
-export function bandMascots(rows, room) {
-  const subs = rows.filter((r) => r.kind === 'sub').length
-  return subs > 0 && subs <= MAX_BAND_MASCOTS && 1 + subs * 3 + (rows.length - subs) <= room
 }
 
 // AGENTILLE_WORKER=<agent>:<model>:<effort>, set when the lead opens the pane; effort may be empty.

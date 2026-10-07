@@ -320,7 +320,7 @@ describe('tmux band', () => {
     await start($, on, { mtimes: { '/h/.agentille/state/run-r9/done-planner': FRESH } })
     const ui = await $.ui.mount({ plugin: 'agentille', surface: 'terminal', component: 'AbovePrompt', props: { hasSurvey: false, isWorking: true, maxRows: 10, bodyColumns: 100 } as never })
     expect(await ui.find({ type: 'Text', text: /executor/ })).toBeDefined()
-    expect(await ui.find({ type: 'Text', text: /1 working · 0 done/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /◇0 ▣1/ })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: /planner/ })).toBeUndefined()
     expect(await ui.find({ type: 'Text', text: /^open\s*$/ })).toBeUndefined()
     await ui.unmount()
@@ -331,7 +331,7 @@ describe('tmux band', () => {
     const rows = [row('%1', ''), row('%2', 'agt-r9-executor')]
     const { clock } = await start($, on, { rows })
     const ui = await $.ui.mount({ plugin: 'agentille', surface: 'terminal', component: 'AbovePrompt', props: { hasSurvey: false, isWorking: true, maxRows: 10, bodyColumns: 100 } as never })
-    expect(await ui.find({ type: 'Text', text: /^working/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /working$/ })).toBeDefined()
     rows.splice(1, 1)
     await clock.advance(5000)
     expect(await ui.find({ type: 'Text', text: /executor/ })).toBeUndefined()
@@ -418,7 +418,7 @@ describe('/agt-spawn', () => {
     const seen = setup(on, { HERDR_ENV: '1', HERDR_PANE_ID: 'w1:p1' }, { 'herdr pane split': { stdout: JSON.stringify({ result: { pane: { pane_id: 'w1:p5' } } }) } })
     const r = await run($, 'do the thing')
     expect(r.text).toMatch(/^Opened agt-[a-z0-9]{6}-spawn · sonnet · herdr pane\.$/)
-    expect(seen.map((a) => a.slice(0, 3).join(' '))).toEqual(['herdr --version', 'herdr pane split', 'herdr agent start', 'herdr agent prompt'])
+    expect(seen.map((a) => a.slice(0, 3).join(' '))).toEqual(['herdr --version', 'herdr pane split', 'herdr agent start', 'herdr agent prompt', 'herdr pane report-metadata'])
     expect(seen[1]).toContain('--no-focus')
   })
 
@@ -852,5 +852,52 @@ describe('herdr reaper', () => {
     expect(done.closed).toEqual([])
     await done.clock.advance(10_000)
     expect(done.closed).toEqual(['w1:p2'])
+  })
+})
+
+import { focusArgv, herdrMetaArgv, herdrSplitArgv as split2, tmuxSplitArgv as tsplit2 } from '../../hooks/panes.js'
+
+describe('switchboard pane helpers', () => {
+  test('wire env rides the split; herdr metadata and focus argv', async () => {
+    const h = split2({ pane: 'w:p1', cwd: '/r', run: 'r1', agent: 'executor', model: 'sonnet', effort: 'high', env: ['AGENTILLE_NAME=agt-r1-exec-1'] })
+    expect(h.slice(h.indexOf('AGENTILLE_NAME=agt-r1-exec-1') - 1, h.indexOf('AGENTILLE_NAME=agt-r1-exec-1') + 1)).toEqual(['--env', 'AGENTILLE_NAME=agt-r1-exec-1'])
+    expect(h[h.length - 1]).toBe('--no-focus')
+    const t = tsplit2({ target: '%1', cwd: '/r', run: 'r1', shell: '/bin/sh', model: 'sonnet', name: 'agt-r1-exec-1', task: 'do it', env: ['AGENTILLE_LEAD=s1'] })
+    expect(t).toContain('AGENTILLE_LEAD=s1')
+    expect(herdrMetaArgv('w:p2', { display: '▣ exec-1 · sonnet' })).toEqual(['herdr', 'pane', 'report-metadata', 'w:p2', '--source', 'agentille', '--display-agent', '▣ exec-1 · sonnet'])
+    expect(herdrMetaArgv('w:p2', {})).toBe(null)
+    expect(focusArgv('herdr', { name: 'agt-r1-exec-1' })).toEqual(['herdr', 'agent', 'focus', 'agt-r1-exec-1'])
+    expect(focusArgv('tmux', { id: '%4' })).toEqual(['tmux', 'select-pane', '-t', '%4'])
+    expect(focusArgv('tmux', { id: 'bad' })).toBe(null)
+    expect(focusArgv('none', { name: 'x' })).toBe(null)
+  })
+})
+
+describe('herdr start race', () => {
+  test('a pane still busy with its shell start is retried, then the worker starts', async ($, on) => {
+    const seen: string[][] = []
+    let busy = 2
+    on('env.get', async ($: any, e: any) => ({ value: ({ HERDR_ENV: '1', HERDR_PANE_ID: 'w1:p1', HOME: '/h' } as any)[e.name] }))
+    on('session.start', async ($: any, e: any) => ({ cwd: e.cwd }))
+    on('session.cwd', async () => ({ value: '/w' }))
+    on('command.register', async () => ({ value: undefined }))
+    on('fs.read', async () => ({ deny: 'no profile' }))
+    on('store.get', async () => ({ value: undefined }))
+    on('process.run', async ($: any, e: any) => {
+      seen.push(e.argv)
+      const cmd = e.argv.slice(0, 3).join(' ')
+      if (cmd === 'herdr pane split') return { value: { exitCode: 0, stdout: JSON.stringify({ result: { pane: { pane_id: 'w1:p5' } } }), stderr: '' } }
+      if (cmd === 'herdr agent start' && busy-- > 0) return { value: { exitCode: 1, stdout: '', stderr: '{"error":{"code":"agent_pane_busy"}}' } }
+      if (cmd === 'herdr agent list') return { value: { exitCode: 0, stdout: JSON.stringify({ result: { agents: [] } }), stderr: '' } }
+      return { value: { exitCode: 0, stdout: '', stderr: '' } }
+    })
+    const clock = mock.clock(on, { now: 1_000_000 })
+    await $.session.start({ cwd: '/w', surface: null, isInteractive: false })
+    const pending = $.command.run({ command: 'agt-spawn', args: '"do the thing"', origin: { kind: 'composer' } } as never)
+    for (let i = 0; i < 4; i++) await clock.advance(500)
+    const r = await pending
+    expect(r.text).toMatch(/^Opened agt-[a-z0-9]{6}-spawn · sonnet · herdr pane\.$/)
+    expect(seen.filter((a) => a.slice(0, 3).join(' ') === 'herdr agent start').length).toBe(3)
+    expect(seen.some((a) => a[1] === 'pane' && a[2] === 'close')).toBe(false)
   })
 })

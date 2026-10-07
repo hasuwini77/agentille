@@ -2,6 +2,48 @@
 
 All notable changes to agentille are documented here.
 
+## [3.4.0] — 2026-10-07
+
+### Added
+
+- **The switchboard.** The band above the prompt is now a framed dispatch
+  tree rooted at your session: one row per subagent (`◇`) and pane session
+  (`▣`), each with its model pill, the tool it is running right now, elapsed
+  time and tokens, and `↑` on an escalated route. Columns drop out on narrow
+  bands; the spinner reads `◇2 ▣1 working`.
+- **The wire.** A worker pane publishes its live status (tool, tokens, model)
+  to the shared store, and when it finishes it saves its full answer under
+  the run and messages the lead session the head of it. The lead wakes on
+  that message, so panes mode no longer needs a background `herdr agent wait`
+  loop. The newest message shows as a `⇄` row.
+- **`/agt-tell <worker> <message>`.** Message a worker pane over the wire
+  (falls back to a Herdr prompt when the worker has no mod).
+- **`/agt-deck [auto|off]`.** An optional side pane: the run's cast as
+  mascots, the routing timeline, the wire log and token bars per role.
+  `auto` opens it on every typed `/agt`.
+- **Herdr combo.** Worker panes are labeled in Herdr's sidebar by role and
+  model, with a live title (current tool, then `✓ done`), and a row's `↗`
+  focuses its pane. tmux gets the same band and `↗`.
+
+### Changed
+
+- The lead's band no longer draws mascots beside subagent rows; the cast
+  moved to `/agt-deck`. Worker panes keep their own mascot.
+
+### Fixed
+
+- `spawn_pane` and `/agt-spawn` failed on machines whose shell prints a
+  startup banner: Herdr refused the start with `agent_pane_busy`. The start
+  is now retried for up to ~10s, and Herdr's error text is reported.
+
+### Rationale
+
+The band showed rows but not the orchestration itself: which agents are
+in-process and which are real sessions, what each is doing, and how results
+travel back. All of it is drawn by the mod from events it already sees, at
+zero model tokens. The wire also removes the most fragile step of panes
+mode, a lead that had to keep a waiter alive or stall.
+
 ## [3.3.0] — 2026-10-04
 
 ### Added

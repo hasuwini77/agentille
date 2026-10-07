@@ -85,14 +85,17 @@ describe('band', () => {
     await $.agent.spawn({ prompt: '[agt run=bandrun size=large mode=review]\nreview', subagentType: 'agentille:agentille-code-reviewer' })
     const ui = await $.ui.mount({ plugin: 'agentille', surface: 'terminal', component: 'AbovePrompt', props: { hasSurvey: false, isWorking: true, maxRows: 10, bodyColumns: 100 } as never })
     expect(await ui.find({ type: 'Text', text: /code-reviewer/ })).toBeDefined()
-    expect(await ui.find({ type: 'Text', text: /opus ▆ high/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /^\s*opus\s*$/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /▆ high/ })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: /run bandrun/ })).toBeDefined()
-    expect(await ui.find({ type: 'Text', text: /▐▛○─○▜▌ ╱  hi!/ })).toBeDefined()
-    expect(await ui.find({ type: 'Text', text: /▝▜█████▛▘/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /^◇$/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /◇1 ▣0/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /lead · / })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /▝▜█████▛▘/ })).toBeUndefined()
     await ui.unmount()
   })
 
-  test('a band too short for the mascot keeps the text row', async ($, on) => {
+  test('a short band still shows the agent row', async ($, on) => {
     on('store.get', async () => ({ value: null }))
     on('agent.spawn', async ($, e) => ({ model: 'claude-opus-5-5', agentId: 'band3' }))
     on('ui.render', async () => ({ type: 'engine', ref: 0 }) as never)
@@ -103,7 +106,7 @@ describe('band', () => {
     await ui.unmount()
   })
 
-  test('a finished subagent waves bye before it leaves the band', async ($, on) => {
+  test('a finished subagent shows a ✓ before it leaves the band', async ($, on) => {
     on('store.get', async () => ({ value: null }))
     on('agent.spawn', async ($, e) => ({ model: 'claude-opus-5-5', agentId: 'band2' }))
     on('turn.complete', async ($, e) => ({ text: e.answer }) as never)
@@ -112,7 +115,7 @@ describe('band', () => {
     await $.agent.spawn({ prompt: '[agt run=byerun size=large mode=review]\nreview', subagentType: 'agentille:agentille-code-reviewer' })
     await $.turn.complete({ agentId: 'band2', answer: 'APPROVE', durationMs: 10, isAborted: false, turnId: 't', reason: 'answer' } as never)
     const ui = await $.ui.mount({ plugin: 'agentille', surface: 'terminal', component: 'AbovePrompt', props: { hasSurvey: false, isWorking: true, maxRows: 10, bodyColumns: 100 } as never })
-    expect(await ui.find({ type: 'Text', text: /▐▛○─○▜▌ ╲  bye!/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /^✓$/ })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: /code-reviewer/ })).toBeDefined()
     await ui.unmount()
   })

@@ -89,3 +89,33 @@ export function parseTellArgs(args, panes = []) {
   if (hits.length > 1) return { error: who + ' matches ' + hits.length + ' workers; use the full agt- name.' }
   return text ? { name: hits[0].name, text } : { usage: TELL_USAGE }
 }
+
+// ── lead self-wake ────────────────────────────────────────────────────────────
+
+export const WAKE_TAG = '[agt wake]'
+export const WAKE_MS = 20_000
+
+// Panes of the lead that finished or blocked ≥ WAKE_MS ago without a wire done message, and that
+// the lead has not been woken for yet. `seen` is the reaper's pane id → { since }.
+export function wakeDue(pool, seen, wireDone, woken, now) {
+  return pool.filter((p) => {
+    if (p.state !== 'done' && p.state !== 'blocked') return false
+    const since = seen.get(p.id)?.since
+    return typeof since === 'number' && now - since >= WAKE_MS && !wireDone.has(p.name) && !woken.has(p.name)
+  })
+}
+
+// How to read a pane from its transport; `id` is the herdr pane id or the tmux pane id.
+export function readCommand(transport, id) {
+  if (!/^[A-Za-z0-9:%._-]{1,40}$/.test(String(id ?? ''))) return null
+  if (transport === 'herdr') return 'herdr pane read ' + id + ' --lines 200'
+  if (transport === 'tmux') return 'tmux capture-pane -p -t ' + id + ' -S -200'
+  return null
+}
+
+// The message the lead sends its own session when a worker went quiet without reporting.
+export function wakeMessage({ name, state, transport, id, answerPath = null }) {
+  const what = state === 'blocked' ? 'is blocked (an approval or question is on screen) and has not reported' : 'finished and has not reported'
+  const read = answerPath ? 'Its answer is saved at ' + answerPath + '; read that.' : readCommand(transport, id) ? 'Read it with: ' + readCommand(transport, id) : 'Read the pane.'
+  return WAKE_TAG + ' ' + name + ' ' + what + '. ' + read + (state === 'blocked' ? ' A blocked worker needs the person.' : ' Then harvest it and close_pane.')
+}

@@ -905,6 +905,40 @@ describe('herdr reaper', () => {
     expect(done.closed).toEqual(['w1:p2'])
   })
 
+  test('the lead wakes itself once when a pane finishes without a wire message', async ($, on) => {
+    const done = await lead($, on, 'done', [])
+    await done.clock.advance(15_000)
+    expect(done.sent).toEqual([])
+    await done.clock.advance(10_000)
+    expect(done.sent).toHaveLength(1)
+    expect(JSON.stringify(done.sent[0].to)).toContain('lead-sid')
+    expect(done.sent[0].text).toContain('agt-r9-executor finished and has not reported')
+    expect(done.sent[0].text).toContain('herdr pane read w1:p2 --lines 200')
+    await done.clock.advance(300_000)
+    expect(done.sent).toHaveLength(1)
+  })
+
+  test('a blocked pane wakes the lead too; a working pane does not', async ($, on) => {
+    const blocked = await lead($, on, 'blocked', [])
+    await blocked.clock.advance(30_000)
+    expect(blocked.sent).toHaveLength(1)
+    expect(blocked.sent[0].text).toContain('is blocked')
+  })
+
+  test('a working pane never wakes the lead', async ($, on) => {
+    const w = await lead($, on, 'working', [])
+    await w.clock.advance(120_000)
+    expect(w.sent).toEqual([])
+  })
+
+  test('a wire done message inside the window means no self-wake', async ($, on) => {
+    const done = await lead($, on, 'done', [])
+    await done.clock.advance(10_000)
+    await $.session.receive({ text: '[agt wire] agt-r9-executor done · 0:10\nBuilt it', origin: { kind: 'peer' } } as never)
+    await done.clock.advance(60_000)
+    expect(done.sent).toEqual([])
+  })
+
   test('the band shows the stranded pane as a flag', async ($, on) => {
     const done = await lead($, on, 'done', [])
     await done.clock.advance(100_000)

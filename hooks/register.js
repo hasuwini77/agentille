@@ -355,7 +355,15 @@ const focusRow = (els, text) => els.Text({ color: FOCUS_COLOR.flag, wrap: 'trunc
 // ── the wire (worker side publishes and reports; lead side reads) ─────────────
 
 // Worker: what it is doing, into the shared store, at most once per PUBLISH_MS unless forced.
-async function publish($, force = false) {
+// Publishes run one after another, so a late tool-call publish never lands over a forced 'done'.
+let pubChain = Promise.resolve()
+function publish($, force = false) {
+  const p = pubChain.then(() => publishNow($, force))
+  pubChain = p.catch(() => {})
+  return p
+}
+
+async function publishNow($, force) {
   if (!wireName) return
   const now = Date.now()
   if (!force && now - pub.at < PUBLISH_MS) return

@@ -82,6 +82,10 @@ Evidence is observed by the mod, not claimed by the lead.
 - **Fix:** attempt 2 → executor effort high; attempt ≥3 → max. A `mode=diagnose` planner after ≥3 fixes → Fable candidate.
 - **Fable gate** (all must pass, else opus · max with the reason logged): candidate · `profile.routing.autoFable` not false · fewer than `maxFablePerRun` (default 1) Fable spawns this run · weekly plan usage below `fableWeeklyCeiling` (default 60%).
 
+### Advisor
+
+Claude Code's advisor tool (`/advisor`, `advisorModel`) is the user's setting: every /agt session inherits it, and agentille never adds one. Subagent mode cannot scope it; it follows the session. With `profile.routing.advisorOnOpus: false`, Opus and Fable pane workers start with `CLAUDE_CODE_DISABLE_ADVISOR_TOOL=1` so a stronger worker is not advised by a same-tier model; Sonnet workers keep theirs. Default `true`.
+
 ### `--fable`
 
 `fable=forced` in the header: planner, ui-prototyper, design-, security- and payments-reviewer, and a large code-/plan-reviewer run Fable; the executor never does. It bypasses the gate (the user chose it). If the `fable` alias does not resolve, re-dispatch that role once on `opus`; never retry-loop. `fable` appears only in dispatch-time model parameters, never in agent frontmatter.

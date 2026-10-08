@@ -2,6 +2,21 @@
 
 All notable changes to agentille are documented here.
 
+## [3.6.0] — 2026-10-08
+
+### Added
+
+- **`profile.viewports`.** An optional default viewport set for the
+  design-reviewer (`desktop` / `tablet` / `mobile`). Without it, nothing
+  changes: desktop + mobile. Viewports named in the task still win.
+
+### Fixed
+
+- The design-reviewer now has `browser_close` and closes its Playwright
+  browser when its checks are done, also on failure. Before, the tab stayed
+  open after the review and kept the CPU busy, which hurts most where WebGL
+  renders in software.
+
 ## [3.5.1] — 2026-10-08
 
 ### Changed

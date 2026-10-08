@@ -698,7 +698,7 @@ export function register(on) {
 
   on('command.run', { command: 'agt-routing' }, async () => {
     if (decisions.length === 0) return { text: 'No agentille dispatches this session.' }
-    return { text: decisions.slice(-30).map((d) => d.role + ' → ' + d.model + ' · ' + d.effort + (d.reason === 'table' ? '' : '  (' + d.reason + ')') + (d.kind === 'pane' ? ' · pane' : '')).join('\n') }
+    return { text: decisions.slice(-30).map((d) => d.role + ' → ' + d.model + (d.effort ? ' · ' + d.effort : '') + (d.reason === 'table' ? '' : '  (' + d.reason + ')') + (d.kind === 'pane' ? ' · pane' : '')).join('\n') }
   })
 
   // Typed only: a plugin, a scheduled task or a notification never opens a pane.
@@ -893,6 +893,24 @@ export function register(on) {
     run.fable = Math.max(run.fable, shared)
 
     const d = decide({ role, hdr, run, depth, settings, weeklyPct })
+
+    // A workflow script's agent: the engine ignores a rewrite there (and logs a failure line), so
+    // it runs on the model the script chose. Log that model, not the table's, and flag a mismatch.
+    if (e.workflow) {
+      const res = await next(e)
+      if (res.deny) return res
+      const off = short(res.model) !== short(d.model)
+      if (res.agentId) live.set(res.agentId, newAgent({ id: res.agentId, role, routed: false, model: res.model, effort: null, reason: null, run: runId, now: Date.now(), parentId: e.parentAgentId ?? null }))
+      const rec = { at: new Date().toISOString(), role, model: res.model, effort: null, reason: off ? 'workflow, table says ' + d.model + ' · ' + d.effort : 'workflow', asked: e.model ?? null, agentId: res.agentId ?? null, kind: 'workflow' }
+      decisions.push(rec)
+      run.log.push(JSON.stringify(rec))
+      await writeRunFile($, runId, 'routing.jsonl', run.log.join('\n') + '\n')
+      ensureTicker($)
+      if (off) $.ui.toast('agt workflow ' + role + ' runs ' + short(res.model) + ' — table says ' + d.model + ' · ' + d.effort)
+      $.ui.invalidate('ui.render')
+      return res
+    }
+
     const res = await next({ ...e, model: d.model })
     if (res.deny) return res
 

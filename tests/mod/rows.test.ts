@@ -154,6 +154,20 @@ describe('rows: in the transcript', () => {
     expect(await drawn('tuI2', { isRunning: true })).not.toEqual(engine)
   })
 
+  test('a workflow agent keeps the script\'s model; a table mismatch is logged and toasted, never rewritten', async ($, on) => {
+    on('store.get', async () => ({ value: null }))
+    const toasts: string[] = []
+    on('ui.toast', async ($: any, e: any) => { toasts.push(e.text ?? String(e)); return { value: undefined } })
+    const asked: unknown[] = []
+    on('agent.spawn', async ($, e) => { asked.push(e.model); return { model: 'claude-haiku-4-5', agentId: 'wfm' + asked.length } })
+    on('ui.render', async () => ({ type: 'engine', ref: 0 }) as never)
+    const wf = { tool_use_id: 'tuWfm', workflow: { runId: 'wf_2', agentIndex: 1 } }
+    await $.agent.spawn({ prompt: '[agt run=wfrun size=large mode=review]\nreview', subagentType: 'agentille:agentille-code-reviewer', model: 'haiku', ...wf } as never)
+    expect(asked).toEqual(['haiku']) // untouched: the table would have said opus
+    expect(toasts.some((t) => /workflow code-reviewer runs haiku — table says opus · high/.test(t))).toBe(true)
+    expect((await $.command.run({ command: 'agt-routing' })).text).toBe('code-reviewer → claude-haiku-4-5  (workflow, table says opus · high)')
+  })
+
   test('a workflow agent is not found by its call id, which every agent of the run shares', async ($, on) => {
     on('store.get', async () => ({ value: null }))
     const seen: unknown[] = []

@@ -229,10 +229,11 @@ export function phaseOf(role) {
 // the tree only has room for a few rows. A working cell pulses (◆/◇, ▣/□) on the ticker, offset
 // per cell; a finished one is a dim ✓, a failed or killed one ✗. Pane workers come from their
 // routes (one per spawn), working until the route ends. Undefined below three agents (the tree
-// already shows that many).
+// already shows that many) and outside an /agt run (`adhoc` is every plain subagent of the session).
 // A lane past LANE_CAP keeps every working and failed cell and fills the rest with the newest
 // finished ones, in start order: the live agent is never the one cut.
 export function swarm({ agents, routes = [], run, tick = 0 }) {
+  if (run === 'adhoc') return undefined
   const cells = []
   for (const a of agents.values()) {
     if (a.run !== run) continue

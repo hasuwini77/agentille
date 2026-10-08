@@ -158,6 +158,12 @@ describe('swarm', () => {
     expect(lane.cells.filter((c) => c.glyph === '✓').length).toBe(7)
   })
 
+  test('no swarm line outside an /agt run', async () => {
+    const m = agents()
+    for (const a of m.values()) a.run = 'adhoc'
+    expect(swarm({ agents: m, run: 'adhoc' })).toBe(undefined)
+  })
+
   test('phaseOf sorts every routed role', async () => {
     expect(['planner', 'plan-reviewer', 'ui-prototyper'].map(phaseOf)).toEqual(['plan', 'plan', 'plan'])
     expect(['executor', 'adversary'].map(phaseOf)).toEqual(['build', 'build'])

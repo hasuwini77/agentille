@@ -63,6 +63,8 @@ Model · effort per role. Size, risk and mode come from the dispatch header; the
 
 Dispatch with aliases (`fable`/`opus`/`sonnet`/`haiku`), never pinned IDs. A pane worker opened by `spawn_pane` is routed exactly like the subagent of its role (same table, ladder and Fable guard).
 
+**Workflow agents.** A workflow script's `agent()` spawns reach the mod, but their model cannot be rewritten (a hook can only refuse them). The lead passes `agentType: 'agentille:agentille-<role>'`, `model` and `effort` from this table in each `agent()` call. The mod logs the table's pick beside the model that ran, flags a drift (`/agt-routing`), and shows the agents on the band and under the Workflow call.
+
 ## Review tiering
 
 - **code-reviewer → Opus** if more than one file has logic changes, >~150 changed LoC, a public API/schema changed, or the diff touches auth/sessions/money. Else Sonnet.

@@ -87,6 +87,11 @@ export const LIST_STATUS = {
   killed: { glyph: '✗', word: 'killed', color: 'error' },
 }
 const BROKEN = new Set(['failed', 'killed'])
+// A workflow agent's reason: plain `workflow` when the script ran the table's model, `workflow, table says X · Y`
+// when it did not. Neither is an escalation; the drift reads `≠`, not `↑`.
+const isWorkflow = (reason) => typeof reason === 'string' && reason.startsWith('workflow')
+const isDrift = (reason) => isWorkflow(reason) && reason !== 'workflow'
+const escalation = (reason) => !!reason && reason !== 'table' && !isWorkflow(reason)
 
 // One band row per agent. `wire` maps a pane name to what its worker published (tool, tok, model).
 // `view` is the id of the agent whose transcript is on screen.
@@ -109,7 +114,7 @@ export function boardRows(rows, { now, tick = 0, cols = 80, wire = new Map(), tr
     else if (broken || paused) activity = ls.word
     else if (done) activity = r.kind === 'sub' ? 'done' : r.state
     else if (r.state === 'open') activity = 'open'
-    else activity = tool ?? (r.reason && r.reason !== 'table' ? '↑ ' + r.reason : r.kind === 'pane' ? 'working' : 'thinking')
+    else activity = tool ?? (escalation(r.reason) ? '↑ ' + r.reason : isDrift(r.reason) ? '≠ ' + r.reason : r.kind === 'pane' ? 'working' : 'thinking')
     return {
       id: r.id,
       name: r.name ?? null,
@@ -125,8 +130,8 @@ export function boardRows(rows, { now, tick = 0, cols = 80, wire = new Map(), tr
       effort: c.effort ? (effortBar(r.effort) + ' ' + String(r.effort ?? '').slice(0, 4)).padEnd(6) : null,
       spinner: paused ? ls.glyph : busy ? spin(tick, i) : done ? ' ' : '·',
       activity,
-      escalated: !!(r.reason && r.reason !== 'table'),
-      reason: r.reason && r.reason !== 'table' ? r.reason : null,
+      escalated: escalation(r.reason),
+      reason: r.reason && r.reason !== 'table' && r.reason !== 'workflow' ? r.reason : null,
       time: start != null && !r.adopted ? elapsed((r.end ?? now) - start).padStart(5) : '     ',
       tok: c.tok ? (tok != null && !r.adopted ? tokens(tok) : '').padStart(6) : null,
       dim: done && !broken,
@@ -192,8 +197,9 @@ export function routingLines(decisions, n = 8) {
     who: cut(String(d.role), 16).padEnd(16) + (d.kind === 'pane' ? ' ▣' : ' ◇'),
     route: (prettyModel(d.model) + ' · ' + (d.effort ?? '')).padEnd(21),
     color: colorOf(d.model),
-    reason: d.reason && d.reason !== 'table' ? '↑ ' + d.reason : 'table',
-    escalated: !!(d.reason && d.reason !== 'table'),
+    reason: escalation(d.reason) ? '↑ ' + d.reason : isDrift(d.reason) ? '≠ ' + d.reason : d.reason === 'workflow' ? 'workflow' : 'table',
+    escalated: escalation(d.reason),
+    drift: isDrift(d.reason),
   }))
 }
 

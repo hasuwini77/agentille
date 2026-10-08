@@ -301,6 +301,7 @@ describe('tmux band', () => {
       return e.path in mtimes ? { value: { kind: 'file', size: 0, mtimeMs: mtimes[e.path], isLink: false } } : { deny: 'ENOENT' }
     })
     on('store.get', async () => ({ value: undefined }))
+    on('session.receive', async ($: any, e: any) => ({ text: e.text }) as never)
     on('ui.panes', async () => ({ value: [] }))
     on('process.run', async ($: any, e: any) => {
       const cmd = e.argv.join(' ')
@@ -405,6 +406,21 @@ describe('tmux band', () => {
     expect(killed).toEqual([])
     await clock.advance(85_000)
     expect(killed).toEqual(['%3'])
+  })
+
+  test('a tmux pane\'s own instance file (pane-<role>.5.md for %5) harvests it', { timeoutMs: 15_000 }, async ($, on) => {
+    const rows = [row('%1', ''), row('%5', 'agt-r9-executor', '1')]
+    const { killed, clock } = await start($, on, { rows, mtimes: { '/h/.agentille/state/run-r9/agents/pane-executor.5.md': FRESH } })
+    await clock.advance(95_000)
+    expect(killed).toEqual(['%5'])
+  })
+
+  test('a tmux wire done message naming pane-<role>.5.md harvests %5', { timeoutMs: 15_000 }, async ($, on) => {
+    const rows = [row('%1', ''), row('%5', 'agt-r9-executor', '1')]
+    const { killed, clock } = await start($, on, { rows })
+    await $.session.receive({ text: '[agt wire] agt-r9-executor done · 0:10\nBuilt it\nFull answer: /h/.agentille/state/run-r9/agents/pane-executor.5.md', origin: { kind: 'peer' } } as never)
+    await clock.advance(95_000)
+    expect(killed).toEqual(['%5'])
   })
 })
 
@@ -831,18 +847,22 @@ describe('herdr reaper', () => {
   const LEAD = { name: 'lead', pane_id: 'w1:p1', agent: 'claude', agent_status: 'working', state_change_seq: 1, tab_id: 'w1:t1', workspace_id: 'w1' }
   const pane = (name: string, id: string, state: string) => ({ name, pane_id: id, agent: 'claude', agent_status: state, state_change_seq: 4, tab_id: 'w1:t1', workspace_id: 'w1' })
   const ANSWER = '/h/.agentille/state/run-r9/agents/pane-executor.md'
+  // What a worker in pane w1:p2 sends: the lead reads which pane reported from the answer path.
+  const WIRE_DONE = '[agt wire] agt-r9-executor done · 0:10\nBuilt it\nFull answer: /h/.agentille/state/run-r9/agents/pane-executor.w1-p2.md'
 
   // session.start polls once and starts the 5 s poll; `closed` collects `herdr pane close` ids, `files` maps a path to its
   // mtime (the files named up front are written in the far future, so always fresh), `agents` is what `herdr agent list`
   // shows (a test flips a pane's agent_status), `toasts` every toast, `sent` every session.send.
-  const lead = async ($: any, on: any, state: string, files: string[] = [ANSWER]) => {
+  const lead = async ($: any, on: any, state: string, files: string[] = [ANSWER], twin = false) => {
     const closed: string[] = []
     const toasts: string[] = []
     const sent: any[] = []
     const mtimes = new Map(files.map((f) => [f, FRESH]))
     const agents = [pane('agt-r9-executor', 'w1:p2', state)]
+    if (twin) agents.push(pane('agt-r9-executor', 'w1:p3', state)) // a second pane of the same role, listed from the first poll
     let splits = 3
     let reuse: string | null = null
+    let blind = false // `herdr agent list` fails while set
     on('env.get', async ($: any, e: any) => ({ value: ({ HERDR_ENV: '1', HERDR_PANE_ID: 'w1:p1', HOME: '/h' } as any)[e.name] }))
     on('session.start', async ($: any, e: any) => ({ cwd: e.cwd }))
     on('session.id', async () => ({ value: 'lead-sid' }))
@@ -862,6 +882,7 @@ describe('herdr reaper', () => {
     on('process.run', async ($: any, e: any) => {
       const cmd = e.argv.join(' ')
       let stdout = ''
+      if (cmd.startsWith('herdr agent list') && blind) return { value: { exitCode: 1, stdout: '', stderr: 'down' } }
       if (cmd.startsWith('herdr agent list')) stdout = JSON.stringify({ result: { agents: [LEAD, ...agents] } })
       if (cmd.startsWith('herdr pane split')) {
         stdout = JSON.stringify({ result: { pane: { pane_id: reuse ?? 'w1:p' + splits++ } } })
@@ -877,7 +898,7 @@ describe('herdr reaper', () => {
     })
     const clock = mock.clock(on, { now: 1_000_000 })
     await $.session.start({ cwd: '/w', surface: null, isInteractive: false })
-    return { closed, clock, toasts, sent, files: mtimes, agents, reuseId: (id: string) => { reuse = id } }
+    return { closed, clock, toasts, sent, files: mtimes, agents, reuseId: (id: string) => { reuse = id }, blind: (b: boolean) => { blind = b } }
   }
   const begin = ($: any) => $.turn.start({ text: 'go', turnId: 't1' })
   const end = ($: any) => $.turn.complete({ answer: 'ok', durationMs: 10, isAborted: false, turnId: 't1', reason: 'answer' })
@@ -933,7 +954,7 @@ describe('herdr reaper', () => {
     const done = await lead($, on, 'done', [])
     await done.clock.advance(100_000)
     expect(done.closed).toEqual([])
-    await $.session.receive({ text: '[agt wire] agt-r9-executor done · 0:10\nBuilt it', origin: { kind: 'peer' } } as never)
+    await $.session.receive({ text: WIRE_DONE, origin: { kind: 'peer' } } as never)
     await done.clock.advance(10_000)
     expect(done.closed).toEqual(['w1:p2'])
   })
@@ -975,7 +996,7 @@ describe('herdr reaper', () => {
   test('a wire done message inside the window means no self-wake', async ($, on) => {
     const done = await lead($, on, 'done', [])
     await done.clock.advance(10_000)
-    await $.session.receive({ text: '[agt wire] agt-r9-executor done · 0:10\nBuilt it', origin: { kind: 'peer' } } as never)
+    await $.session.receive({ text: WIRE_DONE, origin: { kind: 'peer' } } as never)
     await done.clock.advance(60_000)
     expect(done.sent).toEqual([])
   })
@@ -1007,7 +1028,7 @@ describe('herdr reaper', () => {
 
   test('a respawn after a wire report is not taken for reported: it wakes the lead if it goes quiet', { timeoutMs: 30_000 }, async ($, on) => {
     const l = await lead($, on, 'done', [])
-    await $.session.receive({ text: '[agt wire] agt-r9-executor done · 0:10\nBuilt it', origin: { kind: 'peer' } } as never)
+    await $.session.receive({ text: WIRE_DONE, origin: { kind: 'peer' } } as never)
     await l.clock.advance(100_000)
     expect(l.closed).toEqual(['w1:p2'])
     expect(l.sent).toEqual([])
@@ -1037,6 +1058,74 @@ describe('herdr reaper', () => {
     expect(l.closed).toEqual(['w1:p2', 'w1:p3'])
   })
 
+  describe('two panes of one role', () => {
+    const W = (id: string, key = id.replace(':', '-')) => '/h/.agentille/state/run-r9/agents/pane-executor.' + key + '.md'
+    // w1:p2 (the old pane) and w1:p3 (the respawn) both stay open and both finish.
+    const twin = ($: any, on: any, files: string[]) => lead($, on, 'done', files, true)
+
+    test('only the instance whose own answer exists is reaped', { timeoutMs: 30_000 }, async ($, on) => {
+      const l = await twin($, on, [W('w1:p3')])
+      await l.clock.advance(95_000)
+      expect(l.closed).toEqual(['w1:p3'])
+      expect(flagged(l)).toBe(1)
+    })
+
+    test('the old pane\'s own file harvests it, and not the other pane', { timeoutMs: 30_000 }, async ($, on) => {
+      const l = await twin($, on, [W('w1:p2')])
+      await l.clock.advance(95_000)
+      expect(l.closed).toEqual(['w1:p2'])
+      expect(flagged(l)).toBe(1)
+    })
+
+    test('a legacy answer file with a shared name harvests neither', { timeoutMs: 30_000 }, async ($, on) => {
+      const l = await twin($, on, [ANSWER])
+      await l.clock.advance(200_000)
+      expect(l.closed).toEqual([])
+      expect(flagged(l)).toBe(2) // once per pane
+    })
+
+    test('the legacy file counts again once the name is unique', { timeoutMs: 30_000 }, async ($, on) => {
+      const l = await twin($, on, [ANSWER])
+      await l.clock.advance(100_000)
+      expect(l.closed).toEqual([])
+      l.agents.splice(1, 1) // w1:p3 goes away
+      await l.clock.advance(10_000)
+      expect(l.closed).toEqual(['w1:p2'])
+    })
+
+    test('a done message naming a pane the list lacks does not harvest the one it does list', { timeoutMs: 30_000 }, async ($, on) => {
+      const l = await lead($, on, 'done', []) // a stale list: only w1:p2
+      await $.session.receive({ text: '[agt wire] agt-r9-executor done · 0:10\nBuilt it\nFull answer: ' + W('w1:p3'), origin: { kind: 'peer' } } as never)
+      await l.clock.advance(100_000)
+      expect(l.closed).toEqual([])
+      expect(flagged(l)).toBe(1)
+    })
+
+    test('a done message from another role carrying this pane\'s key does not harvest it', { timeoutMs: 30_000 }, async ($, on) => {
+      const l = await lead($, on, 'done', [])
+      await $.session.receive({ text: '[agt wire] agt-r9-other done · 0:10\nBuilt it\nFull answer: ' + W('w1:p2'), origin: { kind: 'peer' } } as never)
+      await l.clock.advance(100_000)
+      expect(l.closed).toEqual([])
+      expect(flagged(l)).toBe(1)
+    })
+
+    test('a done message with no Full answer line harvests nothing', { timeoutMs: 30_000 }, async ($, on) => {
+      const l = await lead($, on, 'done', [])
+      await $.session.receive({ text: '[agt wire] agt-r9-executor done · 0:10\nBuilt it', origin: { kind: 'peer' } } as never)
+      await l.clock.advance(100_000)
+      expect(l.closed).toEqual([])
+      expect(flagged(l)).toBe(1)
+    })
+
+    test('a done message harvests the pane it names, and the lead is not woken for that pane', { timeoutMs: 30_000 }, async ($, on) => {
+      const l = await twin($, on, [])
+      await $.session.receive({ text: '[agt wire] agt-r9-executor done · 0:10\nBuilt it\nFull answer: ' + W('w1:p3'), origin: { kind: 'peer' } } as never)
+      await l.clock.advance(95_000)
+      expect(l.closed).toEqual(['w1:p3'])
+      expect(l.sent).toHaveLength(1) // one wake, for the pane that did not report
+    })
+  })
+
   test('a pane id the multiplexer hands out again is a new pane: the old sighting is forgotten', { timeoutMs: 30_000 }, async ($, on) => {
     const l = await lead($, on, 'done', [])
     l.files.set(ANSWER, l.clock.now())
@@ -1047,6 +1136,25 @@ describe('herdr reaper', () => {
     finish(l, 'w1:p2')
     await l.clock.advance(100_000)
     expect(l.closed).toEqual(['w1:p2'])
+    expect(flagged(l)).toBe(1)
+  })
+
+  test('a new pane that gets an id whose owner no poll saw leave starts unharvested', { timeoutMs: 30_000 }, async ($, on) => {
+    const l = await lead($, on, 'done', [])
+    l.agents[0].name = 'agt-r9-planner' // w1:p2 is the planner for now
+    const mine = '/h/.agentille/state/run-r9/agents/pane-planner.w1-p2.md'
+    const older = '/h/.agentille/state/run-r9/agents/pane-executor.w1-p2.md' // an earlier executor held w1:p2 too
+    l.files.set(mine, l.clock.now())
+    l.files.set(older, l.clock.now())
+    await l.clock.advance(10_000) // the planner's pane is harvested
+    l.blind(true) // the list call fails as the planner goes: no poll sees it leave
+    l.agents.splice(0, 1)
+    l.reuseId('w1:p2')
+    expect((await respawn($)).result).toMatch(/^Opened agt-r9-executor/)
+    finish(l, 'w1:p2')
+    l.blind(false)
+    await l.clock.advance(100_000)
+    expect(l.closed).toEqual([])
     expect(flagged(l)).toBe(1)
   })
 })
@@ -1121,5 +1229,28 @@ describe('panes: tools load eagerly', () => {
   test('spawn_pane and close_pane are never deferred behind tool search', async () => {
     expect(spawnTool.isDeferred).toBe(false)
     expect(closeTool.isDeferred).toBe(false)
+  })
+})
+
+import { answerFile, paneKey } from '../../hooks/panes.js'
+
+describe('pane instance keys', () => {
+  test('a pane id becomes a filename-safe key, or null', () => {
+    expect(paneKey('w1:p3')).toBe('w1-p3')
+    expect(paneKey('%5')).toBe('5')
+    expect(paneKey('')).toBe(null)
+    expect(paneKey(null)).toBe(null)
+    expect(paneKey('::')).toBe(null)
+    expect(paneKey('a'.repeat(64))).toBe('a'.repeat(64))
+    expect(paneKey('a'.repeat(70))).toBe(null)
+  })
+
+  test('the answer file is per pane instance; no key is the legacy file; unsafe parts give null', () => {
+    expect(answerFile('/h', 'r9', 'executor', 'w1-p3')).toBe('/h/.agentille/state/run-r9/agents/pane-executor.w1-p3.md')
+    expect(answerFile('/h', 'r9', 'executor')).toBe('/h/.agentille/state/run-r9/agents/pane-executor.md')
+    expect(answerFile(null, 'r9', 'executor', 'w1-p3')).toBe(null)
+    expect(answerFile('/h', '../x', 'executor')).toBe(null)
+    expect(answerFile('/h', 'r9', 'exec/utor')).toBe(null)
+    expect(answerFile('/h', 'r9', 'executor', '../p3')).toBe(null)
   })
 })

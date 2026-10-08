@@ -3,7 +3,8 @@ name: validate
 # Structural lint for the agentille plugin — version drift, a versioned
 # marketplace.json, broken agent-namespace refs, dangling doc cross-refs,
 # a missing hook script, and PII leaks. NOT a behavioral test of /agt's
-# dispatch (that lives in the model). See scripts/validate.sh + CLAUDE.md.
+# dispatch (scored by the local eval suite in evals/: `claude plugin eval`,
+# see .claude/CLAUDE.md). See also scripts/validate.sh.
 
 on:
   push:

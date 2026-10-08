@@ -30,9 +30,9 @@ First match wins.
 |---|---|---|
 | 1 | `--team <x>` or `--mode team` | print `teams were removed in v3.0 — running as panes/subagent`, then resolve from row 3 as if no flag was typed |
 | 2 | `--mode <m>` (`panes`, `subagent`, `solo`; `herdr` = `panes`) | `<m>` |
-| 3 | ALL hold: no architectural verb (refactor, design, architect, migrate, redesign, restructure), a one-sentence task, no list of deliverables, no auth/money/data words | **solo** |
-| 4 | verb is `review` | **subagent**: reviewers in parallel, in the background |
-| 5 | verb is `debug` | **subagent**: the executor's debug loop |
+| 3 | verb is `review` | **subagent**: reviewers in parallel, in the background |
+| 4 | verb is `debug` | **subagent**: the executor's debug loop |
+| 5 | ALL hold: no architectural verb (refactor, design, architect, migrate, redesign, restructure), a one-sentence task, no list of deliverables, no auth/money/data words, not a `review` or `debug` | **solo** |
 | 6 | ≥2 genuinely disjoint slices that can build at the same time | **panes** inside Herdr or tmux, else **workflow** when the `Workflow` tool exists (`workflow-mode.md`), else subagent waves |
 | 7 | otherwise | Stage 2 classify (`routing.md` → "Stage 2 classify") |
 

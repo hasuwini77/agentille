@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'claude-code/testing'
+import { describe, expect, mock, test } from 'claude-code/testing'
 import { decide, formationOf, parseHeader, roleOf, verdictOf } from '../../hooks/routing.js'
 
 const fresh = () => ({ revise: 0, fixes: 0, fable: 0 })
@@ -102,5 +102,128 @@ describe('mod', () => {
     on('agent.spawn', async ($, e) => { seen = e.model; return { model: e.model ?? 'inherit', agentId: 'a2' } })
     await $.agent.spawn({ prompt: '[agt run=t2 size=large]\nsearch', subagentType: 'Explore', model: 'haiku' })
     expect(seen).toBe('haiku')
+  })
+})
+
+describe('workflow agents: runs, toast, deny', () => {
+  const hdr = (run: string) => '[agt run=' + run + ' size=large mode=review]\nreview'
+  const wf = (run: string | null, role = 'code-reviewer', index = 1) => ({ prompt: run ? hdr(run) : 'review', subagentType: 'agentille:agentille-' + role, workflow: { runId: 'wf_1', agentIndex: index } }) as never
+  const band = ($: any) => $.ui.mount({ plugin: 'agentille', surface: 'terminal', component: 'AbovePrompt', props: { hasSurvey: false, isWorking: true, maxRows: 10, bodyColumns: 100 } as never })
+  // `herdr`: the rows `herdr agent list` shows to a lead inside herdr; left out, there is no pane transport.
+  const setup = (on: any, model = 'claude-sonnet-5', herdr: any[] | null = null) => {
+    const toasts: string[] = []
+    const writes: Record<string, string> = {}
+    let n = 0
+    on('env.get', async ($: any, e: any) => ({ value: ({ HOME: '/h', ...(herdr && { HERDR_ENV: '1' }) } as any)[e.name] }))
+    if (herdr) {
+      on('tool.register', async () => ({ value: undefined }))
+      on('process.run', async ($: any, e: any) => ({ value: { exitCode: 0, stdout: e.argv[1] === 'agent' ? JSON.stringify({ result: { agents: herdr } }) : '', stderr: '' } }))
+    }
+    on('session.start', async ($: any, e: any) => ({ cwd: e.cwd }))
+    on('command.register', async () => ({ value: undefined }))
+    on('fs.read', async () => ({ deny: 'no profile' }))
+    on('fs.write', async ($: any, e: any) => { writes[e.path] = e.text; return { value: undefined } })
+    on('store.get', async () => ({ value: null }))
+    on('ui.render', async () => ({ type: 'engine', ref: 0 }) as never)
+    on('ui.toast', async ($: any, e: any) => { toasts.push(e.text); return { value: undefined } })
+    on('turn.complete', async ($: any, e: any) => ({ text: e.answer }))
+    on('agent.spawn', async () => ({ model, agentId: 'w' + n++ }))
+    mock.clock(on, { now: Date.now() })
+    return { toasts, writes }
+  }
+  const finish = ($: any, agentId: string, answer = 'ok', usage?: object) => $.turn.complete({ agentId, answer, durationMs: 10, isAborted: false, turnId: 't' + agentId, reason: 'answer', usage } as never)
+  const shownRun = async (ui: any, run: string) => (await ui.find({ type: 'Text', text: new RegExp('run ' + run) })) !== undefined
+
+  test('a drift raises one toast per run and role', async ($, on) => {
+    const { toasts } = setup(on)
+    await $.session.start({ cwd: '/w', surface: null, isInteractive: false })
+    await $.agent.spawn(wf('wfdrift'))
+    expect(toasts).toEqual(['agt workflow code-reviewer runs sonnet — table says opus · high'])
+    await $.agent.spawn(wf('wfdrift', 'code-reviewer', 2)) // same run, same role: told once
+    expect(toasts.length).toBe(1)
+    await $.agent.spawn(wf('wfdrift', 'design-reviewer', 3)) // another role is a new drift
+    expect(toasts.length).toBe(2)
+  })
+
+  test('a deny from a lower hook passes through: no agent, no log, no toast', async ($, on) => {
+    const toasts: string[] = []
+    on('ui.toast', async ($: any, e: any) => { toasts.push(e.text); return { value: undefined } })
+    on('agent.spawn', async () => ({ deny: 'workflow agents are off' }))
+    mock.clock(on, { now: Date.now() })
+    const res = await $.agent.spawn(wf('wfdeny'))
+    expect(res).toEqual({ deny: 'workflow agents are off' })
+    expect(toasts).toEqual([])
+    expect((await $.command.run({ command: 'agt-routing' })).text).not.toContain('code-reviewer')
+  })
+
+  test('a workflow takes the band over only from a run with nothing working', async ($, on) => {
+    setup(on)
+    await $.session.start({ cwd: '/w', surface: null, isInteractive: false })
+    await $.agent.spawn({ prompt: hdr('runA'), subagentType: 'agentille:agentille-executor' } as never) // w0, working
+    const ui = await band($)
+    expect(await shownRun(ui, 'runA')).toBe(true)
+    await $.agent.spawn(wf('runB')) // w1: runA still works, the band stays
+    expect(await shownRun(ui, 'runA')).toBe(true)
+    expect(await shownRun(ui, 'runB')).toBe(false)
+    await finish($, 'w0')
+    await finish($, 'w1')
+    await $.agent.spawn(wf('runC', 'code-reviewer', 2)) // nothing works any more: the band follows
+    expect(await shownRun(ui, 'runC')).toBe(true)
+    await ui.unmount()
+  })
+
+  test('a workflow takes the band over from adhoc', async ($, on) => {
+    setup(on)
+    await $.session.start({ cwd: '/w', surface: null, isInteractive: false })
+    await $.agent.spawn({ prompt: 'no header', subagentType: 'Explore' } as never) // w0 adhoc, working
+    await $.agent.spawn(wf('runD'))
+    const ui = await band($)
+    expect(await shownRun(ui, 'runD')).toBe(true)
+    await ui.unmount()
+  })
+
+  test('a workflow naming another run leaves the band on a run whose pane still works', async ($, on) => {
+    setup(on, 'claude-sonnet-5', [{ name: 'agt-runG-executor', pane_id: 'w1:p2', agent: 'claude', agent_status: 'working', state_change_seq: 1 }])
+    await $.session.start({ cwd: '/w', surface: null, isInteractive: false })
+    await $.agent.spawn({ prompt: hdr('runG'), subagentType: 'agentille:agentille-executor' } as never) // w0: runG owns the band
+    await finish($, 'w0') // no subagent of runG works any more, its pane does
+    await $.agent.spawn(wf('runH')) // w1
+    const ui = await band($)
+    expect(await shownRun(ui, 'runG')).toBe(true)
+    expect(await shownRun(ui, 'runH')).toBe(false)
+    await ui.unmount()
+  })
+
+  test('a headerless workflow agent files its routing line and tokens under adhoc, not the band run', async ($, on) => {
+    const { writes } = setup(on)
+    await $.session.start({ cwd: '/w', surface: null, isInteractive: false })
+    await $.agent.spawn({ prompt: hdr('runE'), subagentType: 'agentille:agentille-executor' } as never) // w0 working: runE owns the band
+    await $.agent.spawn(wf(null)) // w1, no header
+    await finish($, 'w1', 'ok', { input_tokens: 500, output_tokens: 100 })
+    expect(writes['/h/.agentille/state/run-runE/routing.jsonl']).not.toContain('"kind":"workflow"') // runE's log holds only its own
+    const ui = await band($)
+    expect(await shownRun(ui, 'runE')).toBe(true) // and the band still shows runE
+    await ui.unmount()
+    expect((await $.command.run({ command: 'agt-ledger' })).text).not.toContain('code-reviewer') // nor does /agt-ledger
+    await finish($, 'w0') // runE's ledger.json is written when one of its own agents finishes
+    const file = writes['/h/.agentille/state/run-runE/ledger.json']
+    expect(file).toBeDefined()
+    const ledger = JSON.parse(file)
+    expect(Object.keys(ledger.roles)).toEqual(['executor']) // w1's tokens stay out of runE's ledger
+    expect(ledger.total).toMatchObject({ agents: 1, input: 0, output: 0 })
+  })
+
+  test('a headerless workflow agent is judged against the band run\'s table pick, not ad hoc', async ($, on) => {
+    const { toasts } = setup(on, 'claude-fable-5')
+    await $.session.start({ cwd: '/w', surface: null, isInteractive: false })
+    for (const id of ['w0', 'w1']) { // two REVISEs: runF's planner is a Fable pick
+      await $.agent.spawn({ prompt: hdr('runF'), subagentType: 'agentille:agentille-plan-reviewer' } as never)
+      await finish($, id, 'REVISE')
+    }
+    await $.agent.spawn(wf(null, 'planner')) // w2, no header, runs fable: what runF's table says
+    expect(toasts.filter((t) => t.includes('table says'))).toEqual([])
+    const routing = (await $.command.run({ command: 'agt-routing' })).text
+    expect(routing).toContain('planner → claude-fable-5')
+    expect(routing).not.toContain('table says')
   })
 })

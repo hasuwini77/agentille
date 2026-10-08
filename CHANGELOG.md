@@ -2,6 +2,50 @@
 
 All notable changes to agentille are documented here.
 
+## [3.9.0] — 2026-10-08
+
+### Added
+
+- **Workflow agents in the transcript.** The `Workflow` call lists the agents
+  its script started beneath it, working and just-finished ones first, up to
+  eight and `+n more`; nothing is drawn when the call is scrolled off screen.
+- **A dispatch-decision eval suite** (`evals/`, `claude plugin eval`). Four
+  prompts score mode, roster, model routing and formation. Local and manual
+  only: every run is a real Claude session on your own account. See
+  `.claude/CLAUDE.md` for the command and its cost.
+
+### Changed
+
+- A workflow agent whose model differs from the routing table reads
+  `≠ workflow, table says …` on the band and the deck, not the `↑` of an
+  escalation.
+- The plan-reviewer and payments-reviewer no longer preload CLAUDE.md files:
+  they judge from the task, the planner's context pack or their own
+  checklist, and the plan-reviewer reads the repo's instructions on demand.
+
+### Fixed
+
+- `/agt "review …"` and `/agt "debug …"` no longer resolve to solo: the
+  review and debug rows now come before the one-sentence solo row. The eval
+  suite caught it.
+- A respawned role, or a reused pane id, can no longer get another open pane
+  reaped by its answer. Answer files are named per pane
+  (`pane-<role>.<pane>.md`), a done message only counts for the pane it
+  names and whose name matches, and a pane id starts unharvested when it is
+  opened. An older worker's `pane-<role>.md` counts only while no other open
+  pane has that name.
+- A workflow agent whose prompt names another run no longer pulls the band
+  off a run that still has agents working.
+- A workflow agent without an `[agt]` header files its routing line and
+  counters under ad hoc, not in the log and ledger of the run in progress.
+- The drift toast for a workflow agent shows once per run and role, not on
+  every agent.
+
+### Rationale
+
+- Dispatch decisions live in the model, so only a behavioural eval can catch
+  a routing regression; the first run found one.
+
 ## [3.8.1] — 2026-10-08
 
 ### Fixed

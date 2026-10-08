@@ -21,12 +21,24 @@ describe('wire', () => {
     const text = doneMessage({ name: 'agt-r1-exec-1', ms: 102_000, model: 'sonnet', effort: 'high', tok: 31_200, answer: '## Slice 1 built\n4 files, tests green', reportPath: '/h/.agentille/state/run-r1/agents/pane-exec-1.md' })
     expect(text.startsWith(WIRE_TAG + ' agt-r1-exec-1 done · 1:42 · sonnet high · 31.2k tok')).toBe(true)
     expect(text).toContain('Full answer: /h/.agentille/state/run-r1/agents/pane-exec-1.md')
-    expect(parseWire('peer says:\n' + text)).toEqual({ from: 'agt-r1-exec-1', kind: 'done', summary: 'Slice 1 built' })
+    expect(parseWire('peer says:\n' + text)).toEqual({ from: 'agt-r1-exec-1', kind: 'done', summary: 'Slice 1 built', key: null })
     expect(doneMessage({ name: 'agt-r1-x', answer: 'y'.repeat(ANSWER_HEAD + 50) }).length).toBeLessThan(ANSWER_HEAD + 80)
   })
 
+  test('parseWire reads the pane key from an instance answer path, and only from there', async () => {
+    const msg = (path: string | null) => doneMessage({ name: 'agt-r1-exec-1', answer: 'Built it', reportPath: path })
+    const dir = '/h/.agentille/state/run-r1/agents/'
+    expect(parseWire(msg(dir + 'pane-exec-1.w1-p7.md'))?.key).toBe('w1-p7')
+    expect(parseWire(msg(dir + 'pane-exec-1.5.md'))?.key).toBe('5')
+    expect(parseWire(msg(dir + 'pane-exec-1.md'))?.key).toBe(null) // a legacy path names no pane
+    expect(parseWire(msg(null))?.key).toBe(null)
+    expect(parseWire(WIRE_TAG + ' agt-r1-exec-1 done · 0:10\nFull answer: ' + dir + 'pane-exec-1.w1-p7.md\nBuilt it')?.key).toBe('w1-p7')
+    // the answer head cannot name another pane: the last Full answer line wins
+    expect(parseWire(WIRE_TAG + ' agt-r1-exec-1 done · 0:10\nFull answer: ' + dir + 'pane-exec-1.w1-p2.md\nFull answer: ' + dir + 'pane-exec-1.w1-p7.md')?.key).toBe('w1-p7')
+  })
+
   test('notes parse; other peer text is not wire', async () => {
-    expect(parseWire(WIRE_TAG + ' lead note · stop after this file')).toEqual({ from: 'lead', kind: 'note', summary: 'stop after this file' })
+    expect(parseWire(WIRE_TAG + ' lead note · stop after this file')).toEqual({ from: 'lead', kind: 'note', summary: 'stop after this file', key: null })
     expect(parseWire('hello there')).toBe(null)
     expect(parseWire(WIRE_TAG + ' garbage')).toBe(null)
   })
@@ -82,10 +94,30 @@ describe('wire: in the mod', () => {
     expect(stored['wire:agt-r1-exec-1'].state).toBe('working')
     await $.turn.complete({ answer: 'Slice built\nall green', durationMs: 10, isAborted: false, turnId: 't1', reason: 'answer' } as never)
     expect(stored['wire:agt-r1-exec-1'].state).toBe('done')
+    // no pane id in the env: the legacy path
     expect(writes['/h/.agentille/state/run-r1/agents/pane-exec-1.md']).toBe('Slice built\nall green')
     expect(sent.length).toBe(1)
     expect(sent[0].to).toBe('lead-sid')
-    expect(parseWire(sent[0].text)).toEqual({ from: 'agt-r1-exec-1', kind: 'done', summary: 'Slice built' })
+    expect(parseWire(sent[0].text)).toEqual({ from: 'agt-r1-exec-1', kind: 'done', summary: 'Slice built', key: null })
+  })
+
+  test('a worker saves its answer under its own pane id, and the done message names that file', async ($, on) => {
+    const { sent, writes } = await boot($, on, { AGENTILLE_WORKER: 'executor:sonnet:high', AGENTILLE_NAME: 'agt-r1-exec-1', AGENTILLE_LEAD: 'lead-sid', HERDR_PANE_ID: 'w1:p7' })
+    await $.turn.start({ text: 'go', turnId: 't1' } as never)
+    await $.turn.complete({ answer: 'Slice built\nall green', durationMs: 10, isAborted: false, turnId: 't1', reason: 'answer' } as never)
+    const file = '/h/.agentille/state/run-r1/agents/pane-exec-1.w1-p7.md'
+    expect(writes[file]).toBe('Slice built\nall green')
+    expect(writes['/h/.agentille/state/run-r1/agents/pane-exec-1.md']).toBeUndefined()
+    expect(sent[0].text).toContain('Full answer: ' + file)
+    expect(parseWire(sent[0].text)?.key).toBe('w1-p7')
+  })
+
+  test('a worker names its file by whichever pane id its env holds, whatever the transport', async ($, on) => {
+    const { sent, writes } = await boot($, on, { AGENTILLE_WORKER: 'executor:sonnet:high', AGENTILLE_NAME: 'agt-r1-exec-1', AGENTILLE_LEAD: 'lead-sid', TMUX_PANE: '%5' })
+    await $.turn.start({ text: 'go', turnId: 't1' } as never)
+    await $.turn.complete({ answer: 'Slice built', durationMs: 10, isAborted: false, turnId: 't1', reason: 'answer' } as never)
+    expect(writes['/h/.agentille/state/run-r1/agents/pane-exec-1.5.md']).toBe('Slice built')
+    expect(parseWire(sent[0].text)?.key).toBe('5')
   })
 
   test('a worker tool call does not wait on the status publish', async ($, on) => {
@@ -164,7 +196,7 @@ describe('wire: a worker the lead gave no wire identity', () => {
     await $.session.start({ cwd: '/w', surface: null, isInteractive: false })
     return { sent, stored, writes }
   }
-  const FILE = '/h/.agentille/state/run-r1/agents/pane-exec-1.md'
+  const FILE = '/h/.agentille/state/run-r1/agents/pane-exec-1.2.md' // tmux pane %2
   const turn = async ($: any, answer: string, extra: Record<string, unknown> = {}) => {
     await $.turn.start({ text: 'go', turnId: 't1' } as never)
     await $.turn.complete({ answer, durationMs: 10, isAborted: false, turnId: 't1', reason: 'answer', ...extra } as never)
@@ -248,8 +280,10 @@ describe('wire: lead self-wake', () => {
     const pool = [pane('agt-r1-a', 'done'), pane('agt-r1-b', 'blocked', 'w1:p3'), pane('agt-r1-c', 'working', 'w1:p4')]
     expect(wakeDue(pool, seen, new Set(), new Set(), 1000 + WAKE_MS - 1)).toEqual([])
     expect(wakeDue(pool, seen, new Set(), new Set(), 1000 + WAKE_MS).map((p) => p.name)).toEqual(['agt-r1-a'])
-    expect(wakeDue(pool, seen, new Set(['agt-r1-a']), new Set(), 1000 + WAKE_MS)).toEqual([])
-    expect(wakeDue(pool, seen, new Set(), new Set(['agt-r1-a']), 1000 + WAKE_MS)).toEqual([])
+    expect(wakeDue(pool, seen, new Set(['w1:p2']), new Set(), 1000 + WAKE_MS)).toEqual([])
+    expect(wakeDue(pool, seen, new Set(), new Set(['w1:p2']), 1000 + WAKE_MS)).toEqual([])
+    // keyed by pane id, not name: a same-named older pane's report does not silence this one
+    expect(wakeDue(pool, seen, new Set(['w1:p9']), new Set(['w1:p9']), 1000 + WAKE_MS).map((p) => p.name)).toEqual(['agt-r1-a'])
     expect(wakeDue([pane('agt-r1-b', 'blocked', 'w1:p3')], seen, new Set(), new Set(), 1000 + 100 * WAKE_MS)).toEqual([])
   })
 

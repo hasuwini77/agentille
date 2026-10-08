@@ -6,6 +6,7 @@ import { boardRows, prettyModel } from './board.js'
 import { short, waving } from './live.js'
 
 const MAX_CALLS = 200
+const MAX_FLOW_ROWS = 8
 const EFFORT_SHORT = { low: 'low', medium: 'med', high: 'high', xhigh: 'xhi', max: 'max' }
 
 // One agent as plain row data: the board's glyph, colour, spinner and activity, in the
@@ -42,19 +43,44 @@ export function cachedRow(cache, a, { now, tick = 0 }) {
   return row
 }
 
+// One agent's row element, the same in an Agent call and under a Workflow call.
+function rowElement(els, row, desc = '') {
+  const { Box, Text } = els
+  const kids = [
+    Text({ color: row.glyphColor, children: [row.glyph] }),
+    Text({ bold: !row.dim, dimColor: row.dim, children: [row.role] }),
+    Text({ color: row.modelColor, dimColor: row.dim, children: [row.model] }),
+    Box({ flexShrink: 1, children: [Text({ wrap: 'truncate', dimColor: row.dim, children: [Text({ color: row.glyphColor, children: [row.spinner ? row.spinner + ' ' : ''] }), row.activity] })] }),
+  ]
+  if (row.time) kids.push(Text({ dimColor: true, children: [row.time] }))
+  if (row.tok) kids.push(Text({ dimColor: true, children: [row.tok] }))
+  if (desc) kids.push(Box({ flexShrink: 1, children: [Text({ wrap: 'truncate', dimColor: true, children: [desc] })] }))
+  return Box({ flexDirection: 'row', columnGap: 1, children: kids })
+}
+
 export function registerRows(on, ctx) {
   const calls = new Map() // tool_use_id → agentId, for a call whose result has not landed yet
+  const flows = new Map() // Workflow tool_use_id → [{ agentId, index }], the agents its script started
   const finished = new Map() // agentId → { key, row }, a finished agent's row (cachedRow)
 
   // Observe only: remember which agent a call started, since a running ToolUse has no output.
   // A matcher keeps this clear of register.js's own unmatched agent.spawn hook (the engine refuses two).
-  // A workflow's agents all carry the Workflow call's id, which names none of them: not kept.
+  // A workflow's agents all carry the Workflow call's id, which names none of them: they are kept
+  // apart, per call, for the Workflow row.
   on('agent.spawn', { subagentType: /./ }, async ($, e, next) => {
     const res = await next(e)
-    if (e.tool_use_id && !e.workflow && res?.agentId) {
-      calls.delete(e.tool_use_id)
-      calls.set(e.tool_use_id, res.agentId)
-      if (calls.size > MAX_CALLS) calls.delete(calls.keys().next().value)
+    if (e.tool_use_id && res?.agentId) {
+      if (e.workflow) {
+        const list = flows.get(e.tool_use_id) ?? []
+        list.push({ agentId: res.agentId, index: e.workflow.agentIndex })
+        flows.delete(e.tool_use_id)
+        flows.set(e.tool_use_id, list)
+        if (flows.size > MAX_CALLS) flows.delete(flows.keys().next().value)
+      } else {
+        calls.delete(e.tool_use_id)
+        calls.set(e.tool_use_id, res.agentId)
+        if (calls.size > MAX_CALLS) calls.delete(calls.keys().next().value)
+      }
     }
     return res
   })
@@ -66,17 +92,26 @@ export function registerRows(on, ctx) {
     const a = id ? ctx.live.get(id) : undefined
     if (!a) return next(e)
     const row = cachedRow(finished, a, { now: Date.now(), tick: ctx.tick })
-    const { Box, Text } = $.ui.resolve(e)
-    const desc = String(p.input?.description ?? '').trim()
-    const kids = [
-      Text({ color: row.glyphColor, children: [row.glyph] }),
-      Text({ bold: !row.dim, dimColor: row.dim, children: [row.role] }),
-      Text({ color: row.modelColor, dimColor: row.dim, children: [row.model] }),
-      Box({ flexShrink: 1, children: [Text({ wrap: 'truncate', dimColor: row.dim, children: [Text({ color: row.glyphColor, children: [row.spinner ? row.spinner + ' ' : ''] }), row.activity] })] }),
-    ]
-    if (row.time) kids.push(Text({ dimColor: true, children: [row.time] }))
-    if (row.tok) kids.push(Text({ dimColor: true, children: [row.tok] }))
-    if (desc) kids.push(Box({ flexShrink: 1, children: [Text({ wrap: 'truncate', dimColor: true, children: [desc] })] }))
-    return Box({ flexDirection: 'row', columnGap: 1, children: kids })
+    return rowElement($.ui.resolve(e), row, String(p.input?.description ?? '').trim())
+  })
+
+  // A Workflow call keeps the engine's own row and lists the agents its script started beneath it.
+  on('ui.render', { component: 'ToolUse', props: { tool: 'Workflow' } }, async ($, e, next) => {
+    const p = e.props
+    if (p.isErrored || p.isInterrupted) return next(e)
+    if (p.onScreen === null) return next(e) // drawn outside the viewport: the engine's row alone
+    const started = flows.get(p.tool_use_id ?? e.requestId)
+    const now = Date.now()
+    // Working agents, and ones still waving goodbye, come first, so the cap never hides them.
+    const active = (a) => (a.state === 'working' || waving(a, now) ? 0 : 1)
+    const agents = (started ?? [])
+      .map((f) => ({ a: ctx.live.get(f.agentId), index: f.index }))
+      .filter((f) => f.a)
+      .sort((x, y) => active(x.a) - active(y.a) || x.index - y.index)
+    if (agents.length === 0) return next(e)
+    const els = $.ui.resolve(e)
+    const shown = agents.slice(0, MAX_FLOW_ROWS).map((f) => rowElement(els, cachedRow(finished, f.a, { now, tick: ctx.tick })))
+    if (agents.length > MAX_FLOW_ROWS) shown.push(els.Text({ dimColor: true, children: ['+' + (agents.length - MAX_FLOW_ROWS) + ' more'] }))
+    return els.Box({ flexDirection: 'column', children: [await next(e), ...shown] })
   })
 }

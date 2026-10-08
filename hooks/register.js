@@ -9,7 +9,7 @@ import { ACCENT, FRAME_COLOR, WIRE_COLOR, boardRows, cast, castColumns, chip, co
 import { PUBLISH_MS, doneMessage, freshStatus, logWire, parseTellArgs, parseWire, shortName, statusKey, validLead, wireEnv, workerStatus } from './wire.js'
 import { activeSquads, allPaths, depsOf, injection } from './squads.js'
 import { BYE_MS, HELLO_MS, MASCOT_COLOR, MODEL_COLOR, agentMood, caption, frame, modelKey, moodAt, parseWorker } from './mascot.js'
-import { MARK, SPAN_COLOR, highlight, highlightText, litFor, parseHighlightArgs, spans } from './highlight.js'
+import { MARK, SPAN_COLOR, highlightFor, highlightText, litFor, parseHighlightArgs, spans } from './highlight.js'
 import { flagOf, focusText, paneFlags, parseFocusArgs } from './focus.js'
 import {
   CLOSE_TOOL, HERDR_START_TIMEOUT, PROBE, SPAWN_TOOL, closeTarget, focusArgv, herdrMetaArgv, spawnToolInput, SAFE_RUN, SPAWN_ROLE, TMUX_LIST_ARGV, doneFile, herdrCloseArgv, herdrPaneIdOf, herdrPromptArgv, herdrSplitArgv, herdrStartArgv,
@@ -52,6 +52,7 @@ const mascot = { greeted: false, hiUntil: 0, byeUntil: 0, working: false, start:
 let highlightOn = true       // /agt replies get an essentials card and lit tokens
 let highlightAll = false     // …and so does every other long reply (/agt-highlight all)
 const litMemo = new Map()    // message id → was it an /agt turn when first drawn
+const hlMemo = new Map()     // message id → { text, highlight() result }
 let sessionId = null         // this session's id: workers it opens send their results here
 let leadModel = null         // the main loop's model, for the tree's root
 const wireLog = []           // [{ from, to, kind, summary, at }] messages between sessions, newest last
@@ -145,7 +146,7 @@ async function notePaneExits($) {
 async function pollHerdr($) {
   let list = []
   try {
-    const r = await $.process.run(['herdr', 'agent', 'list'])
+    const r = await $.process.run(['herdr', 'agent', 'list'], PROBE)
     list = JSON.parse(r.stdout).result?.agents ?? []
   } catch {
     return
@@ -354,7 +355,15 @@ const focusRow = (els, text) => els.Text({ color: FOCUS_COLOR.flag, wrap: 'trunc
 // ── the wire (worker side publishes and reports; lead side reads) ─────────────
 
 // Worker: what it is doing, into the shared store, at most once per PUBLISH_MS unless forced.
-async function publish($, force = false) {
+// Publishes run one after another, so a late tool-call publish never lands over a forced 'done'.
+let pubChain = Promise.resolve()
+function publish($, force = false) {
+  const p = pubChain.then(() => publishNow($, force))
+  pubChain = p.catch(() => {})
+  return p
+}
+
+async function publishNow($, force) {
   if (!wireName) return
   const now = Date.now()
   if (!force && now - pub.at < PUBLISH_MS) return
@@ -429,7 +438,7 @@ function boardRow(els, r, onFocus, slot = false) {
   kids.push(Box({ flexGrow: 1, flexShrink: 1, children: [Text({ wrap: 'truncate', dimColor: r.dim, children: [Text({ color: r.glyphColor, children: [r.spinner + ' '] }), r.activity] })] }))
   kids.push(Text({ dimColor: true, children: [r.time] }))
   if (r.tok) kids.push(Text({ dimColor: true, children: [r.tok] }))
-  if (onFocus) kids.push(Button({ label: '↗', plain: true, dimColor: true, onPress: onFocus }))
+  if (onFocus) kids.push(Button({ key: 'focus:' + r.id, label: '↗', plain: true, dimColor: true, onPress: onFocus }))
   else if (slot) kids.push(Text({ children: [' '] })) // keeps the columns of rows without a ↗ in line
   return Box({ flexDirection: 'row', columnGap: 1, children: kids })
 }
@@ -499,8 +508,10 @@ export function register(on) {
       await $.store.set('deck:auto', deckAuto)
       if (!deckAuto) return { text: 'deck: opens only when you type /agt-deck' }
     }
-    await $.ui.open({ id: DECK, title: 'agentille' })
-    return { text: 'deck open' + (deckAuto ? ' · opens on every /agt (/agt-deck off to stop)' : '') }
+    const o = await $.ui.open({ id: DECK, title: 'agentille' })
+    const auto = deckAuto ? ' · opens on every /agt (/agt-deck off to stop)' : ''
+    if (o?.isPlaced === false) return { text: 'deck waits: ' + (o.reason ?? 'no surface here places panes') + auto }
+    return { text: 'deck open' + auto }
   })
 
   // Typed only. The worker gets it as a peer message over the wire; a Herdr worker without the
@@ -673,7 +684,7 @@ export function register(on) {
       if (a) a.tool = toolLabel(e.tool, e)
     } else if (wireName) {
       pub.tool = toolLabel(e.tool, e)
-      await publish($)
+      void publish($).catch(() => {})
     }
     return next(e)
   })
@@ -799,6 +810,7 @@ export function register(on) {
   // The switchboard above the prompt: a framed dispatch tree rooted at the lead, one row per
   // subagent (◇) and pane session (▣), the newest wire message, and any agent flags.
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
+    if (e.props.hasSurvey) return next(e)
     const now = Date.now()
     const staged = stage({ agents: live, panes, routes: paneRoutes, run: lastRun, now })
     const focus = focusLines(now)
@@ -873,7 +885,7 @@ export function register(on) {
   // decision is memoised per message id so a reply does not restyle when a later turn changes.
   on('ui.render', { component: 'AssistantMessage' }, async ($, e, next) => {
     if (!litFor(litMemo, e.requestId, { on: highlightOn, agtTurn: agtTurn || highlightAll })) return next(e)
-    const h = highlight(e.props?.text)
+    const h = highlightFor(hlMemo, e.requestId, e.props?.text)
     if (!h) return next(e)
     const els = $.ui.resolve(e)
     if (!els.Markdown) return next(e)
@@ -883,10 +895,11 @@ export function register(on) {
 
   // Main-session spinner: how many subagents (◇) and pane sessions (▣) work behind it.
   on('ui.render', { component: 'Spinner' }, async ($, e, next) => {
+    if (live.has(e.requestId)) return next(e)
     const subs = [...live.values()].filter((a) => a.state === 'working').length
     const sessions = panes.filter((p) => p.state === 'working').length
     if (subs + sessions === 0) return next(e)
     const parts = [subs ? '◇' + subs : '', sessions ? '▣' + sessions : ''].filter(Boolean).join(' ')
-    return next({ ...e, props: { ...e.props, suffix: ' · ' + parts + ' working' } })
+    return next({ ...e, props: { ...e.props, suffix: (e.props.suffix ?? '') + ' · ' + parts + ' working' } })
   })
 }

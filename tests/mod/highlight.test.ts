@@ -1,6 +1,6 @@
 import { describe, expect, mock, test } from 'claude-code/testing'
 import { words } from '../../hooks/focus.js'
-import { CARD_MIN_WORDS, LIT_MEMO_MAX, essentials, highlight, highlightText, lightTokens, litFor, parseHighlightArgs, spans } from '../../hooks/highlight.js'
+import { CARD_MIN_WORDS, LIT_MEMO_MAX, essentials, highlight, highlightFor, highlightText, lightTokens, litFor, parseHighlightArgs, spans } from '../../hooks/highlight.js'
 
 const T = '`'
 const FENCE = T + T + T
@@ -172,6 +172,22 @@ describe('highlight: deciding', () => {
     expect(highlight(big + ' ' + words40).body).toBeNull()
     expect(highlight(big + ' ' + words40).card.length).toBe(1)
     expect(highlight('y'.repeat(12_000) + ' ' + words40)).toBeNull()
+  })
+
+  test('highlightFor: same id and text is one computation, changed text recomputes, no id is uncached', async () => {
+    const text = 'Next: tag v2.6.0. ' + Array.from({ length: 40 }, (_, i) => 'w' + i).join(' ')
+    const memo = new Map()
+    const first = highlightFor(memo, 'm1', text)
+    expect(first).toEqual(highlight(text))
+    expect(highlightFor(memo, 'm1', text)).toBe(first)
+    const changed = highlightFor(memo, 'm1', text + ' and hooks/live.js')
+    expect(changed).not.toBe(first)
+    expect(changed).toEqual(highlight(text + ' and hooks/live.js'))
+    expect(highlightFor(memo, '', text)).not.toBe(highlightFor(memo, '', text))
+    expect(memo.size).toBe(1)
+    for (let i = 0; i < LIT_MEMO_MAX + 5; i++) highlightFor(memo, 'x' + i, text)
+    expect(memo.size).toBe(LIT_MEMO_MAX)
+    expect(memo.has('m1')).toBe(false)
   })
 
   test('litFor: the first decision sticks, off still records, oldest id evicted', async () => {

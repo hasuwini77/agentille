@@ -125,7 +125,8 @@ describe('worker band', () => {
   const has = async (ui: any, re: RegExp) => (await ui.find({ type: 'Text', text: re })) !== undefined
   const shows = async (ui: any, re: RegExp) => { if (!(await has(ui, re))) throw new Error(String(re) + ' not drawn: ' + JSON.stringify(await ui.drawn())) }
 
-  test('hi on the first turn, legs step while it works, bye on the answer, then a plain caption, then silence', async ($, on) => {
+  // It walks the mock clock through more than a minute of 300 ms ticks; 5 s is too tight on a busy machine.
+  test('hi on the first turn, legs step while it works, bye on the answer, then a plain caption, then silence', { timeoutMs: 15_000 }, async ($, on) => {
     const { clock, invalidations } = setup(on, 'executor:sonnet:high')
     await start($)
     const ui = await mount($)

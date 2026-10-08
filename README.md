@@ -6,7 +6,7 @@ Install (about 30 seconds, no setup):
 
 ```
 /plugin marketplace add hasuwini77/agentille
-/plugin install agentille@systown-agentille
+/plugin install agentille@hasuwini77-agentille
 ```
 
 Try it in any repo:

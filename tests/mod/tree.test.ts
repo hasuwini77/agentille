@@ -23,6 +23,13 @@ describe('tree: forks and workflow agents', () => {
     expect(quietWorkflows(live, WORKFLOW_SILENT_MS)).toBe(true)
     expect([...live.values()].map((a) => a.state)).toEqual(['done', 'working', 'working'])
   })
+
+  test('a workflow agent inside a long tool call is not timed out', async () => {
+    const live = new Map([['w1', agent('w1', { workflow: 'wf_1', heard: 0, calls: 1 })]])
+    expect(quietWorkflows(live, WORKFLOW_SILENT_MS * 3)).toBe(false)
+    live.get('w1').calls = 0
+    expect(quietWorkflows(live, WORKFLOW_SILENT_MS * 3)).toBe(true)
+  })
 })
 
 describe('tree: nest', () => {

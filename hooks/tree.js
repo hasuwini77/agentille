@@ -60,7 +60,7 @@ export function applyStatus(live, list, now) {
 export function quietWorkflows(live, now) {
   let changed = false
   for (const a of live.values()) {
-    if (!a.workflow || a.state !== 'working' || now - (a.heard ?? a.start) < WORKFLOW_SILENT_MS) continue
+    if (!a.workflow || a.state !== 'working' || a.calls > 0 || now - (a.heard ?? a.start) < WORKFLOW_SILENT_MS) continue
     finish(a, now)
     changed = true
   }

@@ -16,7 +16,7 @@ import {
   isFreshDone, isLead, newRunId, paneName, paneRole, parseSpawnArgs, parseTmuxList, pickTransport, quietSpawn, reapPool, scopeRows, splitName, splitPlan, tmuxEvenArgv, tmuxKillArgv, tmuxPaneAgents, tmuxPaneIdOf,
   advisorEnv, tmuxSplitArgv, tmuxTagArgvs, transportBlock,
 } from './panes.js'
-import { cacheDirOf, newerInstalled, skewMessage } from './skew.js'
+import { cacheDirOf, compareVersions, newerInstalled, skewMessage } from './skew.js'
 import { adopt, applyStatus, nest } from './tree.js'
 import { registerRows } from './rows.js'
 import { registerStatus } from './status.js'
@@ -123,14 +123,19 @@ function shortType(t) {
 }
 
 // The newer agentille version installed beside the one this session runs, or null: nothing found,
-// nothing readable (a checkout, a host without a plugin cache) all read as no skew.
+// nothing readable (a checkout, a host without a plugin cache) all read as no skew. A replaced version
+// stays in the cache with an .orphaned_at marker; it is not installed, so only a newer folder without
+// one counts (one lookup per newer folder).
 async function installedSkew($) {
   if (!runningVersion) return null
   try {
     const dir = cacheDirOf($.plugin.root)
     if (!dir) return null
-    const entries = await $.fs.list(dir)
-    return newerInstalled(runningVersion, entries.filter((e) => e.kind === 'dir').map((e) => e.name))
+    const live = []
+    for (const e of await $.fs.list(dir)) {
+      if (e.kind === 'dir' && compareVersions(e.name, runningVersion) > 0 && !(await $.fs.exists(dir + '/' + e.name + '/.orphaned_at'))) live.push(e.name)
+    }
+    return newerInstalled(runningVersion, live)
   } catch {
     return null
   }
@@ -233,13 +238,13 @@ async function isHarvested($, p) {
   return true
 }
 
-// A pane finished or blocked and no wire done message came: the lead's own session gets one
-// message naming the pane and how to read it, so the lead does not wait blind. Once per pane.
+// A pane finished and no wire done message came: the lead's own session gets one message naming
+// the pane and how to read it, so the lead does not wait blind. Once per pane. A blocked pane waits on the person.
 async function wakeLead($, pool, now, t) {
   if (!sessionId) return
   for (const p of wakeDue(pool, paneSeen, wireDone, woken, now)) {
     woken.add(p.name)
-    const text = wakeMessage({ name: p.name, state: p.state, transport: t, id: p.id, answerPath: (await hasAnswer($, p)) ? answerPath(p) : null })
+    const text = wakeMessage({ name: p.name, transport: t, id: p.id, answerPath: (await hasAnswer($, p)) ? answerPath(p) : null })
     const r = await $.session.send({ to: { sessionId }, text }).catch((err) => ({ isDelivered: false, reason: String(err?.message ?? err) }))
     if (!r.isDelivered) $.ui.toast('agt ⚑ ' + p.name + ' ' + p.state + ' with no report. ' + text.slice(text.indexOf('. ') + 2).slice(0, 120))
   }

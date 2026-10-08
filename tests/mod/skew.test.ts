@@ -31,9 +31,11 @@ describe('skew: versions', () => {
 
 describe('skew: in the mod', () => {
   const TMUX = { TMUX: '/tmp/tmux-1/default,1,0', TMUX_PANE: '%1', SHELL: '/bin/zsh', HOME: '/h' }
-  const boot = async ($: any, on: any, o: { version?: string | null; siblings: string[] }) => {
+  // `orphaned` names the sibling folders that hold a .orphaned_at marker; `lookups` is every marker path asked about.
+  const boot = async ($: any, on: any, o: { version?: string | null; siblings: string[]; orphaned?: string[] }) => {
     const toasts: string[] = []
     const seen: string[][] = []
+    const lookups: string[] = []
     const siblings = o.siblings
     on('env.get', async ($: any, e: any) => ({ value: (TMUX as any)[e.name] }))
     on('session.cwd', async () => ({ value: '/work/repo' }))
@@ -43,7 +45,11 @@ describe('skew: in the mod', () => {
     on('ui.toast', async ($: any, e: any) => { toasts.push(e.text); return { value: undefined } })
     on('fs.read', async ($: any, e: any) => (e.path.endsWith('/.claude-plugin/plugin.json') && o.version !== null ? { value: JSON.stringify({ version: o.version ?? '3.5.1' }) } : { deny: 'ENOENT' }))
     on('fs.list', async () => ({ value: siblings.map((name) => ({ name, kind: 'dir', size: 0, mtimeMs: 0, isLink: false })) }))
-    on('fs.exists', async () => ({ value: false }))
+    on('fs.exists', async ($: any, e: any) => {
+      if (!e.path.endsWith('/.orphaned_at')) return { value: false }
+      lookups.push(e.path)
+      return { value: (o.orphaned ?? []).some((name) => e.path.endsWith('/' + name + '/.orphaned_at')) }
+    })
     on('fs.stat', async ($: any, e: any) => (e.path.startsWith('/work/') ? { value: { kind: 'dir', size: 0, mtimeMs: 0, isLink: false } } : { deny: 'ENOENT' }))
     on('store.get', async () => ({ value: undefined }))
     on('ui.panes', async () => ({ value: [] }))
@@ -53,7 +59,7 @@ describe('skew: in the mod', () => {
     })
     mock.clock(on, { now: 1_000_000 })
     await $.session.start({ cwd: '/work/repo', surface: null, isInteractive: false })
-    return { toasts, seen, siblings }
+    return { toasts, seen, siblings, lookups }
   }
   const spawn = ($: any) => $.tool.call({ tool: 'mcp__agentille__spawn_pane', run: 'k7f2ab', role: 'exec-1', task: 'build one', agent: 'executor', header: '[agt run=k7f2ab size=small mode=build]' })
   const MSG = 'agentille v3.6.0 is installed but this session runs v3.5.1 — restart Claude Code before opening panes'
@@ -80,6 +86,29 @@ describe('skew: in the mod', () => {
     const { toasts } = await boot($, on, { siblings: ['3.5.1', '3.4.0', 'tmp', 'b78ac49cdc6b'] })
     expect((await spawn($)).result).toMatch(/^Opened agt-k7f2ab-exec-1/)
     expect(toasts.filter((t) => t.includes('is installed'))).toEqual([])
+  })
+
+  test('a newer folder marked .orphaned_at is a replaced version, not an install: panes open', async ($, on) => {
+    const { toasts } = await boot($, on, { siblings: ['3.5.1', '3.6.0'], orphaned: ['3.6.0'] })
+    expect((await spawn($)).result).toMatch(/^Opened agt-k7f2ab-exec-1/)
+    expect(toasts.filter((t) => t.includes('is installed'))).toEqual([])
+  })
+
+  test('the newest folder that is not orphaned is the one reported', async ($, on) => {
+    const { toasts } = await boot($, on, { siblings: ['3.5.1', '3.6.0', '3.7.0'], orphaned: ['3.7.0'] })
+    expect((await spawn($)).deny).toBe(MSG)
+    expect(toasts.filter((t) => t.includes('v3.6.0 is installed'))).toHaveLength(1)
+  })
+
+  test('the marker is looked up only for newer versions', async ($, on) => {
+    const { lookups } = await boot($, on, { siblings: ['3.4.0', '3.5.1', 'tmp', 'b78ac49cdc6b', '3.6.0'] })
+    expect(lookups).toHaveLength(1)
+    expect(lookups[0].endsWith('/3.6.0/.orphaned_at')).toBe(true)
+  })
+
+  test('with nothing newer beside it, no marker is looked up at all', async ($, on) => {
+    const { lookups } = await boot($, on, { siblings: ['3.4.0', '3.5.1', 'tmp'] })
+    expect(lookups).toEqual([])
   })
 
   test('no readable plugin.json degrades silently: panes open, no toast', async ($, on) => {

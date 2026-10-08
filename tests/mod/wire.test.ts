@@ -244,22 +244,27 @@ describe('wire: lead self-wake', () => {
   const pane = (name: string, state: string, id = 'w1:p2') => ({ id, name, state })
   const seen = new Map([['w1:p2', { since: 1000 }], ['w1:p3', { since: 1000 }]])
 
-  test('a done or blocked pane with no wire message is due after 20 s, once', () => {
+  test('a done pane with no wire message is due after 20 s, once; a blocked one waits on the person', () => {
     const pool = [pane('agt-r1-a', 'done'), pane('agt-r1-b', 'blocked', 'w1:p3'), pane('agt-r1-c', 'working', 'w1:p4')]
     expect(wakeDue(pool, seen, new Set(), new Set(), 1000 + WAKE_MS - 1)).toEqual([])
-    expect(wakeDue(pool, seen, new Set(), new Set(), 1000 + WAKE_MS).map((p) => p.name)).toEqual(['agt-r1-a', 'agt-r1-b'])
-    expect(wakeDue(pool, seen, new Set(['agt-r1-a']), new Set(['agt-r1-b']), 1000 + WAKE_MS)).toEqual([])
+    expect(wakeDue(pool, seen, new Set(), new Set(), 1000 + WAKE_MS).map((p) => p.name)).toEqual(['agt-r1-a'])
+    expect(wakeDue(pool, seen, new Set(['agt-r1-a']), new Set(), 1000 + WAKE_MS)).toEqual([])
+    expect(wakeDue(pool, seen, new Set(), new Set(['agt-r1-a']), 1000 + WAKE_MS)).toEqual([])
+    expect(wakeDue([pane('agt-r1-b', 'blocked', 'w1:p3')], seen, new Set(), new Set(), 1000 + 100 * WAKE_MS)).toEqual([])
   })
 
   test('the message names the pane and how to read it, per transport', () => {
-    expect(readCommand('herdr', 'w1:p5')).toBe('herdr pane read w1:p5 --lines 200')
-    expect(readCommand('tmux', '%5')).toBe('tmux capture-pane -p -t %5 -S -200')
-    expect(readCommand('herdr', 'w1:p5; rm -rf')).toBe(null)
-    const m = wakeMessage({ name: 'agt-r1-a', state: 'done', transport: 'herdr', id: 'w1:p5' })
+    expect(readCommand('herdr', 'w1:p5', 'agt-r1-a')).toBe('herdr agent read agt-r1-a --source recent-unwrapped --lines 200')
+    expect(readCommand('tmux', '%5', 'agt-r1-a')).toBe('tmux capture-pane -p -t %5 -S -200')
+    expect(readCommand('herdr', 'w1:p5', 'agt-r1-a; rm -rf')).toBe(null)
+    expect(readCommand('tmux', '%5; rm -rf', 'agt-r1-a')).toBe(null)
+    expect(readCommand('none', '%5', 'agt-r1-a')).toBe(null)
+    const m = wakeMessage({ name: 'agt-r1-a', transport: 'herdr', id: 'w1:p5' })
     expect(m.startsWith(WAKE_TAG + ' agt-r1-a finished and has not reported.')).toBe(true)
-    expect(m).toContain('herdr pane read w1:p5 --lines 200')
+    expect(m).toContain('herdr agent read agt-r1-a --source recent-unwrapped --lines 200')
     expect(parseWire(m)).toBe(null)
-    expect(wakeMessage({ name: 'agt-r1-a', state: 'blocked', transport: 'tmux', id: '%5' })).toContain('needs the person')
-    expect(wakeMessage({ name: 'agt-r1-a', state: 'done', transport: 'tmux', id: '%5', answerPath: '/h/a.md' })).toContain('saved at /h/a.md')
+    expect(wakeMessage({ name: 'agt-r1-a', transport: 'tmux', id: '%5' })).toContain('tmux capture-pane -p -t %5 -S -200')
+    expect(wakeMessage({ name: 'agt-r1-a', transport: 'tmux', id: '%5', answerPath: '/h/a.md' })).toContain('saved at /h/a.md')
+    expect(wakeMessage({ name: 'agt-r1-a', transport: 'none', id: '' })).toContain('Read the pane.')
   })
 })

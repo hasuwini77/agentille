@@ -1,5 +1,4 @@
 // /agt flag autocomplete: rows for the token at the cursor while a typed /agt prompt is being written.
-import { isAgtPrompt } from './live.js'
 
 // Mirror of skills/agt/SKILL.md argument-hint (flags and their values) + "Run modifiers". Keep in step with both.
 export const AGT_FLAGS = [
@@ -23,13 +22,28 @@ export const AGT_VALUES = {
   ],
 }
 
-// Rows for the token, or [] when this is not a /agt prompt, the token is the command itself, or nothing matches.
-// A flag token completes to flags; the word after a flag that takes a value completes to its values.
+const WS = /\s/
+
+// The whitespace-delimited word before `start`, found by scanning back from it: the cost is that word's
+// length, not the draft's, and this runs on every keystroke.
+function wordBefore(text, start) {
+  const t = String(text)
+  const space = (i) => WS.test(t[i])
+  let end = Math.min(start, t.length)
+  while (end > 0 && space(end - 1)) end--
+  let at = end
+  while (at > 0 && !space(at - 1)) at--
+  return t.slice(at, end)
+}
+
+// Rows for the token, or [] when the token is the command itself or nothing matches. A flag token
+// completes to flags; the word after a flag that takes a value completes to its values. The draft is
+// known to be a typed /agt one: registerAutocomplete's matcher lets nothing else through.
 export function agtSuggestions({ text, token, start }) {
-  if (typeof token !== 'string' || !isAgtPrompt(text) || !(start > 0)) return []
+  if (typeof token !== 'string' || !(start > 0)) return []
   const match = (rows) => rows.filter((r) => r.text.startsWith(token) && r.text !== token)
   if (token === '-' || token.startsWith('--')) return match(AGT_FLAGS)
-  const flag = String(text).slice(0, start).trimEnd().split(/\s+/).pop()
+  const flag = wordBefore(text, start)
   return Object.hasOwn(AGT_VALUES, flag) ? match(AGT_VALUES[flag]) : []
 }
 

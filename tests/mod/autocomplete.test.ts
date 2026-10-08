@@ -1,8 +1,9 @@
 import { describe, expect, test } from 'claude-code/testing'
 import { AGT_FLAGS, AGT_VALUES, agtSuggestions, autocompleteHook, registerAutocomplete } from '../../hooks/autocomplete.js'
 
+// The event for a draft with the caret at its end: the token is the last run of non-whitespace.
 const ev = (text: string) => {
-  const start = text.lastIndexOf(' ') + 1
+  const start = text.search(/\S*$/)
   return { text, cursor: text.length, token: text.slice(start), start }
 }
 
@@ -21,13 +22,12 @@ describe('autocomplete: agtSuggestions', () => {
     for (const r of agtSuggestions(ev('/agt -'))) expect(r.description).toBeTruthy()
   })
 
-  test('nothing for a finished flag, an unknown flag, plain words or other commands', async () => {
+  test('nothing for a finished flag, an unknown flag, plain words or the command itself', async () => {
     expect(agtSuggestions(ev('/agt --mode'))).toEqual([])
     expect(agtSuggestions(ev('/agt --zzz'))).toEqual([])
     expect(agtSuggestions(ev('/agt fix'))).toEqual([])
-    expect(agtSuggestions(ev('/agt-ledger --m'))).toEqual([])
-    expect(agtSuggestions(ev('hello --mo'))).toEqual([])
     expect(agtSuggestions(ev('--mo'))).toEqual([])
+    expect(agtSuggestions(ev('/agt'))).toEqual([])
   })
 })
 
@@ -55,9 +55,15 @@ describe('autocomplete: values', () => {
     expect(agtSuggestions(ev('/agt --fable p'))).toEqual([])
     expect(agtSuggestions(ev('/agt --plan s'))).toEqual([])
     expect(agtSuggestions(ev('/agt fix p'))).toEqual([])
-    expect(agtSuggestions(ev('/agt-ledger --mode p'))).toEqual([])
-    expect(agtSuggestions(ev('hello --mode p'))).toEqual([])
     expect(agtSuggestions(ev('/agt --mode p ok')).map((r) => r.text)).toEqual([])
+  })
+
+  test('the flag before the value is found across any whitespace, however long the draft', () => {
+    expect(agtSuggestions(ev('/agt "fix it"\n--mode p')).map((r) => r.text)).toEqual(['panes'])
+    expect(agtSuggestions(ev('/agt --mode\tp')).map((r) => r.text)).toEqual(['panes'])
+    expect(agtSuggestions(ev('/agt --formation \n  g')).map((r) => r.text)).toEqual(['gauntlet'])
+    expect(agtSuggestions(ev('/agt ' + 'word '.repeat(5000) + '--mode s')).map((r) => r.text)).toEqual(['subagent', 'solo'])
+    expect(agtSuggestions(ev('/agt ' + 'x'.repeat(5000) + ' p'))).toEqual([])
   })
 
   test('the hook appends value rows after next', async () => {
@@ -95,5 +101,34 @@ describe('autocomplete: autocompleteHook', () => {
     expect(matcher.text.test('/agt-ledger --m')).toBe(false)
     expect(matcher.text.test('hello --mode p')).toBe(false)
     expect(hook).toBe(autocompleteHook)
+  })
+})
+
+// The matcher is what keeps other drafts away from the hook, so the runtime has the last word.
+describe('autocomplete: through the runtime', () => {
+  const boot = async ($: any, on: any) => {
+    on('env.get', async () => ({ value: undefined }))
+    on('session.start', async ($: any, e: any) => ({ cwd: e.cwd }))
+    on('command.register', async () => ({ value: undefined }))
+    on('fs.read', async () => ({ deny: 'no profile' }))
+    on('store.get', async () => ({ value: undefined }))
+    on('prompt.autocomplete', async () => ({ suggestions: [] }))
+    await $.session.start({ cwd: '/w', surface: null, isInteractive: false })
+  }
+  const ask = async ($: any, text: string) => ((await $.prompt.autocomplete(ev(text))) as { suggestions: { text: string }[] }).suggestions.map((r) => r.text)
+
+  test('a typed /agt draft gets flag rows and value rows', async ($, on) => {
+    await boot($, on)
+    expect(await ask($, '/agt --mo')).toEqual(['--mode'])
+    expect(await ask($, '/agt --mode p')).toEqual(['panes'])
+    expect(await ask($, '  /agentille:agt "fix it"\n--formation g')).toEqual(['gauntlet'])
+  })
+
+  test('another command or plain text gets nothing', async ($, on) => {
+    await boot($, on)
+    expect(await ask($, '/agt-ledger --mo')).toEqual([])
+    expect(await ask($, '/agt-ledger --mode p')).toEqual([])
+    expect(await ask($, 'hello --mo')).toEqual([])
+    expect(await ask($, 'hello --mode p')).toEqual([])
   })
 })

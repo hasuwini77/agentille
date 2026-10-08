@@ -881,6 +881,10 @@ describe('herdr reaper', () => {
   }
   const begin = ($: any) => $.turn.start({ text: 'go', turnId: 't1' })
   const end = ($: any) => $.turn.complete({ answer: 'ok', durationMs: 10, isAborted: false, turnId: 't1', reason: 'answer' })
+  // A role can be respawned (a fix, a retry): the second pane of agt-r9-executor is a new worker.
+  const respawn = ($: any) => $.tool.call({ tool: 'mcp__agentille__spawn_pane', run: 'r9', role: 'executor', task: 'redo the filter, tests first', agent: 'executor', header: '[agt run=r9 size=small mode=build]' })
+  const finish = (l: any, id: string) => { l.agents.find((a: any) => a.pane_id === id).agent_status = 'done' }
+  const flagged = (l: any) => l.toasts.filter((t: string) => t.includes('agt-r9-executor done, not harvested')).length
 
   test('idle reaps only between lead turns, done reaps at 90 s (answer harvested)', async ($, on) => {
     const idle = await lead($, on, 'idle')
@@ -942,16 +946,24 @@ describe('herdr reaper', () => {
     expect(done.sent).toHaveLength(1)
     expect(JSON.stringify(done.sent[0].to)).toContain('lead-sid')
     expect(done.sent[0].text).toContain('agt-r9-executor finished and has not reported')
-    expect(done.sent[0].text).toContain('herdr pane read w1:p2 --lines 200')
+    expect(done.sent[0].text).toContain('herdr agent read agt-r9-executor --source recent-unwrapped --lines 200')
     await done.clock.advance(300_000)
     expect(done.sent).toHaveLength(1)
   })
 
-  test('a blocked pane wakes the lead too; a working pane does not', async ($, on) => {
-    const blocked = await lead($, on, 'blocked', [])
-    await blocked.clock.advance(30_000)
-    expect(blocked.sent).toHaveLength(1)
-    expect(blocked.sent[0].text).toContain('is blocked')
+  test('a blocked pane waits on the person: no wake, until it finishes without reporting', { timeoutMs: 30_000 }, async ($, on) => {
+    const l = await lead($, on, 'blocked', [])
+    await l.clock.advance(60_000)
+    expect(l.sent).toEqual([])
+    finish(l, 'w1:p2')
+    await l.clock.advance(15_000)
+    expect(l.sent).toEqual([])
+    await l.clock.advance(10_000)
+    expect(l.sent).toHaveLength(1)
+    expect(l.sent[0].text).toContain('agt-r9-executor finished and has not reported')
+    expect(l.sent[0].text).not.toContain('blocked')
+    await l.clock.advance(300_000)
+    expect(l.sent).toHaveLength(1)
   })
 
   test('a working pane never wakes the lead', async ($, on) => {
@@ -975,11 +987,6 @@ describe('herdr reaper', () => {
     expect(await ui.find({ type: 'Text', text: /⚑ agt-r9-executor done, not harvested/ })).toBeDefined()
     await ui.unmount()
   })
-
-  // A role can be respawned (a fix, a retry): the second pane of agt-r9-executor is a new worker.
-  const respawn = ($: any) => $.tool.call({ tool: 'mcp__agentille__spawn_pane', run: 'r9', role: 'executor', task: 'redo the filter, tests first', agent: 'executor', header: '[agt run=r9 size=small mode=build]' })
-  const finish = (l: any, id: string) => { l.agents.find((a: any) => a.pane_id === id).agent_status = 'done' }
-  const flagged = (l: any) => l.toasts.filter((t: string) => t.includes('agt-r9-executor done, not harvested')).length
 
   test('a respawned role starts unharvested: woken, flagged and kept open like any new pane', { timeoutMs: 30_000 }, async ($, on) => {
     const l = await lead($, on, 'done', [])

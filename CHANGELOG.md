@@ -2,6 +2,18 @@
 
 All notable changes to agentille are documented here.
 
+## [3.8.1] — 2026-10-08
+
+### Fixed
+
+- A swarm lane past eight cells keeps the working agent: it keeps every
+  working and failed cell and fills the rest with the newest finished ones.
+  It used to keep the oldest, so a live agent could fall into `+n`.
+- No swarm line outside an `/agt` run: plain subagents of a session no
+  longer build a session-long line.
+- A workflow agent inside one tool call longer than ten minutes is no
+  longer marked done.
+
 ## [3.8.0] — 2026-10-08
 
 ### Added

@@ -9,6 +9,8 @@ Applies when the task has ≥2 disjoint slices, there is no pane transport, and 
 - design-reviewer: Opus, on UI buckets only.
 - security-reviewer: on security buckets (`risk=auth|money|data`) only.
 
+Each stage's `agent()` call passes `agentType`, `model` and `effort` per `routing.md` → "Default routing". `model` may be absent from the `agent()` options on some builds; the agent's frontmatter model then runs, and the band shows it.
+
 Every stage prompt starts with the `[agt …]` header (`SKILL.md` → "Dispatch header").
 
 ## Adversarial verify

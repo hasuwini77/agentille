@@ -175,3 +175,80 @@ describe('rows: in the transcript', () => {
     expect(await draws('tuWf')).toBe(false)    // a Workflow call id names no single agent
   })
 })
+
+describe('rows: workflow agents', () => {
+  const PROMPT = '[agt run=wfrun size=large mode=build]\nbuild'
+  const band = ($: any) => $.ui.mount({ plugin: 'agentille', surface: 'terminal', component: 'AbovePrompt', props: { hasSurvey: false, isWorking: true, maxRows: 10, bodyColumns: 100 } as never })
+  const has = async (ui: any, re: RegExp) => (await ui.find({ type: 'Text', text: re })) !== undefined
+  const shows = async (ui: any, re: RegExp) => { if (!(await has(ui, re))) throw new Error(String(re) + ' not drawn: ' + JSON.stringify(await ui.drawn())) }
+  const setup = (on: any) => {
+    let invalidations = 0
+    on('store.get', async () => ({ value: null }))
+    on('ui.render', async () => ({ type: 'engine', ref: 0 }) as never)
+    on('ui.invalidate', async ($: any, e: any, next: any) => { invalidations++; return next(e) })
+    on('turn.complete', async ($: any, e: any) => ({ text: e.answer }))
+    on('tool.call', async () => ({ result: 'ok' }) as never)
+    const ids = ['wa', 'wb']
+    let n = 0
+    on('agent.spawn', async () => ({ model: 'claude-sonnet-5', agentId: ids[n++] }))
+    const clock = mock.clock(on, { now: Date.now() })
+    return { clock, invalidations: () => invalidations }
+  }
+  const spawn = ($: any, role: string, index: number) => $.agent.spawn({ prompt: PROMPT, subagentType: 'agentille:agentille-' + role, tool_use_id: 'tuWf', workflow: { runId: 'wf_9', agentIndex: index } } as never)
+
+  test('the band shows a workflow agent with the model that ran', async ($, on) => {
+    setup(on)
+    await spawn($, 'executor', 1)
+    const ui = await band($)
+    await shows(ui, /executor/)
+    await shows(ui, /sonnet/)
+    await ui.unmount()
+  })
+
+  test('turn.complete finishes a workflow agent', async ($, on) => {
+    setup(on)
+    await spawn($, 'executor', 1)
+    await $.turn.complete({ agentId: 'wa', answer: 'built', durationMs: 10, isAborted: false, turnId: 'tw1', reason: 'answer', usage: { input_tokens: 10, output_tokens: 5 } } as never)
+    const ui = await band($)
+    await shows(ui, /executor/)
+    await shows(ui, /done/)
+    await ui.unmount()
+  })
+
+  // 31 minutes of 300 ms ticks on the mock clock
+  test('30 minutes without an event reads no signal; a later tool call revives it; the ticker stops once settled', { timeoutMs: 60_000 }, async ($, on) => {
+    const { clock, invalidations } = setup(on)
+    await spawn($, 'executor', 1)
+    const ui = await band($)
+    await shows(ui, /thinking/)
+    await clock.advance(31 * 60_000)
+    await shows(ui, /no signal/)
+    await clock.advance(2000)
+    const settled = invalidations()
+    await clock.advance(30_000)
+    expect(invalidations()).toBe(settled) // nothing works, nothing waves: the ticker has stopped
+
+    await $.tool.call({ agentId: 'wa', tool: 'Read', input: { file_path: 'a.ts' } } as never)
+    expect(await has(ui, /no signal/)).toBe(false)
+    await shows(ui, /Read/)
+    await ui.unmount()
+  })
+
+  test('a Workflow call lists the run\'s agents under the engine row', async ($, on) => {
+    setup(on)
+    await spawn($, 'executor', 1)
+    await spawn($, 'code-reviewer', 2)
+    const ui = await $.ui.mount({ plugin: 'agentille', surface: 'terminal', component: 'ToolUse', requestId: 'tuWf', props: { tool: 'Workflow', tool_use_id: 'tuWf', input: {}, isRunning: true, isErrored: false, isInterrupted: false } as never })
+    await shows(ui, /executor/)
+    await shows(ui, /code-reviewer/)
+    const tree = JSON.stringify(await ui.drawn())
+    expect(tree.indexOf('"type":"engine"')).toBeGreaterThanOrEqual(0)
+    expect(tree.indexOf('"type":"engine"')).toBeLessThan(tree.indexOf('executor'))
+    expect(tree.indexOf('executor')).toBeLessThan(tree.indexOf('code-reviewer'))
+    await ui.unmount()
+    // an unknown call keeps the engine row alone
+    const other = await $.ui.mount({ plugin: 'agentille', surface: 'terminal', component: 'ToolUse', requestId: 'tuNone', props: { tool: 'Workflow', tool_use_id: 'tuNone', input: {}, isRunning: true, isErrored: false, isInterrupted: false } as never })
+    expect(await has(other, /executor/)).toBe(false)
+    await other.unmount()
+  })
+})

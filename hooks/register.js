@@ -4,7 +4,7 @@
 // observes events, applies decisions, and draws.
 
 import { DEFAULTS, decide, formationOf, parseHeader, roleOf, verdictOf } from './routing.js'
-import { addUsage, elapsed, endRoute, finish, isAgtPrompt, ledger, ledgerText, newAgent, paneAgents, panesLeft, reapable, short, stage, waving } from './live.js'
+import { addUsage, elapsed, endRoute, finish, isAgtPrompt, ledger, ledgerText, newAgent, paneAgents, panesLeft, reapPlan, short, stage, waving } from './live.js'
 import { ACCENT, FRAME_COLOR, INK, WIRE_COLOR, boardRows, cast, castColumns, chip, colorOf, header, hex, leadLine, routingLines, tokenBars, toolLabel, wireLines, wireRow } from './board.js'
 import { PUBLISH_MS, doneMessage, freshStatus, logWire, parseTellArgs, parseWire, shortName, statusKey, validLead, wireEnv, workerStatus } from './wire.js'
 import { activeSquads, allPaths, depsOf, injection } from './squads.js'
@@ -34,6 +34,9 @@ const paneRoutes = []        // PaneRoute[], append-only: how each worker this l
 let opened = []              // { id, name } of panes this lead opened via spawn_pane, in spawn order
 const staged = new Map()     // pane name → last pane seen on stage (live.js panesLeft)
 const paneSeen = new Map()   // reaper bookkeeping
+const harvested = new Set()  // pane names whose answer the lead has in hand (a wire done message, a saved answer file, a close_pane)
+const strandedNow = new Set()   // done/idle panes kept open because nothing was harvested from them
+const strandedToasted = new Set() // ... of which the person was told once
 const tmuxFirstSeen = new Map() // tmux pane id → when this session first listed it
 let selfName = null          // this pane's name when it is an agt-* worker
 let worker = null            // { agent, model, effort } from AGENTILLE_WORKER: this session is a worker pane
@@ -185,6 +188,43 @@ async function notePaneExits($) {
   for (const run of touched) await writeRunFile($, run, 'ledger.json', JSON.stringify(ledger(live, run, paneRoutes), null, 2) + '\n')
 }
 
+// Where a pane worker saves its full answer; the lead reads it from here.
+const answerPath = (p) => {
+  const n = splitName(p.name)
+  return home && n ? home + '/.agentille/state/run-' + n.run + '/agents/pane-' + n.role + '.md' : null
+}
+
+async function isHarvested($, p) {
+  if (harvested.has(p.name)) return true
+  const file = answerPath(p)
+  if (!file || !(await $.fs.exists(file).catch(() => false))) return false
+  harvested.add(p.name)
+  return true
+}
+
+// The lead's reaper. A finished pane closes only once its answer is in hand; until then it stays
+// open and is flagged once, so a worker that could not report never loses its output.
+async function sweep($, pool, now, close) {
+  const ok = new Set()
+  for (const p of pool) if ((p.state === 'done' || p.state === 'idle') && (await isHarvested($, p))) ok.add(p.name)
+  const plan = reapPlan(pool, paneSeen, now, leadTurn, (p) => ok.has(p.name))
+  strandedNow.clear()
+  for (const p of plan.stranded) {
+    strandedNow.add(p.name)
+    if (strandedToasted.has(p.name)) continue
+    strandedToasted.add(p.name)
+    $.ui.toast('agt ⚑ ' + p.name + ' done, not harvested')
+  }
+  for (const p of plan.reap) {
+    try {
+      await close(p)
+      $.ui.toast('agt reaped ' + p.name + ' (' + p.state + ')')
+    } catch {
+      // a pane closed by hand in the meantime is fine
+    }
+  }
+}
+
 async function pollHerdr($) {
   let list = []
   try {
@@ -203,14 +243,7 @@ async function pollHerdr($) {
   await notePaneExits($)
   if (me && !selfName) {
     const mine = panes.filter((p) => p.tab === me.tab_id)
-    for (const p of reapable(reapPool(mine), paneSeen, await $.clock.now(), leadTurn)) {
-      try {
-        await $.process.run(['herdr', 'pane', 'close', p.id])
-        $.ui.toast('agt reaped ' + p.name + ' (' + p.state + ')')
-      } catch {
-        // a pane closed by hand in the meantime is fine
-      }
-    }
+    await sweep($, reapPool(mine), await $.clock.now(), (p) => $.process.run(herdrCloseArgv(p.id)))
   }
   $.ui.invalidate('ui.render')
 }
@@ -302,14 +335,7 @@ async function pollTmux($) {
   panes = tmuxPaneAgents(rows, selfPane, done)
   await notePaneExits($)
   if (isLead(rows, selfPane)) {
-    for (const p of reapable(reapPool(panes), paneSeen, now, leadTurn)) {
-      try {
-        await $.process.run(tmuxKillArgv(p.id), PROBE)
-        $.ui.toast('agt reaped ' + p.name + ' (' + p.state + ')')
-      } catch {
-        // a pane closed by hand in the meantime is fine
-      }
-    }
+    await sweep($, reapPool(panes), now, (p) => $.process.run(tmuxKillArgv(p.id), PROBE))
   }
   $.ui.invalidate('ui.render')
 }
@@ -372,7 +398,7 @@ function addFlag($, text) {
 function focusLines(now) {
   if (!focusOn) return []
   const fresh = flags.filter((f) => now - f.at < FLAG_TTL_MS).map((f) => f.text)
-  return [...fresh, ...paneFlags(panes)].slice(0, 5)
+  return [...fresh, ...paneFlags(panes, strandedNow)].slice(0, 5)
 }
 
 // One Text per essentials item: a coloured mark, then the line with paths, versions and numbers lit.
@@ -658,6 +684,7 @@ export function register(on) {
     if (c.error) return { deny: c.error }
     const r = await $.process.run(t === 'herdr' ? herdrCloseArgv(c.pane.id) : tmuxKillArgv(c.pane.id), PROBE).catch(() => null)
     if (!r || r.exitCode !== 0) return { deny: 'Could not close ' + c.pane.name + '.' }
+    harvested.add(c.pane.name)
     await pollNow($, t)
     return { result: 'Closed ' + c.pane.name + '.' }
   })
@@ -712,6 +739,7 @@ export function register(on) {
     const w = parseWire(e.text)
     if (w) {
       const from = shortName(w.from)
+      if (w.kind === 'done') harvested.add(w.from)
       logWire(wireLog, { from, to: wireName ? shortName(wireName) : 'lead', kind: w.kind, summary: w.summary, at: Date.now() })
       $.ui.toast('⇄ ' + from + ' ' + w.kind)
       $.ui.invalidate('ui.render')

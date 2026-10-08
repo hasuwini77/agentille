@@ -83,7 +83,7 @@ If `agent read` cannot recover a full response (alternate screen), ask that work
 
 **Teardown.** Before declaring the run done, every `agt-<run>-*` pane is harvested, then closed (explicit harvest → `close_pane`). Verify the run id lists zero panes (`herdr agent list`, or the tmux list below). Say so on the card's `⚑`/`verify:` only if one survived.
 
-**Backstop (the mod).** It closes an idle `agt-` pane only while the lead has no turn running, and a `done` pane after ≥90 s. It never touches `working`, `blocked` or `unknown`, nor a pane without the `agt-` prefix. It is a net, not the plan; explicit close after harvest stays mandatory.
+**Backstop (the mod).** It closes an idle `agt-` pane only while the lead has no turn running, and a `done` pane after ≥90 s, and only once that pane is harvested: its answer file `agents/pane-<role>.md` exists, its wire done message reached you, or you closed it. An unharvested pane stays open and is flagged once (`⚑ <name> done, not harvested`): read it, then `close_pane`. It never touches `working`, `blocked` or `unknown`, nor a pane without the `agt-` prefix. It is a net, not the plan; explicit close after harvest stays mandatory.
 
 **Never close a pane you did not open.** `agt-` prefix = ownership; panes the user opened and `/agt-spawn` panes are theirs.
 

@@ -29,9 +29,14 @@ export function flagOf(role, answer) {
   return null
 }
 
-// Panes that wait on a person: herdr reports `blocked` when an approval is on screen.
-export function paneFlags(panes) {
-  return (panes ?? []).filter((p) => p.state === 'blocked').map((p) => p.name + ' is waiting on you')
+// Panes that wait on a person: herdr reports `blocked` when an approval is on screen. Panes whose
+// answer nobody has taken (`stranded`, a set of names) are kept open, so they say so.
+export function paneFlags(panes, stranded = new Set()) {
+  const list = panes ?? []
+  return [
+    ...list.filter((p) => p.state === 'blocked').map((p) => p.name + ' is waiting on you'),
+    ...list.filter((p) => stranded.has(p.name)).map((p) => p.name + ' done, not harvested'),
+  ]
 }
 
 // /agt-focus arguments → { on } | { show: true } | { error }

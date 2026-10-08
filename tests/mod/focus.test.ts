@@ -49,6 +49,7 @@ describe('focus: flags from agent results', () => {
 
   test('a blocked pane waits on the person', async () => {
     expect(paneFlags([{ name: 'agt-r1-exec-1', state: 'blocked' }, { name: 'agt-r1-exec-2', state: 'working' }])).toEqual(['agt-r1-exec-1 is waiting on you'])
+    expect(paneFlags([{ name: 'agt-r1-exec-1', state: 'done' }, { name: 'agt-r1-exec-2', state: 'done' }], new Set(['agt-r1-exec-2']))).toEqual(['agt-r1-exec-2 done, not harvested'])
   })
 })
 

@@ -37,22 +37,27 @@ export function paneAgents(list, selfPane) {
     })
 }
 
-// Remembers when each pane entered its current state (by state_change_seq) and returns
-// the panes that sat in done ≥ 90s, or in idle ≥ 300s while the lead has no turn running (an
-// idle worker mid-run is waiting for review, not abandoned). Only agt-* panes ever reach here.
-export function reapable(panes, seen, now, leadBusy = true) {
-  const out = []
+// Remembers when each pane entered its current state (by state_change_seq) and sorts the panes
+// that sat in done ≥ 90s, or in idle ≥ 300s while the lead has no turn running (an idle worker
+// mid-run is waiting for review, not abandoned). A due pane is only `reap` once `harvested(pane)`
+// says its answer is in hand; otherwise it is `stranded`: kept open and flagged, since closing
+// it would lose the output. With no `harvested` nothing is ever reaped. Only agt-* panes reach here.
+export function reapPlan(panes, seen, now, leadBusy = true, harvested = () => false) {
+  const reap = []
+  const stranded = []
   for (const p of panes) {
     const key = p.id
     const prev = seen.get(key)
     if (!prev || prev.seq !== p.seq || prev.state !== p.state) seen.set(key, { seq: p.seq, state: p.state, since: now })
     const since = seen.get(key).since
-    if (p.state === 'done' && now - since >= DONE_GRACE_MS) out.push(p)
-    else if (p.state === 'idle' && !leadBusy && now - since >= IDLE_GRACE_MS) out.push(p)
+    const due = (p.state === 'done' && now - since >= DONE_GRACE_MS) || (p.state === 'idle' && !leadBusy && now - since >= IDLE_GRACE_MS)
+    if (due) (harvested(p) ? reap : stranded).push(p)
   }
   for (const key of [...seen.keys()]) if (!panes.some((p) => p.id === key)) seen.delete(key)
-  return out
+  return { reap, stranded }
 }
+
+export const reapable = (panes, seen, now, leadBusy = true, harvested = () => false) => reapPlan(panes, seen, now, leadBusy, harvested).reap
 
 export function short(model) {
   return modelKey(model)

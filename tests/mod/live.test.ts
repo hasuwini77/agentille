@@ -1,5 +1,5 @@
 import { describe, expect, mock, test } from 'claude-code/testing'
-import { DONE_GRACE_MS, IDLE_GRACE_MS, isAgtPrompt, ledger, newAgent, addUsage, finish, paneAgents, reapable, panesLeft, withRoute, endRoute, stage, ledgerText } from '../../hooks/live.js'
+import { DONE_GRACE_MS, IDLE_GRACE_MS, isAgtPrompt, ledger, newAgent, addUsage, finish, paneAgents, reapable, reapPlan, panesLeft, withRoute, endRoute, stage, ledgerText } from '../../hooks/live.js'
 import { activeSquads, depsOf, injection } from '../../hooks/squads.js'
 import { BYE_MS } from '../../hooks/mascot.js'
 
@@ -18,25 +18,49 @@ describe('live', () => {
     expect(paneAgents([{ ...herdr[0], tab_id: 'w1:t1', workspace_id: 'w1' }], null)[0]).toMatchObject({ tab: 'w1:t1', workspace: 'w1' })
   })
 
-  test('done reaps at 90 s, idle only between lead turns, a state change resets the clock', async () => {
+  test('a harvested pane: done reaps at 90 s, idle only between lead turns, a state change resets the clock', async () => {
+    const ok = () => true
     const seen = new Map()
     const p = paneAgents(herdr, 'w1:p1')
-    expect(reapable(p, seen, 0)).toEqual([])
-    expect(reapable(p, seen, DONE_GRACE_MS - 1)).toEqual([])
-    expect(reapable(p, seen, DONE_GRACE_MS).map((x) => x.id)).toEqual(['w1:p3'])
+    expect(reapable(p, seen, 0, true, ok)).toEqual([])
+    expect(reapable(p, seen, DONE_GRACE_MS - 1, true, ok)).toEqual([])
+    expect(reapable(p, seen, DONE_GRACE_MS, true, ok).map((x) => x.id)).toEqual(['w1:p3'])
     const bumped = p.map((x) => (x.id === 'w1:p3' ? { ...x, seq: 6 } : x))
-    expect(reapable(bumped, seen, DONE_GRACE_MS + 1)).toEqual([])
+    expect(reapable(bumped, seen, DONE_GRACE_MS + 1, true, ok)).toEqual([])
     const idle = [{ ...p[0], state: 'idle', seq: 4 }]
     const s2 = new Map()
-    reapable(idle, s2, 0, false)
-    expect(reapable(idle, s2, IDLE_GRACE_MS - 1, false)).toEqual([])
-    expect(reapable(idle, s2, IDLE_GRACE_MS, false).length).toBe(1)
-    expect(reapable(idle, s2, IDLE_GRACE_MS * 10, true)).toEqual([])
-    expect(reapable(idle, s2, IDLE_GRACE_MS * 10).length).toBe(0)
+    reapable(idle, s2, 0, false, ok)
+    expect(reapable(idle, s2, IDLE_GRACE_MS - 1, false, ok)).toEqual([])
+    expect(reapable(idle, s2, IDLE_GRACE_MS, false, ok).length).toBe(1)
+    expect(reapable(idle, s2, IDLE_GRACE_MS * 10, true, ok)).toEqual([])
     const doneP = [{ ...p[1] }]
     const s3 = new Map()
-    reapable(doneP, s3, 0, true)
-    expect(reapable(doneP, s3, DONE_GRACE_MS, true).length).toBe(1)
+    reapable(doneP, s3, 0, true, ok)
+    expect(reapable(doneP, s3, DONE_GRACE_MS, true, ok).length).toBe(1)
+  })
+
+  test('an unharvested pane is never reaped, however long it sits: it is stranded and flagged', async () => {
+    const p = paneAgents(herdr, 'w1:p1')
+    const seen = new Map()
+    reapPlan(p, seen, 0)
+    expect(reapable(p, seen, DONE_GRACE_MS * 100)).toEqual([])
+    expect(reapable(p, seen, DONE_GRACE_MS * 100, true, () => false)).toEqual([])
+    const plan = reapPlan(p, seen, DONE_GRACE_MS * 100)
+    expect(plan.reap).toEqual([])
+    expect(plan.stranded.map((x) => x.id)).toEqual(['w1:p3'])
+    const idle = [{ ...p[0], state: 'idle', seq: 4 }]
+    const s2 = new Map()
+    reapPlan(idle, s2, 0, false)
+    expect(reapPlan(idle, s2, IDLE_GRACE_MS * 10, false).stranded.length).toBe(1)
+  })
+
+  test('only the harvested pane of two done panes is reaped; the other is stranded', async () => {
+    const p = paneAgents(herdr, 'w1:p1').map((x) => ({ ...x, state: 'done' }))
+    const seen = new Map()
+    reapPlan(p, seen, 0)
+    const plan = reapPlan(p, seen, DONE_GRACE_MS, true, (x) => x.id === 'w1:p2')
+    expect(plan.reap.map((x) => x.id)).toEqual(['w1:p2'])
+    expect(plan.stranded.map((x) => x.id)).toEqual(['w1:p3'])
   })
 
   test('ledger sums tokens per role for one run', async () => {

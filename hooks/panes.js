@@ -238,6 +238,7 @@ export const TOOL_MODELS = ['sonnet', 'opus', 'haiku']
 
 export const SPAWN_TOOL = {
   name: 'spawn_pane',
+  isDeferred: false,
   description: 'Open one agentille worker pane beside this session (Herdr or tmux, whichever is live), never focused, named agt-<run>-<role>, running Claude on the model and effort agentille routes for `agent`, with the task as its first prompt. Use it for each panes-mode slice in place of raw herdr/tmux commands. The pane is reaped once it sits done; close it yourself with close_pane after harvesting.',
   inputSchema: {
     type: 'object',
@@ -257,6 +258,7 @@ export const SPAWN_TOOL = {
 
 export const CLOSE_TOOL = {
   name: 'close_pane',
+  isDeferred: false,
   description: 'Close one agentille worker pane this session opened (an agt-<run>-<role> pane in this tab or window) after you have read its result. Panes opened by a typed /agt-spawn and panes of other sessions are refused.',
   inputSchema: {
     type: 'object',

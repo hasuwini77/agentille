@@ -918,3 +918,12 @@ describe('advisor opt-out', () => {
     expect(herdrSplitArgv({ pane: 'p1', cwd: '/w', run: 'ab12cd', model: 'opus', env })).toContain('CLAUDE_CODE_DISABLE_ADVISOR_TOOL=1')
   })
 })
+
+import { CLOSE_TOOL as closeTool, SPAWN_TOOL as spawnTool } from '../../hooks/panes.js'
+
+describe('panes: tools load eagerly', () => {
+  test('spawn_pane and close_pane are never deferred behind tool search', async () => {
+    expect(spawnTool.isDeferred).toBe(false)
+    expect(closeTool.isDeferred).toBe(false)
+  })
+})

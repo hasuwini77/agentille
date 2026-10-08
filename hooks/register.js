@@ -3,9 +3,9 @@
 // routing.js / live.js / board.js / wire.js / squads.js / mascot.js / focus.js; this file
 // observes events, applies decisions, and draws.
 
-import { DEFAULTS, decide, formationOf, parseHeader, roleOf, verdictOf, workflowReason } from './routing.js'
+import { DEFAULTS, decide, formationOf, parseHeader, roleOf, verdictOf } from './routing.js'
 import { addUsage, elapsed, endRoute, finish, isAgtPrompt, ledger, ledgerText, newAgent, paneAgents, panesLeft, reapPlan, short, stage, waving } from './live.js'
-import { ACCENT, FRAME_COLOR, INK, WIRE_COLOR, boardRows, cast, castColumns, chip, colorOf, header, hex, leadLine, routingLines, tokenBars, toolLabel, wireLines, wireRow } from './board.js'
+import { ACCENT, FRAME_COLOR, INK, WIRE_COLOR, boardRows, cast, castColumns, chip, colorOf, header, hex, leadLine, routingLines, swarm, tokenBars, toolLabel, wireLines, wireRow } from './board.js'
 import { PUBLISH_MS, doneMessage, freshStatus, logWire, parseTellArgs, parseWire, shortName, statusKey, validLead, wakeDue, wakeMessage, wireEnv, workerStatus } from './wire.js'
 import { activeSquads, allPaths, depsOf, injection } from './squads.js'
 import { BYE_MS, HELLO_MS, MASCOT_COLOR, MODEL_COLOR, agentMood, caption, frame, modelKey, moodAt, parseWorker } from './mascot.js'
@@ -17,7 +17,7 @@ import {
   advisorEnv, tmuxSplitArgv, tmuxTagArgvs, transportBlock,
 } from './panes.js'
 import { cacheDirOf, compareVersions, newerInstalled, skewMessage } from './skew.js'
-import { adopt, applyStatus, nest } from './tree.js'
+import { adopt, applyStatus, nest, quietWorkflows } from './tree.js'
 import { registerRows } from './rows.js'
 import { registerStatus } from './status.js'
 import { registerAutocomplete } from './autocomplete.js'
@@ -27,7 +27,6 @@ let depth = null
 let home = null
 let weeklyPct = null
 let lastRun = 'adhoc'
-const WF_QUIET_MS = 30 * 60_000 // a workflow agent this long without an event is marked `no signal`
 const wfToasted = new Set()  // run:role pairs whose drift the person was told once
 const runs = new Map()       // run id → { revise, fixes, fable, formation, log: [], reports: { role → count } }
 const live = new Map()       // agentId → live agent (live.js)
@@ -92,6 +91,14 @@ const ctx = {
   get routes() { return paneRoutes },
   get isLead() { return !worker && !selfName },
   onTick: [], // (io, ctx, now) callbacks the redraw ticker calls each period; a module adds its own while registering
+}
+
+// A workflow agent is in no agent list, and a cancelled one raises no turn.complete: it is marked,
+// and every event of its loop says it is still alive (tree.js quietWorkflows ends a silent one).
+function heard(a, e) {
+  if (e.workflow) a.workflow = e.workflow.runId || true
+  a.heard = Date.now()
+  return a
 }
 
 function runState(id) {
@@ -180,6 +187,7 @@ async function refreshAgents($, at) {
   listBusy = true
   listAt = now
   try {
+    if (quietWorkflows(live, Date.now())) $.ui.invalidate('ui.render')
     let list
     try {
       list = await $.agent.list()
@@ -414,17 +422,17 @@ async function pollNow($, t) {
   else if (t === 'tmux') await pollTmux($)
 }
 
-// The run an agent's files and counters belong to: a workflow agent without a header files under 'adhoc'.
-const fileRunOf = (a) => a.fileRun ?? a.run
-
 // A subagent's raw answer goes to run-<id>/agents/<role>-<n>.md, written here so the lead spends
 // no tokens copying it. n counts per role in the run; a second turn of the same agent overwrites.
 async function writeReport($, a, answer) {
-  if (!(a.routed || a.agt) || !answer) return
-  const counts = runState(fileRunOf(a)).reports
+  if (!a.routed || !answer) return
+  const counts = runState(a.run).reports
   a.report ??= a.role + '-' + (counts[a.role] = (counts[a.role] ?? 0) + 1) + '.md'
-  await writeRunFile($, fileRunOf(a), 'agents/' + a.report, answer)
+  await writeRunFile($, a.run, 'agents/' + a.report, answer)
 }
+
+// The run an agent's files and counters belong to: a headerless workflow agent files under 'adhoc'.
+const fileRunOf = (a) => a.fileRun ?? a.run
 
 const working = () => [...live.values()].some((a) => a.state === 'working') || panes.some((p) => p.state === 'working')
 
@@ -463,7 +471,6 @@ function ensureTicker($) {
   if (tickTimer) return
   tickTimer = $.clock.every(300, async () => {
     const now = await $.clock.now()
-    quietWorkflows(now)
     if (!working() && !animating(now)) {
       tickTimer?.cancel()
       tickTimer = null
@@ -473,78 +480,6 @@ function ensureTicker($) {
     if (tick % 4 === 0) void refreshAgents($, now)
     $.ui.invalidate('ui.render')
   })
-}
-
-// A workflow script's agent() spawn: the engine lets a hook only refuse it, so the event passes
-// through untouched. What the mod adds is the band row and a log of the table's pick beside the
-// model that ran, with the drift named. The run's counters (fixes, Fable) are not touched.
-async function watchWorkflow($, e, next) {
-  const res = await next(e)
-  if (res.deny) return res
-  const now = await $.clock.now()
-  const role = roleOf(e.subagentType)
-  const hdr = parseHeader(e.prompt) ?? {}
-  // Two runs: the one whose files and counters the agent writes to (its header's, else 'adhoc',
-  // which writes nothing) and the one whose band shows it. A header names the first; the band
-  // moves to it only when the current run has nothing working, so a workflow does not pull the
-  // band off a run still in progress.
-  const fileRun = SAFE_RUN.test(hdr.run ?? '') ? hdr.run : 'adhoc'
-  const busy = [...live.values()].some((a) => a.run === lastRun && a.state === 'working')
-  if (fileRun !== 'adhoc' && (lastRun === 'adhoc' || !busy)) lastRun = fileRun
-  const runId = fileRun === 'adhoc' ? lastRun : fileRun
-  let reason = null
-  let d = null
-  if (role) {
-    d = decide({ role, hdr, run: runState(fileRun), depth, settings, weeklyPct })
-    reason = workflowReason(short(res.model), d)
-  }
-  if (res.agentId) {
-    const a = newAgent({ id: res.agentId, role: role ?? shortType(e.subagentType), routed: false, model: res.model, effort: null, reason: reason === 'workflow' ? null : reason, run: runId, now: Date.now(), parentId: e.parentAgentId ?? null })
-    a.agt = !!role
-    a.fileRun = fileRun
-    a.workflow = { runId: e.workflow.runId, index: e.workflow.agentIndex }
-    a.seen = now
-    live.set(res.agentId, a)
-  }
-  if (d) {
-    const rec = { at: new Date(now).toISOString(), role, model: res.model, effort: null, reason, table: d.model + ' · ' + d.effort, asked: null, agentId: res.agentId ?? null, kind: 'workflow' }
-    decisions.push(rec)
-    const log = runState(fileRun).log
-    log.push(JSON.stringify(rec))
-    await writeRunFile($, fileRun, 'routing.jsonl', log.join('\n') + '\n')
-    const key = fileRun + ':' + role
-    if (reason !== 'workflow' && !wfToasted.has(key)) {
-      wfToasted.add(key)
-      $.ui.toast('agt ≠ ' + role + ' · ' + reason.replace(/^workflow: /, 'workflow ran '))
-    }
-  }
-  ensureTicker($)
-  $.ui.invalidate('ui.render')
-  return res
-}
-
-// A workflow agent's last sign of life. One that was marked `no signal` and speaks again is back.
-async function heardFrom($, a) {
-  if (!a.workflow) return
-  a.seen = await $.clock.now()
-  if (a.listStatus === 'lost') {
-    Object.assign(a, { state: 'working', end: null, leftAt: null, listStatus: null })
-    ensureTicker($)
-    $.ui.invalidate('ui.render')
-  }
-}
-
-// No turn.complete ever reached a workflow agent that went quiet (a cancelled run, a remote agent,
-// a crashed script): after WF_QUIET_MS it is closed at its last event and flagged, so the band does
-// not show it working forever.
-function quietWorkflows(now) {
-  for (const a of live.values()) {
-    if (a.workflow && a.state === 'working' && now - a.seen > WF_QUIET_MS) {
-      finish(a, a.seen)
-      a.leftAt = now
-      a.listStatus = 'lost'
-    }
-  }
 }
 
 function addFlag($, text) {
@@ -654,6 +589,19 @@ function boardHeader(els, h) {
       Text({ dimColor: true, children: [h.right] }),
     ],
   })
+}
+
+// The whole run in one line, by phase: plan ✓ · build ◆◇ · review ◆◆◆✓ · 3/7 done.
+function swarmLine(els, s) {
+  const { Text } = els
+  const parts = []
+  s.lanes.forEach((l, i) => {
+    parts.push(Text({ dimColor: true, children: [(i ? '  ' : '') + l.phase + ' '] }))
+    for (const c of l.cells) parts.push(Text({ color: c.color, dimColor: c.dim, children: [c.glyph] }))
+    if (l.more) parts.push(Text({ dimColor: true, children: ['+' + l.more] }))
+  })
+  parts.push(Text({ dimColor: true, children: ['  ' + s.done + '/' + s.total + ' done'] }))
+  return Text({ wrap: 'truncate', children: parts })
 }
 
 function leadRow(els, l) {
@@ -782,7 +730,7 @@ export function register(on) {
 
   on('command.run', { command: 'agt-routing' }, async () => {
     if (decisions.length === 0) return { text: 'No agentille dispatches this session.' }
-    return { text: decisions.slice(-30).map((d) => d.role + ' → ' + d.model + ' · ' + (d.effort ?? '?') + (d.reason === 'table' || d.reason === 'workflow' ? '' : '  (' + d.reason + ')') + (d.kind === 'pane' ? ' · pane' : d.kind === 'workflow' ? ' · workflow' : '')).join('\n') }
+    return { text: decisions.slice(-30).map((d) => d.role + ' → ' + d.model + (d.effort ? ' · ' + d.effort : '') + (d.reason === 'table' ? '' : '  (' + d.reason + ')') + (d.kind === 'pane' ? ' · pane' : '')).join('\n') }
   })
 
   // Typed only: a plugin, a scheduled task or a notification never opens a pane.
@@ -946,8 +894,19 @@ export function register(on) {
     if (e.agentId) {
       const a = live.get(e.agentId)
       if (a) {
-        await heardFrom($, a)
         a.tool = toolLabel(e.tool, e)
+        a.heard = Date.now()
+      }
+      // A workflow agent inside one long call (a full test suite) is alive: tree.js quietWorkflows
+      // skips it until the call returns, and the return counts as heard.
+      if (a?.workflow) {
+        a.calls = (a.calls ?? 0) + 1
+        try {
+          return await next(e)
+        } finally {
+          a.calls -= 1
+          a.heard = Date.now()
+        }
       }
     } else if (wireName) {
       pub.tool = toolLabel(e.tool, e)
@@ -964,18 +923,53 @@ export function register(on) {
 
   on('agent.spawn', async ($, e, next) => {
     if (e.fork) return next(e)
-    if (e.workflow) return watchWorkflow($, e, next)
     const role = roleOf(e.subagentType)
 
     if (!role) {
       const res = await next(e)
-      if (res.agentId) live.set(res.agentId, newAgent({ id: res.agentId, role: shortType(e.subagentType), routed: false, model: res.model, effort: null, reason: null, run: lastRun, now: Date.now(), parentId: e.parentAgentId ?? null }))
+      if (res.agentId) live.set(res.agentId, heard(newAgent({ id: res.agentId, role: shortType(e.subagentType), routed: false, model: res.model, effort: null, reason: null, run: lastRun, now: Date.now(), parentId: e.parentAgentId ?? null }), e))
       ensureTicker($)
       $.ui.invalidate('ui.render')
       return res
     }
 
     const hdr = parseHeader(e.prompt) ?? {}
+    // A workflow script's agent: the engine ignores a rewrite there (and logs a failure line), so
+    // it runs on the model the script chose. Log that model, not the table's, and flag a mismatch.
+    if (e.workflow) {
+      // Its prompt may carry no header: it then joins the run in progress rather than reset it. A header
+      // names its run, but the band moves to it only when the current run has nothing working.
+      const named = SAFE_RUN.test(hdr.run ?? '') ? hdr.run : null
+      const runId = named ?? lastRun
+      // Its files and counters follow the header: a headerless agent files under 'adhoc' (which writes
+      // nothing), so the run in progress keeps only its own routing log and ledger.
+      const fileRun = named ?? 'adhoc'
+      const run = runState(fileRun)
+      if (named && (lastRun === 'adhoc' || !([...live.values()].some((a) => a.run === lastRun && a.state === 'working')))) lastRun = named
+      agtTurn = true
+      const d = decide({ role, hdr, run, depth, settings, weeklyPct })
+      const res = await next(e)
+      if (res.deny) return res
+      const off = short(res.model) !== short(d.model)
+      const drift = off ? 'workflow, table says ' + d.model + ' · ' + d.effort : 'workflow'
+      if (res.agentId) {
+        const a = heard(newAgent({ id: res.agentId, role, routed: false, model: res.model, effort: null, reason: off ? drift : null, run: runId, now: Date.now(), parentId: e.parentAgentId ?? null }), e)
+        a.fileRun = fileRun
+        live.set(res.agentId, a)
+      }
+      const rec = { at: new Date().toISOString(), role, model: res.model, effort: null, reason: drift, asked: e.model ?? null, agentId: res.agentId ?? null, kind: 'workflow' }
+      decisions.push(rec)
+      run.log.push(JSON.stringify(rec))
+      await writeRunFile($, fileRun, 'routing.jsonl', run.log.join('\n') + '\n')
+      ensureTicker($)
+      if (off && !wfToasted.has(runId + ':' + role)) {
+        wfToasted.add(runId + ':' + role)
+        $.ui.toast('agt workflow ' + role + ' runs ' + short(res.model) + ' — table says ' + d.model + ' · ' + d.effort)
+      }
+      $.ui.invalidate('ui.render')
+      return res
+    }
+
     const runId = SAFE_RUN.test(hdr.run ?? '') ? hdr.run : 'adhoc'
     agtTurn = true
     lastRun = runId
@@ -1006,7 +1000,6 @@ export function register(on) {
 
   on('turn.step', async function* ($, e, next) {
     const a = e.agentId ? live.get(e.agentId) : undefined
-    if (a) await heardFrom($, a)
     if (!e.agentId) leadModel = e.model
     const result = yield* next(a && a.routed ? { ...e, effort: a.effort } : e)
     if (!e.agentId && wireName && result?.usage) {
@@ -1016,6 +1009,7 @@ export function register(on) {
       await publish($)
     }
     if (a) {
+      a.heard = Date.now()
       if (!a.effort && e.effort) a.effort = String(e.effort)
       if (!a.model && e.model) a.model = e.model
       addUsage(a, result?.usage)
@@ -1068,9 +1062,8 @@ export function register(on) {
       await saveAnswer($, selfName, e.answer)
     }
     if (a) {
-      await heardFrom($, a)
       a.tool = null
-      if (a.routed || a.agt) addFlag($, flagOf(a.role, e.answer))
+      if (a.routed) addFlag($, flagOf(a.role, e.answer))
       if (a.role === 'plan-reviewer' && verdictOf(e.answer) === 'REVISE') runState(fileRunOf(a)).revise += 1
       if (a.input + a.output === 0) addUsage(a, e.usage)
       finish(a, Date.now(), e.durationMs)
@@ -1103,9 +1096,11 @@ export function register(on) {
     const rows = nest(cast(staged, live, lastRun))
     const cols = (e.props.bodyColumns ?? 80) - 4
     const view = boardRows(rows, { now, tick, cols, wire: wireStatus, transport, view: e.props.view?.agentId ?? null })
-    const room = Math.max(1, (e.props.maxRows ?? 10) - 4 - kids.length - (wire ? 1 : 0))
+    const sw = swarm({ agents: live, routes: paneRoutes, run: lastRun, tick })
+    const room = Math.max(1, (e.props.maxRows ?? 10) - 4 - kids.length - (wire ? 1 : 0) - (sw ? 1 : 0))
     const waiting = rows.filter((r) => r.state === 'working').length
     const inner = [boardHeader(els, header({ run: lastRun, formation: runs.get(lastRun)?.formation, squads: squads.map((q) => q.name), rows, tally: staged.tally }))]
+    if (sw) inner.push(swarmLine(els, sw))
     if (rows.length) inner.push(leadRow(els, leadLine({ model: leadModel, busy: e.props.isWorking, waiting })))
     const shown = view.slice(0, room)
     const argvs = shown.map((r) => (r.pane ? focusArgv(transport, rows.find((x) => x.id === r.id)) : null))

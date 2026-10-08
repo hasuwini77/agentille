@@ -1,11 +1,36 @@
 import { describe, expect, mock, test } from 'claude-code/testing'
 import { LIST_STATUS, boardRows } from '../../hooks/board.js'
 import { finish, newAgent } from '../../hooks/live.js'
-import { adopt, applyStatus, nest } from '../../hooks/tree.js'
+import { WORKFLOW_SILENT_MS, adopt, applyStatus, nest, quietWorkflows } from '../../hooks/tree.js'
 
 const row = (id: string, parentId: string | null = null) => ({ id, parentId, kind: 'sub', role: id, state: 'working', start: 0, input: 0, output: 0 })
 const agent = (id: string, extra: object = {}) => ({ ...newAgent({ id, role: 'executor', routed: true, model: 'sonnet', effort: 'high', reason: 'table', run: 'r1', now: 0 }), ...extra })
 const item = (id: string, status: string, extra: object = {}) => ({ id, type: 'agentille:agentille-executor', status, description: 'build', ...extra })
+
+describe('tree: forks and workflow agents', () => {
+  test('a listed fork is not adopted: the mod skips forks at spawn too', async () => {
+    const live = new Map()
+    expect(adopt(live, [item('f1', 'running', { type: 'fork' }), item('k1', 'running')], { run: 'r1', now: 5 }).map((a) => a.id)).toEqual(['k1'])
+  })
+
+  test('a workflow agent unheard from for ten minutes is finished; a heard one and a plain one are not', async () => {
+    const live = new Map([
+      ['w1', agent('w1', { workflow: 'wf_1', heard: 0 })],
+      ['w2', agent('w2', { workflow: 'wf_1', heard: WORKFLOW_SILENT_MS - 1000 })],
+      ['p1', agent('p1')],
+    ])
+    expect(quietWorkflows(live, WORKFLOW_SILENT_MS - 1)).toBe(false)
+    expect(quietWorkflows(live, WORKFLOW_SILENT_MS)).toBe(true)
+    expect([...live.values()].map((a) => a.state)).toEqual(['done', 'working', 'working'])
+  })
+
+  test('a workflow agent inside a long tool call is not timed out', async () => {
+    const live = new Map([['w1', agent('w1', { workflow: 'wf_1', heard: 0, calls: 1 })]])
+    expect(quietWorkflows(live, WORKFLOW_SILENT_MS * 3)).toBe(false)
+    live.get('w1').calls = 0
+    expect(quietWorkflows(live, WORKFLOW_SILENT_MS * 3)).toBe(true)
+  })
+})
 
 describe('tree: nest', () => {
   test('orders depth-first and draws the connectors', async () => {

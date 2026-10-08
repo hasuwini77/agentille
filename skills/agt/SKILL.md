@@ -18,7 +18,7 @@ Turn one prompt into the cheapest run that does the job well: do it yourself whe
 5. **Roster, formation, models** → `routing.md`. Start every dispatch with the header below, plus the profile prefix unless every value is a default.
 6. **Run dir.** Create `~/.agentille/state/run-<id>/` and keep it (never delete it). When a planner ran, write its CONTEXT-PACK to `context-pack.md` there and give each executor only its slice plus `checkpoint: ~/.agentille/state/run-<id>/checkpoint-<name>.md`.
 7. **Plan, then review it.** REVISE → re-plan → review again. A second REVISE → re-plan once more (the mod picks Opus max or Fable) and go on without a third review.
-8. **Build, then review**, in dependency order. Pipeline it: review each finished piece while the others still build. Apply the review gate (Hard rules).
+8. **Build, then review**, in dependency order. Pipeline it: review each finished piece while the others still build. **Fan the review out:** every reviewer a finished piece needs (code, design, security, squad specialists) goes out in ONE message as parallel background `Agent` calls, never one after another; the gate waits for all of them, then applies (Hard rules). They read the same diff, so running them together costs no extra tokens.
 9. **Tear down.** Harvest each `agt-<run>-*` pane worker's output, `close_pane` it, then confirm the run id lists zero panes (`panes-mode.md` → "The lifecycle state machine — harvest, then reap"). Stop any named background subagent once its handoff is used.
 10. **Report, then the card.** Write the run report once (`display.md` → "report.md"), never print it, then print the final card (`display.md` → "Final card"). That card is the only end-of-run output.
 
@@ -74,6 +74,6 @@ Communicate: <deliveryStyle>, <tone>.
 - **Never let an agent push through context pressure.** An executor that reports `CONTEXT …` is replaced by a fresh one seeded from its checkpoint and slice.
 - **At most 3 executors at once.** Batch the rest in waves.
 - **Executor is never Haiku**; Haiku only classifies (`routing.md` → "Hard rules"). Fable comes only from the ladder or `--fable`.
-- **Foreground when it gates.** A dispatch whose result feeds the next step uses `run_in_background: false`; background is only for parallel spawns.
+- **Foreground when it gates.** A dispatch whose result feeds the next step uses `run_in_background: false`; background is only for parallel spawns. A set of independent dispatches (a piece's reviewers, disjoint executors) is one message of background calls, then one wait for all of them.
 - **Mods off still works.** Nothing here depends on the mod; it only adds the switchboard, routing, the wire between panes and raw reports.
 - **Never close a pane you did not open.** The `agt-` prefix is ownership; a `/agt-spawn` pane is the user's.

@@ -9,9 +9,7 @@ Applies when the task has ≥2 disjoint slices, there is no pane transport, and 
 - design-reviewer: Opus, on UI buckets only.
 - security-reviewer: on security buckets (`risk=auth|money|data`) only.
 
-Each stage's `agent()` call passes `agentType`, `model` and `effort` per `routing.md` → "Default routing". Unverified: `model` may be absent from the `agent()` options on some builds; the agent's frontmatter model would then run, and the band shows it.
-
-Every stage prompt starts with the `[agt …]` header (`SKILL.md` → "Dispatch header").
+Every stage prompt starts with the `[agt …]` header (`SKILL.md` → "Dispatch header"). The mod cannot change a workflow agent's model, so give each `agent()` the model from `routing.md` → "Default routing" yourself; the mod logs the model it actually ran and toasts a mismatch.
 
 ## Adversarial verify
 

@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'claude-code/testing'
-import { CHIP_WIDTH, SPIN, boardRows, cast, castColumns, chip, columns, header, leadLine, prettyModel, routingLines, spin, tokenBars, toolLabel, wireRow } from '../../hooks/board.js'
+import { CHIP_WIDTH, SPIN, boardRows, cast, castColumns, chip, columns, header, leadLine, phaseOf, prettyModel, routingLines, spin, swarm, tokenBars, toolLabel, wireRow } from '../../hooks/board.js'
 import { newAgent, finish, stage } from '../../hooks/live.js'
 import { frame } from '../../hooks/mascot.js'
 
@@ -69,8 +69,8 @@ describe('board', () => {
 
   test('a workflow drift row shows ≠ and is not marked escalated; a plain workflow row says nothing', async () => {
     const mk = (reason: string | null) => ({ ...sub('w', 'code-reviewer', 'sonnet', 0), reason })
-    const [drift] = boardRows([mk('workflow: script sonnet, table opus')], { now: 1000 })
-    expect(drift).toMatchObject({ activity: '≠ workflow: script sonnet, table opus', escalated: false })
+    const [drift] = boardRows([mk('workflow, table says opus · high')], { now: 1000 })
+    expect(drift).toMatchObject({ activity: '≠ workflow, table says opus · high', escalated: false })
     const [plain] = boardRows([mk('workflow')], { now: 1000 })
     expect(plain).toMatchObject({ activity: 'thinking', escalated: false, reason: null })
   })
@@ -100,13 +100,89 @@ describe('board', () => {
     // a workflow agent is not an escalation: plain it reads like the table, a drift reads ≠ and is not Fable's ↑
     const w = routingLines([
       { at: '2026-10-07T10:00:00Z', role: 'code-reviewer', model: 'opus', effort: null, reason: 'workflow', kind: 'workflow' },
-      { at: '2026-10-07T10:00:01Z', role: 'code-reviewer', model: 'sonnet', effort: null, reason: 'workflow: script sonnet, table opus', kind: 'workflow' },
+      { at: '2026-10-07T10:00:01Z', role: 'code-reviewer', model: 'sonnet', effort: null, reason: 'workflow, table says opus · high', kind: 'workflow' },
     ])
     expect(w[0]).toMatchObject({ escalated: false, drift: false, reason: 'workflow' })
-    expect(w[1]).toMatchObject({ escalated: false, drift: true, reason: '≠ workflow: script sonnet, table opus' })
+    expect(w[1]).toMatchObject({ escalated: false, drift: true, reason: '≠ workflow, table says opus · high' })
     const bars = tokenBars({ roles: { executor: { input: 900, output: 100 }, planner: { input: 400, output: 100 } } }, 10)
     expect(bars.map((b) => b.name.trim())).toEqual(['executor', 'planner'])
     expect(bars[0].bar).toBe('██████████')
     expect(bars[1].bar).toBe('█████░░░░░')
+  })
+})
+
+describe('swarm', () => {
+  const agents = () => {
+    const m = new Map()
+    const add = (id: string, role: string, model: string, start: number) => m.set(id, sub(id, role, model, start))
+    add('p', 'planner', 'opus', 1)
+    add('e1', 'executor', 'sonnet', 2)
+    add('c', 'code-reviewer', 'sonnet', 3)
+    add('d', 'design-reviewer', 'opus', 4)
+    add('x', 'Explore', 'haiku', 5)
+    return m
+  }
+
+  test('below three agents there is no swarm line', async () => {
+    const m = agents()
+    m.delete('x'); m.delete('d'); m.delete('c')
+    expect(swarm({ agents: m, run: 'r1' })).toBe(undefined)
+  })
+
+  test('groups the run by phase, in phase order, done ones included', async () => {
+    const m = agents()
+    finish(m.get('p'), 10, 5)
+    const s = swarm({ agents: m, run: 'r1', tick: 0 })!
+    expect(s.lanes.map((l) => l.phase)).toEqual(['plan', 'build', 'review', 'other'])
+    expect(s.lanes[0].cells[0]).toMatchObject({ glyph: '✓', dim: true })
+    expect(s.lanes[2].cells.map((c) => c.glyph)).toEqual(['◆', '◆'])
+    expect(s).toMatchObject({ done: 1, total: 5 })
+  })
+
+  test('working cells pulse on the ticker; failed ones show ✗', async () => {
+    const m = agents()
+    m.get('c').listStatus = 'failed'
+    const a = swarm({ agents: m, run: 'r1', tick: 0 })!
+    const b = swarm({ agents: m, run: 'r1', tick: 2 })!
+    expect(a.lanes[1].cells[0].glyph).toBe('◆')
+    expect(b.lanes[1].cells[0].glyph).toBe('◇')
+    expect(a.lanes[2].cells[0]).toMatchObject({ glyph: '✗', color: 'error' })
+  })
+
+  test('pane workers count from their routes, other runs are left out, long lanes cap', async () => {
+    const m = new Map()
+    for (let i = 0; i < 10; i++) m.set('r' + i, sub('r' + i, 'code-reviewer', 'sonnet', i))
+    m.set('o', { ...sub('o', 'planner', 'opus', 0), run: 'other' })
+    const routes = [{ name: 'agt-r1-exec-1', run: 'r1', role: 'exec-1', agent: 'executor', model: 'sonnet', start: 0, end: null }]
+    const s = swarm({ agents: m, routes, run: 'r1', tick: 0 })!
+    expect(s.lanes.map((l) => l.phase)).toEqual(['build', 'review'])
+    expect(s.lanes[0].cells[0].glyph).toBe('▣')
+    expect(s.lanes[1]).toMatchObject({ more: 2 })
+    expect(s.lanes[1].cells.length).toBe(8)
+    expect(s.total).toBe(11)
+  })
+
+  test('a long lane keeps the live agent and the newest finished ones', async () => {
+    const m = new Map()
+    for (let i = 0; i < 9; i++) { const a = sub('f' + i, 'executor', 'sonnet', i); finish(a, 100, 1); m.set(a.id, a) }
+    m.set('live', sub('live', 'executor', 'sonnet', 50))
+    const lane = swarm({ agents: m, run: 'r1', tick: 0 })!.lanes[0]
+    expect(lane.cells.length).toBe(8)
+    expect(lane.more).toBe(2)
+    expect(['◆', '◇']).toContain(lane.cells[7].glyph) // the newest, working, drawn last
+    expect(lane.cells.filter((c) => c.glyph === '✓').length).toBe(7)
+  })
+
+  test('no swarm line outside an /agt run', async () => {
+    const m = agents()
+    for (const a of m.values()) a.run = 'adhoc'
+    expect(swarm({ agents: m, run: 'adhoc' })).toBe(undefined)
+  })
+
+  test('phaseOf sorts every routed role', async () => {
+    expect(['planner', 'plan-reviewer', 'ui-prototyper'].map(phaseOf)).toEqual(['plan', 'plan', 'plan'])
+    expect(['executor', 'adversary'].map(phaseOf)).toEqual(['build', 'build'])
+    expect(['code-reviewer', 'seo-reviewer', 'payments-reviewer'].map(phaseOf)).toEqual(['review', 'review', 'review'])
+    expect(phaseOf('Explore')).toBe('other')
   })
 })

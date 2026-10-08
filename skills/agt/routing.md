@@ -40,6 +40,7 @@ Only when the mode table falls through. One inline Haiku call, never the planner
 - Design-reviewer viewports: the ones the user names, else `profile.viewports`, else desktop + mobile.
 - Debug: each fix attempt is a `mode=fix` executor dispatch. After 3 failed fixes, dispatch the planner with `mode=diagnose` (read-only root cause), then a fresh executor implements it.
 - Squads add payments / SEO / perf reviewers to the review step when the diff touches their domain (`squads.md`). Formations reshape the workers (`formations.md`).
+- Every reviewer column ticked for a piece runs **at once**: one message, parallel background calls (`SKILL.md` → "The contract" step 8).
 - Never more than 3 executors at once; batch the rest in waves.
 
 ## Default routing

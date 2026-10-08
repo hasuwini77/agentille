@@ -42,7 +42,7 @@ Plain Claude is one developer. `/agt` is that developer plus a planner and a rev
 | A bug across several files | `/agt "debug why checkout totals are off by one cent"` |
 | Unsure of the scope | `/agt --plan "migrate the auth pages to the app router"` |
 
-What you get over a plain prompt: a separate reviewer checks the work instead of the model that wrote it, each step runs on the model that fits it, independent parts build at the same time, and risky diffs get a red-team pass.
+What you get over a plain prompt: a separate reviewer checks the work instead of the model that wrote it, each step runs on the model that fits it, independent parts build at the same time, a finished part's reviewers run together rather than one after another, and risky diffs get a red-team pass.
 
 Skip it for one-file edits, typos, renames and questions: a plain prompt is cheaper. Any run that is not solo costs more tokens than a plain prompt. What you buy is fewer wrong or unreviewed changes, not a lower bill.
 
@@ -64,7 +64,7 @@ Skip it for one-file edits, typos, renames and questions: a plain prompt is chea
 ## How it decides
 
 - **Solo** for a small, one-sentence task. **Subagents** for sequential work. **Panes** (Herdr or tmux) only when 2+ slices can build at once; each worker pane shows a small mascot that says hi, walks while it works and waves bye. The pick is always printed with a one-line reason.
-- **The switchboard**: a framed dispatch tree above your prompt, rooted at your session. Each subagent (`◇`) and pane session (`▣`) gets a row with its model pill, the tool it is running, elapsed time and tokens; `↑` marks an escalated route. Reviewers nest under the agent that spawned them, the agent you are viewing is highlighted, and a waiting or failed agent says so. Drawn by the mod, zero model tokens.
+- **The switchboard**: a framed dispatch tree above your prompt, rooted at your session, under one swarm line that holds every agent of the run by phase (`plan ✓ · build ◆◇ · review ◆◆◆ · 2/6 done`), however many there are. Each subagent (`◇`) and pane session (`▣`) gets a row with its model pill, the tool it is running, elapsed time and tokens; `↑` marks an escalated route. Reviewers nest under the agent that spawned them, the agent you are viewing is highlighted, and a waiting or failed agent says so. Drawn by the mod, zero model tokens.
 - **In the transcript and under the prompt**: each `Agent` call in the conversation becomes a live row (role, model · effort, current tool, elapsed, tokens), and a pinned status line under the prompt keeps `◇ working · done · tokens · $ session` in view when the band is collapsed. Dollar figures are the measured session cost only; per-agent numbers are tokens.
 - **Never loses a worker's answer**: a pane is closed only once its answer is saved or read, a pane that finishes silently wakes your session, and `/agt` refuses to open panes when the session runs an older agentille than the one installed (restart first).
 - **Type less**: `/agt --` completes its flags and their values.

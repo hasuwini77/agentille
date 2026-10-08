@@ -100,10 +100,3 @@ export function decide({ role, hdr = {}, run = { revise: 0, fixes: 0, fable: 0 }
   if (block) return { model: 'opus', effort: 'max', reason: candidate + ' · Fable blocked: ' + block, fable: false }
   return { model: 'fable', effort: 'high', reason: candidate, fable: true }
 }
-
-// A workflow script's agent() spawns are matched with the same table but cannot be rewritten: the
-// engine lets a hook only refuse them. So the table's pick is logged beside the model that ran.
-// observedKey is the model that ran, as a short key (live.js short()); d is decide()'s answer.
-export function workflowReason(observedKey, d) {
-  return observedKey === d.model ? 'workflow' : 'workflow: script ' + observedKey + ', table ' + d.model
-}

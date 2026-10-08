@@ -2,16 +2,13 @@
 
 All notable changes to agentille are documented here.
 
-## [3.8.0] — 2026-10-08
+## [3.9.0] — 2026-10-08
 
 ### Added
 
-- **Workflow agents on the band.** Agents started by a workflow script show on
-  the band, in the transcript (under the Workflow call, working agents
-  first) and in `/agt-routing`. Their model cannot be changed by a plugin, so
-  the mod logs the routing table's pick next to the model that ran and flags
-  a mismatch with `≠`. An agent silent for 30 minutes reads `no signal` and
-  comes back on its next event.
+- **Workflow agents in the transcript.** The `Workflow` call lists the agents
+  its script started beneath it, working and just-finished ones first, up to
+  eight and `+n more`; nothing is drawn when the call is scrolled off screen.
 - **A dispatch-decision eval suite** (`evals/`, `claude plugin eval`). Four
   prompts score mode, roster, model routing and formation. Local and manual
   only: every run is a real Claude session on your own account. See
@@ -19,6 +16,9 @@ All notable changes to agentille are documented here.
 
 ### Changed
 
+- A workflow agent whose model differs from the routing table reads
+  `≠ workflow, table says …` on the band and the deck, not the `↑` of an
+  escalation.
 - The plan-reviewer and payments-reviewer no longer preload CLAUDE.md files:
   they judge from the task, the planner's context pack or their own
   checklist, and the plan-reviewer reads the repo's instructions on demand.
@@ -34,15 +34,74 @@ All notable changes to agentille are documented here.
   names and whose name matches, and a pane id starts unharvested when it is
   opened. An older worker's `pane-<role>.md` counts only while no other open
   pane has that name.
-- The mod no longer tries to rewrite a workflow agent's model, which the
-  engine ignored and reported as a hook failure.
+- A workflow agent whose prompt names another run no longer pulls the band
+  off a run that still has agents working.
+- A workflow agent without an `[agt]` header still joins the band's run, but
+  its routing line and counters are filed under ad hoc, not in the log and
+  ledger of the run in progress.
+- The drift toast for a workflow agent shows once per run and role, not on
+  every agent.
 
 ### Rationale
 
-- Workflow runs were invisible on the band; now every way /agt dispatches
-  shows up in the same place.
 - Dispatch decisions live in the model, so only a behavioural eval can catch
   a routing regression; the first run found one.
+
+## [3.8.1] — 2026-10-08
+
+### Fixed
+
+- A swarm lane past eight cells keeps the working agent: it keeps every
+  working and failed cell and fills the rest with the newest finished ones.
+  It used to keep the oldest, so a live agent could fall into `+n`.
+- No swarm line outside an `/agt` run: plain subagents of a session no
+  longer build a session-long line.
+- A workflow agent inside one tool call longer than ten minutes is no
+  longer marked done.
+
+## [3.8.0] — 2026-10-08
+
+### Added
+
+- **A swarm line on the band.** One line under the switchboard's header holds
+  every agent of the run, finished ones included, grouped as plan · build ·
+  review: a pulsing cell per working agent in its model's colour, a dim ✓
+  per finished one, ✗ per failed one, and `n/m done`. It appears from three
+  agents on and keeps the whole run in view when the tree has room for only
+  a few rows. Drawn by the mod; no model tokens.
+
+### Changed
+
+- **A finished piece's reviewers go out together.** The contract now says to
+  send every reviewer a piece needs (code, design, security, squad
+  specialists) in one message as parallel background calls, then wait for
+  all of them. They read the same diff, so the run is shorter at the same
+  token cost.
+- The workflow tier tells the lead to set each workflow agent's model from
+  the routing table itself.
+
+### Fixed
+
+- **Workflow agents are no longer rewritten.** This build raises
+  `agent.spawn` for a workflow script's agents but ignores a model rewrite
+  there and logs a failure line. The mod now passes them through, logs the
+  model they really ran, and toasts a mismatch with the routing table.
+- A workflow agent whose prompt has no `[agt]` header joins the run in
+  progress instead of resetting the band to an ad-hoc run.
+- A workflow agent nothing has been heard from in ten minutes is finished,
+  so a cancelled workflow no longer leaves a row, the ticker and the status
+  line running forever.
+- A listed fork is no longer adopted into the tree.
+- The pinned status line shows only for an `/agt` run, not for a plain
+  subagent.
+- A row rebuilt after a reload no longer shows a bare `tok`.
+
+### Rationale
+
+- Run logs showed reviewers of one piece starting many minutes apart. Running
+  them together adds visible concurrency without adding agents or tokens.
+- The workflow fixes come from an audit of 3.7.0 against the 2.1.294 hooks
+  API.
 
 ## [3.7.0] — 2026-10-08
 

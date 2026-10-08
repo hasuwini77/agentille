@@ -85,10 +85,9 @@ export const LIST_STATUS = {
   idle: { glyph: '·', word: 'idle', color: 'inactive' },
   failed: { glyph: '✗', word: 'failed', color: 'error' },
   killed: { glyph: '✗', word: 'killed', color: 'error' },
-  lost: { glyph: '?', word: 'no signal', color: 'warning' },
 }
-const BROKEN = new Set(['failed', 'killed', 'lost'])
-// A workflow agent's reason: plain `workflow` when the script ran the table's model, `workflow: script X, table Y`
+const BROKEN = new Set(['failed', 'killed'])
+// A workflow agent's reason: plain `workflow` when the script ran the table's model, `workflow, table says X · Y`
 // when it did not. Neither is an escalation; the drift reads `≠`, not `↑`.
 const isWorkflow = (reason) => typeof reason === 'string' && reason.startsWith('workflow')
 const isDrift = (reason) => isWorkflow(reason) && reason !== 'workflow'
@@ -217,4 +216,56 @@ export function tokenBars(l, width = 20) {
     const fill = Math.max(r.tok > 0 ? 1 : 0, Math.round((r.tok / top) * width))
     return { name: cut(r.name, 16).padEnd(16), bar: '█'.repeat(fill) + '░'.repeat(width - fill), tok: tokens(r.tok).padStart(6) }
   })
+}
+
+// ── the swarm line: the whole run in one line, by phase ──────────────────────
+
+export const PHASES = ['plan', 'build', 'review', 'other']
+const LANE_CAP = 8 // cells per lane before it reads "+n"
+
+export function phaseOf(role) {
+  const r = String(role ?? '')
+  if (r === 'planner' || r === 'plan-reviewer' || r === 'ui-prototyper') return 'plan'
+  if (r === 'executor' || r === 'adversary') return 'build'
+  if (r.endsWith('-reviewer')) return 'review'
+  return 'other'
+}
+
+// One cell per agent of the run, done ones included, so a run of twelve reads in one line where
+// the tree only has room for a few rows. A working cell pulses (◆/◇, ▣/□) on the ticker, offset
+// per cell; a finished one is a dim ✓, a failed or killed one ✗. Pane workers come from their
+// routes (one per spawn), working until the route ends. Undefined below three agents (the tree
+// already shows that many) and outside an /agt run (`adhoc` is every plain subagent of the session).
+// A lane past LANE_CAP keeps every working and failed cell and fills the rest with the newest
+// finished ones, in start order: the live agent is never the one cut.
+export function swarm({ agents, routes = [], run, tick = 0 }) {
+  if (run === 'adhoc') return undefined
+  const cells = []
+  for (const a of agents.values()) {
+    if (a.run !== run) continue
+    const broken = BROKEN.has(a.listStatus)
+    const working = a.state === 'working' && !broken
+    cells.push({ at: a.start ?? 0, phase: phaseOf(a.role), kind: 'sub', working, broken, model: a.model })
+  }
+  for (const r of routes) {
+    if (r.run !== run) continue
+    cells.push({ at: r.start ?? 0, phase: phaseOf(r.agent ?? r.role), kind: 'pane', working: r.end == null, broken: false, model: r.model })
+  }
+  if (cells.length < 3) return undefined
+  cells.sort((a, b) => a.at - b.at)
+  const lanes = []
+  for (const phase of PHASES) {
+    const mine = cells.filter((c) => c.phase === phase)
+    if (!mine.length) continue
+    const keep = new Set(mine.filter((c) => c.working || c.broken).slice(-LANE_CAP))
+    for (let i = mine.length - 1; i >= 0 && keep.size < LANE_CAP; i--) keep.add(mine[i])
+    const shown = mine.filter((c) => keep.has(c)).map((c, i) => {
+      if (c.broken) return { glyph: '✗', color: 'error', dim: false }
+      if (!c.working) return { glyph: DONE_GLYPH, color: hex(DONE_COLOR), dim: true }
+      const on = (tick + i) % 4 < 2
+      return { glyph: c.kind === 'pane' ? (on ? '▣' : '□') : on ? '◆' : '◇', color: colorOf(c.model), dim: false }
+    })
+    lanes.push({ phase, cells: shown, more: mine.length - shown.length })
+  }
+  return { lanes, done: cells.filter((c) => !c.working).length, total: cells.length }
 }

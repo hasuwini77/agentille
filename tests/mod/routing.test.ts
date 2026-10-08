@@ -137,3 +137,89 @@ describe('mod', () => {
     expect(line).toBe('code-reviewer → claude-opus-5-5 · ? · workflow')
   })
 })
+
+describe('workflow agents: runs, toast, deny', () => {
+  const hdr = (run: string) => '[agt run=' + run + ' size=large mode=review]\nreview'
+  const wf = (run: string | null, role = 'code-reviewer', index = 1) => ({ prompt: run ? hdr(run) : 'review', subagentType: 'agentille:agentille-' + role, workflow: { runId: 'wf_1', agentIndex: index } }) as never
+  const band = ($: any) => $.ui.mount({ plugin: 'agentille', surface: 'terminal', component: 'AbovePrompt', props: { hasSurvey: false, isWorking: true, maxRows: 10, bodyColumns: 100 } as never })
+  const setup = (on: any, model = 'claude-sonnet-5') => {
+    const toasts: string[] = []
+    const writes: Record<string, string> = {}
+    let n = 0
+    on('env.get', async ($: any, e: any) => ({ value: ({ HOME: '/h' } as any)[e.name] }))
+    on('session.start', async ($: any, e: any) => ({ cwd: e.cwd }))
+    on('command.register', async () => ({ value: undefined }))
+    on('fs.read', async () => ({ deny: 'no profile' }))
+    on('fs.write', async ($: any, e: any) => { writes[e.path] = e.text; return { value: undefined } })
+    on('store.get', async () => ({ value: null }))
+    on('ui.render', async () => ({ type: 'engine', ref: 0 }) as never)
+    on('ui.toast', async ($: any, e: any) => { toasts.push(e.text); return { value: undefined } })
+    on('turn.complete', async ($: any, e: any) => ({ text: e.answer }))
+    on('agent.spawn', async () => ({ model, agentId: 'w' + n++ }))
+    mock.clock(on, { now: Date.now() })
+    return { toasts, writes }
+  }
+  const finish = ($: any, agentId: string) => $.turn.complete({ agentId, answer: 'ok', durationMs: 10, isAborted: false, turnId: 't' + agentId, reason: 'answer' } as never)
+  const shownRun = async (ui: any, run: string) => (await ui.find({ type: 'Text', text: new RegExp('run ' + run) })) !== undefined
+
+  test('a drift raises one agt ≠ toast per run and role', async ($, on) => {
+    const { toasts } = setup(on)
+    await $.session.start({ cwd: '/w', surface: null, isInteractive: false })
+    await $.agent.spawn(wf('wfdrift'))
+    expect(toasts).toEqual(['agt ≠ code-reviewer · workflow ran script sonnet, table opus'])
+    await $.agent.spawn(wf('wfdrift', 'code-reviewer', 2)) // same run, same role: told once
+    expect(toasts.length).toBe(1)
+    await $.agent.spawn(wf('wfdrift', 'design-reviewer', 3)) // another role is a new drift
+    expect(toasts.length).toBe(2)
+  })
+
+  test('a deny from a lower hook passes through: no agent, no log, no toast', async ($, on) => {
+    const toasts: string[] = []
+    on('ui.toast', async ($: any, e: any) => { toasts.push(e.text); return { value: undefined } })
+    on('agent.spawn', async () => ({ deny: 'workflow agents are off' }))
+    mock.clock(on, { now: Date.now() })
+    const res = await $.agent.spawn(wf('wfdeny'))
+    expect(res).toEqual({ deny: 'workflow agents are off' })
+    expect(toasts).toEqual([])
+    expect((await $.command.run({ command: 'agt-routing' })).text).not.toContain('code-reviewer')
+  })
+
+  test('a workflow takes the band over only from a run with nothing working', async ($, on) => {
+    setup(on)
+    await $.session.start({ cwd: '/w', surface: null, isInteractive: false })
+    await $.agent.spawn({ prompt: hdr('runA'), subagentType: 'agentille:agentille-executor' } as never) // w0, working
+    const ui = await band($)
+    expect(await shownRun(ui, 'runA')).toBe(true)
+    await $.agent.spawn(wf('runB')) // w1: runA still works, the band stays
+    expect(await shownRun(ui, 'runA')).toBe(true)
+    expect(await shownRun(ui, 'runB')).toBe(false)
+    await finish($, 'w0')
+    await finish($, 'w1')
+    await $.agent.spawn(wf('runC', 'code-reviewer', 2)) // nothing works any more: the band follows
+    expect(await shownRun(ui, 'runC')).toBe(true)
+    await ui.unmount()
+  })
+
+  test('a workflow takes the band over from adhoc', async ($, on) => {
+    setup(on)
+    await $.session.start({ cwd: '/w', surface: null, isInteractive: false })
+    await $.agent.spawn({ prompt: 'no header', subagentType: 'Explore' } as never) // w0 adhoc, working
+    await $.agent.spawn(wf('runD'))
+    const ui = await band($)
+    expect(await shownRun(ui, 'runD')).toBe(true)
+    await ui.unmount()
+  })
+
+  test('a headerless workflow agent files its routing line and report under adhoc, not the band run', async ($, on) => {
+    const { writes } = setup(on)
+    await $.session.start({ cwd: '/w', surface: null, isInteractive: false })
+    await $.agent.spawn({ prompt: hdr('runE'), subagentType: 'agentille:agentille-executor' } as never) // w0 working: runE owns the band
+    await $.agent.spawn(wf(null)) // w1, no header
+    await finish($, 'w1')
+    expect(writes['/h/.agentille/state/run-runE/routing.jsonl']).not.toContain('"kind":"workflow"') // runE's log holds only its own
+    expect(Object.keys(writes).some((p) => p.includes('agents/code-reviewer'))).toBe(false) // the report went to adhoc, which writes nothing
+    const ui = await band($)
+    expect(await shownRun(ui, 'runE')).toBe(true) // and the band still shows runE
+    await ui.unmount()
+  })
+})

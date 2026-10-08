@@ -67,6 +67,14 @@ describe('board', () => {
     expect(boardRows([a], { now: 5 })[0]).toMatchObject({ glyph: '✓', dim: true, activity: 'done' })
   })
 
+  test('a workflow drift row shows ≠ and is not marked escalated; a plain workflow row says nothing', async () => {
+    const mk = (reason: string | null) => ({ ...sub('w', 'code-reviewer', 'sonnet', 0), reason })
+    const [drift] = boardRows([mk('workflow: script sonnet, table opus')], { now: 1000 })
+    expect(drift).toMatchObject({ activity: '≠ workflow: script sonnet, table opus', escalated: false })
+    const [plain] = boardRows([mk('workflow')], { now: 1000 })
+    expect(plain).toMatchObject({ activity: 'thinking', escalated: false, reason: null })
+  })
+
   test('header counts working subagents and live sessions; lead line says what the lead does', async () => {
     const rows = [{ kind: 'sub', state: 'working' }, { kind: 'sub', state: 'done' }, { kind: 'pane', state: 'working' }, { kind: 'pane', state: 'idle' }]
     expect(header({ run: 'r1', formation: 'gauntlet', rows, tally: { tok: 50_300 } })).toEqual({ left: 'run r1 · gauntlet', right: '◇1 ▣1 · 50.3k' })
@@ -89,6 +97,13 @@ describe('board', () => {
     expect(c.cells[0].lines.length).toBe(3)
     const t = routingLines([{ at: '2026-10-07T10:00:00Z', role: 'planner', model: 'fable', effort: 'high', reason: 'plan REVISE ×2' }])
     expect(t[0]).toMatchObject({ escalated: true, reason: '↑ plan REVISE ×2' })
+    // a workflow agent is not an escalation: plain it reads like the table, a drift reads ≠ and is not Fable's ↑
+    const w = routingLines([
+      { at: '2026-10-07T10:00:00Z', role: 'code-reviewer', model: 'opus', effort: null, reason: 'workflow', kind: 'workflow' },
+      { at: '2026-10-07T10:00:01Z', role: 'code-reviewer', model: 'sonnet', effort: null, reason: 'workflow: script sonnet, table opus', kind: 'workflow' },
+    ])
+    expect(w[0]).toMatchObject({ escalated: false, drift: false, reason: 'workflow' })
+    expect(w[1]).toMatchObject({ escalated: false, drift: true, reason: '≠ workflow: script sonnet, table opus' })
     const bars = tokenBars({ roles: { executor: { input: 900, output: 100 }, planner: { input: 400, output: 100 } } }, 10)
     expect(bars.map((b) => b.name.trim())).toEqual(['executor', 'planner'])
     expect(bars[0].bar).toBe('██████████')

@@ -99,14 +99,17 @@ export function registerRows(on, ctx) {
   on('ui.render', { component: 'ToolUse', props: { tool: 'Workflow' } }, async ($, e, next) => {
     const p = e.props
     if (p.isErrored || p.isInterrupted) return next(e)
+    if (p.onScreen === null) return next(e) // drawn outside the viewport: the engine's row alone
     const started = flows.get(p.tool_use_id ?? e.requestId)
+    const now = Date.now()
+    // Working agents, and ones still waving goodbye, come first, so the cap never hides them.
+    const active = (a) => (a.state === 'working' || waving(a, now) ? 0 : 1)
     const agents = (started ?? [])
       .map((f) => ({ a: ctx.live.get(f.agentId), index: f.index }))
       .filter((f) => f.a)
-      .sort((x, y) => x.index - y.index)
+      .sort((x, y) => active(x.a) - active(y.a) || x.index - y.index)
     if (agents.length === 0) return next(e)
     const els = $.ui.resolve(e)
-    const now = Date.now()
     const shown = agents.slice(0, MAX_FLOW_ROWS).map((f) => rowElement(els, cachedRow(finished, f.a, { now, tick: ctx.tick })))
     if (agents.length > MAX_FLOW_ROWS) shown.push(els.Text({ dimColor: true, children: ['+' + (agents.length - MAX_FLOW_ROWS) + ' more'] }))
     return els.Box({ flexDirection: 'column', children: [await next(e), ...shown] })

@@ -414,13 +414,16 @@ async function pollNow($, t) {
   else if (t === 'tmux') await pollTmux($)
 }
 
+// The run an agent's files and counters belong to: a workflow agent without a header files under 'adhoc'.
+const fileRunOf = (a) => a.fileRun ?? a.run
+
 // A subagent's raw answer goes to run-<id>/agents/<role>-<n>.md, written here so the lead spends
 // no tokens copying it. n counts per role in the run; a second turn of the same agent overwrites.
 async function writeReport($, a, answer) {
   if (!(a.routed || a.agt) || !answer) return
-  const counts = runState(a.run).reports
+  const counts = runState(fileRunOf(a)).reports
   a.report ??= a.role + '-' + (counts[a.role] = (counts[a.role] ?? 0) + 1) + '.md'
-  await writeRunFile($, a.run, 'agents/' + a.report, answer)
+  await writeRunFile($, fileRunOf(a), 'agents/' + a.report, answer)
 }
 
 const working = () => [...live.values()].some((a) => a.state === 'working') || panes.some((p) => p.state === 'working')
@@ -481,17 +484,24 @@ async function watchWorkflow($, e, next) {
   const now = await $.clock.now()
   const role = roleOf(e.subagentType)
   const hdr = parseHeader(e.prompt) ?? {}
-  const runId = SAFE_RUN.test(hdr.run ?? '') ? hdr.run : lastRun
-  lastRun = runId // the band follows the run its agents belong to
+  // Two runs: the one whose files and counters the agent writes to (its header's, else 'adhoc',
+  // which writes nothing) and the one whose band shows it. A header names the first; the band
+  // moves to it only when the current run has nothing working, so a workflow does not pull the
+  // band off a run still in progress.
+  const fileRun = SAFE_RUN.test(hdr.run ?? '') ? hdr.run : 'adhoc'
+  const busy = [...live.values()].some((a) => a.run === lastRun && a.state === 'working')
+  if (fileRun !== 'adhoc' && (lastRun === 'adhoc' || !busy)) lastRun = fileRun
+  const runId = fileRun === 'adhoc' ? lastRun : fileRun
   let reason = null
   let d = null
   if (role) {
-    d = decide({ role, hdr, run: runState(runId), depth, settings, weeklyPct })
+    d = decide({ role, hdr, run: runState(fileRun), depth, settings, weeklyPct })
     reason = workflowReason(short(res.model), d)
   }
   if (res.agentId) {
     const a = newAgent({ id: res.agentId, role: role ?? shortType(e.subagentType), routed: false, model: res.model, effort: null, reason: reason === 'workflow' ? null : reason, run: runId, now: Date.now(), parentId: e.parentAgentId ?? null })
     a.agt = !!role
+    a.fileRun = fileRun
     a.workflow = { runId: e.workflow.runId, index: e.workflow.agentIndex }
     a.seen = now
     live.set(res.agentId, a)
@@ -499,10 +509,10 @@ async function watchWorkflow($, e, next) {
   if (d) {
     const rec = { at: new Date(now).toISOString(), role, model: res.model, effort: null, reason, table: d.model + ' · ' + d.effort, asked: null, agentId: res.agentId ?? null, kind: 'workflow' }
     decisions.push(rec)
-    const log = runState(runId).log
+    const log = runState(fileRun).log
     log.push(JSON.stringify(rec))
-    await writeRunFile($, runId, 'routing.jsonl', log.join('\n') + '\n')
-    const key = runId + ':' + role
+    await writeRunFile($, fileRun, 'routing.jsonl', log.join('\n') + '\n')
+    const key = fileRun + ':' + role
     if (reason !== 'workflow' && !wfToasted.has(key)) {
       wfToasted.add(key)
       $.ui.toast('agt ≠ ' + role + ' · ' + reason.replace(/^workflow: /, 'workflow ran '))
@@ -1061,11 +1071,11 @@ export function register(on) {
       await heardFrom($, a)
       a.tool = null
       if (a.routed || a.agt) addFlag($, flagOf(a.role, e.answer))
-      if (a.role === 'plan-reviewer' && verdictOf(e.answer) === 'REVISE') runState(a.run).revise += 1
+      if (a.role === 'plan-reviewer' && verdictOf(e.answer) === 'REVISE') runState(fileRunOf(a)).revise += 1
       if (a.input + a.output === 0) addUsage(a, e.usage)
       finish(a, Date.now(), e.durationMs)
       await writeReport($, a, e.answer)
-      await writeRunFile($, a.run, 'ledger.json', JSON.stringify(ledger(live, a.run, paneRoutes), null, 2) + '\n')
+      await writeRunFile($, fileRunOf(a), 'ledger.json', JSON.stringify(ledger(live, fileRunOf(a), paneRoutes), null, 2) + '\n')
       ensureTicker($)
       void refreshAgents($)
       $.ui.invalidate('ui.render')
@@ -1133,7 +1143,7 @@ export function register(on) {
     }
     if (decisions.length) {
       kids.push(rule(els, 'routing'))
-      for (const d of routingLines(decisions)) kids.push(Text({ wrap: 'truncate', children: [Text({ dimColor: true, children: [d.at + '  '] }), d.who + '  ', Text({ color: d.color, children: [d.route] }), Text({ color: d.escalated ? colorOf('fable') : undefined, dimColor: !d.escalated, children: [d.reason] })] }))
+      for (const d of routingLines(decisions)) kids.push(Text({ wrap: 'truncate', children: [Text({ dimColor: true, children: [d.at + '  '] }), d.who + '  ', Text({ color: d.color, children: [d.route] }), Text({ color: d.escalated ? colorOf('fable') : d.drift ? 'warning' : undefined, dimColor: !d.escalated && !d.drift, children: [d.reason] })] }))
     }
     if (wireLog.length) {
       kids.push(rule(els, 'wire'))

@@ -188,7 +188,7 @@ describe('rows: workflow agents', () => {
     on('ui.invalidate', async ($: any, e: any, next: any) => { invalidations++; return next(e) })
     on('turn.complete', async ($: any, e: any) => ({ text: e.answer }))
     on('tool.call', async () => ({ result: 'ok' }) as never)
-    const ids = ['wa', 'wb']
+    const ids = ['wa', 'wb', ...Array.from({ length: 10 }, (_, i) => 'w' + (i + 2))]
     let n = 0
     on('agent.spawn', async () => ({ model: 'claude-sonnet-5', agentId: ids[n++] }))
     const clock = mock.clock(on, { now: Date.now() })
@@ -250,5 +250,30 @@ describe('rows: workflow agents', () => {
     const other = await $.ui.mount({ plugin: 'agentille', surface: 'terminal', component: 'ToolUse', requestId: 'tuNone', props: { tool: 'Workflow', tool_use_id: 'tuNone', input: {}, isRunning: true, isErrored: false, isInterrupted: false } as never })
     expect(await has(other, /executor/)).toBe(false)
     await other.unmount()
+  })
+  test('a Workflow row lists working agents first, then by index, so the cap never hides them', async ($, on) => {
+    const { clock } = setup(on)
+    for (let i = 1; i <= 9; i++) await spawn($, i === 9 ? 'code-reviewer' : 'executor', i)
+    const ids = ['wa', 'wb', 'w2', 'w3', 'w4', 'w5', 'w6', 'w7'] // indexes 1..8 finish; 9 keeps working
+    for (const id of ids) await $.turn.complete({ agentId: id, answer: 'built', durationMs: 10, isAborted: false, turnId: 't' + id, reason: 'answer', usage: { input_tokens: 1, output_tokens: 1 } } as never)
+    await new Promise((r) => setTimeout(r, 2600)) // past the goodbye wave, which also sorts first
+    await clock.advance(0)
+    const ui = await $.ui.mount({ plugin: 'agentille', surface: 'terminal', component: 'ToolUse', requestId: 'tuWf', props: { tool: 'Workflow', tool_use_id: 'tuWf', input: {}, isRunning: true, isErrored: false, isInterrupted: false } as never })
+    await shows(ui, /code-reviewer/) // the ninth works: it is shown although eight earlier indexes are done
+    expect(await has(ui, /\+2 more/)).toBe(false)
+    await shows(ui, /\+1 more/)
+    await ui.unmount()
+  })
+
+  test('a Workflow row off screen is the engine row alone', async ($, on) => {
+    setup(on)
+    await spawn($, 'executor', 1)
+    const mount = (onScreen: unknown) => $.ui.mount({ plugin: 'agentille', surface: 'terminal', component: 'ToolUse', requestId: 'tuWf', props: { tool: 'Workflow', tool_use_id: 'tuWf', input: {}, isRunning: true, isErrored: false, isInterrupted: false, onScreen } as never })
+    const off = await mount(null)
+    expect(await has(off, /executor/)).toBe(false)
+    await off.unmount()
+    const on1 = await mount({ first: 0, last: 3, of: 4 })
+    await shows(on1, /executor/)
+    await on1.unmount()
   })
 })

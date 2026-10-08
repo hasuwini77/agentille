@@ -43,11 +43,12 @@ describe('tree: adopt and applyStatus', () => {
     expect(live.get('x2')).toMatchObject({ role: 'Explore', parentId: 'x1', listStatus: 'waiting' })
   })
 
+
   test('applyStatus records the list status and finishes failed and killed agents', async () => {
     const a = agent('a'), b = agent('b'), c = agent('c')
     const live = new Map([['a', a], ['b', b], ['c', c]]) as Map<string, any>
     applyStatus(live, [item('a', 'waiting', { parentId: 'p' }), item('b', 'failed'), item('c', 'killed')], 100)
-    expect(a).toMatchObject({ listStatus: 'waiting', state: 'working', parentId: 'p' })
+    expect(a).toMatchObject({ listStatus: 'waiting', state: 'working', parentId: 'p', listed: true })
     expect(b).toMatchObject({ listStatus: 'failed', state: 'done', leftAt: 100 })
     expect(c).toMatchObject({ listStatus: 'killed', state: 'done' })
   })
@@ -66,6 +67,34 @@ describe('tree: adopt and applyStatus', () => {
     expect(adopted.state).toBe('done')
     expect(gone.state).toBe('done')
     expect(spawned.state).toBe('working')
+  })
+
+  test('an adopted agent that goes idle finishes', async () => {
+    const a = agent('a', { adopted: true })
+    applyStatus(new Map([['a', a]]) as Map<string, any>, [item('a', 'idle')], 100)
+    expect(a).toMatchObject({ state: 'done', leftAt: 100 })
+    const live = new Map() as Map<string, any>
+    adopt(live, [item('i1', 'idle')], { run: 'adhoc', now: 5 })
+    applyStatus(live, [item('i1', 'idle')], 6)
+    expect(live.get('i1')).toMatchObject({ adopted: true, state: 'done', listStatus: 'idle' })
+  })
+
+  test('a spawned agent the list once named and no longer does is finished; one never listed is not', async () => {
+    const seen = agent('seen'), never = agent('never')
+    const live = new Map([['seen', seen], ['never', never]]) as Map<string, any>
+    expect(applyStatus(live, [item('seen', 'running')], 100)).toBe(true)
+    expect(seen).toMatchObject({ listed: true, state: 'working' })
+    expect(applyStatus(live, [], 200)).toBe(true)
+    expect(seen).toMatchObject({ state: 'done', leftAt: 200 })
+    expect(never.state).toBe('working')
+  })
+
+  test('applyStatus reports a change only when something changed', async () => {
+    const a = agent('a')
+    const live = new Map([['a', a]]) as Map<string, any>
+    expect(applyStatus(live, [item('a', 'running')], 100)).toBe(true)
+    expect(applyStatus(live, [item('a', 'running')], 200)).toBe(false)
+    expect(applyStatus(live, [item('a', 'waiting')], 300)).toBe(true)
   })
 })
 
@@ -91,6 +120,15 @@ describe('tree: board rows', () => {
     expect(r.time.trim()).toBe('')
   })
 
+  test('an adopted row shows no tokens, even once partial usage arrives', async () => {
+    const [r] = draw([agent('n', { model: null, adopted: true })])
+    expect(r.tok.trim()).toBe('')
+    const [s] = draw([agent('n', { model: null, adopted: true, input: 1200, output: 300 })])
+    expect(s.tok.trim()).toBe('')
+    const [t] = draw([agent('n', { input: 1200, output: 300 })])
+    expect(t.tok.trim()).not.toBe('')
+  })
+
   test('the connector comes from the tree when set; the agent in view is marked', async () => {
     const [a, b] = draw([{ ...agent('a'), tree: '│  └─' }, agent('b')], { view: 'b' })
     expect(a.tree).toBe('│  └─')
@@ -105,16 +143,18 @@ function finishAs(a: any) {
 }
 
 describe('tree: in the mod', () => {
-  const boot = async ($: any, on: any, list: object[]) => {
+  const boot = async ($: any, on: any, list: object[] | (() => object[])) => {
+    const calls = { list: 0 }
     on('env.get', async ($: any, e: any) => ({ value: ({ HOME: '/h' } as any)[e.name] }))
     on('session.start', async ($: any, e: any) => ({ cwd: e.cwd }))
     on('command.register', async () => ({ value: undefined }))
     on('fs.read', async () => ({ deny: 'no profile' }))
     on('store.get', async () => ({ value: undefined }))
-    on('agent.list', async () => ({ value: list }) as never)
+    on('agent.list', async () => { calls.list += 1; return { value: typeof list === 'function' ? list() : list } as never })
     on('ui.render', async () => ({ type: 'engine', ref: 0 }) as never)
-    mock.clock(on, { now: 1_000_000 })
+    const clock = mock.clock(on, { now: 1_000_000 })
     await $.session.start({ cwd: '/w', surface: null, isInteractive: false })
+    return { clock, calls }
   }
   const mount = ($: any, over: object = {}) => $.ui.mount({ plugin: 'agentille', surface: 'terminal', component: 'AbovePrompt', props: { hasSurvey: false, isWorking: true, maxRows: 10, bodyColumns: 100, ...over } as never })
   const LIST = [item('x1', 'running'), item('x2', 'waiting', { type: 'Explore', parentId: 'x1', description: 'scan' })]
@@ -151,6 +191,46 @@ describe('tree: in the mod', () => {
     const ui = await mount($)
     expect(await ui.find({ type: 'Text', text: /Explore/ })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: /^\s+└─$/ })).toBeDefined()
+    await ui.unmount()
+  })
+
+  test('only an idle adopted agent: the list poll never turns into a running ticker', async ($, on) => {
+    const { clock, calls } = await boot($, on, [item('i1', 'idle')])
+    expect(calls.list).toBe(1)
+    await clock.advance(6000)
+    expect(calls.list).toBe(1)
+  })
+
+  test('the ticker stops once the adopted agents end', async ($, on) => {
+    let status = 'running'
+    const { clock, calls } = await boot($, on, () => [item('x1', status)])
+    await clock.advance(3000)
+    const during = calls.list
+    expect(during).toBeGreaterThan(1)
+    status = 'completed'
+    await clock.advance(3000)
+    const after = calls.list
+    await clock.advance(6000)
+    expect(calls.list).toBe(after)
+  })
+
+  test('the list is read at most once a second', async ($, on) => {
+    const { clock, calls } = await boot($, on, [item('x1', 'running')])
+    expect(calls.list).toBe(1)
+    await $.session.start({ cwd: '/w', surface: null, isInteractive: false })
+    expect(calls.list).toBe(1)
+    await clock.advance(1100)
+    await $.session.start({ cwd: '/w', surface: null, isInteractive: false })
+    expect(calls.list).toBeGreaterThan(1)
+  })
+
+  test('a throwing list leaves the band drawing from events', async ($, on) => {
+    on('agent.spawn', async () => ({ model: 'claude-sonnet-5', agentId: 'sp1' }))
+    const { calls } = await boot($, on, () => { throw new Error('no agent list') })
+    expect(calls.list).toBe(1)
+    await $.agent.spawn({ prompt: '[agt run=boom size=large mode=build]\nlead', subagentType: 'agentille:agentille-executor' })
+    const ui = await mount($)
+    expect(await ui.find({ type: 'Text', text: /executor/ })).toBeDefined()
     await ui.unmount()
   })
 })

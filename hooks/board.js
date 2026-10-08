@@ -128,7 +128,7 @@ export function boardRows(rows, { now, tick = 0, cols = 80, wire = new Map(), tr
       escalated: !!(r.reason && r.reason !== 'table'),
       reason: r.reason && r.reason !== 'table' ? r.reason : null,
       time: start != null && !r.adopted ? elapsed((r.end ?? now) - start).padStart(5) : '     ',
-      tok: c.tok ? (tok != null ? tokens(tok) : '').padStart(6) : null,
+      tok: c.tok ? (tok != null && !r.adopted ? tokens(tok) : '').padStart(6) : null,
       dim: done && !broken,
       busy,
     }

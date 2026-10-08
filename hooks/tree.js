@@ -28,20 +28,27 @@ export function adopt(live, list, { run, now }) {
 }
 
 // Fold the list's view of each known agent into the live map. A failed or killed agent raises no
-// turn.complete, so it is finished here; so is an adopted agent that completed or left the list.
+// turn.complete, so it is finished here. So is an adopted agent that completed or is idle (nothing
+// else ends it, and a working agent keeps the ticker and the list poll alive), and any agent the
+// list once named and no longer does. Returns whether anything changed.
 export function applyStatus(live, list, now) {
   const byId = new Map((list ?? []).map((item) => [item.id, item]))
+  let changed = false
   for (const a of live.values()) {
     const item = byId.get(a.id)
     if (!item) {
-      if (a.adopted && a.state === 'working') finish(a, now)
+      if ((a.adopted || a.listed) && a.state === 'working') { finish(a, now); changed = true }
       continue
     }
+    const parentId = a.parentId ?? item.parentId ?? null
+    if (a.listStatus !== item.status || a.parentId !== parentId || !a.listed) changed = true
     a.listStatus = item.status
-    a.parentId ??= item.parentId ?? null
+    a.parentId = parentId
+    a.listed = true
     if (a.state !== 'working') continue
-    if (BROKEN.has(item.status) || (a.adopted && item.status === 'completed')) finish(a, now)
+    if (BROKEN.has(item.status) || (a.adopted && (item.status === 'completed' || item.status === 'idle'))) { finish(a, now); changed = true }
   }
+  return changed
 }
 
 // Depth-first order with a tree prefix per row: "├─", "│  └─". A row whose parent is not among the

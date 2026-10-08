@@ -68,6 +68,7 @@ const DECK = 'agt-deck'
 const FLAG_TTL_MS = 30 * 60_000
 const FOCUS_COLOR = { next: '#3fb950', flag: '#f85149' }
 const LIST_MS = 1000         // $.agent.list() is read at most this often
+const LIST_RETRY_MS = 30_000 // ... and after a failed read, at most this often
 let listAt = 0
 let listBusy = false
 
@@ -143,20 +144,23 @@ async function loadSquads($) {
 // The engine's agent list is the truth for who exists and who spawned whom. Read it at session
 // start (a reload loses the live map) and while agents work; render hooks only see the copy.
 // A failed read leaves everything as it was.
-async function refreshAgents($) {
-  const now = Date.now()
+async function refreshAgents($, at) {
+  const now = at ?? await $.clock.now()
   if (listBusy || now - listAt < LIST_MS) return
   listBusy = true
   listAt = now
   try {
-    const list = await $.agent.list()
+    let list
+    try {
+      list = await $.agent.list()
+    } catch {
+      listAt = now + LIST_RETRY_MS - LIST_MS // no agent list here (an older build, a host without agents): the band runs on events alone, and the list is retried rarely
+    }
     if (!Array.isArray(list)) return
-    adopt(live, list, { run: lastRun, now })
-    applyStatus(live, list, now)
+    const added = adopt(live, list, { run: lastRun, now }).length > 0
+    const changed = applyStatus(live, list, now)
     if (working()) ensureTicker($)
-    $.ui.invalidate('ui.render')
-  } catch {
-    // no agent list here (an older build, a host without agents): the band runs on events alone
+    if (added || changed) $.ui.invalidate('ui.render')
   } finally {
     listBusy = false
   }
@@ -346,12 +350,13 @@ const animating = (now) => (!!worker && moodAt({ ...mascot, now }) !== 'idle') |
 function ensureTicker($) {
   if (tickTimer) return
   tickTimer = $.clock.every(300, async () => {
-    if (!working() && !animating(await $.clock.now())) {
+    const now = await $.clock.now()
+    if (!working() && !animating(now)) {
       tickTimer?.cancel()
       tickTimer = null
     } else tick += 1
     if (panes.length && tick % 3 === 0) await readWire($)
-    if (tick % 4 === 0) void refreshAgents($)
+    if (tick % 4 === 0) void refreshAgents($, now)
     $.ui.invalidate('ui.render')
   })
 }

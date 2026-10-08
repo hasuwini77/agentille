@@ -2,6 +2,48 @@
 
 All notable changes to agentille are documented here.
 
+## [3.8.0] — 2026-10-08
+
+### Added
+
+- **Workflow agents on the band.** Agents started by a workflow script show on
+  the band, in the transcript (under the Workflow call, working agents
+  first) and in `/agt-routing`. Their model cannot be changed by a plugin, so
+  the mod logs the routing table's pick next to the model that ran and flags
+  a mismatch with `≠`. An agent silent for 30 minutes reads `no signal` and
+  comes back on its next event.
+- **A dispatch-decision eval suite** (`evals/`, `claude plugin eval`). Four
+  prompts score mode, roster, model routing and formation. Local and manual
+  only: every run is a real Claude session on your own account. See
+  `.claude/CLAUDE.md` for the command and its cost.
+
+### Changed
+
+- The plan-reviewer and payments-reviewer no longer preload CLAUDE.md files:
+  they judge from the task, the planner's context pack or their own
+  checklist, and the plan-reviewer reads the repo's instructions on demand.
+
+### Fixed
+
+- `/agt "review …"` and `/agt "debug …"` no longer resolve to solo: the
+  review and debug rows now come before the one-sentence solo row. The eval
+  suite caught it.
+- A respawned role, or a reused pane id, can no longer get another open pane
+  reaped by its answer. Answer files are named per pane
+  (`pane-<role>.<pane>.md`), a done message only counts for the pane it
+  names and whose name matches, and a pane id starts unharvested when it is
+  opened. An older worker's `pane-<role>.md` counts only while no other open
+  pane has that name.
+- The mod no longer tries to rewrite a workflow agent's model, which the
+  engine ignored and reported as a hook failure.
+
+### Rationale
+
+- Workflow runs were invisible on the band; now every way /agt dispatches
+  shows up in the same place.
+- Dispatch decisions live in the model, so only a behavioural eval can catch
+  a routing regression; the first run found one.
+
 ## [3.7.0] — 2026-10-08
 
 ### Added

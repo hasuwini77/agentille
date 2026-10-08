@@ -1,7 +1,7 @@
 ---
 name: agt
 description: Personal AI coding orchestrator. Classifies one task and runs the right roster of agentille agents (planner, executor, reviewers) with the right model per role, then ends on one short result card. Works with zero setup. Activates ONLY when the user types `/agt <task>`; model invocation is disabled.
-argument-hint: [--plan] [--mode panes|subagent|solo] [--fable] "<task>"
+argument-hint: [--plan] [--mode panes|subagent|solo] [--fable] [--formation duel|gauntlet|relay] "<task>"
 disable-model-invocation: true
 ---
 

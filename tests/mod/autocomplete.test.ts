@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'claude-code/testing'
-import { AGT_FLAGS, agtSuggestions, autocompleteHook, registerAutocomplete } from '../../hooks/autocomplete.js'
+import { AGT_FLAGS, AGT_VALUES, agtSuggestions, autocompleteHook, registerAutocomplete } from '../../hooks/autocomplete.js'
 
 const ev = (text: string) => {
   const start = text.lastIndexOf(' ') + 1
@@ -31,6 +31,41 @@ describe('autocomplete: agtSuggestions', () => {
   })
 })
 
+describe('autocomplete: values', () => {
+  test('the word after --mode completes to its values', () => {
+    expect(agtSuggestions(ev('/agt --mode p')).map((r) => r.text)).toEqual(['panes'])
+    expect(agtSuggestions(ev('/agt --mode s')).map((r) => r.text)).toEqual(['subagent', 'solo'])
+    expect(agtSuggestions(ev('/agt "fix it" --mode su')).map((r) => r.text)).toEqual(['subagent'])
+    expect(agtSuggestions(ev('/agt --mode  p')).map((r) => r.text)).toEqual(['panes'])
+  })
+
+  test('the word after --formation completes to its values', () => {
+    expect(agtSuggestions(ev('/agt --formation g')).map((r) => r.text)).toEqual(['gauntlet'])
+    expect(agtSuggestions(ev('/agentille:agt --plan --formation d')).map((r) => r.text)).toEqual(['duel'])
+    expect(agtSuggestions(ev('/agt --formation r')).map((r) => r.text)).toEqual(['relay'])
+  })
+
+  test('every value row carries a description', () => {
+    for (const rows of Object.values(AGT_VALUES)) for (const r of rows) expect(r.description).toBeTruthy()
+  })
+
+  test('nothing for a finished value, an unknown value, other flags or plain words', () => {
+    expect(agtSuggestions(ev('/agt --mode panes'))).toEqual([])
+    expect(agtSuggestions(ev('/agt --mode zzz'))).toEqual([])
+    expect(agtSuggestions(ev('/agt --fable p'))).toEqual([])
+    expect(agtSuggestions(ev('/agt --plan s'))).toEqual([])
+    expect(agtSuggestions(ev('/agt fix p'))).toEqual([])
+    expect(agtSuggestions(ev('/agt-ledger --mode p'))).toEqual([])
+    expect(agtSuggestions(ev('hello --mode p'))).toEqual([])
+    expect(agtSuggestions(ev('/agt --mode p ok')).map((r) => r.text)).toEqual([])
+  })
+
+  test('the hook appends value rows after next', async () => {
+    const r = await autocompleteHook({}, ev('/agt --mode p'), async () => ({ suggestions: [] }))
+    expect(r.suggestions.map((s: { text: string }) => s.text)).toEqual(['panes'])
+  })
+})
+
 describe('autocomplete: autocompleteHook', () => {
   test('appends its rows after next', async () => {
     const own = { text: '--mine' }
@@ -53,8 +88,12 @@ describe('autocomplete: autocompleteHook', () => {
     expect(calls).toHaveLength(1)
     const [event, matcher, hook] = calls[0]
     expect(event).toBe('prompt.autocomplete')
-    expect(matcher.token.test('--mo')).toBe(true)
-    expect(matcher.token.test('fix')).toBe(false)
+    // matched on the draft, not the token: a value after `--mode ` is a plain word
+    expect(matcher.token).toBeUndefined()
+    expect(matcher.text.test('/agt --mode p')).toBe(true)
+    expect(matcher.text.test('/agentille:agt --formation g')).toBe(true)
+    expect(matcher.text.test('/agt-ledger --m')).toBe(false)
+    expect(matcher.text.test('hello --mode p')).toBe(false)
     expect(hook).toBe(autocompleteHook)
   })
 })

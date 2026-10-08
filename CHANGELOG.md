@@ -2,6 +2,30 @@
 
 All notable changes to agentille are documented here.
 
+## [3.6.1] — 2026-10-08
+
+### Fixed
+
+- The band's 300 ms tick no longer re-runs the highlight pass over every
+  reply: results are memoised per message and recomputed only when its text
+  changes.
+- A worker's tool calls no longer wait on its status publish, and publishes
+  run in order, so a finished worker never reads as still working.
+- `herdr agent list` gets the same timeout as every other probe.
+- The band steps aside for a survey.
+- `/agt-deck` says when the pane could not be placed instead of claiming it
+  opened.
+- A subagent's own spinner is left alone; the main spinner keeps its
+  ellipsis.
+- The jump-to-worker buttons get unique keys.
+- A long mock-clock test no longer times out on a busy machine.
+
+### Rationale
+
+- These are the cheap correctness and load fixes found while auditing the
+  mod against the current hooks API, shipped before the visibility work
+  builds on the same file.
+
 ## [3.6.0] — 2026-10-08
 
 ### Added

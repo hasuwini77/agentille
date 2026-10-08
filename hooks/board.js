@@ -228,8 +228,10 @@ export function phaseOf(role) {
 // One cell per agent of the run, done ones included, so a run of twelve reads in one line where
 // the tree only has room for a few rows. A working cell pulses (◆/◇, ▣/□) on the ticker, offset
 // per cell; a finished one is a dim ✓, a failed or killed one ✗. Pane workers come from their
-// routes (one per spawn), working until the route ends. Undefined below three agents: the tree
-// already shows that many.
+// routes (one per spawn), working until the route ends. Undefined below three agents (the tree
+// already shows that many).
+// A lane past LANE_CAP keeps every working and failed cell and fills the rest with the newest
+// finished ones, in start order: the live agent is never the one cut.
 export function swarm({ agents, routes = [], run, tick = 0 }) {
   const cells = []
   for (const a of agents.values()) {
@@ -248,7 +250,9 @@ export function swarm({ agents, routes = [], run, tick = 0 }) {
   for (const phase of PHASES) {
     const mine = cells.filter((c) => c.phase === phase)
     if (!mine.length) continue
-    const shown = mine.slice(0, LANE_CAP).map((c, i) => {
+    const keep = new Set(mine.filter((c) => c.working || c.broken).slice(-LANE_CAP))
+    for (let i = mine.length - 1; i >= 0 && keep.size < LANE_CAP; i--) keep.add(mine[i])
+    const shown = mine.filter((c) => keep.has(c)).map((c, i) => {
       if (c.broken) return { glyph: '✗', color: 'error', dim: false }
       if (!c.working) return { glyph: DONE_GLYPH, color: hex(DONE_COLOR), dim: true }
       const on = (tick + i) % 4 < 2

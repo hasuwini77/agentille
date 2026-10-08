@@ -147,6 +147,17 @@ describe('swarm', () => {
     expect(s.total).toBe(11)
   })
 
+  test('a long lane keeps the live agent and the newest finished ones', async () => {
+    const m = new Map()
+    for (let i = 0; i < 9; i++) { const a = sub('f' + i, 'executor', 'sonnet', i); finish(a, 100, 1); m.set(a.id, a) }
+    m.set('live', sub('live', 'executor', 'sonnet', 50))
+    const lane = swarm({ agents: m, run: 'r1', tick: 0 })!.lanes[0]
+    expect(lane.cells.length).toBe(8)
+    expect(lane.more).toBe(2)
+    expect(['◆', '◇']).toContain(lane.cells[7].glyph) // the newest, working, drawn last
+    expect(lane.cells.filter((c) => c.glyph === '✓').length).toBe(7)
+  })
+
   test('phaseOf sorts every routed role', async () => {
     expect(['planner', 'plan-reviewer', 'ui-prototyper'].map(phaseOf)).toEqual(['plan', 'plan', 'plan'])
     expect(['executor', 'adversary'].map(phaseOf)).toEqual(['build', 'build'])

@@ -8,6 +8,7 @@ import { ROLES, parseHeader } from './routing.js'
 export const SAFE_RUN = /^[A-Za-z0-9_-]{1,64}$/
 export const NAME_RE = /^[a-z][a-z0-9_-]{0,31}$/
 const ROLE_RE = /^[a-z0-9-]+$/
+const PANE_KEY = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/
 const MODEL_LIKE = /^[A-Za-z0-9][\w.-]*$/
 const BARE_WORD = /^[a-z-]+$/
 const MODEL_RE = /^(haiku|sonnet|opus|fable|claude-[a-z0-9.-]+)$/
@@ -60,6 +61,20 @@ export function splitName(name) {
 export function doneFile(home, run, role) {
   if (!home || !SAFE_RUN.test(run) || !ROLE_RE.test(role)) return null
   return home + '/.agentille/state/run-' + run + '/done-' + role
+}
+
+// A pane id made filename-safe: herdr w1:p3 → w1-p3, tmux %5 → 5. null when nothing safe is left.
+// The key names a pane instance's own answer file, so a respawned role never reads its predecessor's.
+export function paneKey(id) {
+  const key = String(id ?? '').replace(/[^A-Za-z0-9_-]/g, '-').replace(/^-+|-+$/g, '')
+  return PANE_KEY.test(key) ? key : null
+}
+
+// Where a worker saves its full answer: one file per pane instance (pane-<role>.<key>.md). With no key,
+// the legacy pane-<role>.md an older worker writes. null for an unsafe run, role or key.
+export function answerFile(home, run, role, key = null) {
+  if (!home || !SAFE_RUN.test(run) || !ROLE_RE.test(role) || (key !== null && !PANE_KEY.test(key))) return null
+  return home + '/.agentille/state/run-' + run + '/agents/pane-' + role + (key === null ? '' : '.' + key) + '.md'
 }
 
 // ── /agt-spawn arguments ──────────────────────────────────────────────────────

@@ -33,12 +33,12 @@ Pane answers never reach the mod's result hook, so a pane worker raises no `⚑`
 
 ## The wire — workers report back on their own
 
-With the mod in both sessions, a worker that finishes a turn saves its full answer to `~/.agentille/state/run-<run>/agents/pane-<role>.md` and sends you one peer message:
+With the mod in both sessions, a worker that finishes a turn saves its full answer to `~/.agentille/state/run-<run>/agents/pane-<role>.<pane>.md` (`<pane>` is the worker's own pane id made filename-safe, e.g. `w1-p3`) and sends you one peer message:
 
 ```
 [agt wire] agt-<run>-exec-1 done · 1:42 · sonnet medium · 31.2k tok
 <the head of its answer>
-Full answer: ~/.agentille/state/run-<run>/agents/pane-exec-1.md
+Full answer: ~/.agentille/state/run-<run>/agents/pane-exec-1.w1-p3.md
 ```
 
 That message starts your next turn, so after spawning a wave, **end your turn**: no background `herdr agent wait` loop, no polling. Harvest from the message (read the file only when the head is not enough), then `close_pane`. A `blocked` worker needs the person, not you: the band flags it and Herdr notifies. The person can steer a worker with `/agt-tell <worker> <message>`.
@@ -85,7 +85,7 @@ If `agent read` cannot recover a full response (alternate screen), ask that work
 
 **Teardown.** Before declaring the run done, every `agt-<run>-*` pane is harvested, then closed (explicit harvest → `close_pane`). Verify the run id lists zero panes (`herdr agent list`, or the tmux list below). Say so on the card's `⚑`/`verify:` only if one survived.
 
-**Backstop (the mod).** It closes an idle `agt-` pane only while the lead has no turn running, and a `done` pane after ≥90 s, and only once that pane is harvested: its answer file `agents/pane-<role>.md` was written after the pane opened (an earlier worker's file does not count), its wire done message reached you, or you closed it. A role you respawn starts unharvested again. An unharvested pane stays open and is flagged once (`⚑ <name> done, not harvested`, or `idle, not harvested`): read it, then `close_pane`. It never touches `working`, `blocked` or `unknown`, nor a pane without the `agt-` prefix. It is a net, not the plan; explicit close after harvest stays mandatory.
+**Backstop (the mod).** It closes an idle `agt-` pane only while the lead has no turn running, and a `done` pane after ≥90 s, and only once that pane is harvested: that pane instance's own answer file `agents/pane-<role>.<pane>.md` was written after the pane opened (an earlier pane's file does not count), its wire done message reached you (it names the file, so it harvests only that pane), or you closed it. An older worker's legacy `pane-<role>.md` counts only while exactly one pane has that name. A role you respawn is a new pane and starts unharvested again, even while the earlier pane is still open. An unharvested pane stays open and is flagged once (`⚑ <name> done, not harvested`, or `idle, not harvested`): read it, then `close_pane`. It never touches `working`, `blocked` or `unknown`, nor a pane without the `agt-` prefix. It is a net, not the plan; explicit close after harvest stays mandatory.
 
 **Never close a pane you did not open.** `agt-` prefix = ownership; panes the user opened and `/agt-spawn` panes are theirs.
 

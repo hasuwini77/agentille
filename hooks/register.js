@@ -12,8 +12,8 @@ import { BYE_MS, HELLO_MS, MASCOT_COLOR, MODEL_COLOR, agentMood, caption, frame,
 import { MARK, SPAN_COLOR, highlightFor, highlightText, litFor, parseHighlightArgs, spans } from './highlight.js'
 import { flagOf, focusText, paneFlags, parseFocusArgs } from './focus.js'
 import {
-  CLOSE_TOOL, HERDR_START_TIMEOUT, PROBE, SPAWN_TOOL, closeTarget, focusArgv, herdrMetaArgv, spawnToolInput, SAFE_RUN, SPAWN_ROLE, TMUX_LIST_ARGV, doneFile, herdrCloseArgv, herdrPaneIdOf, herdrPromptArgv, herdrSplitArgv, herdrStartArgv,
-  isFreshDone, isLead, newRunId, paneName, paneRole, parseSpawnArgs, parseTmuxList, pickTransport, quietSpawn, reapPool, scopeRows, splitName, splitPlan, tmuxEvenArgv, tmuxKillArgv, tmuxPaneAgents, tmuxPaneIdOf,
+  CLOSE_TOOL, HERDR_START_TIMEOUT, PROBE, SPAWN_TOOL, closeTarget, focusArgv, herdrMetaArgv, spawnToolInput, SAFE_RUN, SPAWN_ROLE, TMUX_LIST_ARGV, answerFile, doneFile, herdrCloseArgv, herdrPaneIdOf, herdrPromptArgv, herdrSplitArgv, herdrStartArgv,
+  isFreshDone, isLead, newRunId, paneKey, paneName, paneRole, parseSpawnArgs, parseTmuxList, pickTransport, quietSpawn, reapPool, scopeRows, splitName, splitPlan, tmuxEvenArgv, tmuxKillArgv, tmuxPaneAgents, tmuxPaneIdOf,
   advisorEnv, tmuxSplitArgv, tmuxTagArgvs, transportBlock,
 } from './panes.js'
 import { cacheDirOf, compareVersions, newerInstalled, skewMessage } from './skew.js'
@@ -35,11 +35,11 @@ const paneRoutes = []        // PaneRoute[], append-only: how each worker this l
 let opened = []              // { id, name } of panes this lead opened via spawn_pane, in spawn order
 const staged = new Map()     // pane name → last pane seen on stage (live.js panesLeft)
 const paneSeen = new Map()   // reaper bookkeeping
-const harvested = new Set()  // pane names whose answer the lead has in hand (a wire done message, a saved answer file, a close_pane)
-const wireDone = new Set()   // pane names whose wire done message reached this lead
-const woken = new Set()      // pane names the lead already woke itself for
+const harvested = new Set()  // pane ids whose answer the lead has in hand (a wire done message, a saved answer file, a close_pane)
+const wireDone = new Set()   // pane ids whose wire done message reached this lead
+const woken = new Set()      // pane ids the lead already woke itself for
 const strandedNow = new Set()   // done/idle panes kept open because nothing was harvested from them
-const strandedToasted = new Set() // ... of which the person was told once
+const strandedToasted = new Set() // ... pane ids of which the person was told once
 const firstSeen = new Map()  // pane id → when this session first listed it: a done-file or answer file older than that is a previous pane's
 let selfName = null          // this pane's name when it is an agt-* worker
 let worker = null            // { agent, model, effort } from AGENTILLE_WORKER: this session is a worker pane
@@ -203,6 +203,13 @@ async function writeRunFile($, runId, name, text) {
   }
 }
 
+// A pane that left the list takes its bookkeeping with it, so a reused pane id never inherits a harvest.
+function forgetGone(listed) {
+  const gone = (id) => !listed.some((p) => p.id === id)
+  for (const id of [...firstSeen.keys()]) if (gone(id)) firstSeen.delete(id)
+  for (const s of [harvested, wireDone, woken, strandedToasted]) for (const id of [...s]) if (gone(id)) s.delete(id)
+}
+
 // Panes that left the stage this poll: end their route and refresh the ledger.
 async function notePaneExits($) {
   const touched = new Set()
@@ -213,16 +220,9 @@ async function notePaneExits($) {
   for (const run of touched) await writeRunFile($, run, 'ledger.json', JSON.stringify(ledger(live, run, paneRoutes), null, 2) + '\n')
 }
 
-// Where a pane worker saves its full answer; the lead reads it from here.
-const answerPath = (p) => {
-  const n = splitName(p.name)
-  return home && n ? home + '/.agentille/state/run-' + n.run + '/agents/pane-' + n.role + '.md' : null
-}
-
-// The file counts only if it was written once this session knew the pane: a role can be respawned, and
+// A file counts only if it was written once this session knew the pane: a role can be respawned, and
 // the earlier pane's answer is not this worker's.
-async function hasAnswer($, p) {
-  const file = answerPath(p)
+async function freshAnswer($, file, p) {
   if (!file) return false
   try {
     return isFreshDone(await $.fs.stat(file), firstSeen.get(p.id))
@@ -231,10 +231,23 @@ async function hasAnswer($, p) {
   }
 }
 
+// Where a pane worker saved its full answer, or null. Each pane instance writes its own file
+// (pane-<role>.<pane>.md). An older worker's legacy pane-<role>.md counts only while one pane has the
+// name: with two, it could be either one's.
+async function answerOf($, p) {
+  const n = splitName(p.name)
+  if (!n) return null
+  const own = answerFile(home, n.run, n.role, paneKey(p.id))
+  if (await freshAnswer($, own, p)) return own
+  if (panes.filter((q) => q.name === p.name).length !== 1) return null
+  const legacy = answerFile(home, n.run, n.role)
+  return (await freshAnswer($, legacy, p)) ? legacy : null
+}
+
 async function isHarvested($, p) {
-  if (harvested.has(p.name)) return true
-  if (!(await hasAnswer($, p))) return false
-  harvested.add(p.name)
+  if (harvested.has(p.id)) return true
+  if (!(await answerOf($, p))) return false
+  harvested.add(p.id)
   return true
 }
 
@@ -243,8 +256,8 @@ async function isHarvested($, p) {
 async function wakeLead($, pool, now, t) {
   if (!sessionId) return
   for (const p of wakeDue(pool, paneSeen, wireDone, woken, now)) {
-    woken.add(p.name)
-    const text = wakeMessage({ name: p.name, transport: t, id: p.id, answerPath: (await hasAnswer($, p)) ? answerPath(p) : null })
+    woken.add(p.id)
+    const text = wakeMessage({ name: p.name, transport: t, id: p.id, answerPath: await answerOf($, p) })
     const r = await $.session.send({ to: { sessionId }, text }).catch((err) => ({ isDelivered: false, reason: String(err?.message ?? err) }))
     if (!r.isDelivered) $.ui.toast('agt ⚑ ' + p.name + ' ' + p.state + ' with no report. ' + text.slice(text.indexOf('. ') + 2).slice(0, 120))
   }
@@ -254,13 +267,13 @@ async function wakeLead($, pool, now, t) {
 // open and is flagged once, so a worker that could not report never loses its output.
 async function sweep($, pool, now, t, close) {
   const ok = new Set()
-  for (const p of pool) if ((p.state === 'done' || p.state === 'idle') && (await isHarvested($, p))) ok.add(p.name)
-  const plan = reapPlan(pool, paneSeen, now, leadTurn, (p) => ok.has(p.name))
+  for (const p of pool) if ((p.state === 'done' || p.state === 'idle') && (await isHarvested($, p))) ok.add(p.id)
+  const plan = reapPlan(pool, paneSeen, now, leadTurn, (p) => ok.has(p.id))
   strandedNow.clear()
   for (const p of plan.stranded) {
     strandedNow.add(p.name)
-    if (strandedToasted.has(p.name)) continue
-    strandedToasted.add(p.name)
+    if (strandedToasted.has(p.id)) continue
+    strandedToasted.add(p.id)
     $.ui.toast('agt ⚑ ' + p.name + ' ' + p.state + ', not harvested')
   }
   for (const p of plan.reap) {
@@ -291,7 +304,7 @@ async function pollHerdr($) {
   panes = quietSpawn(paneAgents(list, selfPane).filter((p) => !me || p.workspace === me.workspace_id))
   const now = await $.clock.now()
   for (const p of panes) if (!firstSeen.has(p.id)) firstSeen.set(p.id, now)
-  for (const id of [...firstSeen.keys()]) if (!panes.some((p) => p.id === id)) firstSeen.delete(id)
+  forgetGone(panes)
   await notePaneExits($)
   if (me && !selfName) {
     const mine = panes.filter((p) => p.tab === me.tab_id)
@@ -372,7 +385,7 @@ async function pollTmux($) {
   const now = await $.clock.now()
   const scoped = me ? scopeRows(rows, selfPane) : []
   for (const r of scoped) if (!firstSeen.has(r.id)) firstSeen.set(r.id, now)
-  for (const id of [...firstSeen.keys()]) if (!rows.some((r) => r.id === id)) firstSeen.delete(id)
+  forgetGone(rows)
   const done = new Map()
   for (const r of scoped) {
     const n = splitName(r.agt)
@@ -520,8 +533,12 @@ async function publishNow($, force) {
 async function saveAnswer($, name, answer) {
   const n = splitName(name)
   if (!n || !answer || !home) return null
-  await writeRunFile($, n.run, 'agents/pane-' + n.role + '.md', answer)
-  return home + '/.agentille/state/run-' + n.run + '/agents/pane-' + n.role + '.md'
+  // One file per pane instance, named by this pane's id, so a respawned role cannot overwrite or be read as its predecessor.
+  const pane = transport === 'tmux' ? await $.env.get('TMUX_PANE') : await $.env.get('HERDR_PANE_ID')
+  const file = answerFile(home, n.run, n.role, paneKey(pane))
+  if (!file) return null
+  await writeRunFile($, n.run, 'agents/' + file.split('/').pop(), answer)
+  return file
 }
 
 // Worker: a finished turn saves the full answer under the run and messages the lead its head,
@@ -745,9 +762,8 @@ export function register(on) {
     } catch (err) {
       return { deny: 'Could not open a ' + t + ' pane: ' + String(err?.message ?? err).slice(0, 160) }
     }
-    // A role can be respawned (a fix, a retry): the new pane starts with nothing harvested. The poll
-    // below lists it for the first time, so only files written from then on count as its own.
-    for (const s of [harvested, wireDone, woken, strandedToasted]) s.delete(a.name)
+    // A role can be respawned (a fix, a retry). Harvest state is keyed by pane id, so the new pane starts with
+    // nothing harvested and only files written after the poll below first lists it count as its own.
     run.fixes = fixes
     if (d.fable) {
       run.fable += 1
@@ -775,7 +791,7 @@ export function register(on) {
     if (c.error) return { deny: c.error }
     const r = await $.process.run(t === 'herdr' ? herdrCloseArgv(c.pane.id) : tmuxKillArgv(c.pane.id), PROBE).catch(() => null)
     if (!r || r.exitCode !== 0) return { deny: 'Could not close ' + c.pane.name + '.' }
-    harvested.add(c.pane.name)
+    harvested.add(c.pane.id)
     await pollNow($, t)
     return { result: 'Closed ' + c.pane.name + '.' }
   })
@@ -830,7 +846,9 @@ export function register(on) {
     const w = parseWire(e.text)
     if (w) {
       const from = shortName(w.from)
-      if (w.kind === 'done') { harvested.add(w.from); wireDone.add(w.from) }
+      // Only the pane whose key the message names: a stale list or a respawned role must not harvest the older pane.
+      const hit = w.kind === 'done' && w.key ? panes.find((p) => paneKey(p.id) === w.key) : null
+      if (hit) { harvested.add(hit.id); wireDone.add(hit.id) }
       logWire(wireLog, { from, to: wireName ? shortName(wireName) : 'lead', kind: w.kind, summary: w.summary, at: Date.now() })
       $.ui.toast('⇄ ' + from + ' ' + w.kind)
       $.ui.invalidate('ui.render')

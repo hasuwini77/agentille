@@ -49,7 +49,11 @@ export function doneMessage({ name, ms = 0, model = null, effort = null, tok = 0
   return [WIRE_TAG + ' ' + name + ' done · ' + meta, head, reportPath ? 'Full answer: ' + reportPath : ''].filter(Boolean).join('\n')
 }
 
-// A received wire message → { from, kind, summary }, or null for anything else.
+// The pane key in a `Full answer:` path (pane-<role>.<key>.md): which pane instance reported.
+const ANSWER_KEY = /\/pane-[^/.]+\.([A-Za-z0-9][A-Za-z0-9_-]{0,63})\.md$/
+
+// A received wire message → { from, kind, summary, key }, or null for anything else. `key` is null for a
+// legacy pane-<role>.md path or when there is no `Full answer:` line.
 export function parseWire(text) {
   const s = String(text ?? '')
   const at = s.indexOf(WIRE_TAG)
@@ -59,8 +63,10 @@ export function parseWire(text) {
   if (!m) return null
   const [, from, kind, rest] = m
   const first = lines.slice(1).map((l) => l.trim()).find((l) => l && !l.startsWith('Full answer:'))
+  const full = lines.slice(1).map((l) => l.trim()).filter((l) => l.startsWith('Full answer:')).pop() // the last: the answer head cannot shadow it
+  const key = ANSWER_KEY.exec(full ? full.slice('Full answer:'.length).trim() : '')?.[1] ?? null
   const summary = kind === 'done' ? first ?? rest : rest || first || kind
-  return { from, kind, summary: summary.replace(/^[#>*\s-]+/, '').slice(0, 160) }
+  return { from, kind, summary: summary.replace(/^[#>*\s-]+/, '').slice(0, 160), key }
 }
 
 // Short names for the band: agt-r1-exec-1 → exec-1.
@@ -97,12 +103,13 @@ export const WAKE_MS = 20_000
 
 // Panes of the lead that finished ≥ WAKE_MS ago without a wire done message, and that the lead has
 // not been woken for yet. A blocked pane is not due: it waits on the person, and the one wake a pane
-// gets is kept for when it finishes. `seen` is the reaper's pane id → { since }.
+// gets is kept for when it finishes. `seen` is the reaper's pane id → { since }; `wireDone` and `woken`
+// hold pane ids, so a respawned role's new pane is judged on its own.
 export function wakeDue(pool, seen, wireDone, woken, now) {
   return pool.filter((p) => {
     if (p.state !== 'done') return false
     const since = seen.get(p.id)?.since
-    return typeof since === 'number' && now - since >= WAKE_MS && !wireDone.has(p.name) && !woken.has(p.name)
+    return typeof since === 'number' && now - since >= WAKE_MS && !wireDone.has(p.id) && !woken.has(p.id)
   })
 }
 

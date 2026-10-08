@@ -192,6 +192,19 @@ export function highlight(text) {
   return { card, body }
 }
 
+// highlight() is regex work and the transcript redraws on every ticker tick, so the result
+// is kept per message id while its text is unchanged (a streaming reply recomputes).
+export function highlightFor(memo, id, text) {
+  if (!id) return highlight(text)
+  const hit = memo.get(id)
+  if (hit && hit.text === text) return hit.h
+  const h = highlight(text)
+  memo.delete(id)
+  memo.set(id, { text, h })
+  if (memo.size > LIT_MEMO_MAX) memo.delete(memo.keys().next().value)
+  return h
+}
+
 // The lit/dim decision is made once per message id, on its first sight, so a reply
 // does not flip style when a later turn changes.
 export function litFor(memo, id, { on, agtTurn }) {

@@ -9,7 +9,7 @@ import { ACCENT, FRAME_COLOR, WIRE_COLOR, boardRows, cast, castColumns, chip, co
 import { PUBLISH_MS, doneMessage, freshStatus, logWire, parseTellArgs, parseWire, shortName, statusKey, validLead, wireEnv, workerStatus } from './wire.js'
 import { activeSquads, allPaths, depsOf, injection } from './squads.js'
 import { BYE_MS, HELLO_MS, MASCOT_COLOR, MODEL_COLOR, agentMood, caption, frame, modelKey, moodAt, parseWorker } from './mascot.js'
-import { MARK, SPAN_COLOR, highlight, highlightText, litFor, parseHighlightArgs, spans } from './highlight.js'
+import { MARK, SPAN_COLOR, highlightFor, highlightText, litFor, parseHighlightArgs, spans } from './highlight.js'
 import { flagOf, focusText, paneFlags, parseFocusArgs } from './focus.js'
 import {
   CLOSE_TOOL, HERDR_START_TIMEOUT, PROBE, SPAWN_TOOL, closeTarget, focusArgv, herdrMetaArgv, spawnToolInput, SAFE_RUN, SPAWN_ROLE, TMUX_LIST_ARGV, doneFile, herdrCloseArgv, herdrPaneIdOf, herdrPromptArgv, herdrSplitArgv, herdrStartArgv,
@@ -52,6 +52,7 @@ const mascot = { greeted: false, hiUntil: 0, byeUntil: 0, working: false, start:
 let highlightOn = true       // /agt replies get an essentials card and lit tokens
 let highlightAll = false     // …and so does every other long reply (/agt-highlight all)
 const litMemo = new Map()    // message id → was it an /agt turn when first drawn
+const hlMemo = new Map()     // message id → { text, highlight() result }
 let sessionId = null         // this session's id: workers it opens send their results here
 let leadModel = null         // the main loop's model, for the tree's root
 const wireLog = []           // [{ from, to, kind, summary, at }] messages between sessions, newest last
@@ -145,7 +146,7 @@ async function notePaneExits($) {
 async function pollHerdr($) {
   let list = []
   try {
-    const r = await $.process.run(['herdr', 'agent', 'list'])
+    const r = await $.process.run(['herdr', 'agent', 'list'], PROBE)
     list = JSON.parse(r.stdout).result?.agents ?? []
   } catch {
     return
@@ -673,7 +674,7 @@ export function register(on) {
       if (a) a.tool = toolLabel(e.tool, e)
     } else if (wireName) {
       pub.tool = toolLabel(e.tool, e)
-      await publish($)
+      void publish($).catch(() => {})
     }
     return next(e)
   })
@@ -873,7 +874,7 @@ export function register(on) {
   // decision is memoised per message id so a reply does not restyle when a later turn changes.
   on('ui.render', { component: 'AssistantMessage' }, async ($, e, next) => {
     if (!litFor(litMemo, e.requestId, { on: highlightOn, agtTurn: agtTurn || highlightAll })) return next(e)
-    const h = highlight(e.props?.text)
+    const h = highlightFor(hlMemo, e.requestId, e.props?.text)
     if (!h) return next(e)
     const els = $.ui.resolve(e)
     if (!els.Markdown) return next(e)

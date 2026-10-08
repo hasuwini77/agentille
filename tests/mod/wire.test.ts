@@ -88,6 +88,36 @@ describe('wire: in the mod', () => {
     expect(parseWire(sent[0].text)).toEqual({ from: 'agt-r1-exec-1', kind: 'done', summary: 'Slice built' })
   })
 
+  test('a worker tool call does not wait on the status publish', async ($, on) => {
+    let release: () => void = () => {}
+    let gate = false
+    const stored: Record<string, any> = {}
+    on('env.get', async ($: any, e: any) => ({ value: ({ HOME: '/h', AGENTILLE_WORKER: 'executor:sonnet:high', AGENTILLE_NAME: 'agt-r1-exec-1', AGENTILLE_LEAD: 'lead-sid' } as any)[e.name] }))
+    on('session.start', async ($: any, e: any) => ({ cwd: e.cwd }))
+    on('session.id', async () => ({ value: 'worker-sid' }))
+    on('command.register', async () => ({ value: undefined }))
+    on('fs.read', async () => ({ deny: 'no profile' }))
+    on('store.get', async () => ({ value: undefined }))
+    on('store.set', async ($: any, e: any) => {
+      if (gate) await new Promise<void>((r) => { release = r })
+      stored[e.key] = e.value
+      return { value: undefined }
+    })
+    on('tool.call', async () => ({ result: {}, text: 'ok' }) as never)
+    on('ui.render', async () => ({ type: 'engine', ref: 0 }) as never)
+    const clock = mock.clock(on, { now: 1_000_000 })
+    await $.session.start({ cwd: '/w', surface: null, isInteractive: false })
+    await clock.advance(5000)
+    await new Promise((r) => setTimeout(r, 1100)) // the publish throttle reads Date.now()
+    gate = true
+    await $.tool.call({ tool: 'Read', input: { file_path: 'a.ts' } } as never)
+    expect(stored['wire:agt-r1-exec-1'].tool).toBeNull()
+    gate = false
+    release()
+    await clock.advance(0)
+    expect(stored['wire:agt-r1-exec-1'].tool).toMatch(/Read/)
+  })
+
   test('a session that is not a worker never publishes or reports', async ($, on) => {
     const { sent, stored } = await boot($, on, {})
     await $.turn.start({ text: 'go', turnId: 't1' } as never)

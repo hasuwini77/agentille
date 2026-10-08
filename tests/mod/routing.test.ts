@@ -1,5 +1,5 @@
-import { describe, expect, test } from 'claude-code/testing'
-import { decide, formationOf, parseHeader, roleOf, verdictOf } from '../../hooks/routing.js'
+import { describe, expect, mock, test } from 'claude-code/testing'
+import { decide, formationOf, parseHeader, roleOf, verdictOf, workflowReason } from '../../hooks/routing.js'
 
 const fresh = () => ({ revise: 0, fixes: 0, fable: 0 })
 const S = { autoFable: true, maxFablePerRun: 1, fableWeeklyCeiling: 60 }
@@ -88,6 +88,14 @@ describe('formations', () => {
   })
 })
 
+describe('workflow agents', () => {
+  test('the reason is plain when the script ran the table model, a drift when it did not', async () => {
+    const d = decide({ role: 'code-reviewer', hdr: { size: 'large' } })
+    expect(workflowReason('opus', d)).toBe('workflow')
+    expect(workflowReason('sonnet', d)).toBe('workflow: script sonnet, table opus')
+  })
+})
+
 describe('mod', () => {
   test('rewrites the model of an agentille dispatch', async ($, on) => {
     let seen: string | undefined
@@ -102,5 +110,30 @@ describe('mod', () => {
     on('agent.spawn', async ($, e) => { seen = e.model; return { model: e.model ?? 'inherit', agentId: 'a2' } })
     await $.agent.spawn({ prompt: '[agt run=t2 size=large]\nsearch', subagentType: 'Explore', model: 'haiku' })
     expect(seen).toBe('haiku')
+  })
+
+  test('a workflow agent keeps its model, raises no routing toast, and logs the table pick against what ran', async ($, on) => {
+    const seen: any[] = []
+    const toasts: string[] = []
+    on('store.get', async () => ({ value: null }))
+    on('ui.toast', async ($: any, e: any) => { toasts.push(e.text); return { value: undefined } })
+    on('agent.spawn', async ($, e) => { seen.push(e); return { model: 'claude-sonnet-5', agentId: 'wf1' } })
+    mock.clock(on, { now: Date.now() })
+    await $.agent.spawn({ prompt: '[agt run=wfroute size=large mode=review]\nreview', subagentType: 'agentille:agentille-code-reviewer', model: 'sonnet', workflow: { runId: 'wf_1', agentIndex: 1 } } as never)
+    expect(seen[0].model).toBe('sonnet') // the table says opus; a workflow agent is not rewritten
+    expect(toasts.some((t) => t.includes('agt ↑'))).toBe(false)
+    const line = (await $.command.run({ command: 'agt-routing' })).text
+    expect(line).toContain('code-reviewer → claude-sonnet-5')
+    expect(line).toContain('workflow: script sonnet, table opus')
+    expect(line).toContain('· workflow')
+  })
+
+  test('a workflow agent that ran the table model is listed without a drift', async ($, on) => {
+    on('store.get', async () => ({ value: null }))
+    on('agent.spawn', async () => ({ model: 'claude-opus-5-5', agentId: 'wf2' }))
+    mock.clock(on, { now: Date.now() })
+    await $.agent.spawn({ prompt: '[agt run=wfok size=large mode=review]\nreview', subagentType: 'agentille:agentille-code-reviewer', workflow: { runId: 'wf_2', agentIndex: 1 } } as never)
+    const line = (await $.command.run({ command: 'agt-routing' })).text
+    expect(line).toBe('code-reviewer → claude-opus-5-5 · ? · workflow')
   })
 })

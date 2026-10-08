@@ -85,8 +85,9 @@ export const LIST_STATUS = {
   idle: { glyph: '·', word: 'idle', color: 'inactive' },
   failed: { glyph: '✗', word: 'failed', color: 'error' },
   killed: { glyph: '✗', word: 'killed', color: 'error' },
+  lost: { glyph: '?', word: 'no signal', color: 'warning' },
 }
-const BROKEN = new Set(['failed', 'killed'])
+const BROKEN = new Set(['failed', 'killed', 'lost'])
 
 // One band row per agent. `wire` maps a pane name to what its worker published (tool, tok, model).
 // `view` is the id of the agent whose transcript is on screen.

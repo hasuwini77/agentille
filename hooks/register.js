@@ -3,7 +3,7 @@
 // routing.js / live.js / board.js / wire.js / squads.js / mascot.js / focus.js; this file
 // observes events, applies decisions, and draws.
 
-import { DEFAULTS, decide, formationOf, parseHeader, roleOf, verdictOf } from './routing.js'
+import { DEFAULTS, decide, formationOf, parseHeader, roleOf, verdictOf, workflowReason } from './routing.js'
 import { addUsage, elapsed, endRoute, finish, isAgtPrompt, ledger, ledgerText, newAgent, paneAgents, panesLeft, reapPlan, short, stage, waving } from './live.js'
 import { ACCENT, FRAME_COLOR, INK, WIRE_COLOR, boardRows, cast, castColumns, chip, colorOf, header, hex, leadLine, routingLines, tokenBars, toolLabel, wireLines, wireRow } from './board.js'
 import { PUBLISH_MS, doneMessage, freshStatus, logWire, parseTellArgs, parseWire, shortName, statusKey, validLead, wakeDue, wakeMessage, wireEnv, workerStatus } from './wire.js'
@@ -27,6 +27,8 @@ let depth = null
 let home = null
 let weeklyPct = null
 let lastRun = 'adhoc'
+const WF_QUIET_MS = 30 * 60_000 // a workflow agent this long without an event is marked `no signal`
+const wfToasted = new Set()  // run:role pairs whose drift the person was told once
 const runs = new Map()       // run id → { revise, fixes, fable, formation, log: [], reports: { role → count } }
 const live = new Map()       // agentId → live agent (live.js)
 const decisions = []         // this session, for /agt-routing
@@ -413,7 +415,7 @@ async function pollNow($, t) {
 // A subagent's raw answer goes to run-<id>/agents/<role>-<n>.md, written here so the lead spends
 // no tokens copying it. n counts per role in the run; a second turn of the same agent overwrites.
 async function writeReport($, a, answer) {
-  if (!a.routed || !answer) return
+  if (!(a.routed || a.agt) || !answer) return
   const counts = runState(a.run).reports
   a.report ??= a.role + '-' + (counts[a.role] = (counts[a.role] ?? 0) + 1) + '.md'
   await writeRunFile($, a.run, 'agents/' + a.report, answer)
@@ -436,7 +438,7 @@ function ensurePolling($) {
 
 // Redraw while something works, a worker's mascot is animating or a finished subagent is
 // still waving (elapsed times tick, legs step); the ticker cancels itself once all are idle.
-const animating = (now) => (!!worker && moodAt({ ...mascot, now }) !== 'idle') || [...live.values()].some((a) => waving(a, Date.now()))
+const animating = (now) => (!!worker && moodAt({ ...mascot, now }) !== 'idle') || [...live.values()].some((a) => waving(a, now))
 
 // The modules that follow the run on the ticker (the pinned status line) add a callback to ctx.onTick.
 // They get the few `$` calls they need as `io`, not `$`: the hook checker follows `$` itself only
@@ -456,6 +458,7 @@ function ensureTicker($) {
   if (tickTimer) return
   tickTimer = $.clock.every(300, async () => {
     const now = await $.clock.now()
+    quietWorkflows(now)
     if (!working() && !animating(now)) {
       tickTimer?.cancel()
       tickTimer = null
@@ -465,6 +468,71 @@ function ensureTicker($) {
     if (tick % 4 === 0) void refreshAgents($, now)
     $.ui.invalidate('ui.render')
   })
+}
+
+// A workflow script's agent() spawn: the engine lets a hook only refuse it, so the event passes
+// through untouched. What the mod adds is the band row and a log of the table's pick beside the
+// model that ran, with the drift named. The run's counters (fixes, Fable) are not touched.
+async function watchWorkflow($, e, next) {
+  const res = await next(e)
+  if (res.deny) return res
+  const now = await $.clock.now()
+  const role = roleOf(e.subagentType)
+  const hdr = parseHeader(e.prompt) ?? {}
+  const runId = SAFE_RUN.test(hdr.run ?? '') ? hdr.run : lastRun
+  lastRun = runId // the band follows the run its agents belong to
+  let reason = null
+  let d = null
+  if (role) {
+    d = decide({ role, hdr, run: runState(runId), depth, settings, weeklyPct })
+    reason = workflowReason(short(res.model), d)
+  }
+  if (res.agentId) {
+    const a = newAgent({ id: res.agentId, role: role ?? shortType(e.subagentType), routed: false, model: res.model, effort: null, reason: reason === 'workflow' ? null : reason, run: runId, now: Date.now(), parentId: e.parentAgentId ?? null })
+    a.agt = !!role
+    a.workflow = { runId: e.workflow.runId, index: e.workflow.agentIndex }
+    a.seen = now
+    live.set(res.agentId, a)
+  }
+  if (d) {
+    const rec = { at: new Date(now).toISOString(), role, model: res.model, effort: null, reason, table: d.model + ' · ' + d.effort, asked: null, agentId: res.agentId ?? null, kind: 'workflow' }
+    decisions.push(rec)
+    const log = runState(runId).log
+    log.push(JSON.stringify(rec))
+    await writeRunFile($, runId, 'routing.jsonl', log.join('\n') + '\n')
+    const key = runId + ':' + role
+    if (reason !== 'workflow' && !wfToasted.has(key)) {
+      wfToasted.add(key)
+      $.ui.toast('agt ≠ ' + role + ' · ' + reason.replace(/^workflow: /, 'workflow ran '))
+    }
+  }
+  ensureTicker($)
+  $.ui.invalidate('ui.render')
+  return res
+}
+
+// A workflow agent's last sign of life. One that was marked `no signal` and speaks again is back.
+async function heardFrom($, a) {
+  if (!a.workflow) return
+  a.seen = await $.clock.now()
+  if (a.listStatus === 'lost') {
+    Object.assign(a, { state: 'working', end: null, leftAt: null, listStatus: null })
+    ensureTicker($)
+    $.ui.invalidate('ui.render')
+  }
+}
+
+// No turn.complete ever reached a workflow agent that went quiet (a cancelled run, a remote agent,
+// a crashed script): after WF_QUIET_MS it is closed at its last event and flagged, so the band does
+// not show it working forever.
+function quietWorkflows(now) {
+  for (const a of live.values()) {
+    if (a.workflow && a.state === 'working' && now - a.seen > WF_QUIET_MS) {
+      finish(a, a.seen)
+      a.leftAt = now
+      a.listStatus = 'lost'
+    }
+  }
 }
 
 function addFlag($, text) {
@@ -702,7 +770,7 @@ export function register(on) {
 
   on('command.run', { command: 'agt-routing' }, async () => {
     if (decisions.length === 0) return { text: 'No agentille dispatches this session.' }
-    return { text: decisions.slice(-30).map((d) => d.role + ' → ' + d.model + ' · ' + d.effort + (d.reason === 'table' ? '' : '  (' + d.reason + ')') + (d.kind === 'pane' ? ' · pane' : '')).join('\n') }
+    return { text: decisions.slice(-30).map((d) => d.role + ' → ' + d.model + ' · ' + (d.effort ?? '?') + (d.reason === 'table' || d.reason === 'workflow' ? '' : '  (' + d.reason + ')') + (d.kind === 'pane' ? ' · pane' : d.kind === 'workflow' ? ' · workflow' : '')).join('\n') }
   })
 
   // Typed only: a plugin, a scheduled task or a notification never opens a pane.
@@ -861,7 +929,10 @@ export function register(on) {
   on('tool.call', async ($, e, next) => {
     if (e.agentId) {
       const a = live.get(e.agentId)
-      if (a) a.tool = toolLabel(e.tool, e)
+      if (a) {
+        await heardFrom($, a)
+        a.tool = toolLabel(e.tool, e)
+      }
     } else if (wireName) {
       pub.tool = toolLabel(e.tool, e)
       void publish($).catch(() => {})
@@ -877,6 +948,7 @@ export function register(on) {
 
   on('agent.spawn', async ($, e, next) => {
     if (e.fork) return next(e)
+    if (e.workflow) return watchWorkflow($, e, next)
     const role = roleOf(e.subagentType)
 
     if (!role) {
@@ -918,6 +990,7 @@ export function register(on) {
 
   on('turn.step', async function* ($, e, next) {
     const a = e.agentId ? live.get(e.agentId) : undefined
+    if (a) await heardFrom($, a)
     if (!e.agentId) leadModel = e.model
     const result = yield* next(a && a.routed ? { ...e, effort: a.effort } : e)
     if (!e.agentId && wireName && result?.usage) {
@@ -979,8 +1052,9 @@ export function register(on) {
       await saveAnswer($, selfName, e.answer)
     }
     if (a) {
+      await heardFrom($, a)
       a.tool = null
-      if (a.routed) addFlag($, flagOf(a.role, e.answer))
+      if (a.routed || a.agt) addFlag($, flagOf(a.role, e.answer))
       if (a.role === 'plan-reviewer' && verdictOf(e.answer) === 'REVISE') runState(a.run).revise += 1
       if (a.input + a.output === 0) addUsage(a, e.usage)
       finish(a, Date.now(), e.durationMs)

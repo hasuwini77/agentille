@@ -43,7 +43,7 @@ Full answer: ~/.agentille/state/run-<run>/agents/pane-exec-1.md
 
 That message starts your next turn, so after spawning a wave, **end your turn**: no background `herdr agent wait` loop, no polling. Harvest from the message (read the file only when the head is not enough), then `close_pane`. A `blocked` worker needs the person, not you: the band flags it and Herdr notifies. The person can steer a worker with `/agt-tell <worker> <message>`.
 
-Still end your turn after the wave; the mod backs you up. It never closes a pane whose answer is unharvested (it flags it `⚑ <name> done, not harvested`), and if a pane finishes or blocks and no wire message arrives within ~20 s it sends you one `[agt wake]` message naming the pane and the read command (`herdr pane read <pane-id> --lines 200`, or `tmux capture-pane -p -t <id> -S -200`). Harvest from that, then `close_pane`.
+Still end your turn after the wave; the mod backs you up. It never closes a pane whose answer is unharvested (it flags it `⚑ <name> done, not harvested`), and if a pane finishes or blocks and no wire message arrives within ~20 s it sends you one `[agt wake]` message naming the pane and the read command (`herdr pane read <pane-id> --lines 200`, or `tmux capture-pane -p -t <id> -S -200`). Harvest from that, then `close_pane`. If a newer agentille is installed than the one this session runs, `spawn_pane` refuses (restart Claude Code first): an old session's workers cannot report.
 
 No wire message within the slice's expected time (a worker without the mod, a crash): fall back to the read loop below.
 

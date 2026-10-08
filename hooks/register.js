@@ -16,6 +16,7 @@ import {
   isFreshDone, isLead, newRunId, paneName, paneRole, parseSpawnArgs, parseTmuxList, pickTransport, quietSpawn, reapPool, scopeRows, splitName, splitPlan, tmuxEvenArgv, tmuxKillArgv, tmuxPaneAgents, tmuxPaneIdOf,
   advisorEnv, tmuxSplitArgv, tmuxTagArgvs, transportBlock,
 } from './panes.js'
+import { cacheDirOf, newerInstalled, skewMessage } from './skew.js'
 import { adopt, applyStatus, nest } from './tree.js'
 import { registerRows } from './rows.js'
 import { registerStatus } from './status.js'
@@ -60,6 +61,8 @@ let highlightOn = true       // /agt replies get an essentials card and lit toke
 let highlightAll = false     // …and so does every other long reply (/agt-highlight all)
 const litMemo = new Map()    // message id → was it an /agt turn when first drawn
 const hlMemo = new Map()     // message id → { text, highlight() result }
+let runningVersion = null    // this module's own agentille version, read from its plugin.json at session start
+let skewToasted = false
 let sessionId = null         // this session's id: workers it opens send their results here
 let leadModel = null         // the main loop's model, for the tree's root
 const wireLog = []           // [{ from, to, kind, summary, at }] messages between sessions, newest last
@@ -116,6 +119,20 @@ async function transportOf($) {
 
 function shortType(t) {
   return String(t ?? 'agent').split(':').pop()
+}
+
+// The newer agentille version installed beside the one this session runs, or null: nothing found,
+// nothing readable (a checkout, a host without a plugin cache) all read as no skew.
+async function installedSkew($) {
+  if (!runningVersion) return null
+  try {
+    const dir = cacheDirOf($.plugin.root)
+    if (!dir) return null
+    const entries = await $.fs.list(dir)
+    return newerInstalled(runningVersion, entries.filter((e) => e.kind === 'dir').map((e) => e.name))
+  } catch {
+    return null
+  }
 }
 
 async function loadProfile($) {
@@ -554,6 +571,16 @@ export function register(on) {
   on('session.start', async ($, e, next) => {
     await loadProfile($)
     await loadSquads($)
+    try {
+      runningVersion = JSON.parse(await $.fs.read($.plugin.root + '/.claude-plugin/plugin.json')).version ?? null
+    } catch {
+      runningVersion = null
+    }
+    const skew = await installedSkew($)
+    if (skew) {
+      skewToasted = true
+      $.ui.toast('agt ⚑ ' + skewMessage(skew, runningVersion))
+    }
     transport = await detectTransport($)
     worker = parseWorker(await $.env.get('AGENTILLE_WORKER'))
     sessionId = validLead(await $.session.id().catch(() => null))
@@ -647,6 +674,13 @@ export function register(on) {
   // /agt panes mode: the same openPane as /agt-spawn, with the input validated here.
   on('tool.call', { tool: 'mcp__agentille__spawn_pane' }, async ($, e) => {
     if (selfName || worker) return { deny: 'This is a worker pane (' + (selfName ?? worker.agent) + '); workers do not open panes.' }
+    // An update since this session started leaves it on old code: its workers would never report.
+    const skew = await installedSkew($)
+    if (skew) {
+      if (!skewToasted) $.ui.toast('agt ⚑ ' + skewMessage(skew, runningVersion))
+      skewToasted = true
+      return { deny: skewMessage(skew, runningVersion) }
+    }
     const t = await transportOf($)
     if (t === 'none') return { deny: 'No pane transport here: run the slice as a subagent.' }
     const a = spawnToolInput(e, panes)

@@ -5,7 +5,7 @@
 
 import { DEFAULTS, decide, formationOf, parseHeader, roleOf, verdictOf } from './routing.js'
 import { addUsage, elapsed, endRoute, finish, isAgtPrompt, ledger, ledgerText, newAgent, paneAgents, panesLeft, reapable, short, stage, waving } from './live.js'
-import { ACCENT, FRAME_COLOR, WIRE_COLOR, boardRows, cast, castColumns, chip, colorOf, header, leadLine, routingLines, tokenBars, toolLabel, wireLines, wireRow } from './board.js'
+import { ACCENT, FRAME_COLOR, INK, WIRE_COLOR, boardRows, cast, castColumns, chip, colorOf, header, hex, leadLine, routingLines, tokenBars, toolLabel, wireLines, wireRow } from './board.js'
 import { PUBLISH_MS, doneMessage, freshStatus, logWire, parseTellArgs, parseWire, shortName, statusKey, validLead, wireEnv, workerStatus } from './wire.js'
 import { activeSquads, allPaths, depsOf, injection } from './squads.js'
 import { BYE_MS, HELLO_MS, MASCOT_COLOR, MODEL_COLOR, agentMood, caption, frame, modelKey, moodAt, parseWorker } from './mascot.js'
@@ -16,8 +16,10 @@ import {
   isFreshDone, isLead, newRunId, paneName, paneRole, parseSpawnArgs, parseTmuxList, pickTransport, quietSpawn, reapPool, scopeRows, splitName, splitPlan, tmuxEvenArgv, tmuxKillArgv, tmuxPaneAgents, tmuxPaneIdOf,
   advisorEnv, tmuxSplitArgv, tmuxTagArgvs, transportBlock,
 } from './panes.js'
-
-const hex = (n) => '#' + n.toString(16).padStart(6, '0')
+import { adopt, applyStatus, nest } from './tree.js'
+import { registerRows } from './rows.js'
+import { registerStatus } from './status.js'
+import { registerAutocomplete } from './autocomplete.js'
 
 let settings = { ...DEFAULTS }
 let depth = null
@@ -65,6 +67,20 @@ let deckAuto = false         // /agt-deck auto: the deck opens on every typed /a
 const DECK = 'agt-deck'
 const FLAG_TTL_MS = 30 * 60_000
 const FOCUS_COLOR = { next: '#3fb950', flag: '#f85149' }
+const LIST_MS = 1000         // $.agent.list() is read at most this often
+let listAt = 0
+let listBusy = false
+
+// What the modules wired last in register(on) read: live state through getters, since most of
+// it is reassigned.
+const ctx = {
+  live,
+  get run() { return lastRun },
+  get tick() { return tick },
+  get panes() { return panes },
+  get routes() { return paneRoutes },
+  get isLead() { return !worker && !selfName },
+}
 
 function runState(id) {
   if (!runs.has(id)) runs.set(id, { revise: 0, fixes: 0, fable: 0, formation: null, log: [], reports: {} })
@@ -121,6 +137,28 @@ async function loadSquads($) {
   } catch {
     squads = []
     squadBlock = ''
+  }
+}
+
+// The engine's agent list is the truth for who exists and who spawned whom. Read it at session
+// start (a reload loses the live map) and while agents work; render hooks only see the copy.
+// A failed read leaves everything as it was.
+async function refreshAgents($) {
+  const now = Date.now()
+  if (listBusy || now - listAt < LIST_MS) return
+  listBusy = true
+  listAt = now
+  try {
+    const list = await $.agent.list()
+    if (!Array.isArray(list)) return
+    adopt(live, list, { run: lastRun, now })
+    applyStatus(live, list, now)
+    if (working()) ensureTicker($)
+    $.ui.invalidate('ui.render')
+  } catch {
+    // no agent list here (an older build, a host without agents): the band runs on events alone
+  } finally {
+    listBusy = false
   }
 }
 
@@ -313,6 +351,7 @@ function ensureTicker($) {
       tickTimer = null
     } else tick += 1
     if (panes.length && tick % 3 === 0) await readWire($)
+    if (tick % 4 === 0) void refreshAgents($)
     $.ui.invalidate('ui.render')
   })
 }
@@ -407,8 +446,6 @@ async function readWire($) {
 
 // ── drawing (takes resolved elements, never $) ────────────────────────────────
 
-const INK = '#14161c'
-
 function boardHeader(els, h) {
   const { Box, Text } = els
   return Box({
@@ -430,7 +467,7 @@ function leadRow(els, l) {
 // elapsed · tokens, and a ↗ that jumps to a pane worker.
 function boardRow(els, r, onFocus, slot = false) {
   const { Box, Text, Button } = els
-  const kids = [Text({ dimColor: true, children: [r.tree] }), Text({ color: r.glyphColor, children: [r.glyph] }), Text({ dimColor: r.dim, children: [r.role] })]
+  const kids = [Text({ dimColor: true, children: [r.tree] }), Text({ color: r.glyphColor, children: [r.glyph] }), Text({ dimColor: r.dim, ...(r.inView ? { inverse: true } : {}), children: [r.role] })]
   if (r.kind) kids.push(Text({ dimColor: true, children: [r.kind] }))
   kids.push(r.dim ? Text({ color: r.chipColor, dimColor: true, children: [r.chip] }) : Text({ color: INK, backgroundColor: r.chipColor, children: [r.chip] }))
   kids.push(Text({ color: colorOf('fable'), children: [r.escalated ? '↑' : ' '] }))
@@ -497,6 +534,7 @@ export function register(on) {
     }
     if (working()) ensureTicker($)
     if (wireName) await publish($, true)
+    await refreshAgents($)
     return next(e)
   })
 
@@ -701,7 +739,7 @@ export function register(on) {
 
     if (!role) {
       const res = await next(e)
-      if (res.agentId) live.set(res.agentId, newAgent({ id: res.agentId, role: shortType(e.subagentType), routed: false, model: res.model, effort: null, reason: null, run: lastRun, now: Date.now() }))
+      if (res.agentId) live.set(res.agentId, newAgent({ id: res.agentId, role: shortType(e.subagentType), routed: false, model: res.model, effort: null, reason: null, run: lastRun, now: Date.now(), parentId: e.parentAgentId ?? null }))
       ensureTicker($)
       $.ui.invalidate('ui.render')
       return res
@@ -725,7 +763,7 @@ export function register(on) {
       run.fable += 1
       await $.store.set('fable:' + runId, run.fable)
     }
-    if (res.agentId) live.set(res.agentId, newAgent({ id: res.agentId, role, routed: true, model: res.model, effort: d.effort, reason: d.reason, run: runId, now: Date.now() }))
+    if (res.agentId) live.set(res.agentId, newAgent({ id: res.agentId, role, routed: true, model: res.model, effort: d.effort, reason: d.reason, run: runId, now: Date.now(), parentId: e.parentAgentId ?? null }))
     const rec = { at: new Date().toISOString(), role, model: res.model, effort: d.effort, reason: d.reason, asked: e.model ?? null, agentId: res.agentId ?? null }
     decisions.push(rec)
     run.log.push(JSON.stringify(rec))
@@ -748,6 +786,7 @@ export function register(on) {
     }
     if (a) {
       if (!a.effort && e.effort) a.effort = String(e.effort)
+      if (!a.model && e.model) a.model = e.model
       addUsage(a, result?.usage)
       $.ui.invalidate('ui.render')
     }
@@ -802,6 +841,7 @@ export function register(on) {
       await writeReport($, a, e.answer)
       await writeRunFile($, a.run, 'ledger.json', JSON.stringify(ledger(live, a.run, paneRoutes), null, 2) + '\n')
       ensureTicker($)
+      void refreshAgents($)
       $.ui.invalidate('ui.render')
     }
     return next(e)
@@ -824,9 +864,9 @@ export function register(on) {
     // No agent rows: the newest wire message alone, no frame.
     if (staged.rows.length === 0) return els.Box({ flexDirection: 'column', children: [...kids, ...(wire ? [wireLine(els, wire)] : []), theirs] })
 
-    const rows = cast(staged, live, lastRun)
+    const rows = nest(cast(staged, live, lastRun))
     const cols = (e.props.bodyColumns ?? 80) - 4
-    const view = boardRows(rows, { now, tick, cols, wire: wireStatus, transport })
+    const view = boardRows(rows, { now, tick, cols, wire: wireStatus, transport, view: e.props.view?.agentId ?? null })
     const room = Math.max(1, (e.props.maxRows ?? 10) - 4 - kids.length - (wire ? 1 : 0))
     const waiting = rows.filter((r) => r.state === 'working').length
     const inner = [boardHeader(els, header({ run: lastRun, formation: runs.get(lastRun)?.formation, squads: squads.map((q) => q.name), rows, tally: staged.tally }))]
@@ -902,4 +942,8 @@ export function register(on) {
     const parts = [subs ? '◇' + subs : '', sessions ? '▣' + sessions : ''].filter(Boolean).join(' ')
     return next({ ...e, props: { ...e.props, suffix: (e.props.suffix ?? '') + ' · ' + parts + ' working' } })
   })
+
+  registerRows(on, ctx)
+  registerStatus(on, ctx)
+  registerAutocomplete(on, ctx)
 }

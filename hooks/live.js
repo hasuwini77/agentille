@@ -9,8 +9,8 @@ export const ON_STAGE = new Set(['working', 'blocked'])
 const LEAVING = new Set(['done', 'idle'])
 const EFFORT_BAR = { low: '▂', medium: '▄', high: '▆', xhigh: '▇', max: '█' }
 
-export function newAgent({ id, role, routed, model, effort, reason, run, now }) {
-  return { id, kind: 'sub', role, routed, model, effort, reason, run, start: now, end: null, leftAt: null, state: 'working', input: 0, output: 0, cacheRead: 0 }
+export function newAgent({ id, role, routed, model, effort, reason, run, now, parentId = null }) {
+  return { id, kind: 'sub', role, routed, model, effort, reason, run, parentId, listStatus: null, start: now, end: null, leftAt: null, state: 'working', input: 0, output: 0, cacheRead: 0 }
 }
 
 export function addUsage(a, u) {

@@ -32,7 +32,7 @@ export function formationOf(hdr) {
   return hdr && FORMATIONS.has(hdr.formation) ? hdr.formation : null
 }
 
-export const DEFAULTS = { autoFable: true, maxFablePerRun: 1, fableWeeklyCeiling: 60 }
+export const DEFAULTS = { autoFable: true, maxFablePerRun: 1, fableWeeklyCeiling: 60, advisorOnOpus: true }
 
 export function roleOf(subagentType) {
   if (typeof subagentType !== 'string' || !subagentType.startsWith(ROLE_PREFIX)) return null

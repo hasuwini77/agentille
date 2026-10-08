@@ -11,7 +11,7 @@ recon: <mode> · <one-clause reason>   [agentille v<version>]
 ⚑ <agent> <blocked|REVISE|FAIL>: <one line>
 ```
 
-`<version>` is the `version` in this plugin's `.claude-plugin/plugin.json`. One `⚑` line per real problem, when it happens.
+`<version>` is the `version` in this plugin's `.claude-plugin/plugin.json`. When you have the `advisor` tool, append ` · advisor` after the reason. One `⚑` line per real problem, when it happens.
 
 ## Progress spine
 

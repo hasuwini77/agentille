@@ -14,7 +14,7 @@ import { flagOf, focusText, paneFlags, parseFocusArgs } from './focus.js'
 import {
   CLOSE_TOOL, HERDR_START_TIMEOUT, PROBE, SPAWN_TOOL, closeTarget, focusArgv, herdrMetaArgv, spawnToolInput, SAFE_RUN, SPAWN_ROLE, TMUX_LIST_ARGV, doneFile, herdrCloseArgv, herdrPaneIdOf, herdrPromptArgv, herdrSplitArgv, herdrStartArgv,
   isFreshDone, isLead, newRunId, paneName, paneRole, parseSpawnArgs, parseTmuxList, pickTransport, quietSpawn, reapPool, scopeRows, splitName, splitPlan, tmuxEvenArgv, tmuxKillArgv, tmuxPaneAgents, tmuxPaneIdOf,
-  tmuxSplitArgv, tmuxTagArgvs, transportBlock,
+  advisorEnv, tmuxSplitArgv, tmuxTagArgvs, transportBlock,
 } from './panes.js'
 
 const hex = (n) => '#' + n.toString(16).padStart(6, '0')
@@ -187,7 +187,7 @@ async function openPane($, t, o) {
     if (!lead) throw new Error('TMUX_PANE is not set')
     const target = o.split?.target ?? lead
     const shell = (await $.env.get('SHELL')) ?? ''
-    const id = tmuxPaneIdOf((await runOk($, tmuxSplitArgv({ ...o, target, shell, direction: o.split?.direction, env: wireEnv({ name: o.name, lead: sessionId }) }), PROBE)).stdout)
+    const id = tmuxPaneIdOf((await runOk($, tmuxSplitArgv({ ...o, target, shell, direction: o.split?.direction, env: [...wireEnv({ name: o.name, lead: sessionId }), ...advisorEnv(o.model, settings)] }), PROBE)).stdout)
     if (!id) throw new Error('tmux gave no pane id')
     try {
       for (const argv of tmuxTagArgvs(id, o.name)) await runOk($, argv, PROBE)
@@ -202,7 +202,7 @@ async function openPane($, t, o) {
   const lead = await $.env.get('HERDR_PANE_ID')
   if (!lead) throw new Error('HERDR_PANE_ID is not set')
   const pane = o.split?.target ?? lead
-  const id = herdrPaneIdOf((await runOk($, herdrSplitArgv({ pane, cwd: o.cwd, run: o.run, direction: o.split?.direction, agent: o.agent, model: o.model, effort: o.effort, env: wireEnv({ name: o.name, lead: sessionId }) }), PROBE)).stdout)
+  const id = herdrPaneIdOf((await runOk($, herdrSplitArgv({ pane, cwd: o.cwd, run: o.run, direction: o.split?.direction, agent: o.agent, model: o.model, effort: o.effort, env: [...wireEnv({ name: o.name, lead: sessionId }), ...advisorEnv(o.model, settings)] }), PROBE)).stdout)
   if (!id) throw new Error('herdr gave no pane id')
   try {
     // A fresh pane is busy while its shell starts up (a login banner, a slow rc): herdr says

@@ -1,5 +1,5 @@
 import { describe, expect, mock, test } from 'claude-code/testing'
-import { EFFORTS, PANE_RULE, splitPlan, tmuxEvenArgv, SPAWN_TOOL, closeTarget, paneRole, doneFile, spawnToolInput, TOOL_MODELS, herdrCloseArgv, herdrPaneIdOf, herdrPromptArgv, herdrSplitArgv, herdrStartArgv, isFreshDone, isLead, newRunId, paneName, parseSpawnArgs, parseTmuxList, pickTransport, quietSpawn, reapPool, scopeRows, splitName, tmuxKillArgv, tmuxPaneAgents, tmuxPaneIdOf, tmuxSplitArgv, tmuxTagArgvs, transportBlock, TMUX_LIST_FORMAT } from '../../hooks/panes.js'
+import { advisorEnv, EFFORTS, PANE_RULE, splitPlan, tmuxEvenArgv, SPAWN_TOOL, closeTarget, paneRole, doneFile, spawnToolInput, TOOL_MODELS, herdrCloseArgv, herdrPaneIdOf, herdrPromptArgv, herdrSplitArgv, herdrStartArgv, isFreshDone, isLead, newRunId, paneName, parseSpawnArgs, parseTmuxList, pickTransport, quietSpawn, reapPool, scopeRows, splitName, tmuxKillArgv, tmuxPaneAgents, tmuxPaneIdOf, tmuxSplitArgv, tmuxTagArgvs, transportBlock, TMUX_LIST_FORMAT } from '../../hooks/panes.js'
 import { reapable } from '../../hooks/live.js'
 import { ROLES, roleOf } from '../../hooks/routing.js'
 
@@ -899,5 +899,22 @@ describe('herdr start race', () => {
     expect(r.text).toMatch(/^Opened agt-[a-z0-9]{6}-spawn · sonnet · herdr pane\.$/)
     expect(seen.filter((a) => a.slice(0, 3).join(' ') === 'herdr agent start').length).toBe(3)
     expect(seen.some((a) => a[1] === 'pane' && a[2] === 'close')).toBe(false)
+  })
+})
+
+describe('advisor opt-out', () => {
+  test('only Opus and Fable workers lose the advisor, and only when asked', () => {
+    const off = 'CLAUDE_CODE_DISABLE_ADVISOR_TOOL=1'
+    expect(advisorEnv('opus', { advisorOnOpus: false })).toEqual([off])
+    expect(advisorEnv('fable', { advisorOnOpus: false })).toEqual([off])
+    expect(advisorEnv('sonnet', { advisorOnOpus: false })).toEqual([])
+    expect(advisorEnv('opus', { advisorOnOpus: true })).toEqual([])
+    expect(advisorEnv('opus', {})).toEqual([])
+    expect(advisorEnv('opus', undefined)).toEqual([])
+  })
+  test('the env reaches both transports', () => {
+    const env = advisorEnv('opus', { advisorOnOpus: false })
+    expect(tmuxSplitArgv({ target: '%1', cwd: '/w', run: 'ab12cd', shell: '/bin/zsh', model: 'opus', name: 'agt-ab12cd-planner', task: 't', env })).toContain('CLAUDE_CODE_DISABLE_ADVISOR_TOOL=1')
+    expect(herdrSplitArgv({ pane: 'p1', cwd: '/w', run: 'ab12cd', model: 'opus', env })).toContain('CLAUDE_CODE_DISABLE_ADVISOR_TOOL=1')
   })
 })

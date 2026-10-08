@@ -2,6 +2,23 @@
 
 All notable changes to agentille are documented here.
 
+## [3.5.0] — 2026-10-08
+
+### Added
+
+- **Advisor awareness.** When Claude Code's advisor tool is on, the recon line
+  ends with ` · advisor`. A new `profile.routing.advisorOnOpus` setting
+  (default `true`) can turn the advisor off for Opus and Fable pane workers,
+  so a top-tier worker is not advised by a same-tier model, while Sonnet
+  workers keep theirs.
+
+### Rationale
+
+- The advisor follows the user's own setting into every /agt session,
+  including subagents and pane workers. agentille never adds one; it only
+  makes it visible and lets panes opt out where it doubles cost for little
+  gain. Subagent mode cannot scope it.
+
 ## [3.4.0] — 2026-10-07
 
 ### Added

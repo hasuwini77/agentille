@@ -149,6 +149,10 @@ const effortArgs = (effort) => (EFFORTS.includes(effort) ? ['--effort', effort] 
 // not as a bare session that only has the task prompt.
 const agentArgs = (agent) => (ROLES.includes(agent) ? ['--agent', 'agentille:agentille-' + agent] : [])
 
+// Claude Code's advisor attaches to every session from the user's settings. With
+// profile.routing.advisorOnOpus false, an Opus or Fable worker runs without one.
+export const advisorEnv = (model, settings) => (settings?.advisorOnOpus === false && (model === 'opus' || model === 'fable') ? ['CLAUDE_CODE_DISABLE_ADVISOR_TOOL=1'] : [])
+
 // Who the worker is, for its own mascot band: <agent>:<model>:<effort>. A typed /agt-spawn has no agent.
 export const workerEnv = ({ agent, model, effort }) => 'AGENTILLE_WORKER=' + [agent || SPAWN_ROLE, model, EFFORTS.includes(effort) ? effort : ''].join(':')
 

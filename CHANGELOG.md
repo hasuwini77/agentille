@@ -2,6 +2,57 @@
 
 All notable changes to agentille are documented here.
 
+## [3.7.0] — 2026-10-08
+
+### Added
+
+- **Live agent rows in the transcript.** Each `Agent` call in the
+  conversation is redrawn as one live line: role, model · effort, the tool it
+  is running, elapsed time and tokens. Unknown agents, errored and
+  interrupted calls keep the stock row.
+- **A pinned status line under the prompt.** `agt <run> · ◇ working · done ·
+  tokens`, plus the measured session cost and context use when the engine
+  reports them. It stays visible with the band collapsed, shows only in the
+  lead session, and clears once the run settles. Dollar figures are the
+  session total; per-agent numbers are tokens.
+- **A real dispatch tree.** The band reads the engine's agent list: reviewers
+  nest under the agent that spawned them, waiting/idle/failed/killed agents
+  say so, the agent you are viewing is highlighted, and the tree rebuilds
+  after a plugin reload (rebuilt rows leave model, time and tokens blank
+  rather than guess).
+- **`/agt` autocomplete.** Flags (`--plan`, `--mode`, `--fable`,
+  `--formation`) and their values complete as you type.
+
+### Changed
+
+- `spawn_pane` and `close_pane` load eagerly instead of behind a tool search,
+  so their schemas ride every request in a lead session where Herdr or tmux
+  is live.
+- Requires Claude Code 2.1.294 for the mod.
+
+### Fixed
+
+- **A pane worker's answer can no longer be lost.** The reaper closes a done
+  or idle pane only once its answer was saved, reported or read; otherwise
+  it stays open and is flagged `not harvested`. A respawned role starts
+  unharvested, and an answer file older than the pane does not count.
+- A worker saves its answer to the run folder even when the lead gave it no
+  wire identity.
+- A pane that finishes without reporting wakes the lead session itself, once,
+  with the command to read it.
+- `spawn_pane` refuses, with a clear message, when the session runs an older
+  agentille than the one installed: restart first. Orphaned version folders
+  are ignored.
+- A long mock-clock reaper test no longer times out on a busy machine.
+
+### Rationale
+
+- The aim is to make it obvious, at a glance, which agent is doing what and
+  what it costs, without spending model tokens.
+- The reaper fix comes from a real run: a session that kept an older mod after
+  an update opened panes whose workers never reported, and the reaper closed
+  one before anyone read it.
+
 ## [3.6.1] — 2026-10-08
 
 ### Fixed

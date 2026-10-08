@@ -11,11 +11,11 @@ recon: <mode> · <one-clause reason>   [agentille v<version>]
 ⚑ <agent> <blocked|REVISE|FAIL>: <one line>
 ```
 
-`<version>` is the `version` in this plugin's `.claude-plugin/plugin.json`. When you have the `advisor` tool, append ` · advisor` after the reason. One `⚑` line per real problem, when it happens.
+`<version>` is the `version` in the `.claude-plugin/plugin.json` beside this skill (the plugin root above its base directory), the one actually running: never a repo checkout's, which can differ. When you have the `advisor` tool, append ` · advisor` after the reason. One `⚑` line per real problem, when it happens.
 
 ## Progress spine
 
-Before the first dispatch, seed TodoWrite with one todo per phase the roster actually has (e.g. plan · build · review · ship). Mark each in progress, then done, as it moves. That is the whole live view you write. With the mod loaded, the switchboard above the prompt shows the dispatch tree (each subagent `◇` and pane session `▣`, its model, live tool, elapsed and tokens) and the newest wire message; `/agt-deck` opens a fuller view. You do nothing for either.
+Before the first dispatch, seed TodoWrite with one todo per phase the roster actually has (e.g. plan · build · review · ship). Mark each in progress, then done, as it moves. That is the whole live view you write. With the mod loaded, the switchboard above the prompt shows the dispatch tree (each subagent `◇` and pane session `▣`, its model, live tool, elapsed and tokens) and the newest wire message, each `Agent` call in the transcript is a live row, and a status line under the prompt keeps the run's totals in view; `/agt-deck` opens a fuller view. You do nothing for either.
 
 ## Agent heads
 

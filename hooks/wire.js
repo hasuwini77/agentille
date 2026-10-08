@@ -89,3 +89,34 @@ export function parseTellArgs(args, panes = []) {
   if (hits.length > 1) return { error: who + ' matches ' + hits.length + ' workers; use the full agt- name.' }
   return text ? { name: hits[0].name, text } : { usage: TELL_USAGE }
 }
+
+// ── lead self-wake ────────────────────────────────────────────────────────────
+
+export const WAKE_TAG = '[agt wake]'
+export const WAKE_MS = 20_000
+
+// Panes of the lead that finished ≥ WAKE_MS ago without a wire done message, and that the lead has
+// not been woken for yet. A blocked pane is not due: it waits on the person, and the one wake a pane
+// gets is kept for when it finishes. `seen` is the reaper's pane id → { since }.
+export function wakeDue(pool, seen, wireDone, woken, now) {
+  return pool.filter((p) => {
+    if (p.state !== 'done') return false
+    const since = seen.get(p.id)?.since
+    return typeof since === 'number' && now - since >= WAKE_MS && !wireDone.has(p.name) && !woken.has(p.name)
+  })
+}
+
+// How to read a pane from its transport: herdr by agent name, unwrapped, as panes-mode.md's harvest
+// loop does; tmux by pane `id`.
+export function readCommand(transport, id, name) {
+  if (transport === 'herdr') return NAME_RE.test(String(name ?? '')) ? 'herdr agent read ' + name + ' --source recent-unwrapped --lines 200' : null
+  if (transport === 'tmux' && /^[A-Za-z0-9:%._-]{1,40}$/.test(String(id ?? ''))) return 'tmux capture-pane -p -t ' + id + ' -S -200'
+  return null
+}
+
+// The message the lead sends its own session when a worker finished without reporting.
+export function wakeMessage({ name, transport, id, answerPath = null }) {
+  const cmd = readCommand(transport, id, name)
+  const read = answerPath ? 'Its answer is saved at ' + answerPath + '; read that.' : cmd ? 'Read it with: ' + cmd : 'Read the pane.'
+  return WAKE_TAG + ' ' + name + ' finished and has not reported. ' + read + ' Then harvest it and close_pane.'
+}

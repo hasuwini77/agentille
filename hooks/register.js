@@ -4,9 +4,9 @@
 // observes events, applies decisions, and draws.
 
 import { DEFAULTS, decide, formationOf, parseHeader, roleOf, verdictOf } from './routing.js'
-import { addUsage, elapsed, endRoute, finish, isAgtPrompt, ledger, ledgerText, newAgent, paneAgents, panesLeft, reapable, short, stage, waving } from './live.js'
-import { ACCENT, FRAME_COLOR, WIRE_COLOR, boardRows, cast, castColumns, chip, colorOf, header, leadLine, routingLines, tokenBars, toolLabel, wireLines, wireRow } from './board.js'
-import { PUBLISH_MS, doneMessage, freshStatus, logWire, parseTellArgs, parseWire, shortName, statusKey, validLead, wireEnv, workerStatus } from './wire.js'
+import { addUsage, elapsed, endRoute, finish, isAgtPrompt, ledger, ledgerText, newAgent, paneAgents, panesLeft, reapPlan, short, stage, waving } from './live.js'
+import { ACCENT, FRAME_COLOR, INK, WIRE_COLOR, boardRows, cast, castColumns, chip, colorOf, header, hex, leadLine, routingLines, tokenBars, toolLabel, wireLines, wireRow } from './board.js'
+import { PUBLISH_MS, doneMessage, freshStatus, logWire, parseTellArgs, parseWire, shortName, statusKey, validLead, wakeDue, wakeMessage, wireEnv, workerStatus } from './wire.js'
 import { activeSquads, allPaths, depsOf, injection } from './squads.js'
 import { BYE_MS, HELLO_MS, MASCOT_COLOR, MODEL_COLOR, agentMood, caption, frame, modelKey, moodAt, parseWorker } from './mascot.js'
 import { MARK, SPAN_COLOR, highlightFor, highlightText, litFor, parseHighlightArgs, spans } from './highlight.js'
@@ -16,8 +16,11 @@ import {
   isFreshDone, isLead, newRunId, paneName, paneRole, parseSpawnArgs, parseTmuxList, pickTransport, quietSpawn, reapPool, scopeRows, splitName, splitPlan, tmuxEvenArgv, tmuxKillArgv, tmuxPaneAgents, tmuxPaneIdOf,
   advisorEnv, tmuxSplitArgv, tmuxTagArgvs, transportBlock,
 } from './panes.js'
-
-const hex = (n) => '#' + n.toString(16).padStart(6, '0')
+import { cacheDirOf, compareVersions, newerInstalled, skewMessage } from './skew.js'
+import { adopt, applyStatus, nest } from './tree.js'
+import { registerRows } from './rows.js'
+import { registerStatus } from './status.js'
+import { registerAutocomplete } from './autocomplete.js'
 
 let settings = { ...DEFAULTS }
 let depth = null
@@ -32,7 +35,12 @@ const paneRoutes = []        // PaneRoute[], append-only: how each worker this l
 let opened = []              // { id, name } of panes this lead opened via spawn_pane, in spawn order
 const staged = new Map()     // pane name → last pane seen on stage (live.js panesLeft)
 const paneSeen = new Map()   // reaper bookkeeping
-const tmuxFirstSeen = new Map() // tmux pane id → when this session first listed it
+const harvested = new Set()  // pane names whose answer the lead has in hand (a wire done message, a saved answer file, a close_pane)
+const wireDone = new Set()   // pane names whose wire done message reached this lead
+const woken = new Set()      // pane names the lead already woke itself for
+const strandedNow = new Set()   // done/idle panes kept open because nothing was harvested from them
+const strandedToasted = new Set() // ... of which the person was told once
+const firstSeen = new Map()  // pane id → when this session first listed it: a done-file or answer file older than that is a previous pane's
 let selfName = null          // this pane's name when it is an agt-* worker
 let worker = null            // { agent, model, effort } from AGENTILLE_WORKER: this session is a worker pane
 let selfTab = null           // herdr: the lead's own tab, where its workers split
@@ -53,6 +61,8 @@ let highlightOn = true       // /agt replies get an essentials card and lit toke
 let highlightAll = false     // …and so does every other long reply (/agt-highlight all)
 const litMemo = new Map()    // message id → was it an /agt turn when first drawn
 const hlMemo = new Map()     // message id → { text, highlight() result }
+let runningVersion = null    // this module's own agentille version, read from its plugin.json at session start
+let skewToasted = false
 let sessionId = null         // this session's id: workers it opens send their results here
 let leadModel = null         // the main loop's model, for the tree's root
 const wireLog = []           // [{ from, to, kind, summary, at }] messages between sessions, newest last
@@ -65,6 +75,22 @@ let deckAuto = false         // /agt-deck auto: the deck opens on every typed /a
 const DECK = 'agt-deck'
 const FLAG_TTL_MS = 30 * 60_000
 const FOCUS_COLOR = { next: '#3fb950', flag: '#f85149' }
+const LIST_MS = 1000         // $.agent.list() is read at most this often
+const LIST_RETRY_MS = 30_000 // ... and after a failed read, at most this often
+let listAt = 0
+let listBusy = false
+
+// What the modules wired last in register(on) read: live state through getters, since most of
+// it is reassigned.
+const ctx = {
+  live,
+  get run() { return lastRun },
+  get tick() { return tick },
+  get panes() { return panes },
+  get routes() { return paneRoutes },
+  get isLead() { return !worker && !selfName },
+  onTick: [], // (io, ctx, now) callbacks the redraw ticker calls each period; a module adds its own while registering
+}
 
 function runState(id) {
   if (!runs.has(id)) runs.set(id, { revise: 0, fixes: 0, fable: 0, formation: null, log: [], reports: {} })
@@ -96,6 +122,25 @@ function shortType(t) {
   return String(t ?? 'agent').split(':').pop()
 }
 
+// The newer agentille version installed beside the one this session runs, or null: nothing found,
+// nothing readable (a checkout, a host without a plugin cache) all read as no skew. A replaced version
+// stays in the cache with an .orphaned_at marker; it is not installed, so only a newer folder without
+// one counts (one lookup per newer folder).
+async function installedSkew($) {
+  if (!runningVersion) return null
+  try {
+    const dir = cacheDirOf($.plugin.root)
+    if (!dir) return null
+    const live = []
+    for (const e of await $.fs.list(dir)) {
+      if (e.kind === 'dir' && compareVersions(e.name, runningVersion) > 0 && !(await $.fs.exists(dir + '/' + e.name + '/.orphaned_at'))) live.push(e.name)
+    }
+    return newerInstalled(runningVersion, live)
+  } catch {
+    return null
+  }
+}
+
 async function loadProfile($) {
   home = (await $.env.get('HOME')) ?? null
   if (!home) return
@@ -124,6 +169,31 @@ async function loadSquads($) {
   }
 }
 
+// The engine's agent list is the truth for who exists and who spawned whom. Read it at session
+// start (a reload loses the live map) and while agents work; render hooks only see the copy.
+// A failed read leaves everything as it was.
+async function refreshAgents($, at) {
+  const now = at ?? await $.clock.now()
+  if (listBusy || now - listAt < LIST_MS) return
+  listBusy = true
+  listAt = now
+  try {
+    let list
+    try {
+      list = await $.agent.list()
+    } catch {
+      listAt = now + LIST_RETRY_MS - LIST_MS // no agent list here (an older build, a host without agents): the band runs on events alone, and the list is retried rarely
+    }
+    if (!Array.isArray(list)) return
+    const added = adopt(live, list, { run: lastRun, now }).length > 0
+    const changed = applyStatus(live, list, now)
+    if (working()) ensureTicker($)
+    if (added || changed) $.ui.invalidate('ui.render')
+  } finally {
+    listBusy = false
+  }
+}
+
 async function writeRunFile($, runId, name, text) {
   if (!home || !SAFE_RUN.test(runId) || runId === 'adhoc') return
   try {
@@ -143,6 +213,67 @@ async function notePaneExits($) {
   for (const run of touched) await writeRunFile($, run, 'ledger.json', JSON.stringify(ledger(live, run, paneRoutes), null, 2) + '\n')
 }
 
+// Where a pane worker saves its full answer; the lead reads it from here.
+const answerPath = (p) => {
+  const n = splitName(p.name)
+  return home && n ? home + '/.agentille/state/run-' + n.run + '/agents/pane-' + n.role + '.md' : null
+}
+
+// The file counts only if it was written once this session knew the pane: a role can be respawned, and
+// the earlier pane's answer is not this worker's.
+async function hasAnswer($, p) {
+  const file = answerPath(p)
+  if (!file) return false
+  try {
+    return isFreshDone(await $.fs.stat(file), firstSeen.get(p.id))
+  } catch {
+    return false // missing or unreadable
+  }
+}
+
+async function isHarvested($, p) {
+  if (harvested.has(p.name)) return true
+  if (!(await hasAnswer($, p))) return false
+  harvested.add(p.name)
+  return true
+}
+
+// A pane finished and no wire done message came: the lead's own session gets one message naming
+// the pane and how to read it, so the lead does not wait blind. Once per pane. A blocked pane waits on the person.
+async function wakeLead($, pool, now, t) {
+  if (!sessionId) return
+  for (const p of wakeDue(pool, paneSeen, wireDone, woken, now)) {
+    woken.add(p.name)
+    const text = wakeMessage({ name: p.name, transport: t, id: p.id, answerPath: (await hasAnswer($, p)) ? answerPath(p) : null })
+    const r = await $.session.send({ to: { sessionId }, text }).catch((err) => ({ isDelivered: false, reason: String(err?.message ?? err) }))
+    if (!r.isDelivered) $.ui.toast('agt ⚑ ' + p.name + ' ' + p.state + ' with no report. ' + text.slice(text.indexOf('. ') + 2).slice(0, 120))
+  }
+}
+
+// The lead's reaper. A finished pane closes only once its answer is in hand; until then it stays
+// open and is flagged once, so a worker that could not report never loses its output.
+async function sweep($, pool, now, t, close) {
+  const ok = new Set()
+  for (const p of pool) if ((p.state === 'done' || p.state === 'idle') && (await isHarvested($, p))) ok.add(p.name)
+  const plan = reapPlan(pool, paneSeen, now, leadTurn, (p) => ok.has(p.name))
+  strandedNow.clear()
+  for (const p of plan.stranded) {
+    strandedNow.add(p.name)
+    if (strandedToasted.has(p.name)) continue
+    strandedToasted.add(p.name)
+    $.ui.toast('agt ⚑ ' + p.name + ' ' + p.state + ', not harvested')
+  }
+  for (const p of plan.reap) {
+    try {
+      await close(p)
+      $.ui.toast('agt reaped ' + p.name + ' (' + p.state + ')')
+    } catch {
+      // a pane closed by hand in the meantime is fine
+    }
+  }
+  await wakeLead($, pool, now, t)
+}
+
 async function pollHerdr($) {
   let list = []
   try {
@@ -158,17 +289,13 @@ async function pollHerdr($) {
   // Show the workspace's agt-* panes; reap only the lead's own tab, where herdr mode
   // splits its workers. Workers (panes that are themselves agt-*) never reap.
   panes = quietSpawn(paneAgents(list, selfPane).filter((p) => !me || p.workspace === me.workspace_id))
+  const now = await $.clock.now()
+  for (const p of panes) if (!firstSeen.has(p.id)) firstSeen.set(p.id, now)
+  for (const id of [...firstSeen.keys()]) if (!panes.some((p) => p.id === id)) firstSeen.delete(id)
   await notePaneExits($)
   if (me && !selfName) {
     const mine = panes.filter((p) => p.tab === me.tab_id)
-    for (const p of reapable(reapPool(mine), paneSeen, await $.clock.now(), leadTurn)) {
-      try {
-        await $.process.run(['herdr', 'pane', 'close', p.id])
-        $.ui.toast('agt reaped ' + p.name + ' (' + p.state + ')')
-      } catch {
-        // a pane closed by hand in the meantime is fine
-      }
-    }
+    await sweep($, reapPool(mine), now, 'herdr', (p) => $.process.run(herdrCloseArgv(p.id)))
   }
   $.ui.invalidate('ui.render')
 }
@@ -244,15 +371,15 @@ async function pollTmux($) {
   // only if it was written after the pane was first listed.
   const now = await $.clock.now()
   const scoped = me ? scopeRows(rows, selfPane) : []
-  for (const r of scoped) if (!tmuxFirstSeen.has(r.id)) tmuxFirstSeen.set(r.id, now)
-  for (const id of [...tmuxFirstSeen.keys()]) if (!rows.some((r) => r.id === id)) tmuxFirstSeen.delete(id)
+  for (const r of scoped) if (!firstSeen.has(r.id)) firstSeen.set(r.id, now)
+  for (const id of [...firstSeen.keys()]) if (!rows.some((r) => r.id === id)) firstSeen.delete(id)
   const done = new Map()
   for (const r of scoped) {
     const n = splitName(r.agt)
     const file = n && n.role !== SPAWN_ROLE && !r.dead && doneFile(home, n.run, n.role)
     if (!file) continue
     try {
-      done.set(r.agt, isFreshDone(await $.fs.stat(file), tmuxFirstSeen.get(r.id)))
+      done.set(r.agt, isFreshDone(await $.fs.stat(file), firstSeen.get(r.id)))
     } catch {
       // missing or unreadable counts as not done
     }
@@ -260,14 +387,7 @@ async function pollTmux($) {
   panes = tmuxPaneAgents(rows, selfPane, done)
   await notePaneExits($)
   if (isLead(rows, selfPane)) {
-    for (const p of reapable(reapPool(panes), paneSeen, now, leadTurn)) {
-      try {
-        await $.process.run(tmuxKillArgv(p.id), PROBE)
-        $.ui.toast('agt reaped ' + p.name + ' (' + p.state + ')')
-      } catch {
-        // a pane closed by hand in the meantime is fine
-      }
-    }
+    await sweep($, reapPool(panes), now, 'tmux', (p) => $.process.run(tmuxKillArgv(p.id), PROBE))
   }
   $.ui.invalidate('ui.render')
 }
@@ -305,14 +425,31 @@ function ensurePolling($) {
 // still waving (elapsed times tick, legs step); the ticker cancels itself once all are idle.
 const animating = (now) => (!!worker && moodAt({ ...mascot, now }) !== 'idle') || [...live.values()].some((a) => waving(a, Date.now()))
 
+// The modules that follow the run on the ticker (the pinned status line) add a callback to ctx.onTick.
+// They get the few `$` calls they need as `io`, not `$`: the hook checker follows `$` itself only
+// into top-level functions of one file, so the arrows that spell the calls out sit here.
+async function tickModules($, now) {
+  const io = { status: (text) => $.ui.status(text), after: (ms, fn) => $.clock.after(ms, fn), now: () => $.clock.now() }
+  for (const f of ctx.onTick) {
+    try {
+      await f(io, ctx, now)
+    } catch {
+      // one module's tick must not stop the others or the redraw
+    }
+  }
+}
+
 function ensureTicker($) {
   if (tickTimer) return
   tickTimer = $.clock.every(300, async () => {
-    if (!working() && !animating(await $.clock.now())) {
+    const now = await $.clock.now()
+    if (!working() && !animating(now)) {
       tickTimer?.cancel()
       tickTimer = null
     } else tick += 1
+    await tickModules($, now) // also on the tick that stops the ticker, so the last change is seen
     if (panes.length && tick % 3 === 0) await readWire($)
+    if (tick % 4 === 0) void refreshAgents($, now)
     $.ui.invalidate('ui.render')
   })
 }
@@ -328,7 +465,7 @@ function addFlag($, text) {
 function focusLines(now) {
   if (!focusOn) return []
   const fresh = flags.filter((f) => now - f.at < FLAG_TTL_MS).map((f) => f.text)
-  return [...fresh, ...paneFlags(panes)].slice(0, 5)
+  return [...fresh, ...paneFlags(panes, strandedNow)].slice(0, 5)
 }
 
 // One Text per essentials item: a coloured mark, then the line with paths, versions and numbers lit.
@@ -379,15 +516,18 @@ async function publishNow($, force) {
   if (argv) await $.process.run(argv, PROBE).catch(() => {})
 }
 
+// Worker: the full answer of a finished turn, saved under the run where the lead reads it. Returns the path, or null.
+async function saveAnswer($, name, answer) {
+  const n = splitName(name)
+  if (!n || !answer || !home) return null
+  await writeRunFile($, n.run, 'agents/pane-' + n.role + '.md', answer)
+  return home + '/.agentille/state/run-' + n.run + '/agents/pane-' + n.role + '.md'
+}
+
 // Worker: a finished turn saves the full answer under the run and messages the lead its head,
 // so the lead wakes on its own and never scrapes the pane.
 async function reportDone($, answer) {
-  const n = splitName(wireName)
-  let reportPath = null
-  if (n && answer && home) {
-    await writeRunFile($, n.run, 'agents/pane-' + n.role + '.md', answer)
-    reportPath = home + '/.agentille/state/run-' + n.run + '/agents/pane-' + n.role + '.md'
-  }
+  const reportPath = await saveAnswer($, wireName, answer)
   if (!leadSession) return
   const text = doneMessage({ name: wireName, ms: pub.ms ?? 0, model: worker?.model ?? short(pub.model), effort: worker?.effort || pub.effort, tok: pub.tok, answer, reportPath })
   const r = await $.session.send({ to: { sessionId: leadSession }, text }).catch((err) => ({ isDelivered: false, reason: String(err?.message ?? err) }))
@@ -406,8 +546,6 @@ async function readWire($) {
 }
 
 // ── drawing (takes resolved elements, never $) ────────────────────────────────
-
-const INK = '#14161c'
 
 function boardHeader(els, h) {
   const { Box, Text } = els
@@ -430,7 +568,7 @@ function leadRow(els, l) {
 // elapsed · tokens, and a ↗ that jumps to a pane worker.
 function boardRow(els, r, onFocus, slot = false) {
   const { Box, Text, Button } = els
-  const kids = [Text({ dimColor: true, children: [r.tree] }), Text({ color: r.glyphColor, children: [r.glyph] }), Text({ dimColor: r.dim, children: [r.role] })]
+  const kids = [Text({ dimColor: true, children: [r.tree] }), Text({ color: r.glyphColor, children: [r.glyph] }), Text({ dimColor: r.dim, ...(r.inView ? { inverse: true } : {}), children: [r.role] })]
   if (r.kind) kids.push(Text({ dimColor: true, children: [r.kind] }))
   kids.push(r.dim ? Text({ color: r.chipColor, dimColor: true, children: [r.chip] }) : Text({ color: INK, backgroundColor: r.chipColor, children: [r.chip] }))
   kids.push(Text({ color: colorOf('fable'), children: [r.escalated ? '↑' : ' '] }))
@@ -467,6 +605,16 @@ export function register(on) {
   on('session.start', async ($, e, next) => {
     await loadProfile($)
     await loadSquads($)
+    try {
+      runningVersion = JSON.parse(await $.fs.read($.plugin.root + '/.claude-plugin/plugin.json')).version ?? null
+    } catch {
+      runningVersion = null
+    }
+    const skew = await installedSkew($)
+    if (skew) {
+      skewToasted = true
+      $.ui.toast('agt ⚑ ' + skewMessage(skew, runningVersion))
+    }
     transport = await detectTransport($)
     worker = parseWorker(await $.env.get('AGENTILLE_WORKER'))
     sessionId = validLead(await $.session.id().catch(() => null))
@@ -485,7 +633,8 @@ export function register(on) {
     await $.command.register({ name: 'agt-highlight', description: 'Highlight replies: an essentials card, paths, versions and numbers lit. on (/agt only) · all · off', argumentHint: '[on|all|off]', immediate: true })
     await $.command.register({ name: 'agt-focus', description: 'Show agent flags above the prompt (a REVISE, a FAIL, a blocked pane). on · off', argumentHint: '[on|off]', immediate: true })
     if (transport !== 'none') {
-      // One look now: a lead restarted mid-run still reaps its leftover panes.
+      // One look now: a lead restarted mid-run sees its leftover panes. It reaps only those whose answer
+      // was written after this look; an older one is flagged "not harvested" and left to the person.
       await pollNow($, transport)
       if (panes.length) ensurePolling($)
       // The lead opens and closes its workers through the mod; a worker pane gets no fan-out of its own.
@@ -497,6 +646,7 @@ export function register(on) {
     }
     if (working()) ensureTicker($)
     if (wireName) await publish($, true)
+    await refreshAgents($)
     return next(e)
   })
 
@@ -559,6 +709,13 @@ export function register(on) {
   // /agt panes mode: the same openPane as /agt-spawn, with the input validated here.
   on('tool.call', { tool: 'mcp__agentille__spawn_pane' }, async ($, e) => {
     if (selfName || worker) return { deny: 'This is a worker pane (' + (selfName ?? worker.agent) + '); workers do not open panes.' }
+    // An update since this session started leaves it on old code: its workers would never report.
+    const skew = await installedSkew($)
+    if (skew) {
+      if (!skewToasted) $.ui.toast('agt ⚑ ' + skewMessage(skew, runningVersion))
+      skewToasted = true
+      return { deny: skewMessage(skew, runningVersion) }
+    }
     const t = await transportOf($)
     if (t === 'none') return { deny: 'No pane transport here: run the slice as a subagent.' }
     const a = spawnToolInput(e, panes)
@@ -588,6 +745,9 @@ export function register(on) {
     } catch (err) {
       return { deny: 'Could not open a ' + t + ' pane: ' + String(err?.message ?? err).slice(0, 160) }
     }
+    // A role can be respawned (a fix, a retry): the new pane starts with nothing harvested. The poll
+    // below lists it for the first time, so only files written from then on count as its own.
+    for (const s of [harvested, wireDone, woken, strandedToasted]) s.delete(a.name)
     run.fixes = fixes
     if (d.fable) {
       run.fable += 1
@@ -615,6 +775,7 @@ export function register(on) {
     if (c.error) return { deny: c.error }
     const r = await $.process.run(t === 'herdr' ? herdrCloseArgv(c.pane.id) : tmuxKillArgv(c.pane.id), PROBE).catch(() => null)
     if (!r || r.exitCode !== 0) return { deny: 'Could not close ' + c.pane.name + '.' }
+    harvested.add(c.pane.name)
     await pollNow($, t)
     return { result: 'Closed ' + c.pane.name + '.' }
   })
@@ -669,6 +830,7 @@ export function register(on) {
     const w = parseWire(e.text)
     if (w) {
       const from = shortName(w.from)
+      if (w.kind === 'done') { harvested.add(w.from); wireDone.add(w.from) }
       logWire(wireLog, { from, to: wireName ? shortName(wireName) : 'lead', kind: w.kind, summary: w.summary, at: Date.now() })
       $.ui.toast('⇄ ' + from + ' ' + w.kind)
       $.ui.invalidate('ui.render')
@@ -701,7 +863,7 @@ export function register(on) {
 
     if (!role) {
       const res = await next(e)
-      if (res.agentId) live.set(res.agentId, newAgent({ id: res.agentId, role: shortType(e.subagentType), routed: false, model: res.model, effort: null, reason: null, run: lastRun, now: Date.now() }))
+      if (res.agentId) live.set(res.agentId, newAgent({ id: res.agentId, role: shortType(e.subagentType), routed: false, model: res.model, effort: null, reason: null, run: lastRun, now: Date.now(), parentId: e.parentAgentId ?? null }))
       ensureTicker($)
       $.ui.invalidate('ui.render')
       return res
@@ -725,7 +887,7 @@ export function register(on) {
       run.fable += 1
       await $.store.set('fable:' + runId, run.fable)
     }
-    if (res.agentId) live.set(res.agentId, newAgent({ id: res.agentId, role, routed: true, model: res.model, effort: d.effort, reason: d.reason, run: runId, now: Date.now() }))
+    if (res.agentId) live.set(res.agentId, newAgent({ id: res.agentId, role, routed: true, model: res.model, effort: d.effort, reason: d.reason, run: runId, now: Date.now(), parentId: e.parentAgentId ?? null }))
     const rec = { at: new Date().toISOString(), role, model: res.model, effort: d.effort, reason: d.reason, asked: e.model ?? null, agentId: res.agentId ?? null }
     decisions.push(rec)
     run.log.push(JSON.stringify(rec))
@@ -748,6 +910,7 @@ export function register(on) {
     }
     if (a) {
       if (!a.effort && e.effort) a.effort = String(e.effort)
+      if (!a.model && e.model) a.model = e.model
       addUsage(a, result?.usage)
       $.ui.invalidate('ui.render')
     }
@@ -792,6 +955,10 @@ export function register(on) {
       Object.assign(pub, { state: 'done', tool: null, ms: Date.now() - (pub.start ?? Date.now()) })
       await publish($, true)
       if (e.reason === 'answer') await reportDone($, e.answer)
+    } else if (!e.agentId && !wireName && selfName && e.reason === 'answer') {
+      // A lead that gave this pane no wire identity (an older agentille, a hand-made pane) never hears from
+      // it; the saved answer is all it can leave, and what the lead reads before closing the pane.
+      await saveAnswer($, selfName, e.answer)
     }
     if (a) {
       a.tool = null
@@ -802,6 +969,7 @@ export function register(on) {
       await writeReport($, a, e.answer)
       await writeRunFile($, a.run, 'ledger.json', JSON.stringify(ledger(live, a.run, paneRoutes), null, 2) + '\n')
       ensureTicker($)
+      void refreshAgents($)
       $.ui.invalidate('ui.render')
     }
     return next(e)
@@ -824,9 +992,9 @@ export function register(on) {
     // No agent rows: the newest wire message alone, no frame.
     if (staged.rows.length === 0) return els.Box({ flexDirection: 'column', children: [...kids, ...(wire ? [wireLine(els, wire)] : []), theirs] })
 
-    const rows = cast(staged, live, lastRun)
+    const rows = nest(cast(staged, live, lastRun))
     const cols = (e.props.bodyColumns ?? 80) - 4
-    const view = boardRows(rows, { now, tick, cols, wire: wireStatus, transport })
+    const view = boardRows(rows, { now, tick, cols, wire: wireStatus, transport, view: e.props.view?.agentId ?? null })
     const room = Math.max(1, (e.props.maxRows ?? 10) - 4 - kids.length - (wire ? 1 : 0))
     const waiting = rows.filter((r) => r.state === 'working').length
     const inner = [boardHeader(els, header({ run: lastRun, formation: runs.get(lastRun)?.formation, squads: squads.map((q) => q.name), rows, tally: staged.tally }))]
@@ -902,4 +1070,8 @@ export function register(on) {
     const parts = [subs ? '◇' + subs : '', sessions ? '▣' + sessions : ''].filter(Boolean).join(' ')
     return next({ ...e, props: { ...e.props, suffix: (e.props.suffix ?? '') + ' · ' + parts + ' working' } })
   })
+
+  registerRows(on, ctx)
+  registerStatus(on, ctx)
+  registerAutocomplete(on, ctx)
 }

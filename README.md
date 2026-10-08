@@ -64,7 +64,10 @@ Skip it for one-file edits, typos, renames and questions: a plain prompt is chea
 ## How it decides
 
 - **Solo** for a small, one-sentence task. **Subagents** for sequential work. **Panes** (Herdr or tmux) only when 2+ slices can build at once; each worker pane shows a small mascot that says hi, walks while it works and waves bye. The pick is always printed with a one-line reason.
-- **The switchboard**: a framed dispatch tree above your prompt, rooted at your session. Each subagent (`◇`) and pane session (`▣`) gets a row with its model pill, the tool it is running, elapsed time and tokens; `↑` marks an escalated route. Drawn by the mod, zero model tokens.
+- **The switchboard**: a framed dispatch tree above your prompt, rooted at your session. Each subagent (`◇`) and pane session (`▣`) gets a row with its model pill, the tool it is running, elapsed time and tokens; `↑` marks an escalated route. Reviewers nest under the agent that spawned them, the agent you are viewing is highlighted, and a waiting or failed agent says so. Drawn by the mod, zero model tokens.
+- **In the transcript and under the prompt**: each `Agent` call in the conversation becomes a live row (role, model · effort, current tool, elapsed, tokens), and a pinned status line under the prompt keeps `◇ working · done · tokens · $ session` in view when the band is collapsed. Dollar figures are the measured session cost only; per-agent numbers are tokens.
+- **Never loses a worker's answer**: a pane is closed only once its answer is saved or read, a pane that finishes silently wakes your session, and `/agt` refuses to open panes when the session runs an older agentille than the one installed (restart first).
+- **Type less**: `/agt --` completes its flags and their values.
 - **The wire**: pane workers report to your session when they finish, so it wakes on its own; their live status reaches your band through a shared store.
 - **Best with Herdr**: workers are labeled in Herdr's sidebar and a row's `↗` jumps to its pane. tmux works with the same band; without a multiplexer you get the subagent tree.
 - **Routing**: planners and judgment reviewers on Opus, the executor on Sonnet (never Haiku), effort set per role by the bundled mod. Fable only after observed failures at Opus max, or when you type `--fable`.
@@ -73,7 +76,7 @@ Skip it for one-file edits, typos, renames and questions: a plain prompt is chea
 
 ## Requirements
 
-Claude Code 2.1.292+ for the mod (switchboard, routing, the wire, pane tools, deck). Without it the skill still runs, with explicit models. No profile file needed.
+Claude Code 2.1.294+ for the mod (switchboard, routing, the wire, pane tools, deck). Without it the skill still runs, with explicit models. No profile file needed.
 
 ## Acknowledgments
 

@@ -1,6 +1,6 @@
 import { describe, expect, mock, test } from 'claude-code/testing'
 import { advisorEnv, EFFORTS, PANE_RULE, splitPlan, tmuxEvenArgv, SPAWN_TOOL, closeTarget, paneRole, doneFile, spawnToolInput, TOOL_MODELS, herdrCloseArgv, herdrPaneIdOf, herdrPromptArgv, herdrSplitArgv, herdrStartArgv, isFreshDone, isLead, newRunId, paneName, parseSpawnArgs, parseTmuxList, pickTransport, quietSpawn, reapPool, scopeRows, splitName, tmuxKillArgv, tmuxPaneAgents, tmuxPaneIdOf, tmuxSplitArgv, tmuxTagArgvs, transportBlock, TMUX_LIST_FORMAT } from '../../hooks/panes.js'
-import { reapable } from '../../hooks/live.js'
+import { reapPlan } from '../../hooks/live.js'
 import { ROLES, roleOf } from '../../hooks/routing.js'
 
 const TAB = '\t'
@@ -166,10 +166,12 @@ describe('tmux panes', () => {
     const rows = parseTmuxList([row('%1', ''), row('%2', 'agt-r1-executor'), row('%3', 'agt-r1-reviewer', '1')].join('\n'))
     const p = tmuxPaneAgents(rows, '%1', new Map())
     const seen = new Map()
-    expect(reapable(p, seen, 0)).toEqual([])
-    expect(reapable(p, seen, 89_999)).toEqual([])
-    expect(reapable(p, seen, 90_000).map((x) => x.id)).toEqual(['%3'])
-    expect(reapable(p, seen, 10_000_000).map((x) => x.id)).toEqual(['%3'])
+    const ok = () => true
+    expect(reapPlan(p, seen, 0, true, ok).reap).toEqual([])
+    expect(reapPlan(p, seen, 89_999, true, ok).reap).toEqual([])
+    expect(reapPlan(p, seen, 90_000, true, ok).reap.map((x) => x.id)).toEqual(['%3'])
+    expect(reapPlan(p, seen, 10_000_000, true, ok).reap.map((x) => x.id)).toEqual(['%3'])
+    expect(reapPlan(p, seen, 10_000_000).reap).toEqual([])
   })
 
   test('spawn panes are never offered to the reaper, in either transport', async () => {
@@ -283,7 +285,7 @@ describe('tmux band', () => {
   const FRESH = Number.MAX_SAFE_INTEGER
   const LIST = [row('%1', ''), row('%2', 'agt-r9-executor'), row('%3', 'agt-r9-planner'), row('%4', 'agt-r9-spawn-x', '1'), row('%5', 'agt-r9-other', '0', '@2'), row('%6', 'agt-r9-spawn')]
 
-  // session.start probes tmux, polls once and draws; `mtimes` maps done-file path → mtimeMs
+  // session.start probes tmux, polls once and draws; `mtimes` maps a done-file or saved-answer path → mtimeMs
   const start = async ($: any, on: any, o: { self?: string; rows?: string[]; mtimes?: Record<string, number> } = {}) => {
     const killed: string[] = []
     const statted: string[] = []
@@ -293,7 +295,7 @@ describe('tmux band', () => {
     on('session.start', async ($: any, e: any) => ({ cwd: e.cwd }))
     on('command.register', async () => ({ value: undefined }))
     on('fs.read', async () => ({ deny: 'no profile' }))
-    on('fs.exists', async ($: any, e: any) => { statted.push(e.path); return { value: false } })
+    on('fs.exists', async () => ({ value: false }))
     on('fs.stat', async ($: any, e: any) => {
       statted.push(e.path)
       return e.path in mtimes ? { value: { kind: 'file', size: 0, mtimeMs: mtimes[e.path], isLink: false } } : { deny: 'ENOENT' }
@@ -339,15 +341,34 @@ describe('tmux band', () => {
   })
 
   const DONE = (role: string) => '/h/.agentille/state/run-r9/done-' + role
+  const ANSWER = (role: string) => '/h/.agentille/state/run-r9/agents/pane-' + role + '.md'
 
-  test('a lead kills a done pane only after 90s, never a working or a spawn pane', async ($, on) => {
+  test('a lead kills a done pane only after 90s, never a working or a spawn pane', { timeoutMs: 15_000 }, async ($, on) => {
     const rows = [row('%1', ''), row('%2', 'agt-r9-executor', '1'), row('%3', 'agt-r9-spawn', '1'), row('%4', 'agt-r9-planner')]
-    const { killed, clock } = await start($, on, { rows })
+    const { killed, clock } = await start($, on, { rows, mtimes: { [ANSWER('executor')]: FRESH } })
     await clock.advance(85_000)
     expect(killed).toEqual([])
     await clock.advance(10_000)
     expect(killed).toEqual(['%2'])
     await clock.advance(300_000)
+    expect(killed).toEqual(['%2'])
+  })
+
+  test('a done pane with no answer saved is never killed, however long it waits', { timeoutMs: 15_000 }, async ($, on) => {
+    const rows = [row('%1', ''), row('%2', 'agt-r9-executor', '1')]
+    const { killed, clock } = await start($, on, { rows })
+    await clock.advance(400_000)
+    expect(killed).toEqual([])
+  })
+
+  test('an answer file older than the pane\'s first sighting does not harvest it', { timeoutMs: 15_000 }, async ($, on) => {
+    const rows = [row('%1', ''), row('%2', 'agt-r9-executor', '1')]
+    const mtimes: Record<string, number> = { [ANSWER('executor')]: 5 }
+    const { killed, clock } = await start($, on, { rows, mtimes })
+    await clock.advance(400_000)
+    expect(killed).toEqual([])
+    mtimes[ANSWER('executor')] = clock.now() + 1
+    await clock.advance(10_000)
     expect(killed).toEqual(['%2'])
   })
 
@@ -375,7 +396,7 @@ describe('tmux band', () => {
 
   test('a done-file older than the pane\'s first sighting is ignored until a fresh one is written', async ($, on) => {
     const rows = [row('%1', ''), row('%3', 'agt-r9-planner')]
-    const mtimes: Record<string, number> = { [DONE('planner')]: 5 }
+    const mtimes: Record<string, number> = { [DONE('planner')]: 5, [ANSWER('planner')]: FRESH }
     const { killed, clock } = await start($, on, { rows, mtimes })
     await clock.advance(300_000)
     expect(killed).toEqual([])
@@ -806,36 +827,66 @@ describe('pane tools: in the mod', () => {
 })
 
 describe('herdr reaper', () => {
-  const agents = (state: string, gone: boolean) => JSON.stringify({ result: { agents: [
-    { name: 'lead', pane_id: 'w1:p1', agent: 'claude', agent_status: 'working', state_change_seq: 1, tab_id: 'w1:t1', workspace_id: 'w1' },
-    ...(gone ? [] : [{ name: 'agt-r9-executor', pane_id: 'w1:p2', agent: 'claude', agent_status: state, state_change_seq: 4, tab_id: 'w1:t1', workspace_id: 'w1' }]),
-  ] } })
+  const FRESH = Number.MAX_SAFE_INTEGER
+  const LEAD = { name: 'lead', pane_id: 'w1:p1', agent: 'claude', agent_status: 'working', state_change_seq: 1, tab_id: 'w1:t1', workspace_id: 'w1' }
+  const pane = (name: string, id: string, state: string) => ({ name, pane_id: id, agent: 'claude', agent_status: state, state_change_seq: 4, tab_id: 'w1:t1', workspace_id: 'w1' })
+  const ANSWER = '/h/.agentille/state/run-r9/agents/pane-executor.md'
 
-  // session.start polls once and starts the 5 s poll; `closed` collects `herdr pane close` ids
-  const lead = async ($: any, on: any, state: string) => {
+  // session.start polls once and starts the 5 s poll; `closed` collects `herdr pane close` ids, `files` maps a path to its
+  // mtime (the files named up front are written in the far future, so always fresh), `agents` is what `herdr agent list`
+  // shows (a test flips a pane's agent_status), `toasts` every toast, `sent` every session.send.
+  const lead = async ($: any, on: any, state: string, files: string[] = [ANSWER]) => {
     const closed: string[] = []
+    const toasts: string[] = []
+    const sent: any[] = []
+    const mtimes = new Map(files.map((f) => [f, FRESH]))
+    const agents = [pane('agt-r9-executor', 'w1:p2', state)]
+    let splits = 3
+    let reuse: string | null = null
     on('env.get', async ($: any, e: any) => ({ value: ({ HERDR_ENV: '1', HERDR_PANE_ID: 'w1:p1', HOME: '/h' } as any)[e.name] }))
     on('session.start', async ($: any, e: any) => ({ cwd: e.cwd }))
+    on('session.id', async () => ({ value: 'lead-sid' }))
+    on('session.cwd', async () => ({ value: '/work/repo' }))
     on('command.register', async () => ({ value: undefined }))
     on('tool.register', async () => ({ value: undefined }))
-    on('ui.toast', async () => ({ value: undefined }))
+    on('ui.toast', async ($: any, e: any) => { toasts.push(e.text); return { value: undefined } })
     on('fs.read', async () => ({ deny: 'no profile' }))
+    on('fs.exists', async () => ({ value: false }))
+    on('fs.stat', async ($: any, e: any) => (mtimes.has(e.path) ? { value: { kind: 'file', size: 0, mtimeMs: mtimes.get(e.path), isLink: false } } : { deny: 'ENOENT' }))
     on('store.get', async () => ({ value: undefined }))
+    on('session.send', async ($: any, e: any) => { sent.push(e); return { isDelivered: true } })
+    on('session.receive', async ($: any, e: any) => ({ text: e.text }) as never)
     on('turn.start', async ($: any, e: any) => ({ turnId: e.turnId }))
     on('turn.complete', async ($: any, e: any) => ({ text: e.answer }))
+    on('ui.render', async () => ({ type: 'engine', ref: 0 }) as never)
     on('process.run', async ($: any, e: any) => {
       const cmd = e.argv.join(' ')
-      if (cmd.startsWith('herdr pane close')) closed.push(e.argv[3])
-      return { value: { exitCode: 0, stdout: cmd.startsWith('herdr agent list') ? agents(state, closed.length > 0) : '', stderr: '' } }
+      let stdout = ''
+      if (cmd.startsWith('herdr agent list')) stdout = JSON.stringify({ result: { agents: [LEAD, ...agents] } })
+      if (cmd.startsWith('herdr pane split')) {
+        stdout = JSON.stringify({ result: { pane: { pane_id: reuse ?? 'w1:p' + splits++ } } })
+        reuse = null
+      }
+      if (cmd.startsWith('herdr agent start')) agents.push(pane(e.argv[3], e.argv[7], 'working'))
+      if (cmd.startsWith('herdr pane close')) {
+        closed.push(e.argv[3])
+        const i = agents.findIndex((a) => a.pane_id === e.argv[3])
+        if (i >= 0) agents.splice(i, 1)
+      }
+      return { value: { exitCode: 0, stdout, stderr: '' } }
     })
     const clock = mock.clock(on, { now: 1_000_000 })
     await $.session.start({ cwd: '/w', surface: null, isInteractive: false })
-    return { closed, clock }
+    return { closed, clock, toasts, sent, files: mtimes, agents, reuseId: (id: string) => { reuse = id } }
   }
   const begin = ($: any) => $.turn.start({ text: 'go', turnId: 't1' })
   const end = ($: any) => $.turn.complete({ answer: 'ok', durationMs: 10, isAborted: false, turnId: 't1', reason: 'answer' })
+  // A role can be respawned (a fix, a retry): the second pane of agt-r9-executor is a new worker.
+  const respawn = ($: any) => $.tool.call({ tool: 'mcp__agentille__spawn_pane', run: 'r9', role: 'executor', task: 'redo the filter, tests first', agent: 'executor', header: '[agt run=r9 size=small mode=build]' })
+  const finish = (l: any, id: string) => { l.agents.find((a: any) => a.pane_id === id).agent_status = 'done' }
+  const flagged = (l: any) => l.toasts.filter((t: string) => t.includes('agt-r9-executor done, not harvested')).length
 
-  test('idle reaps only between lead turns, done reaps at 90 s', async ($, on) => {
+  test('idle reaps only between lead turns, done reaps at 90 s (answer harvested)', async ($, on) => {
     const idle = await lead($, on, 'idle')
     await begin($)
     await idle.clock.advance(400_000)
@@ -845,13 +896,158 @@ describe('herdr reaper', () => {
     expect(idle.closed).toEqual(['w1:p2'])
   })
 
-  test('a done pane is reaped at 90 s even while the lead works', async ($, on) => {
+  test('a done pane is reaped at 90 s even while the lead works (answer harvested)', async ($, on) => {
     const done = await lead($, on, 'done')
     await begin($)
     await done.clock.advance(85_000)
     expect(done.closed).toEqual([])
     await done.clock.advance(10_000)
     expect(done.closed).toEqual(['w1:p2'])
+  })
+
+  test('a done pane whose answer was never harvested stays open and is flagged once', async ($, on) => {
+    const done = await lead($, on, 'done', [])
+    await done.clock.advance(600_000)
+    expect(done.closed).toEqual([])
+    expect(done.toasts.filter((t) => t.includes('agt-r9-executor done, not harvested'))).toHaveLength(1)
+  })
+
+  test('an unharvested idle pane is not reaped between turns either, and the flag says idle', async ($, on) => {
+    const idle = await lead($, on, 'idle', [])
+    await idle.clock.advance(900_000)
+    expect(idle.closed).toEqual([])
+    expect(idle.toasts.filter((t) => t.includes('agt-r9-executor idle, not harvested'))).toHaveLength(1)
+    expect(idle.toasts.filter((t) => t.includes('done, not harvested'))).toEqual([])
+  })
+
+  test('the pane is reaped once its answer file appears', async ($, on) => {
+    const done = await lead($, on, 'done', [])
+    await done.clock.advance(200_000)
+    expect(done.closed).toEqual([])
+    done.files.set(ANSWER, FRESH)
+    await done.clock.advance(10_000)
+    expect(done.closed).toEqual(['w1:p2'])
+  })
+
+  test('a wire done message from the pane counts as harvested', async ($, on) => {
+    const done = await lead($, on, 'done', [])
+    await done.clock.advance(100_000)
+    expect(done.closed).toEqual([])
+    await $.session.receive({ text: '[agt wire] agt-r9-executor done · 0:10\nBuilt it', origin: { kind: 'peer' } } as never)
+    await done.clock.advance(10_000)
+    expect(done.closed).toEqual(['w1:p2'])
+  })
+
+  test('the lead wakes itself once when a pane finishes without a wire message', async ($, on) => {
+    const done = await lead($, on, 'done', [])
+    await done.clock.advance(15_000)
+    expect(done.sent).toEqual([])
+    await done.clock.advance(10_000)
+    expect(done.sent).toHaveLength(1)
+    expect(JSON.stringify(done.sent[0].to)).toContain('lead-sid')
+    expect(done.sent[0].text).toContain('agt-r9-executor finished and has not reported')
+    expect(done.sent[0].text).toContain('herdr agent read agt-r9-executor --source recent-unwrapped --lines 200')
+    await done.clock.advance(300_000)
+    expect(done.sent).toHaveLength(1)
+  })
+
+  test('a blocked pane waits on the person: no wake, until it finishes without reporting', { timeoutMs: 30_000 }, async ($, on) => {
+    const l = await lead($, on, 'blocked', [])
+    await l.clock.advance(60_000)
+    expect(l.sent).toEqual([])
+    finish(l, 'w1:p2')
+    await l.clock.advance(15_000)
+    expect(l.sent).toEqual([])
+    await l.clock.advance(10_000)
+    expect(l.sent).toHaveLength(1)
+    expect(l.sent[0].text).toContain('agt-r9-executor finished and has not reported')
+    expect(l.sent[0].text).not.toContain('blocked')
+    await l.clock.advance(300_000)
+    expect(l.sent).toHaveLength(1)
+  })
+
+  test('a working pane never wakes the lead', async ($, on) => {
+    const w = await lead($, on, 'working', [])
+    await w.clock.advance(120_000)
+    expect(w.sent).toEqual([])
+  })
+
+  test('a wire done message inside the window means no self-wake', async ($, on) => {
+    const done = await lead($, on, 'done', [])
+    await done.clock.advance(10_000)
+    await $.session.receive({ text: '[agt wire] agt-r9-executor done · 0:10\nBuilt it', origin: { kind: 'peer' } } as never)
+    await done.clock.advance(60_000)
+    expect(done.sent).toEqual([])
+  })
+
+  test('the band shows the stranded pane as a flag', async ($, on) => {
+    const done = await lead($, on, 'done', [])
+    await done.clock.advance(100_000)
+    const ui = await $.ui.mount({ plugin: 'agentille', surface: 'terminal', component: 'AbovePrompt', props: { hasSurvey: false, isWorking: false, maxRows: 10, bodyColumns: 100 } as never })
+    expect(await ui.find({ type: 'Text', text: /⚑ agt-r9-executor done, not harvested/ })).toBeDefined()
+    await ui.unmount()
+  })
+
+  test('a respawned role starts unharvested: woken, flagged and kept open like any new pane', { timeoutMs: 30_000 }, async ($, on) => {
+    const l = await lead($, on, 'done', [])
+    await l.clock.advance(25_000)
+    expect(l.sent).toHaveLength(1)
+    await l.clock.advance(70_000)
+    expect(flagged(l)).toBe(1)
+    expect((await $.tool.call({ tool: 'mcp__agentille__close_pane', name: 'agt-r9-executor' })).result).toBe('Closed agt-r9-executor.')
+    expect(l.closed).toEqual(['w1:p2'])
+    expect((await respawn($)).result).toMatch(/^Opened agt-r9-executor/)
+    finish(l, 'w1:p3')
+    await l.clock.advance(25_000)
+    expect(l.sent).toHaveLength(2)
+    await l.clock.advance(70_000)
+    expect(flagged(l)).toBe(2)
+    expect(l.closed).toEqual(['w1:p2'])
+  })
+
+  test('a respawn after a wire report is not taken for reported: it wakes the lead if it goes quiet', { timeoutMs: 30_000 }, async ($, on) => {
+    const l = await lead($, on, 'done', [])
+    await $.session.receive({ text: '[agt wire] agt-r9-executor done · 0:10\nBuilt it', origin: { kind: 'peer' } } as never)
+    await l.clock.advance(100_000)
+    expect(l.closed).toEqual(['w1:p2'])
+    expect(l.sent).toEqual([])
+    expect((await respawn($)).result).toMatch(/^Opened agt-r9-executor/)
+    finish(l, 'w1:p3')
+    await l.clock.advance(25_000)
+    expect(l.sent).toHaveLength(1)
+    expect(l.sent[0].text).toContain('agt-r9-executor finished and has not reported')
+    await l.clock.advance(70_000)
+    expect(l.closed).toEqual(['w1:p2'])
+  })
+
+  test('the earlier pane\'s answer file does not harvest the respawn, a fresh one does', { timeoutMs: 30_000 }, async ($, on) => {
+    const l = await lead($, on, 'done', [])
+    l.files.set(ANSWER, l.clock.now()) // the first worker saved its answer as it finished
+    await l.clock.advance(100_000)
+    expect(l.closed).toEqual(['w1:p2'])
+    expect((await respawn($)).result).toMatch(/^Opened agt-r9-executor/)
+    finish(l, 'w1:p3')
+    await l.clock.advance(100_000)
+    expect(l.closed).toEqual(['w1:p2'])
+    expect(flagged(l)).toBe(1)
+    expect(l.sent.at(-1).text).not.toContain('saved at')
+    expect(l.sent.at(-1).text).toContain('Read it with:')
+    l.files.set(ANSWER, l.clock.now() + 1) // the second worker saves its own
+    await l.clock.advance(10_000)
+    expect(l.closed).toEqual(['w1:p2', 'w1:p3'])
+  })
+
+  test('a pane id the multiplexer hands out again is a new pane: the old sighting is forgotten', { timeoutMs: 30_000 }, async ($, on) => {
+    const l = await lead($, on, 'done', [])
+    l.files.set(ANSWER, l.clock.now())
+    await l.clock.advance(100_000)
+    expect(l.closed).toEqual(['w1:p2'])
+    l.reuseId('w1:p2')
+    expect((await respawn($)).result).toMatch(/^Opened agt-r9-executor/)
+    finish(l, 'w1:p2')
+    await l.clock.advance(100_000)
+    expect(l.closed).toEqual(['w1:p2'])
+    expect(flagged(l)).toBe(1)
   })
 })
 
@@ -916,5 +1112,14 @@ describe('advisor opt-out', () => {
     const env = advisorEnv('opus', { advisorOnOpus: false })
     expect(tmuxSplitArgv({ target: '%1', cwd: '/w', run: 'ab12cd', shell: '/bin/zsh', model: 'opus', name: 'agt-ab12cd-planner', task: 't', env })).toContain('CLAUDE_CODE_DISABLE_ADVISOR_TOOL=1')
     expect(herdrSplitArgv({ pane: 'p1', cwd: '/w', run: 'ab12cd', model: 'opus', env })).toContain('CLAUDE_CODE_DISABLE_ADVISOR_TOOL=1')
+  })
+})
+
+import { CLOSE_TOOL as closeTool, SPAWN_TOOL as spawnTool } from '../../hooks/panes.js'
+
+describe('panes: tools load eagerly', () => {
+  test('spawn_pane and close_pane are never deferred behind tool search', async () => {
+    expect(spawnTool.isDeferred).toBe(false)
+    expect(closeTool.isDeferred).toBe(false)
   })
 })

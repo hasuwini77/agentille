@@ -1,0 +1,41 @@
+schema_version: "1.0"
+name: parallel-slices
+description: Two disjoint slices are not routed to solo and run in parallel.
+tags: [routing, parallel]
+runs: 3
+expected_outcome: recon is panes, workflow or subagent (never solo); roster has two executor entries and a code-reviewer; the slices run in parallel.
+execution:
+  prompt: '/agt "add a CSV export endpoint in api/export.ts, and separately add a dark-mode toggle component in web/Toggle.tsx"'
+  max_turns: 10
+  timeout_seconds: 240
+  allowed_tools: [Read, Glob, Grep]
+  append_system_prompt: |
+    Dispatch-decision eval for the agentille /agt skill. Follow /agt only as far as its routing decision, then stop.
+    - Treat ~/.agentille/profile.json as missing: use the documented defaults.
+    - The working directory is an empty sandbox. Treat every file, directory and tool the task names as present; do not explore to confirm them.
+    - Never ask a question; take the recommended default.
+    - If routing reaches Stage 2, classify it yourself inline.
+    - Do not dispatch agents, open panes, start a workflow, write or edit files, or create a run directory.
+    End with one final message of exactly four plain-text lines: no numbering, no bullets, no bold, no code fence, nothing before or after. Each line starts with its keyword:
+    the recon line, as display.md defines it, starting with recon:
+    roster: then every agentille role this run would dispatch, in order, each as <role> <model>·<effort> per routing.md, comma-separated, one entry per executor slice, or the word none when the mode is solo
+    header: then the [agt …] dispatch header you would send
+    formation: then none, duel, gauntlet or relay, then " · " and why
+graders:
+  - name: recon-not-solo-family
+    type: regex
+    target: last_message
+    pattern: '^recon:\s*(panes|workflow|subagent)\b'
+    flags: m
+    weight: 2
+  - name: recon-not-solo
+    type: regex
+    target: last_message
+    pattern: '^recon:\s*solo\b'
+    flags: m
+    match: not_contains
+  - name: two-parallel-slices
+    type: llm
+    focus: last_message
+    criteria: >-
+      The roster has two executor entries (one per slice) and a code-reviewer, and the recon reason or the roster shows the two slices run in parallel (panes, a workflow or subagent waves), not one after the other as a single slice.

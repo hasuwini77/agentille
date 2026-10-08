@@ -1,0 +1,35 @@
+schema_version: "1.0"
+name: solo-one-liner
+description: A one-sentence typo fix with no risk words routes to solo with no agents.
+tags: [routing, solo]
+runs: 3
+expected_outcome: recon names solo and the roster is none.
+execution:
+  prompt: '/agt "fix the typo recieve -> receive in the README heading"'
+  max_turns: 10
+  timeout_seconds: 240
+  allowed_tools: [Read, Glob, Grep]
+  append_system_prompt: |
+    Dispatch-decision eval for the agentille /agt skill. Follow /agt only as far as its routing decision, then stop.
+    - Treat ~/.agentille/profile.json as missing: use the documented defaults.
+    - The working directory is an empty sandbox. Treat every file, directory and tool the task names as present; do not explore to confirm them.
+    - Never ask a question; take the recommended default.
+    - If routing reaches Stage 2, classify it yourself inline.
+    - Do not dispatch agents, open panes, start a workflow, write or edit files, or create a run directory.
+    End with one final message of exactly four plain-text lines: no numbering, no bullets, no bold, no code fence, nothing before or after. Each line starts with its keyword:
+    the recon line, as display.md defines it, starting with recon:
+    roster: then every agentille role this run would dispatch, in order, each as <role> <model>·<effort> per routing.md, comma-separated, one entry per executor slice, or the word none when the mode is solo
+    header: then the [agt …] dispatch header you would send
+    formation: then none, duel, gauntlet or relay, then " · " and why
+graders:
+  - name: recon-solo
+    type: regex
+    target: last_message
+    pattern: '^recon:\s*solo\b'
+    flags: m
+    weight: 2
+  - name: roster-none
+    type: regex
+    target: last_message
+    pattern: '^roster:\s*none\b'
+    flags: mi

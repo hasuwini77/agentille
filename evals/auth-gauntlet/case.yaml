@@ -1,0 +1,55 @@
+schema_version: "1.0"
+name: auth-gauntlet
+description: An auth task is risk=auth with a security-reviewer at opus max and the gauntlet formation.
+tags: [routing, risk, formation]
+runs: 3
+expected_outcome: header has risk=auth; roster has security-reviewer at opus max and an adversary; formation is gauntlet; recon cites Stage 2 or classify.
+execution:
+  prompt: '/agt "add password reset with emailed one-time tokens to the login flow; tests run with npm test (vitest)"'
+  max_turns: 10
+  timeout_seconds: 240
+  allowed_tools: [Read, Glob, Grep]
+  append_system_prompt: |
+    Dispatch-decision eval for the agentille /agt skill. Follow /agt only as far as its routing decision, then stop.
+    - Treat ~/.agentille/profile.json as missing: use the documented defaults.
+    - The working directory is an empty sandbox. Treat every file, directory and tool the task names as present; do not explore to confirm them.
+    - Never ask a question; take the recommended default.
+    - If routing reaches Stage 2, classify it yourself inline.
+    - Do not dispatch agents, open panes, start a workflow, write or edit files, or create a run directory.
+    End with one final message of exactly four plain-text lines: no numbering, no bullets, no bold, no code fence, nothing before or after. Each line starts with its keyword:
+    the recon line, as display.md defines it, starting with recon:
+    roster: then every agentille role this run would dispatch, in order, each as <role> <model>·<effort> per routing.md, comma-separated, one entry per executor slice, or the word none when the mode is solo
+    header: then the [agt …] dispatch header you would send
+    formation: then none, duel, gauntlet or relay, then " · " and why
+graders:
+  - name: header-risk-auth
+    type: regex
+    target: last_message
+    pattern: '^header:.*risk=auth'
+    flags: m
+  - name: roster-has-security-reviewer
+    type: regex
+    target: last_message
+    pattern: '^roster:.*security-reviewer'
+    flags: m
+    weight: 2
+  - name: security-reviewer-opus-max
+    type: regex
+    target: last_message
+    pattern: 'security-reviewer\W{1,3}opus\W{1,3}max'
+    flags: i
+  - name: formation-gauntlet
+    type: regex
+    target: last_message
+    pattern: '^formation:\s*gauntlet\b'
+    flags: mi
+  - name: roster-has-adversary
+    type: regex
+    target: last_message
+    pattern: '^roster:.*adversary'
+    flags: m
+  - name: recon-cites-stage2
+    type: regex
+    target: last_message
+    pattern: '^recon:.*(stage 2|classif)'
+    flags: mi

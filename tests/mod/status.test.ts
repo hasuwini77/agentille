@@ -5,6 +5,10 @@ import { pin, statusText } from '../../hooks/status.js'
 const base = { run: 'r1', subs: 2, panes: 1, done: 3, tok: 12_300, usd: null, ctxPct: null, lastLeftAt: 0, now: 1000 }
 
 describe('status: the line', () => {
+  test('a plain subagent outside /agt pins nothing', async () => {
+    expect(statusText({ ...base, run: 'adhoc' })).toBe(undefined)
+  })
+
   test('counts, tokens, then the measured session cost and context when known', async () => {
     expect(statusText(base)).toBe('agt r1 · ◇2 ▣1 working · 3 done · 12.3k tok')
     expect(statusText({ ...base, usd: 1.5, ctxPct: 41.6 })).toBe('agt r1 · ◇2 ▣1 working · 3 done · 12.3k tok · $1.50 session · ctx 42%')

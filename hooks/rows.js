@@ -22,7 +22,7 @@ export function agentRow(a, { now, tick = 0 } = {}) {
     spinner: r.spinner.trim(),
     activity: r.activity,
     time: r.time.trim(),
-    tok: r.tok == null ? '' : r.tok.trim() + ' tok',
+    tok: r.tok?.trim() ? r.tok.trim() + ' tok' : '',
     dim: r.dim,
   }
 }

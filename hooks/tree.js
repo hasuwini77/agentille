@@ -7,6 +7,9 @@ import { roleOf } from './routing.js'
 
 const ENDED = new Set(['completed', 'failed', 'killed'])
 const BROKEN = new Set(['failed', 'killed'])
+// A workflow agent unheard from this long is over: a cancelled one raises no turn.complete, and no
+// list names it. One model request rarely runs past a few minutes; a tool call or step resets it.
+export const WORKFLOW_SILENT_MS = 10 * 60_000
 
 const typeName = (t) => String(t ?? 'agent').split(':').pop()
 
@@ -16,7 +19,8 @@ const typeName = (t) => String(t ?? 'agent').split(':').pop()
 export function adopt(live, list, { run, now }) {
   const added = []
   for (const item of list ?? []) {
-    if (!item?.id || live.has(item.id) || ENDED.has(item.status)) continue
+    // A fork the mod skips at spawn (register.js) stays skipped here.
+    if (!item?.id || live.has(item.id) || ENDED.has(item.status) || item.type === 'fork') continue
     const a = newAgent({ id: item.id, role: roleOf(item.type) ?? typeName(item.type), routed: false, model: null, effort: null, reason: null, run, now })
     a.parentId = item.parentId ?? null
     a.listStatus = item.status
@@ -47,6 +51,18 @@ export function applyStatus(live, list, now) {
     a.listed = true
     if (a.state !== 'working') continue
     if (BROKEN.has(item.status) || (a.adopted && (item.status === 'completed' || item.status === 'idle'))) { finish(a, now); changed = true }
+  }
+  return changed
+}
+
+// Finish every working workflow agent nothing has been heard from in WORKFLOW_SILENT_MS. Returns
+// whether any was.
+export function quietWorkflows(live, now) {
+  let changed = false
+  for (const a of live.values()) {
+    if (!a.workflow || a.state !== 'working' || now - (a.heard ?? a.start) < WORKFLOW_SILENT_MS) continue
+    finish(a, now)
+    changed = true
   }
   return changed
 }

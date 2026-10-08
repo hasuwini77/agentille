@@ -5,7 +5,7 @@
 
 import { DEFAULTS, decide, formationOf, parseHeader, roleOf, verdictOf } from './routing.js'
 import { addUsage, elapsed, endRoute, finish, isAgtPrompt, ledger, ledgerText, newAgent, paneAgents, panesLeft, reapPlan, short, stage, waving } from './live.js'
-import { ACCENT, FRAME_COLOR, INK, WIRE_COLOR, boardRows, cast, castColumns, chip, colorOf, header, hex, leadLine, routingLines, tokenBars, toolLabel, wireLines, wireRow } from './board.js'
+import { ACCENT, FRAME_COLOR, INK, WIRE_COLOR, boardRows, cast, castColumns, chip, colorOf, header, hex, leadLine, routingLines, swarm, tokenBars, toolLabel, wireLines, wireRow } from './board.js'
 import { PUBLISH_MS, doneMessage, freshStatus, logWire, parseTellArgs, parseWire, shortName, statusKey, validLead, wakeDue, wakeMessage, wireEnv, workerStatus } from './wire.js'
 import { activeSquads, allPaths, depsOf, injection } from './squads.js'
 import { BYE_MS, HELLO_MS, MASCOT_COLOR, MODEL_COLOR, agentMood, caption, frame, modelKey, moodAt, parseWorker } from './mascot.js'
@@ -17,7 +17,7 @@ import {
   advisorEnv, tmuxSplitArgv, tmuxTagArgvs, transportBlock,
 } from './panes.js'
 import { cacheDirOf, compareVersions, newerInstalled, skewMessage } from './skew.js'
-import { adopt, applyStatus, nest } from './tree.js'
+import { adopt, applyStatus, nest, quietWorkflows } from './tree.js'
 import { registerRows } from './rows.js'
 import { registerStatus } from './status.js'
 import { registerAutocomplete } from './autocomplete.js'
@@ -90,6 +90,14 @@ const ctx = {
   get routes() { return paneRoutes },
   get isLead() { return !worker && !selfName },
   onTick: [], // (io, ctx, now) callbacks the redraw ticker calls each period; a module adds its own while registering
+}
+
+// A workflow agent is in no agent list, and a cancelled one raises no turn.complete: it is marked,
+// and every event of its loop says it is still alive (tree.js quietWorkflows ends a silent one).
+function heard(a, e) {
+  if (e.workflow) a.workflow = e.workflow.runId || true
+  a.heard = Date.now()
+  return a
 }
 
 function runState(id) {
@@ -178,6 +186,7 @@ async function refreshAgents($, at) {
   listBusy = true
   listAt = now
   try {
+    if (quietWorkflows(live, Date.now())) $.ui.invalidate('ui.render')
     let list
     try {
       list = await $.agent.list()
@@ -559,6 +568,19 @@ function boardHeader(els, h) {
   })
 }
 
+// The whole run in one line, by phase: plan ✓ · build ◆◇ · review ◆◆◆✓ · 3/7 done.
+function swarmLine(els, s) {
+  const { Text } = els
+  const parts = []
+  s.lanes.forEach((l, i) => {
+    parts.push(Text({ dimColor: true, children: [(i ? '  ' : '') + l.phase + ' '] }))
+    for (const c of l.cells) parts.push(Text({ color: c.color, dimColor: c.dim, children: [c.glyph] }))
+    if (l.more) parts.push(Text({ dimColor: true, children: ['+' + l.more] }))
+  })
+  parts.push(Text({ dimColor: true, children: ['  ' + s.done + '/' + s.total + ' done'] }))
+  return Text({ wrap: 'truncate', children: parts })
+}
+
 function leadRow(els, l) {
   const { Text } = els
   return Text({ wrap: 'truncate', children: [Text({ color: l.color, children: ['◉ '] }), l.text, Text({ dimColor: true, children: ['  ' + l.state] })] })
@@ -685,7 +707,7 @@ export function register(on) {
 
   on('command.run', { command: 'agt-routing' }, async () => {
     if (decisions.length === 0) return { text: 'No agentille dispatches this session.' }
-    return { text: decisions.slice(-30).map((d) => d.role + ' → ' + d.model + ' · ' + d.effort + (d.reason === 'table' ? '' : '  (' + d.reason + ')') + (d.kind === 'pane' ? ' · pane' : '')).join('\n') }
+    return { text: decisions.slice(-30).map((d) => d.role + ' → ' + d.model + (d.effort ? ' · ' + d.effort : '') + (d.reason === 'table' ? '' : '  (' + d.reason + ')') + (d.kind === 'pane' ? ' · pane' : '')).join('\n') }
   })
 
   // Typed only: a plugin, a scheduled task or a notification never opens a pane.
@@ -843,7 +865,10 @@ export function register(on) {
   on('tool.call', async ($, e, next) => {
     if (e.agentId) {
       const a = live.get(e.agentId)
-      if (a) a.tool = toolLabel(e.tool, e)
+      if (a) {
+        a.tool = toolLabel(e.tool, e)
+        a.heard = Date.now()
+      }
     } else if (wireName) {
       pub.tool = toolLabel(e.tool, e)
       void publish($).catch(() => {})
@@ -863,13 +888,36 @@ export function register(on) {
 
     if (!role) {
       const res = await next(e)
-      if (res.agentId) live.set(res.agentId, newAgent({ id: res.agentId, role: shortType(e.subagentType), routed: false, model: res.model, effort: null, reason: null, run: lastRun, now: Date.now(), parentId: e.parentAgentId ?? null }))
+      if (res.agentId) live.set(res.agentId, heard(newAgent({ id: res.agentId, role: shortType(e.subagentType), routed: false, model: res.model, effort: null, reason: null, run: lastRun, now: Date.now(), parentId: e.parentAgentId ?? null }), e))
       ensureTicker($)
       $.ui.invalidate('ui.render')
       return res
     }
 
     const hdr = parseHeader(e.prompt) ?? {}
+    // A workflow script's agent: the engine ignores a rewrite there (and logs a failure line), so
+    // it runs on the model the script chose. Log that model, not the table's, and flag a mismatch.
+    if (e.workflow) {
+      // Its prompt may carry no header: it then joins the run in progress rather than reset it.
+      const runId = SAFE_RUN.test(hdr.run ?? '') ? hdr.run : lastRun
+      const run = runState(runId)
+      lastRun = runId
+      agtTurn = true
+      const d = decide({ role, hdr, run, depth, settings, weeklyPct })
+      const res = await next(e)
+      if (res.deny) return res
+      const off = short(res.model) !== short(d.model)
+      if (res.agentId) live.set(res.agentId, heard(newAgent({ id: res.agentId, role, routed: false, model: res.model, effort: null, reason: null, run: runId, now: Date.now(), parentId: e.parentAgentId ?? null }), e))
+      const rec = { at: new Date().toISOString(), role, model: res.model, effort: null, reason: off ? 'workflow, table says ' + d.model + ' · ' + d.effort : 'workflow', asked: e.model ?? null, agentId: res.agentId ?? null, kind: 'workflow' }
+      decisions.push(rec)
+      run.log.push(JSON.stringify(rec))
+      await writeRunFile($, runId, 'routing.jsonl', run.log.join('\n') + '\n')
+      ensureTicker($)
+      if (off) $.ui.toast('agt workflow ' + role + ' runs ' + short(res.model) + ' — table says ' + d.model + ' · ' + d.effort)
+      $.ui.invalidate('ui.render')
+      return res
+    }
+
     const runId = SAFE_RUN.test(hdr.run ?? '') ? hdr.run : 'adhoc'
     agtTurn = true
     lastRun = runId
@@ -909,6 +957,7 @@ export function register(on) {
       await publish($)
     }
     if (a) {
+      a.heard = Date.now()
       if (!a.effort && e.effort) a.effort = String(e.effort)
       if (!a.model && e.model) a.model = e.model
       addUsage(a, result?.usage)
@@ -995,9 +1044,11 @@ export function register(on) {
     const rows = nest(cast(staged, live, lastRun))
     const cols = (e.props.bodyColumns ?? 80) - 4
     const view = boardRows(rows, { now, tick, cols, wire: wireStatus, transport, view: e.props.view?.agentId ?? null })
-    const room = Math.max(1, (e.props.maxRows ?? 10) - 4 - kids.length - (wire ? 1 : 0))
+    const sw = swarm({ agents: live, routes: paneRoutes, run: lastRun, tick })
+    const room = Math.max(1, (e.props.maxRows ?? 10) - 4 - kids.length - (wire ? 1 : 0) - (sw ? 1 : 0))
     const waiting = rows.filter((r) => r.state === 'working').length
     const inner = [boardHeader(els, header({ run: lastRun, formation: runs.get(lastRun)?.formation, squads: squads.map((q) => q.name), rows, tally: staged.tally }))]
+    if (sw) inner.push(swarmLine(els, sw))
     if (rows.length) inner.push(leadRow(els, leadLine({ model: leadModel, busy: e.props.isWorking, waiting })))
     const shown = view.slice(0, room)
     const argvs = shown.map((r) => (r.pane ? focusArgv(transport, rows.find((x) => x.id === r.id)) : null))

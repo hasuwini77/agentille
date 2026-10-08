@@ -239,6 +239,8 @@ async function answerOf($, p) {
   if (!n) return null
   const own = answerFile(home, n.run, n.role, paneKey(p.id))
   if (await freshAnswer($, own, p)) return own
+  // Known limit: two keyless twins (an older worker's one legacy file) cannot be told apart, so with two panes of the
+  // name neither is harvested by it and both stay flagged.
   if (panes.filter((q) => q.name === p.name).length !== 1) return null
   const legacy = answerFile(home, n.run, n.role)
   return (await freshAnswer($, legacy, p)) ? legacy : null
@@ -534,7 +536,7 @@ async function saveAnswer($, name, answer) {
   const n = splitName(name)
   if (!n || !answer || !home) return null
   // One file per pane instance, named by this pane's id, so a respawned role cannot overwrite or be read as its predecessor.
-  const pane = transport === 'tmux' ? await $.env.get('TMUX_PANE') : await $.env.get('HERDR_PANE_ID')
+  const pane = (await $.env.get('HERDR_PANE_ID')) ?? (await $.env.get('TMUX_PANE'))
   const file = answerFile(home, n.run, n.role, paneKey(pane))
   if (!file) return null
   await writeRunFile($, n.run, 'agents/' + file.split('/').pop(), answer)
@@ -762,8 +764,12 @@ export function register(on) {
     } catch (err) {
       return { deny: 'Could not open a ' + t + ' pane: ' + String(err?.message ?? err).slice(0, 160) }
     }
-    // A role can be respawned (a fix, a retry). Harvest state is keyed by pane id, so the new pane starts with
-    // nothing harvested and only files written after the poll below first lists it count as its own.
+    // A role can be respawned (a fix, a retry), and the multiplexer can hand the old pane's id out again. Harvest state is
+    // keyed by pane id and the list call above may have failed, so wipe whatever the id carries: the new pane starts with
+    // nothing harvested and only files written from now on count as its own.
+    firstSeen.set(id, await $.clock.now())
+    for (const s of [harvested, wireDone, woken, strandedToasted]) s.delete(id)
+    paneSeen.delete(id)
     run.fixes = fixes
     if (d.fable) {
       run.fable += 1
@@ -847,7 +853,7 @@ export function register(on) {
     if (w) {
       const from = shortName(w.from)
       // Only the pane whose key the message names: a stale list or a respawned role must not harvest the older pane.
-      const hit = w.kind === 'done' && w.key ? panes.find((p) => paneKey(p.id) === w.key) : null
+      const hit = w.kind === 'done' && w.key ? panes.find((p) => paneKey(p.id) === w.key && p.name === w.from) : null
       if (hit) { harvested.add(hit.id); wireDone.add(hit.id) }
       logWire(wireLog, { from, to: wireName ? shortName(wireName) : 'lead', kind: w.kind, summary: w.summary, at: Date.now() })
       $.ui.toast('⇄ ' + from + ' ' + w.kind)

@@ -112,6 +112,14 @@ describe('wire: in the mod', () => {
     expect(parseWire(sent[0].text)?.key).toBe('w1-p7')
   })
 
+  test('a worker names its file by whichever pane id its env holds, whatever the transport', async ($, on) => {
+    const { sent, writes } = await boot($, on, { AGENTILLE_WORKER: 'executor:sonnet:high', AGENTILLE_NAME: 'agt-r1-exec-1', AGENTILLE_LEAD: 'lead-sid', TMUX_PANE: '%5' })
+    await $.turn.start({ text: 'go', turnId: 't1' } as never)
+    await $.turn.complete({ answer: 'Slice built', durationMs: 10, isAborted: false, turnId: 't1', reason: 'answer' } as never)
+    expect(writes['/h/.agentille/state/run-r1/agents/pane-exec-1.5.md']).toBe('Slice built')
+    expect(parseWire(sent[0].text)?.key).toBe('5')
+  })
+
   test('a worker tool call does not wait on the status publish', async ($, on) => {
     let release: () => void = () => {}
     let gate = false

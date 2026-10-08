@@ -1,5 +1,5 @@
 import { describe, expect, mock, test } from 'claude-code/testing'
-import { DONE_GRACE_MS, IDLE_GRACE_MS, isAgtPrompt, ledger, newAgent, addUsage, finish, paneAgents, reapable, reapPlan, panesLeft, withRoute, endRoute, stage, ledgerText } from '../../hooks/live.js'
+import { DONE_GRACE_MS, IDLE_GRACE_MS, isAgtPrompt, ledger, newAgent, addUsage, finish, paneAgents, reapPlan, panesLeft, withRoute, endRoute, stage, ledgerText } from '../../hooks/live.js'
 import { activeSquads, depsOf, injection } from '../../hooks/squads.js'
 import { BYE_MS } from '../../hooks/mascot.js'
 
@@ -22,29 +22,29 @@ describe('live', () => {
     const ok = () => true
     const seen = new Map()
     const p = paneAgents(herdr, 'w1:p1')
-    expect(reapable(p, seen, 0, true, ok)).toEqual([])
-    expect(reapable(p, seen, DONE_GRACE_MS - 1, true, ok)).toEqual([])
-    expect(reapable(p, seen, DONE_GRACE_MS, true, ok).map((x) => x.id)).toEqual(['w1:p3'])
+    expect(reapPlan(p, seen, 0, true, ok).reap).toEqual([])
+    expect(reapPlan(p, seen, DONE_GRACE_MS - 1, true, ok).reap).toEqual([])
+    expect(reapPlan(p, seen, DONE_GRACE_MS, true, ok).reap.map((x) => x.id)).toEqual(['w1:p3'])
     const bumped = p.map((x) => (x.id === 'w1:p3' ? { ...x, seq: 6 } : x))
-    expect(reapable(bumped, seen, DONE_GRACE_MS + 1, true, ok)).toEqual([])
+    expect(reapPlan(bumped, seen, DONE_GRACE_MS + 1, true, ok).reap).toEqual([])
     const idle = [{ ...p[0], state: 'idle', seq: 4 }]
     const s2 = new Map()
-    reapable(idle, s2, 0, false, ok)
-    expect(reapable(idle, s2, IDLE_GRACE_MS - 1, false, ok)).toEqual([])
-    expect(reapable(idle, s2, IDLE_GRACE_MS, false, ok).length).toBe(1)
-    expect(reapable(idle, s2, IDLE_GRACE_MS * 10, true, ok)).toEqual([])
+    reapPlan(idle, s2, 0, false, ok)
+    expect(reapPlan(idle, s2, IDLE_GRACE_MS - 1, false, ok).reap).toEqual([])
+    expect(reapPlan(idle, s2, IDLE_GRACE_MS, false, ok).reap.length).toBe(1)
+    expect(reapPlan(idle, s2, IDLE_GRACE_MS * 10, true, ok).reap).toEqual([])
     const doneP = [{ ...p[1] }]
     const s3 = new Map()
-    reapable(doneP, s3, 0, true, ok)
-    expect(reapable(doneP, s3, DONE_GRACE_MS, true, ok).length).toBe(1)
+    reapPlan(doneP, s3, 0, true, ok)
+    expect(reapPlan(doneP, s3, DONE_GRACE_MS, true, ok).reap.length).toBe(1)
   })
 
   test('an unharvested pane is never reaped, however long it sits: it is stranded and flagged', async () => {
     const p = paneAgents(herdr, 'w1:p1')
     const seen = new Map()
     reapPlan(p, seen, 0)
-    expect(reapable(p, seen, DONE_GRACE_MS * 100)).toEqual([])
-    expect(reapable(p, seen, DONE_GRACE_MS * 100, true, () => false)).toEqual([])
+    expect(reapPlan(p, seen, DONE_GRACE_MS * 100).reap).toEqual([])
+    expect(reapPlan(p, seen, DONE_GRACE_MS * 100, true, () => false).reap).toEqual([])
     const plan = reapPlan(p, seen, DONE_GRACE_MS * 100)
     expect(plan.reap).toEqual([])
     expect(plan.stranded.map((x) => x.id)).toEqual(['w1:p3'])

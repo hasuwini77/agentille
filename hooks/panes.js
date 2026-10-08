@@ -117,7 +117,7 @@ export function quietSpawn(panes) {
 }
 
 // tmux rows → live.js pane agents. `done` maps pane name → whether a fresh done-file exists.
-// A pane is done when that holds or tmux says it is dead; seq is synthesized for reapable().
+// A pane is done when that holds or tmux says it is dead; seq is synthesized for reapPlan().
 export function tmuxPaneAgents(rows, selfPane, done) {
   return quietSpawn(scopeRows(rows, selfPane).map((r) => {
     const n = splitName(r.agt)

@@ -40,7 +40,7 @@ const wireDone = new Set()   // pane names whose wire done message reached this 
 const woken = new Set()      // pane names the lead already woke itself for
 const strandedNow = new Set()   // done/idle panes kept open because nothing was harvested from them
 const strandedToasted = new Set() // ... of which the person was told once
-const tmuxFirstSeen = new Map() // tmux pane id → when this session first listed it
+const firstSeen = new Map()  // pane id → when this session first listed it: a done-file or answer file older than that is a previous pane's
 let selfName = null          // this pane's name when it is an agt-* worker
 let worker = null            // { agent, model, effort } from AGENTILLE_WORKER: this session is a worker pane
 let selfTab = null           // herdr: the lead's own tab, where its workers split
@@ -214,9 +214,16 @@ const answerPath = (p) => {
   return home && n ? home + '/.agentille/state/run-' + n.run + '/agents/pane-' + n.role + '.md' : null
 }
 
+// The file counts only if it was written once this session knew the pane: a role can be respawned, and
+// the earlier pane's answer is not this worker's.
 async function hasAnswer($, p) {
   const file = answerPath(p)
-  return !!file && (await $.fs.exists(file).catch(() => false))
+  if (!file) return false
+  try {
+    return isFreshDone(await $.fs.stat(file), firstSeen.get(p.id))
+  } catch {
+    return false // missing or unreadable
+  }
 }
 
 async function isHarvested($, p) {
@@ -249,7 +256,7 @@ async function sweep($, pool, now, t, close) {
     strandedNow.add(p.name)
     if (strandedToasted.has(p.name)) continue
     strandedToasted.add(p.name)
-    $.ui.toast('agt ⚑ ' + p.name + ' done, not harvested')
+    $.ui.toast('agt ⚑ ' + p.name + ' ' + p.state + ', not harvested')
   }
   for (const p of plan.reap) {
     try {
@@ -277,10 +284,13 @@ async function pollHerdr($) {
   // Show the workspace's agt-* panes; reap only the lead's own tab, where herdr mode
   // splits its workers. Workers (panes that are themselves agt-*) never reap.
   panes = quietSpawn(paneAgents(list, selfPane).filter((p) => !me || p.workspace === me.workspace_id))
+  const now = await $.clock.now()
+  for (const p of panes) if (!firstSeen.has(p.id)) firstSeen.set(p.id, now)
+  for (const id of [...firstSeen.keys()]) if (!panes.some((p) => p.id === id)) firstSeen.delete(id)
   await notePaneExits($)
   if (me && !selfName) {
     const mine = panes.filter((p) => p.tab === me.tab_id)
-    await sweep($, reapPool(mine), await $.clock.now(), 'herdr', (p) => $.process.run(herdrCloseArgv(p.id)))
+    await sweep($, reapPool(mine), now, 'herdr', (p) => $.process.run(herdrCloseArgv(p.id)))
   }
   $.ui.invalidate('ui.render')
 }
@@ -356,15 +366,15 @@ async function pollTmux($) {
   // only if it was written after the pane was first listed.
   const now = await $.clock.now()
   const scoped = me ? scopeRows(rows, selfPane) : []
-  for (const r of scoped) if (!tmuxFirstSeen.has(r.id)) tmuxFirstSeen.set(r.id, now)
-  for (const id of [...tmuxFirstSeen.keys()]) if (!rows.some((r) => r.id === id)) tmuxFirstSeen.delete(id)
+  for (const r of scoped) if (!firstSeen.has(r.id)) firstSeen.set(r.id, now)
+  for (const id of [...firstSeen.keys()]) if (!rows.some((r) => r.id === id)) firstSeen.delete(id)
   const done = new Map()
   for (const r of scoped) {
     const n = splitName(r.agt)
     const file = n && n.role !== SPAWN_ROLE && !r.dead && doneFile(home, n.run, n.role)
     if (!file) continue
     try {
-      done.set(r.agt, isFreshDone(await $.fs.stat(file), tmuxFirstSeen.get(r.id)))
+      done.set(r.agt, isFreshDone(await $.fs.stat(file), firstSeen.get(r.id)))
     } catch {
       // missing or unreadable counts as not done
     }
@@ -615,7 +625,8 @@ export function register(on) {
     await $.command.register({ name: 'agt-highlight', description: 'Highlight replies: an essentials card, paths, versions and numbers lit. on (/agt only) · all · off', argumentHint: '[on|all|off]', immediate: true })
     await $.command.register({ name: 'agt-focus', description: 'Show agent flags above the prompt (a REVISE, a FAIL, a blocked pane). on · off', argumentHint: '[on|off]', immediate: true })
     if (transport !== 'none') {
-      // One look now: a lead restarted mid-run still reaps its leftover panes.
+      // One look now: a lead restarted mid-run sees its leftover panes. It reaps only those whose answer
+      // was written after this look; an older one is flagged "not harvested" and left to the person.
       await pollNow($, transport)
       if (panes.length) ensurePolling($)
       // The lead opens and closes its workers through the mod; a worker pane gets no fan-out of its own.
@@ -726,6 +737,9 @@ export function register(on) {
     } catch (err) {
       return { deny: 'Could not open a ' + t + ' pane: ' + String(err?.message ?? err).slice(0, 160) }
     }
+    // A role can be respawned (a fix, a retry): the new pane starts with nothing harvested. The poll
+    // below lists it for the first time, so only files written from then on count as its own.
+    for (const s of [harvested, wireDone, woken, strandedToasted]) s.delete(a.name)
     run.fixes = fixes
     if (d.fable) {
       run.fable += 1

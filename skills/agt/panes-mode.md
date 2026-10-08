@@ -43,7 +43,7 @@ Full answer: ~/.agentille/state/run-<run>/agents/pane-exec-1.md
 
 That message starts your next turn, so after spawning a wave, **end your turn**: no background `herdr agent wait` loop, no polling. Harvest from the message (read the file only when the head is not enough), then `close_pane`. A `blocked` worker needs the person, not you: the band flags it and Herdr notifies. The person can steer a worker with `/agt-tell <worker> <message>`.
 
-Still end your turn after the wave; the mod backs you up. It never closes a pane whose answer is unharvested (it flags it `⚑ <name> done, not harvested`), and if a pane finishes or blocks and no wire message arrives within ~20 s it sends you one `[agt wake]` message naming the pane and the read command (`herdr pane read <pane-id> --lines 200`, or `tmux capture-pane -p -t <id> -S -200`). Harvest from that, then `close_pane`. If a newer agentille is installed than the one this session runs, `spawn_pane` refuses (restart Claude Code first): an old session's workers cannot report.
+Still end your turn after the wave; the mod backs you up. It never closes a pane whose answer is unharvested (it flags it `⚑ <name> done, not harvested`, or `idle, not harvested`), and if a pane finishes or blocks and no wire message arrives within ~20 s it sends you one `[agt wake]` message naming the pane and the read command (`herdr pane read <pane-id> --lines 200`, or `tmux capture-pane -p -t <id> -S -200`). Harvest from that, then `close_pane`. If a newer agentille is installed than the one this session runs, `spawn_pane` refuses (restart Claude Code first): an old session's workers cannot report.
 
 No wire message within the slice's expected time (a worker without the mod, a crash): fall back to the read loop below.
 
@@ -85,7 +85,7 @@ If `agent read` cannot recover a full response (alternate screen), ask that work
 
 **Teardown.** Before declaring the run done, every `agt-<run>-*` pane is harvested, then closed (explicit harvest → `close_pane`). Verify the run id lists zero panes (`herdr agent list`, or the tmux list below). Say so on the card's `⚑`/`verify:` only if one survived.
 
-**Backstop (the mod).** It closes an idle `agt-` pane only while the lead has no turn running, and a `done` pane after ≥90 s, and only once that pane is harvested: its answer file `agents/pane-<role>.md` exists, its wire done message reached you, or you closed it. An unharvested pane stays open and is flagged once (`⚑ <name> done, not harvested`): read it, then `close_pane`. It never touches `working`, `blocked` or `unknown`, nor a pane without the `agt-` prefix. It is a net, not the plan; explicit close after harvest stays mandatory.
+**Backstop (the mod).** It closes an idle `agt-` pane only while the lead has no turn running, and a `done` pane after ≥90 s, and only once that pane is harvested: its answer file `agents/pane-<role>.md` was written after the pane opened (an earlier worker's file does not count), its wire done message reached you, or you closed it. A role you respawn starts unharvested again. An unharvested pane stays open and is flagged once (`⚑ <name> done, not harvested`, or `idle, not harvested`): read it, then `close_pane`. It never touches `working`, `blocked` or `unknown`, nor a pane without the `agt-` prefix. It is a net, not the plan; explicit close after harvest stays mandatory.
 
 **Never close a pane you did not open.** `agt-` prefix = ownership; panes the user opened and `/agt-spawn` panes are theirs.
 
@@ -105,7 +105,7 @@ tmux select-pane -t <id> -T <name>
 
 Keep the `--`, and escape `#` as `##` in `<cwd>`. The lead only sees panes in its own window: `tmux list-panes -a -F '#{pane_id}\t#{@agt}\t#{pane_dead}\t#{window_id}'`. Your pane is `$TMUX_PANE`; a pane with no `@agt` is the user's.
 
-**Done signal.** Each worker's last act is writing `~/.agentille/state/run-<run>/done-<role>`: put that instruction in the slice prompt. The mod polls the file; without it tmux workers never read as done. A pane is `done` when that file exists (written after the mod first saw the pane) or the pane is dead. Delete `done-<role>` before (re)spawning a role. There is no `blocked` or `idle` state, so reap only on the done file or a dead pane, never on silence, and `tmux capture-pane -p -t <id> -S -200` an overdue worker first: an approval prompt looks like "still working". The backstop closes after `done` holds 90 s. Two leads in one window can reap each other's workers; run one lead per window.
+**Done signal.** Each worker's last act is writing `~/.agentille/state/run-<run>/done-<role>`: put that instruction in the slice prompt. The mod polls the file; without it tmux workers never read as done. A pane is `done` when that file exists (written after the mod first saw the pane) or the pane is dead. Delete `done-<role>` before (re)spawning a role. There is no `blocked` or `idle` state, so reap only on the done file or a dead pane, never on silence, and `tmux capture-pane -p -t <id> -S -200` an overdue worker first: an approval prompt looks like "still working". The backstop closes a pane once it is harvested and `done` has held 90 s. Two leads in one window can reap each other's workers; run one lead per window.
 
 ## /agt-spawn — one pane, one routed session
 

@@ -1,6 +1,6 @@
 import { describe, expect, mock, test } from 'claude-code/testing'
 import { advisorEnv, EFFORTS, PANE_RULE, splitPlan, tmuxEvenArgv, SPAWN_TOOL, closeTarget, paneRole, doneFile, spawnToolInput, TOOL_MODELS, herdrCloseArgv, herdrPaneIdOf, herdrPromptArgv, herdrSplitArgv, herdrStartArgv, isFreshDone, isLead, newRunId, paneName, parseSpawnArgs, parseTmuxList, pickTransport, quietSpawn, reapPool, scopeRows, splitName, tmuxKillArgv, tmuxPaneAgents, tmuxPaneIdOf, tmuxSplitArgv, tmuxTagArgvs, transportBlock, TMUX_LIST_FORMAT } from '../../hooks/panes.js'
-import { reapable } from '../../hooks/live.js'
+import { reapPlan } from '../../hooks/live.js'
 import { ROLES, roleOf } from '../../hooks/routing.js'
 
 const TAB = '\t'
@@ -167,11 +167,11 @@ describe('tmux panes', () => {
     const p = tmuxPaneAgents(rows, '%1', new Map())
     const seen = new Map()
     const ok = () => true
-    expect(reapable(p, seen, 0, true, ok)).toEqual([])
-    expect(reapable(p, seen, 89_999, true, ok)).toEqual([])
-    expect(reapable(p, seen, 90_000, true, ok).map((x) => x.id)).toEqual(['%3'])
-    expect(reapable(p, seen, 10_000_000, true, ok).map((x) => x.id)).toEqual(['%3'])
-    expect(reapable(p, seen, 10_000_000)).toEqual([])
+    expect(reapPlan(p, seen, 0, true, ok).reap).toEqual([])
+    expect(reapPlan(p, seen, 89_999, true, ok).reap).toEqual([])
+    expect(reapPlan(p, seen, 90_000, true, ok).reap.map((x) => x.id)).toEqual(['%3'])
+    expect(reapPlan(p, seen, 10_000_000, true, ok).reap.map((x) => x.id)).toEqual(['%3'])
+    expect(reapPlan(p, seen, 10_000_000).reap).toEqual([])
   })
 
   test('spawn panes are never offered to the reaper, in either transport', async () => {
@@ -285,8 +285,8 @@ describe('tmux band', () => {
   const FRESH = Number.MAX_SAFE_INTEGER
   const LIST = [row('%1', ''), row('%2', 'agt-r9-executor'), row('%3', 'agt-r9-planner'), row('%4', 'agt-r9-spawn-x', '1'), row('%5', 'agt-r9-other', '0', '@2'), row('%6', 'agt-r9-spawn')]
 
-  // session.start probes tmux, polls once and draws; `mtimes` maps done-file path → mtimeMs
-  const start = async ($: any, on: any, o: { self?: string; rows?: string[]; mtimes?: Record<string, number>; answers?: string[] } = {}) => {
+  // session.start probes tmux, polls once and draws; `mtimes` maps a done-file or saved-answer path → mtimeMs
+  const start = async ($: any, on: any, o: { self?: string; rows?: string[]; mtimes?: Record<string, number> } = {}) => {
     const killed: string[] = []
     const statted: string[] = []
     const rows = o.rows ?? LIST
@@ -295,7 +295,7 @@ describe('tmux band', () => {
     on('session.start', async ($: any, e: any) => ({ cwd: e.cwd }))
     on('command.register', async () => ({ value: undefined }))
     on('fs.read', async () => ({ deny: 'no profile' }))
-    on('fs.exists', async ($: any, e: any) => { statted.push(e.path); return { value: (o.answers ?? []).includes(e.path) } })
+    on('fs.exists', async () => ({ value: false }))
     on('fs.stat', async ($: any, e: any) => {
       statted.push(e.path)
       return e.path in mtimes ? { value: { kind: 'file', size: 0, mtimeMs: mtimes[e.path], isLink: false } } : { deny: 'ENOENT' }
@@ -345,7 +345,7 @@ describe('tmux band', () => {
 
   test('a lead kills a done pane only after 90s, never a working or a spawn pane', { timeoutMs: 15_000 }, async ($, on) => {
     const rows = [row('%1', ''), row('%2', 'agt-r9-executor', '1'), row('%3', 'agt-r9-spawn', '1'), row('%4', 'agt-r9-planner')]
-    const { killed, clock } = await start($, on, { rows, answers: [ANSWER('executor')] })
+    const { killed, clock } = await start($, on, { rows, mtimes: { [ANSWER('executor')]: FRESH } })
     await clock.advance(85_000)
     expect(killed).toEqual([])
     await clock.advance(10_000)
@@ -359,6 +359,17 @@ describe('tmux band', () => {
     const { killed, clock } = await start($, on, { rows })
     await clock.advance(400_000)
     expect(killed).toEqual([])
+  })
+
+  test('an answer file older than the pane\'s first sighting does not harvest it', { timeoutMs: 15_000 }, async ($, on) => {
+    const rows = [row('%1', ''), row('%2', 'agt-r9-executor', '1')]
+    const mtimes: Record<string, number> = { [ANSWER('executor')]: 5 }
+    const { killed, clock } = await start($, on, { rows, mtimes })
+    await clock.advance(400_000)
+    expect(killed).toEqual([])
+    mtimes[ANSWER('executor')] = clock.now() + 1
+    await clock.advance(10_000)
+    expect(killed).toEqual(['%2'])
   })
 
   test('a worker pane (its own @agt) never kills anything', async ($, on) => {
@@ -385,8 +396,8 @@ describe('tmux band', () => {
 
   test('a done-file older than the pane\'s first sighting is ignored until a fresh one is written', async ($, on) => {
     const rows = [row('%1', ''), row('%3', 'agt-r9-planner')]
-    const mtimes: Record<string, number> = { [DONE('planner')]: 5 }
-    const { killed, clock } = await start($, on, { rows, mtimes, answers: [ANSWER('planner')] })
+    const mtimes: Record<string, number> = { [DONE('planner')]: 5, [ANSWER('planner')]: FRESH }
+    const { killed, clock } = await start($, on, { rows, mtimes })
     await clock.advance(300_000)
     expect(killed).toEqual([])
     mtimes[DONE('planner')] = clock.now() + 1
@@ -816,27 +827,32 @@ describe('pane tools: in the mod', () => {
 })
 
 describe('herdr reaper', () => {
-  const agents = (state: string, gone: boolean) => JSON.stringify({ result: { agents: [
-    { name: 'lead', pane_id: 'w1:p1', agent: 'claude', agent_status: 'working', state_change_seq: 1, tab_id: 'w1:t1', workspace_id: 'w1' },
-    ...(gone ? [] : [{ name: 'agt-r9-executor', pane_id: 'w1:p2', agent: 'claude', agent_status: state, state_change_seq: 4, tab_id: 'w1:t1', workspace_id: 'w1' }]),
-  ] } })
+  const FRESH = Number.MAX_SAFE_INTEGER
+  const LEAD = { name: 'lead', pane_id: 'w1:p1', agent: 'claude', agent_status: 'working', state_change_seq: 1, tab_id: 'w1:t1', workspace_id: 'w1' }
+  const pane = (name: string, id: string, state: string) => ({ name, pane_id: id, agent: 'claude', agent_status: state, state_change_seq: 4, tab_id: 'w1:t1', workspace_id: 'w1' })
   const ANSWER = '/h/.agentille/state/run-r9/agents/pane-executor.md'
 
-  // session.start polls once and starts the 5 s poll; `closed` collects `herdr pane close` ids,
-  // `files` is the set of paths that exist, `toasts` every toast, `sent` every session.send.
+  // session.start polls once and starts the 5 s poll; `closed` collects `herdr pane close` ids, `files` maps a path to its
+  // mtime (the files named up front are written in the far future, so always fresh), `agents` is what `herdr agent list`
+  // shows (a test flips a pane's agent_status), `toasts` every toast, `sent` every session.send.
   const lead = async ($: any, on: any, state: string, files: string[] = [ANSWER]) => {
     const closed: string[] = []
     const toasts: string[] = []
     const sent: any[] = []
-    const exists = new Set(files)
+    const mtimes = new Map(files.map((f) => [f, FRESH]))
+    const agents = [pane('agt-r9-executor', 'w1:p2', state)]
+    let splits = 3
+    let reuse: string | null = null
     on('env.get', async ($: any, e: any) => ({ value: ({ HERDR_ENV: '1', HERDR_PANE_ID: 'w1:p1', HOME: '/h' } as any)[e.name] }))
     on('session.start', async ($: any, e: any) => ({ cwd: e.cwd }))
     on('session.id', async () => ({ value: 'lead-sid' }))
+    on('session.cwd', async () => ({ value: '/work/repo' }))
     on('command.register', async () => ({ value: undefined }))
     on('tool.register', async () => ({ value: undefined }))
     on('ui.toast', async ($: any, e: any) => { toasts.push(e.text); return { value: undefined } })
     on('fs.read', async () => ({ deny: 'no profile' }))
-    on('fs.exists', async ($: any, e: any) => ({ value: exists.has(e.path) }))
+    on('fs.exists', async () => ({ value: false }))
+    on('fs.stat', async ($: any, e: any) => (mtimes.has(e.path) ? { value: { kind: 'file', size: 0, mtimeMs: mtimes.get(e.path), isLink: false } } : { deny: 'ENOENT' }))
     on('store.get', async () => ({ value: undefined }))
     on('session.send', async ($: any, e: any) => { sent.push(e); return { isDelivered: true } })
     on('session.receive', async ($: any, e: any) => ({ text: e.text }) as never)
@@ -845,12 +861,23 @@ describe('herdr reaper', () => {
     on('ui.render', async () => ({ type: 'engine', ref: 0 }) as never)
     on('process.run', async ($: any, e: any) => {
       const cmd = e.argv.join(' ')
-      if (cmd.startsWith('herdr pane close')) closed.push(e.argv[3])
-      return { value: { exitCode: 0, stdout: cmd.startsWith('herdr agent list') ? agents(state, closed.length > 0) : '', stderr: '' } }
+      let stdout = ''
+      if (cmd.startsWith('herdr agent list')) stdout = JSON.stringify({ result: { agents: [LEAD, ...agents] } })
+      if (cmd.startsWith('herdr pane split')) {
+        stdout = JSON.stringify({ result: { pane: { pane_id: reuse ?? 'w1:p' + splits++ } } })
+        reuse = null
+      }
+      if (cmd.startsWith('herdr agent start')) agents.push(pane(e.argv[3], e.argv[7], 'working'))
+      if (cmd.startsWith('herdr pane close')) {
+        closed.push(e.argv[3])
+        const i = agents.findIndex((a) => a.pane_id === e.argv[3])
+        if (i >= 0) agents.splice(i, 1)
+      }
+      return { value: { exitCode: 0, stdout, stderr: '' } }
     })
     const clock = mock.clock(on, { now: 1_000_000 })
     await $.session.start({ cwd: '/w', surface: null, isInteractive: false })
-    return { closed, clock, toasts, sent, exists }
+    return { closed, clock, toasts, sent, files: mtimes, agents, reuseId: (id: string) => { reuse = id } }
   }
   const begin = ($: any) => $.turn.start({ text: 'go', turnId: 't1' })
   const end = ($: any) => $.turn.complete({ answer: 'ok', durationMs: 10, isAborted: false, turnId: 't1', reason: 'answer' })
@@ -881,17 +908,19 @@ describe('herdr reaper', () => {
     expect(done.toasts.filter((t) => t.includes('agt-r9-executor done, not harvested'))).toHaveLength(1)
   })
 
-  test('an unharvested idle pane is not reaped between turns either', async ($, on) => {
+  test('an unharvested idle pane is not reaped between turns either, and the flag says idle', async ($, on) => {
     const idle = await lead($, on, 'idle', [])
     await idle.clock.advance(900_000)
     expect(idle.closed).toEqual([])
+    expect(idle.toasts.filter((t) => t.includes('agt-r9-executor idle, not harvested'))).toHaveLength(1)
+    expect(idle.toasts.filter((t) => t.includes('done, not harvested'))).toEqual([])
   })
 
   test('the pane is reaped once its answer file appears', async ($, on) => {
     const done = await lead($, on, 'done', [])
     await done.clock.advance(200_000)
     expect(done.closed).toEqual([])
-    done.exists.add(ANSWER)
+    done.files.set(ANSWER, FRESH)
     await done.clock.advance(10_000)
     expect(done.closed).toEqual(['w1:p2'])
   })
@@ -945,6 +974,73 @@ describe('herdr reaper', () => {
     const ui = await $.ui.mount({ plugin: 'agentille', surface: 'terminal', component: 'AbovePrompt', props: { hasSurvey: false, isWorking: false, maxRows: 10, bodyColumns: 100 } as never })
     expect(await ui.find({ type: 'Text', text: /⚑ agt-r9-executor done, not harvested/ })).toBeDefined()
     await ui.unmount()
+  })
+
+  // A role can be respawned (a fix, a retry): the second pane of agt-r9-executor is a new worker.
+  const respawn = ($: any) => $.tool.call({ tool: 'mcp__agentille__spawn_pane', run: 'r9', role: 'executor', task: 'redo the filter, tests first', agent: 'executor', header: '[agt run=r9 size=small mode=build]' })
+  const finish = (l: any, id: string) => { l.agents.find((a: any) => a.pane_id === id).agent_status = 'done' }
+  const flagged = (l: any) => l.toasts.filter((t: string) => t.includes('agt-r9-executor done, not harvested')).length
+
+  test('a respawned role starts unharvested: woken, flagged and kept open like any new pane', { timeoutMs: 30_000 }, async ($, on) => {
+    const l = await lead($, on, 'done', [])
+    await l.clock.advance(25_000)
+    expect(l.sent).toHaveLength(1)
+    await l.clock.advance(70_000)
+    expect(flagged(l)).toBe(1)
+    expect((await $.tool.call({ tool: 'mcp__agentille__close_pane', name: 'agt-r9-executor' })).result).toBe('Closed agt-r9-executor.')
+    expect(l.closed).toEqual(['w1:p2'])
+    expect((await respawn($)).result).toMatch(/^Opened agt-r9-executor/)
+    finish(l, 'w1:p3')
+    await l.clock.advance(25_000)
+    expect(l.sent).toHaveLength(2)
+    await l.clock.advance(70_000)
+    expect(flagged(l)).toBe(2)
+    expect(l.closed).toEqual(['w1:p2'])
+  })
+
+  test('a respawn after a wire report is not taken for reported: it wakes the lead if it goes quiet', { timeoutMs: 30_000 }, async ($, on) => {
+    const l = await lead($, on, 'done', [])
+    await $.session.receive({ text: '[agt wire] agt-r9-executor done · 0:10\nBuilt it', origin: { kind: 'peer' } } as never)
+    await l.clock.advance(100_000)
+    expect(l.closed).toEqual(['w1:p2'])
+    expect(l.sent).toEqual([])
+    expect((await respawn($)).result).toMatch(/^Opened agt-r9-executor/)
+    finish(l, 'w1:p3')
+    await l.clock.advance(25_000)
+    expect(l.sent).toHaveLength(1)
+    expect(l.sent[0].text).toContain('agt-r9-executor finished and has not reported')
+    await l.clock.advance(70_000)
+    expect(l.closed).toEqual(['w1:p2'])
+  })
+
+  test('the earlier pane\'s answer file does not harvest the respawn, a fresh one does', { timeoutMs: 30_000 }, async ($, on) => {
+    const l = await lead($, on, 'done', [])
+    l.files.set(ANSWER, l.clock.now()) // the first worker saved its answer as it finished
+    await l.clock.advance(100_000)
+    expect(l.closed).toEqual(['w1:p2'])
+    expect((await respawn($)).result).toMatch(/^Opened agt-r9-executor/)
+    finish(l, 'w1:p3')
+    await l.clock.advance(100_000)
+    expect(l.closed).toEqual(['w1:p2'])
+    expect(flagged(l)).toBe(1)
+    expect(l.sent.at(-1).text).not.toContain('saved at')
+    expect(l.sent.at(-1).text).toContain('Read it with:')
+    l.files.set(ANSWER, l.clock.now() + 1) // the second worker saves its own
+    await l.clock.advance(10_000)
+    expect(l.closed).toEqual(['w1:p2', 'w1:p3'])
+  })
+
+  test('a pane id the multiplexer hands out again is a new pane: the old sighting is forgotten', { timeoutMs: 30_000 }, async ($, on) => {
+    const l = await lead($, on, 'done', [])
+    l.files.set(ANSWER, l.clock.now())
+    await l.clock.advance(100_000)
+    expect(l.closed).toEqual(['w1:p2'])
+    l.reuseId('w1:p2')
+    expect((await respawn($)).result).toMatch(/^Opened agt-r9-executor/)
+    finish(l, 'w1:p2')
+    await l.clock.advance(100_000)
+    expect(l.closed).toEqual(['w1:p2'])
+    expect(flagged(l)).toBe(1)
   })
 })
 

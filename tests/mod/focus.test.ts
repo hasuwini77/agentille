@@ -51,6 +51,10 @@ describe('focus: flags from agent results', () => {
     expect(paneFlags([{ name: 'agt-r1-exec-1', state: 'blocked' }, { name: 'agt-r1-exec-2', state: 'working' }])).toEqual(['agt-r1-exec-1 is waiting on you'])
     expect(paneFlags([{ name: 'agt-r1-exec-1', state: 'done' }, { name: 'agt-r1-exec-2', state: 'done' }], new Set(['agt-r1-exec-2']))).toEqual(['agt-r1-exec-2 done, not harvested'])
   })
+
+  test('a stranded idle pane says idle, not done', async () => {
+    expect(paneFlags([{ name: 'agt-r1-exec-1', state: 'idle' }, { name: 'agt-r1-exec-2', state: 'done' }], new Set(['agt-r1-exec-1', 'agt-r1-exec-2']))).toEqual(['agt-r1-exec-1 idle, not harvested', 'agt-r1-exec-2 done, not harvested'])
+  })
 })
 
 describe('focus: in the mod', () => {

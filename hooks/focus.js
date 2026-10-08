@@ -35,7 +35,7 @@ export function paneFlags(panes, stranded = new Set()) {
   const list = panes ?? []
   return [
     ...list.filter((p) => p.state === 'blocked').map((p) => p.name + ' is waiting on you'),
-    ...list.filter((p) => stranded.has(p.name)).map((p) => p.name + ' done, not harvested'),
+    ...list.filter((p) => stranded.has(p.name)).map((p) => p.name + (p.state === 'idle' ? ' idle' : ' done') + ', not harvested'),
   ]
 }
 

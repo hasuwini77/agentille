@@ -57,8 +57,6 @@ export function reapPlan(panes, seen, now, leadBusy = true, harvested = () => fa
   return { reap, stranded }
 }
 
-export const reapable = (panes, seen, now, leadBusy = true, harvested = () => false) => reapPlan(panes, seen, now, leadBusy, harvested).reap
-
 export function short(model) {
   return modelKey(model)
 }

@@ -511,15 +511,18 @@ async function publishNow($, force) {
   if (argv) await $.process.run(argv, PROBE).catch(() => {})
 }
 
+// Worker: the full answer of a finished turn, saved under the run where the lead reads it. Returns the path, or null.
+async function saveAnswer($, name, answer) {
+  const n = splitName(name)
+  if (!n || !answer || !home) return null
+  await writeRunFile($, n.run, 'agents/pane-' + n.role + '.md', answer)
+  return home + '/.agentille/state/run-' + n.run + '/agents/pane-' + n.role + '.md'
+}
+
 // Worker: a finished turn saves the full answer under the run and messages the lead its head,
 // so the lead wakes on its own and never scrapes the pane.
 async function reportDone($, answer) {
-  const n = splitName(wireName)
-  let reportPath = null
-  if (n && answer && home) {
-    await writeRunFile($, n.run, 'agents/pane-' + n.role + '.md', answer)
-    reportPath = home + '/.agentille/state/run-' + n.run + '/agents/pane-' + n.role + '.md'
-  }
+  const reportPath = await saveAnswer($, wireName, answer)
   if (!leadSession) return
   const text = doneMessage({ name: wireName, ms: pub.ms ?? 0, model: worker?.model ?? short(pub.model), effort: worker?.effort || pub.effort, tok: pub.tok, answer, reportPath })
   const r = await $.session.send({ to: { sessionId: leadSession }, text }).catch((err) => ({ isDelivered: false, reason: String(err?.message ?? err) }))
@@ -947,6 +950,10 @@ export function register(on) {
       Object.assign(pub, { state: 'done', tool: null, ms: Date.now() - (pub.start ?? Date.now()) })
       await publish($, true)
       if (e.reason === 'answer') await reportDone($, e.answer)
+    } else if (!e.agentId && !wireName && selfName && e.reason === 'answer') {
+      // A lead that gave this pane no wire identity (an older agentille, a hand-made pane) never hears from
+      // it; the saved answer is all it can leave, and what the lead reads before closing the pane.
+      await saveAnswer($, selfName, e.answer)
     }
     if (a) {
       a.tool = null

@@ -138,6 +138,63 @@ describe('wire: in the mod', () => {
   })
 })
 
+describe('wire: a worker the lead gave no wire identity', () => {
+  // What a lead from before the wire, or a hand-made pane, leaves: AGENTILLE_RUN and the multiplexer's own name for the pane.
+  const T = '\t'
+  const boot = async ($: any, on: any, self: string) => {
+    const sent: any[] = []
+    const stored: Record<string, any> = {}
+    const writes: Record<string, string> = {}
+    const rows = [['%1', '', 'claude', '0', '@1'], ['%2', 'agt-r1-exec-1', 'claude', '0', '@1']].map((r) => r.join(T)).join('\n') + '\n'
+    on('env.get', async ($: any, e: any) => ({ value: ({ HOME: '/h', TMUX: '/tmp/tmux-1/default,1,0', TMUX_PANE: self, AGENTILLE_RUN: 'r1' } as any)[e.name] }))
+    on('session.start', async ($: any, e: any) => ({ cwd: e.cwd }))
+    on('session.id', async () => ({ value: 'worker-sid' }))
+    on('command.register', async () => ({ value: undefined }))
+    on('tool.register', async () => ({ value: undefined }))
+    on('fs.read', async () => ({ deny: 'no profile' }))
+    on('fs.write', async ($: any, e: any) => { writes[e.path] = e.text; return { value: undefined } })
+    on('store.get', async ($: any, e: any) => ({ value: stored[e.key] }))
+    on('store.set', async ($: any, e: any) => { stored[e.key] = e.value; return { value: undefined } })
+    on('session.send', async ($: any, e: any) => { sent.push(e); return { isDelivered: true } })
+    on('turn.start', async ($: any, e: any) => ({ turnId: e.turnId }))
+    on('turn.complete', async ($: any, e: any) => ({ text: e.answer }) as never)
+    on('ui.render', async () => ({ type: 'engine', ref: 0 }) as never)
+    on('process.run', async ($: any, e: any) => ({ value: { exitCode: 0, stdout: e.argv[1] === 'list-panes' ? rows : '', stderr: '' } }))
+    mock.clock(on, { now: 1_000_000 })
+    await $.session.start({ cwd: '/w', surface: null, isInteractive: false })
+    return { sent, stored, writes }
+  }
+  const FILE = '/h/.agentille/state/run-r1/agents/pane-exec-1.md'
+  const turn = async ($: any, answer: string, extra: Record<string, unknown> = {}) => {
+    await $.turn.start({ text: 'go', turnId: 't1' } as never)
+    await $.turn.complete({ answer, durationMs: 10, isAborted: false, turnId: 't1', reason: 'answer', ...extra } as never)
+  }
+
+  test('its answer is saved at the end of each turn, and nothing is sent', async ($, on) => {
+    const { sent, stored, writes } = await boot($, on, '%2')
+    await turn($, 'Slice built\nall green')
+    expect(writes[FILE]).toBe('Slice built\nall green')
+    await turn($, 'Second pass done')
+    expect(writes[FILE]).toBe('Second pass done')
+    expect(sent).toEqual([])
+    expect(Object.keys(stored).filter((k) => k.startsWith('wire:'))).toEqual([])
+  })
+
+  test('only a main-loop answer counts: an aborted turn and a subagent leave the file alone', async ($, on) => {
+    const { writes } = await boot($, on, '%2')
+    await turn($, 'The real answer')
+    await turn($, 'cut short', { reason: 'aborted' })
+    await $.turn.complete({ answer: 'a subagent said this', durationMs: 10, isAborted: false, turnId: 't2', reason: 'answer', agentId: 'sub1' } as never)
+    expect(writes[FILE]).toBe('The real answer')
+  })
+
+  test('a lead pane, which no multiplexer names agt-, saves nothing', async ($, on) => {
+    const { writes } = await boot($, on, '%1')
+    await turn($, 'I am the lead')
+    expect(writes).toEqual({})
+  })
+})
+
 describe('deck: unplaced', () => {
   test('/agt-deck says the deck waits when the surface does not place it', async ($, on) => {
     on('env.get', async () => ({ value: undefined }))

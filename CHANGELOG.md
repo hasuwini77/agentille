@@ -2,6 +2,14 @@
 
 All notable changes to agentille are documented here.
 
+## [3.5.1] — 2026-10-08
+
+### Changed
+
+- The marketplace is now named `hasuwini77-agentille`, matching the repo.
+  Install with `/plugin install agentille@hasuwini77-agentille`. An existing
+  install keeps working under the name it was added with.
+
 ## [3.5.0] — 2026-10-08
 
 ### Added

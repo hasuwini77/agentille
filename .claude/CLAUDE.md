@@ -40,7 +40,7 @@ Features and fixes ship through a pull request, never a direct push to `main`.
 3. Run `bash scripts/validate.sh`, `claude plugin validate . --strict` and `claude plugin test .` (the `pre-push` hook and CI run the validator too).
 4. Commit `chore: release vx.y.z`, push, and open a PR (`gh pr create`, body with `Closes #N`).
 5. On green: merge by PR number with a merge commit (`gh pr merge <N> --merge --delete-branch`), pull `main`, assert `jq -r .version .claude-plugin/plugin.json` is `x.y.z`, then `git tag vx.y.z && git push origin vx.y.z`.
-6. Users pick it up with `claude plugin marketplace update systown-agentille && claude plugin update agentille@systown-agentille`.
+6. Users pick it up with `claude plugin marketplace update hasuwini77-agentille && claude plugin update agentille@hasuwini77-agentille`.
 
 ## Hooks-test recipe
 

@@ -30,6 +30,7 @@ description: Optional setup for agentille. Asks up to 5 skippable questions (nam
 | `neverDo` | list of hard prohibitions, passed to every agent | `[]` |
 | `thinkingDepth` | `always` / `complex-only` / `quick`; edit by hand | `complex-only` |
 | `routing` | `{autoFable, maxFablePerRun, fableWeeklyCeiling, advisorOnOpus}`; edit by hand | built-in |
+| `viewports` | design-reviewer default, any of `desktop` / `tablet` / `mobile`; edit by hand | desktop + mobile |
 | `projects[]` | repos registered by `/agentille-project` | `[]` |
 
 Old profiles keep working: fields nobody reads are ignored, and there are no migrations.

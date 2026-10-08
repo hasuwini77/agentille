@@ -138,6 +138,22 @@ describe('wire: in the mod', () => {
   })
 })
 
+describe('deck: unplaced', () => {
+  test('/agt-deck says the deck waits when the surface does not place it', async ($, on) => {
+    on('env.get', async () => ({ value: undefined }))
+    on('session.start', async ($: any, e: any) => ({ cwd: e.cwd }))
+    on('command.register', async () => ({ value: undefined }))
+    on('fs.read', async () => ({ deny: 'no profile' }))
+    on('store.get', async () => ({ value: undefined }))
+    on('store.set', async () => ({ value: undefined }))
+    on('ui.open', async () => ({ value: { isPlaced: false, reason: 'terminal too narrow' } }) as never)
+    on('ui.render', async () => ({ type: 'engine', ref: 0 }) as never)
+    await $.session.start({ cwd: '/w', surface: null, isInteractive: false })
+    const r = await $.command.run({ command: 'agt-deck', args: 'auto', origin: { kind: 'composer' } } as never)
+    expect(r.text).toBe('deck waits: terminal too narrow · opens on every /agt (/agt-deck off to stop)')
+  })
+})
+
 describe('deck', () => {
   test('/agt-deck opens the pane, auto is remembered, and the pane draws routing', async ($, on) => {
     const stored: Record<string, any> = {}

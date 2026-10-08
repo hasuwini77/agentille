@@ -106,6 +106,35 @@ describe('band', () => {
     await ui.unmount()
   })
 
+  test('the band steps aside while a survey is up', async ($, on) => {
+    on('store.get', async () => ({ value: null }))
+    on('agent.spawn', async ($, e) => ({ model: 'claude-opus-5-5', agentId: 'band4' }))
+    on('ui.render', async () => ({ type: 'engine', ref: 0 }) as never)
+    await $.agent.spawn({ prompt: '[agt run=surveyrun size=large mode=review]\nreview', subagentType: 'agentille:agentille-code-reviewer' })
+    const props = { isWorking: true, maxRows: 10, bodyColumns: 100 }
+    let ui = await $.ui.mount({ plugin: 'agentille', surface: 'terminal', component: 'AbovePrompt', props: { ...props, hasSurvey: true } as never })
+    expect(await ui.find({ type: 'Text', text: /code-reviewer/ })).toBeUndefined()
+    await ui.unmount()
+    ui = await $.ui.mount({ plugin: 'agentille', surface: 'terminal', component: 'AbovePrompt', props: { ...props, hasSurvey: false } as never })
+    expect(await ui.find({ type: 'Text', text: /code-reviewer/ })).toBeDefined()
+    await ui.unmount()
+  })
+
+  test('the main spinner keeps its own suffix; a subagent spinner is left alone', async ($, on) => {
+    const seen: any[] = []
+    on('store.get', async () => ({ value: null }))
+    on('agent.spawn', async ($, e) => ({ model: 'claude-opus-5-5', agentId: 'spin1' }))
+    on('ui.render', async ($: any, e: any) => { seen.push(e); return { type: 'engine', ref: 0 } as never })
+    await $.agent.spawn({ prompt: '[agt run=spinrun size=large mode=review]\nreview', subagentType: 'agentille:agentille-code-reviewer' })
+    const props = { word: 'Working', message: null, suffix: '…', mode: 'responding' } as never
+    let ui = await $.ui.mount({ plugin: 'agentille', surface: 'terminal', component: 'Spinner', requestId: 'main', props })
+    expect(seen.at(-1).props.suffix).toBe('… · ◇1 working')
+    await ui.unmount()
+    ui = await $.ui.mount({ plugin: 'agentille', surface: 'terminal', component: 'Spinner', requestId: 'spin1', props })
+    expect(seen.at(-1).props.suffix).toBe('…')
+    await ui.unmount()
+  })
+
   test('a finished subagent shows a ✓ before it leaves the band', async ($, on) => {
     on('store.get', async () => ({ value: null }))
     on('agent.spawn', async ($, e) => ({ model: 'claude-opus-5-5', agentId: 'band2' }))

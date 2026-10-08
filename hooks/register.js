@@ -430,7 +430,7 @@ function boardRow(els, r, onFocus, slot = false) {
   kids.push(Box({ flexGrow: 1, flexShrink: 1, children: [Text({ wrap: 'truncate', dimColor: r.dim, children: [Text({ color: r.glyphColor, children: [r.spinner + ' '] }), r.activity] })] }))
   kids.push(Text({ dimColor: true, children: [r.time] }))
   if (r.tok) kids.push(Text({ dimColor: true, children: [r.tok] }))
-  if (onFocus) kids.push(Button({ label: '↗', plain: true, dimColor: true, onPress: onFocus }))
+  if (onFocus) kids.push(Button({ key: 'focus:' + r.id, label: '↗', plain: true, dimColor: true, onPress: onFocus }))
   else if (slot) kids.push(Text({ children: [' '] })) // keeps the columns of rows without a ↗ in line
   return Box({ flexDirection: 'row', columnGap: 1, children: kids })
 }
@@ -500,8 +500,10 @@ export function register(on) {
       await $.store.set('deck:auto', deckAuto)
       if (!deckAuto) return { text: 'deck: opens only when you type /agt-deck' }
     }
-    await $.ui.open({ id: DECK, title: 'agentille' })
-    return { text: 'deck open' + (deckAuto ? ' · opens on every /agt (/agt-deck off to stop)' : '') }
+    const o = await $.ui.open({ id: DECK, title: 'agentille' })
+    const auto = deckAuto ? ' · opens on every /agt (/agt-deck off to stop)' : ''
+    if (o?.isPlaced === false) return { text: 'deck waits: ' + (o.reason ?? 'no surface here places panes') + auto }
+    return { text: 'deck open' + auto }
   })
 
   // Typed only. The worker gets it as a peer message over the wire; a Herdr worker without the
@@ -800,6 +802,7 @@ export function register(on) {
   // The switchboard above the prompt: a framed dispatch tree rooted at the lead, one row per
   // subagent (◇) and pane session (▣), the newest wire message, and any agent flags.
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
+    if (e.props.hasSurvey) return next(e)
     const now = Date.now()
     const staged = stage({ agents: live, panes, routes: paneRoutes, run: lastRun, now })
     const focus = focusLines(now)
@@ -884,10 +887,11 @@ export function register(on) {
 
   // Main-session spinner: how many subagents (◇) and pane sessions (▣) work behind it.
   on('ui.render', { component: 'Spinner' }, async ($, e, next) => {
+    if (live.has(e.requestId)) return next(e)
     const subs = [...live.values()].filter((a) => a.state === 'working').length
     const sessions = panes.filter((p) => p.state === 'working').length
     if (subs + sessions === 0) return next(e)
     const parts = [subs ? '◇' + subs : '', sessions ? '▣' + sessions : ''].filter(Boolean).join(' ')
-    return next({ ...e, props: { ...e.props, suffix: ' · ' + parts + ' working' } })
+    return next({ ...e, props: { ...e.props, suffix: (e.props.suffix ?? '') + ' · ' + parts + ' working' } })
   })
 }

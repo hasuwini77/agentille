@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'claude-code/testing'
-import { CHIP_WIDTH, SPIN, boardRows, cast, castColumns, chip, columns, header, leadLine, prettyModel, routingLines, spin, tokenBars, toolLabel, wireRow } from '../../hooks/board.js'
+import { CHIP_WIDTH, SPIN, boardRows, cast, castColumns, chip, columns, header, leadLine, phaseOf, prettyModel, routingLines, spin, swarm, tokenBars, toolLabel, wireRow } from '../../hooks/board.js'
 import { newAgent, finish, stage } from '../../hooks/live.js'
 import { frame } from '../../hooks/mascot.js'
 
@@ -93,5 +93,64 @@ describe('board', () => {
     expect(bars.map((b) => b.name.trim())).toEqual(['executor', 'planner'])
     expect(bars[0].bar).toBe('██████████')
     expect(bars[1].bar).toBe('█████░░░░░')
+  })
+})
+
+describe('swarm', () => {
+  const agents = () => {
+    const m = new Map()
+    const add = (id: string, role: string, model: string, start: number) => m.set(id, sub(id, role, model, start))
+    add('p', 'planner', 'opus', 1)
+    add('e1', 'executor', 'sonnet', 2)
+    add('c', 'code-reviewer', 'sonnet', 3)
+    add('d', 'design-reviewer', 'opus', 4)
+    add('x', 'Explore', 'haiku', 5)
+    return m
+  }
+
+  test('below three agents there is no swarm line', async () => {
+    const m = agents()
+    m.delete('x'); m.delete('d'); m.delete('c')
+    expect(swarm({ agents: m, run: 'r1' })).toBe(undefined)
+  })
+
+  test('groups the run by phase, in phase order, done ones included', async () => {
+    const m = agents()
+    finish(m.get('p'), 10, 5)
+    const s = swarm({ agents: m, run: 'r1', tick: 0 })!
+    expect(s.lanes.map((l) => l.phase)).toEqual(['plan', 'build', 'review', 'other'])
+    expect(s.lanes[0].cells[0]).toMatchObject({ glyph: '✓', dim: true })
+    expect(s.lanes[2].cells.map((c) => c.glyph)).toEqual(['◆', '◆'])
+    expect(s).toMatchObject({ done: 1, total: 5 })
+  })
+
+  test('working cells pulse on the ticker; failed ones show ✗', async () => {
+    const m = agents()
+    m.get('c').listStatus = 'failed'
+    const a = swarm({ agents: m, run: 'r1', tick: 0 })!
+    const b = swarm({ agents: m, run: 'r1', tick: 2 })!
+    expect(a.lanes[1].cells[0].glyph).toBe('◆')
+    expect(b.lanes[1].cells[0].glyph).toBe('◇')
+    expect(a.lanes[2].cells[0]).toMatchObject({ glyph: '✗', color: 'error' })
+  })
+
+  test('pane workers count from their routes, other runs are left out, long lanes cap', async () => {
+    const m = new Map()
+    for (let i = 0; i < 10; i++) m.set('r' + i, sub('r' + i, 'code-reviewer', 'sonnet', i))
+    m.set('o', { ...sub('o', 'planner', 'opus', 0), run: 'other' })
+    const routes = [{ name: 'agt-r1-exec-1', run: 'r1', role: 'exec-1', agent: 'executor', model: 'sonnet', start: 0, end: null }]
+    const s = swarm({ agents: m, routes, run: 'r1', tick: 0 })!
+    expect(s.lanes.map((l) => l.phase)).toEqual(['build', 'review'])
+    expect(s.lanes[0].cells[0].glyph).toBe('▣')
+    expect(s.lanes[1]).toMatchObject({ more: 2 })
+    expect(s.lanes[1].cells.length).toBe(8)
+    expect(s.total).toBe(11)
+  })
+
+  test('phaseOf sorts every routed role', async () => {
+    expect(['planner', 'plan-reviewer', 'ui-prototyper'].map(phaseOf)).toEqual(['plan', 'plan', 'plan'])
+    expect(['executor', 'adversary'].map(phaseOf)).toEqual(['build', 'build'])
+    expect(['code-reviewer', 'seo-reviewer', 'payments-reviewer'].map(phaseOf)).toEqual(['review', 'review', 'review'])
+    expect(phaseOf('Explore')).toBe('other')
   })
 })

@@ -5,7 +5,7 @@
 
 import { DEFAULTS, decide, formationOf, parseHeader, roleOf, verdictOf } from './routing.js'
 import { addUsage, elapsed, endRoute, finish, isAgtPrompt, ledger, ledgerText, newAgent, paneAgents, panesLeft, reapPlan, short, stage, waving } from './live.js'
-import { ACCENT, FRAME_COLOR, INK, WIRE_COLOR, boardRows, cast, castColumns, chip, colorOf, header, hex, leadLine, routingLines, tokenBars, toolLabel, wireLines, wireRow } from './board.js'
+import { ACCENT, FRAME_COLOR, INK, WIRE_COLOR, boardRows, cast, castColumns, chip, colorOf, header, hex, leadLine, routingLines, swarm, tokenBars, toolLabel, wireLines, wireRow } from './board.js'
 import { PUBLISH_MS, doneMessage, freshStatus, logWire, parseTellArgs, parseWire, shortName, statusKey, validLead, wakeDue, wakeMessage, wireEnv, workerStatus } from './wire.js'
 import { activeSquads, allPaths, depsOf, injection } from './squads.js'
 import { BYE_MS, HELLO_MS, MASCOT_COLOR, MODEL_COLOR, agentMood, caption, frame, modelKey, moodAt, parseWorker } from './mascot.js'
@@ -559,6 +559,19 @@ function boardHeader(els, h) {
   })
 }
 
+// The whole run in one line, by phase: plan ✓ · build ◆◇ · review ◆◆◆✓ · 3/7 done.
+function swarmLine(els, s) {
+  const { Text } = els
+  const parts = []
+  s.lanes.forEach((l, i) => {
+    parts.push(Text({ dimColor: true, children: [(i ? '  ' : '') + l.phase + ' '] }))
+    for (const c of l.cells) parts.push(Text({ color: c.color, dimColor: c.dim, children: [c.glyph] }))
+    if (l.more) parts.push(Text({ dimColor: true, children: ['+' + l.more] }))
+  })
+  parts.push(Text({ dimColor: true, children: ['  ' + s.done + '/' + s.total + ' done'] }))
+  return Text({ wrap: 'truncate', children: parts })
+}
+
 function leadRow(els, l) {
   const { Text } = els
   return Text({ wrap: 'truncate', children: [Text({ color: l.color, children: ['◉ '] }), l.text, Text({ dimColor: true, children: ['  ' + l.state] })] })
@@ -995,9 +1008,11 @@ export function register(on) {
     const rows = nest(cast(staged, live, lastRun))
     const cols = (e.props.bodyColumns ?? 80) - 4
     const view = boardRows(rows, { now, tick, cols, wire: wireStatus, transport, view: e.props.view?.agentId ?? null })
-    const room = Math.max(1, (e.props.maxRows ?? 10) - 4 - kids.length - (wire ? 1 : 0))
+    const sw = swarm({ agents: live, routes: paneRoutes, run: lastRun, tick })
+    const room = Math.max(1, (e.props.maxRows ?? 10) - 4 - kids.length - (wire ? 1 : 0) - (sw ? 1 : 0))
     const waiting = rows.filter((r) => r.state === 'working').length
     const inner = [boardHeader(els, header({ run: lastRun, formation: runs.get(lastRun)?.formation, squads: squads.map((q) => q.name), rows, tally: staged.tally }))]
+    if (sw) inner.push(swarmLine(els, sw))
     if (rows.length) inner.push(leadRow(els, leadLine({ model: leadModel, busy: e.props.isWorking, waiting })))
     const shown = view.slice(0, room)
     const argvs = shown.map((r) => (r.pane ? focusArgv(transport, rows.find((x) => x.id === r.id)) : null))

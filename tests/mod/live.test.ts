@@ -119,6 +119,18 @@ describe('band', () => {
     await ui.unmount()
   })
 
+  test('three reviewers sent together draw a swarm line under the header', async ($, on) => {
+    let n = 0
+    on('store.get', async () => ({ value: null }))
+    on('agent.spawn', async ($, e) => ({ model: 'claude-sonnet-5-5', agentId: 'sw' + n++ }))
+    on('ui.render', async () => ({ type: 'engine', ref: 0 }) as never)
+    for (const r of ['code', 'security', 'design']) await $.agent.spawn({ prompt: '[agt run=swarmrun size=small mode=review]\nreview', subagentType: 'agentille:agentille-' + r + '-reviewer' })
+    const ui = await $.ui.mount({ plugin: 'agentille', surface: 'terminal', component: 'AbovePrompt', props: { hasSurvey: false, isWorking: true, maxRows: 10, bodyColumns: 100 } as never })
+    expect(await ui.find({ type: 'Text', text: /^review $/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /0\/3 done/ })).toBeDefined()
+    await ui.unmount()
+  })
+
   test('a short band still shows the agent row', async ($, on) => {
     on('store.get', async () => ({ value: null }))
     on('agent.spawn', async ($, e) => ({ model: 'claude-opus-5-5', agentId: 'band3' }))

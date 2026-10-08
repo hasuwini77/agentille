@@ -869,6 +869,17 @@ export function register(on) {
         a.tool = toolLabel(e.tool, e)
         a.heard = Date.now()
       }
+      // A workflow agent inside one long call (a full test suite) is alive: tree.js quietWorkflows
+      // skips it until the call returns, and the return counts as heard.
+      if (a?.workflow) {
+        a.calls = (a.calls ?? 0) + 1
+        try {
+          return await next(e)
+        } finally {
+          a.calls -= 1
+          a.heard = Date.now()
+        }
+      }
     } else if (wireName) {
       pub.tool = toolLabel(e.tool, e)
       void publish($).catch(() => {})

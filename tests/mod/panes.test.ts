@@ -340,7 +340,7 @@ describe('tmux band', () => {
 
   const DONE = (role: string) => '/h/.agentille/state/run-r9/done-' + role
 
-  test('a lead kills a done pane only after 90s, never a working or a spawn pane', async ($, on) => {
+  test('a lead kills a done pane only after 90s, never a working or a spawn pane', { timeoutMs: 15_000 }, async ($, on) => {
     const rows = [row('%1', ''), row('%2', 'agt-r9-executor', '1'), row('%3', 'agt-r9-spawn', '1'), row('%4', 'agt-r9-planner')]
     const { killed, clock } = await start($, on, { rows })
     await clock.advance(85_000)

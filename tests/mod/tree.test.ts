@@ -8,6 +8,11 @@ const agent = (id: string, extra: object = {}) => ({ ...newAgent({ id, role: 'ex
 const item = (id: string, status: string, extra: object = {}) => ({ id, type: 'agentille:agentille-executor', status, description: 'build', ...extra })
 
 describe('tree: forks and workflow agents', () => {
+  test('a listed fork is not adopted: the mod skips forks at spawn too', async () => {
+    const live = new Map()
+    expect(adopt(live, [item('f1', 'running', { type: 'fork' }), item('k1', 'running')], { run: 'r1', now: 5 }).map((a) => a.id)).toEqual(['k1'])
+  })
+
   test('a workflow agent unheard from for ten minutes is finished; a heard one and a plain one are not', async () => {
     const live = new Map([
       ['w1', agent('w1', { workflow: 'wf_1', heard: 0 })],

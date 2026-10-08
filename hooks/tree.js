@@ -19,7 +19,8 @@ const typeName = (t) => String(t ?? 'agent').split(':').pop()
 export function adopt(live, list, { run, now }) {
   const added = []
   for (const item of list ?? []) {
-    if (!item?.id || live.has(item.id) || ENDED.has(item.status)) continue
+    // A fork the mod skips at spawn (register.js) stays skipped here.
+    if (!item?.id || live.has(item.id) || ENDED.has(item.status) || item.type === 'fork') continue
     const a = newAgent({ id: item.id, role: roleOf(item.type) ?? typeName(item.type), routed: false, model: null, effort: null, reason: null, run, now })
     a.parentId = item.parentId ?? null
     a.listStatus = item.status

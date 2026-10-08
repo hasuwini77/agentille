@@ -4,9 +4,9 @@
 # marketplace.json, broken agent-namespace references, dangling doc
 # cross-refs, a missing hook script, and PII leaks into a public repo.
 #
-# This is NOT a behavioral test framework. Dispatch decisions live in the
-# model and are verified by running a representative task through /agt
-# (see CLAUDE.md). This script only checks what is deterministic.
+# This is NOT a behavioral test framework. Dispatch decisions are scored by
+# the local eval suite in evals/ (`claude plugin eval`, see .claude/CLAUDE.md).
+# This script only checks what is deterministic.
 #
 # Usage:  bash scripts/validate.sh
 # Exit:   0 = all hard checks pass · 1 = at least one FAIL.

@@ -5,6 +5,7 @@ tools: Read, Grep, Glob, Bash
 model: opus
 effort: high
 color: orange
+omitClaudeMd: true
 ---
 
 # agentille-payments-reviewer

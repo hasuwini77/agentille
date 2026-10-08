@@ -43,3 +43,6 @@ review-*.png
 # Claude Code writes mod type declarations here on every --plugin-dir load
 .claude-plugin/types/
 /tsconfig.json
+
+# eval run transcripts: local only (absolute paths inside)
+evals/results/

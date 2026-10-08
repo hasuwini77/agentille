@@ -81,7 +81,7 @@ export function ledger(agents, run, routes = []) {
   const panes = {}
   const total = { agents: 0, input: 0, output: 0, cacheRead: 0, ms: 0 }
   for (const a of agents.values()) {
-    if (a.run !== run) continue
+    if ((a.fileRun ?? a.run) !== run) continue // a headerless workflow agent counts under its file run (ad hoc), not the band's
     const r = (roles[a.role] ??= { agents: 0, input: 0, output: 0, cacheRead: 0, ms: 0 })
     const ms = (a.end ?? a.start) - a.start
     for (const t of [r, total]) {

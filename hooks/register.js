@@ -938,16 +938,18 @@ export function register(on) {
     // it runs on the model the script chose. Log that model, not the table's, and flag a mismatch.
     if (e.workflow) {
       // Its prompt may carry no header: it then joins the run in progress rather than reset it. A header
-      // names its run, but the band moves to it only when the current run has nothing working.
+      // names its run, but the band moves to it only when the current run has nothing working, subagent or pane.
       const named = SAFE_RUN.test(hdr.run ?? '') ? hdr.run : null
       const runId = named ?? lastRun
       // Its files and counters follow the header: a headerless agent files under 'adhoc' (which writes
       // nothing), so the run in progress keeps only its own routing log and ledger.
       const fileRun = named ?? 'adhoc'
       const run = runState(fileRun)
-      if (named && (lastRun === 'adhoc' || !([...live.values()].some((a) => a.run === lastRun && a.state === 'working')))) lastRun = named
+      const busy = [...live.values()].some((a) => a.run === lastRun && a.state === 'working') || panes.some((p) => splitName(p.name)?.run === lastRun && p.state === 'working')
+      if (named && (lastRun === 'adhoc' || !busy)) lastRun = named
       agtTurn = true
-      const d = decide({ role, hdr, run, depth, settings, weeklyPct })
+      // The table pick follows the run in progress (its REVISEs); `run` is only where the log goes.
+      const d = decide({ role, hdr, run: runState(runId), depth, settings, weeklyPct })
       const res = await next(e)
       if (res.deny) return res
       const off = short(res.model) !== short(d.model)

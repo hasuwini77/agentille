@@ -36,9 +36,8 @@ All notable changes to agentille are documented here.
   pane has that name.
 - A workflow agent whose prompt names another run no longer pulls the band
   off a run that still has agents working.
-- A workflow agent without an `[agt]` header still joins the band's run, but
-  its routing line and counters are filed under ad hoc, not in the log and
-  ledger of the run in progress.
+- A workflow agent without an `[agt]` header files its routing line and
+  counters under ad hoc, not in the log and ledger of the run in progress.
 - The drift toast for a workflow agent shows once per run and role, not on
   every agent.
 

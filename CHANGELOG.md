@@ -2,6 +2,50 @@
 
 All notable changes to agentille are documented here.
 
+## [3.8.0] — 2026-10-08
+
+### Added
+
+- **A swarm line on the band.** One line under the switchboard's header holds
+  every agent of the run, finished ones included, grouped as plan · build ·
+  review: a pulsing cell per working agent in its model's colour, a dim ✓
+  per finished one, ✗ per failed one, and `n/m done`. It appears from three
+  agents on and keeps the whole run in view when the tree has room for only
+  a few rows. Drawn by the mod; no model tokens.
+
+### Changed
+
+- **A finished piece's reviewers go out together.** The contract now says to
+  send every reviewer a piece needs (code, design, security, squad
+  specialists) in one message as parallel background calls, then wait for
+  all of them. They read the same diff, so the run is shorter at the same
+  token cost.
+- The workflow tier tells the lead to set each workflow agent's model from
+  the routing table itself.
+
+### Fixed
+
+- **Workflow agents are no longer rewritten.** This build raises
+  `agent.spawn` for a workflow script's agents but ignores a model rewrite
+  there and logs a failure line. The mod now passes them through, logs the
+  model they really ran, and toasts a mismatch with the routing table.
+- A workflow agent whose prompt has no `[agt]` header joins the run in
+  progress instead of resetting the band to an ad-hoc run.
+- A workflow agent nothing has been heard from in ten minutes is finished,
+  so a cancelled workflow no longer leaves a row, the ticker and the status
+  line running forever.
+- A listed fork is no longer adopted into the tree.
+- The pinned status line shows only for an `/agt` run, not for a plain
+  subagent.
+- A row rebuilt after a reload no longer shows a bare `tok`.
+
+### Rationale
+
+- Run logs showed reviewers of one piece starting many minutes apart. Running
+  them together adds visible concurrency without adding agents or tokens.
+- The workflow fixes come from an audit of 3.7.0 against the 2.1.294 hooks
+  API.
+
 ## [3.7.0] — 2026-10-08
 
 ### Added

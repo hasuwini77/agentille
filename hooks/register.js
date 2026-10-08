@@ -17,7 +17,7 @@ import {
   advisorEnv, tmuxSplitArgv, tmuxTagArgvs, transportBlock,
 } from './panes.js'
 import { cacheDirOf, compareVersions, newerInstalled, skewMessage } from './skew.js'
-import { adopt, applyStatus, nest } from './tree.js'
+import { adopt, applyStatus, nest, quietWorkflows } from './tree.js'
 import { registerRows } from './rows.js'
 import { registerStatus } from './status.js'
 import { registerAutocomplete } from './autocomplete.js'
@@ -90,6 +90,14 @@ const ctx = {
   get routes() { return paneRoutes },
   get isLead() { return !worker && !selfName },
   onTick: [], // (io, ctx, now) callbacks the redraw ticker calls each period; a module adds its own while registering
+}
+
+// A workflow agent is in no agent list, and a cancelled one raises no turn.complete: it is marked,
+// and every event of its loop says it is still alive (tree.js quietWorkflows ends a silent one).
+function heard(a, e) {
+  if (e.workflow) a.workflow = e.workflow.runId || true
+  a.heard = Date.now()
+  return a
 }
 
 function runState(id) {
@@ -178,6 +186,7 @@ async function refreshAgents($, at) {
   listBusy = true
   listAt = now
   try {
+    if (quietWorkflows(live, Date.now())) $.ui.invalidate('ui.render')
     let list
     try {
       list = await $.agent.list()
@@ -856,7 +865,10 @@ export function register(on) {
   on('tool.call', async ($, e, next) => {
     if (e.agentId) {
       const a = live.get(e.agentId)
-      if (a) a.tool = toolLabel(e.tool, e)
+      if (a) {
+        a.tool = toolLabel(e.tool, e)
+        a.heard = Date.now()
+      }
     } else if (wireName) {
       pub.tool = toolLabel(e.tool, e)
       void publish($).catch(() => {})
@@ -876,31 +888,26 @@ export function register(on) {
 
     if (!role) {
       const res = await next(e)
-      if (res.agentId) live.set(res.agentId, newAgent({ id: res.agentId, role: shortType(e.subagentType), routed: false, model: res.model, effort: null, reason: null, run: lastRun, now: Date.now(), parentId: e.parentAgentId ?? null }))
+      if (res.agentId) live.set(res.agentId, heard(newAgent({ id: res.agentId, role: shortType(e.subagentType), routed: false, model: res.model, effort: null, reason: null, run: lastRun, now: Date.now(), parentId: e.parentAgentId ?? null }), e))
       ensureTicker($)
       $.ui.invalidate('ui.render')
       return res
     }
 
     const hdr = parseHeader(e.prompt) ?? {}
-    const runId = SAFE_RUN.test(hdr.run ?? '') ? hdr.run : 'adhoc'
-    agtTurn = true
-    lastRun = runId
-    const run = runState(runId)
-    run.formation = formationOf(hdr) ?? run.formation
-    if (role === 'executor' && hdr.mode === 'fix') run.fixes += 1
-    const shared = Number((await $.store.get('fable:' + runId)) ?? 0)
-    run.fable = Math.max(run.fable, shared)
-
-    const d = decide({ role, hdr, run, depth, settings, weeklyPct })
-
     // A workflow script's agent: the engine ignores a rewrite there (and logs a failure line), so
     // it runs on the model the script chose. Log that model, not the table's, and flag a mismatch.
     if (e.workflow) {
+      // Its prompt may carry no header: it then joins the run in progress rather than reset it.
+      const runId = SAFE_RUN.test(hdr.run ?? '') ? hdr.run : lastRun
+      const run = runState(runId)
+      lastRun = runId
+      agtTurn = true
+      const d = decide({ role, hdr, run, depth, settings, weeklyPct })
       const res = await next(e)
       if (res.deny) return res
       const off = short(res.model) !== short(d.model)
-      if (res.agentId) live.set(res.agentId, newAgent({ id: res.agentId, role, routed: false, model: res.model, effort: null, reason: null, run: runId, now: Date.now(), parentId: e.parentAgentId ?? null }))
+      if (res.agentId) live.set(res.agentId, heard(newAgent({ id: res.agentId, role, routed: false, model: res.model, effort: null, reason: null, run: runId, now: Date.now(), parentId: e.parentAgentId ?? null }), e))
       const rec = { at: new Date().toISOString(), role, model: res.model, effort: null, reason: off ? 'workflow, table says ' + d.model + ' · ' + d.effort : 'workflow', asked: e.model ?? null, agentId: res.agentId ?? null, kind: 'workflow' }
       decisions.push(rec)
       run.log.push(JSON.stringify(rec))
@@ -911,6 +918,16 @@ export function register(on) {
       return res
     }
 
+    const runId = SAFE_RUN.test(hdr.run ?? '') ? hdr.run : 'adhoc'
+    agtTurn = true
+    lastRun = runId
+    const run = runState(runId)
+    run.formation = formationOf(hdr) ?? run.formation
+    if (role === 'executor' && hdr.mode === 'fix') run.fixes += 1
+    const shared = Number((await $.store.get('fable:' + runId)) ?? 0)
+    run.fable = Math.max(run.fable, shared)
+
+    const d = decide({ role, hdr, run, depth, settings, weeklyPct })
     const res = await next({ ...e, model: d.model })
     if (res.deny) return res
 
@@ -940,6 +957,7 @@ export function register(on) {
       await publish($)
     }
     if (a) {
+      a.heard = Date.now()
       if (!a.effort && e.effort) a.effort = String(e.effort)
       if (!a.model && e.model) a.model = e.model
       addUsage(a, result?.usage)

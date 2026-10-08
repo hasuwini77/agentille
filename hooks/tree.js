@@ -7,6 +7,9 @@ import { roleOf } from './routing.js'
 
 const ENDED = new Set(['completed', 'failed', 'killed'])
 const BROKEN = new Set(['failed', 'killed'])
+// A workflow agent unheard from this long is over: a cancelled one raises no turn.complete, and no
+// list names it. One model request rarely runs past a few minutes; a tool call or step resets it.
+export const WORKFLOW_SILENT_MS = 10 * 60_000
 
 const typeName = (t) => String(t ?? 'agent').split(':').pop()
 
@@ -47,6 +50,18 @@ export function applyStatus(live, list, now) {
     a.listed = true
     if (a.state !== 'working') continue
     if (BROKEN.has(item.status) || (a.adopted && (item.status === 'completed' || item.status === 'idle'))) { finish(a, now); changed = true }
+  }
+  return changed
+}
+
+// Finish every working workflow agent nothing has been heard from in WORKFLOW_SILENT_MS. Returns
+// whether any was.
+export function quietWorkflows(live, now) {
+  let changed = false
+  for (const a of live.values()) {
+    if (!a.workflow || a.state !== 'working' || now - (a.heard ?? a.start) < WORKFLOW_SILENT_MS) continue
+    finish(a, now)
+    changed = true
   }
   return changed
 }

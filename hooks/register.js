@@ -89,6 +89,7 @@ const ctx = {
   get panes() { return panes },
   get routes() { return paneRoutes },
   get isLead() { return !worker && !selfName },
+  onTick: [], // (io, ctx, now) callbacks the redraw ticker calls each period; a module adds its own while registering
 }
 
 function runState(id) {
@@ -409,6 +410,20 @@ function ensurePolling($) {
 // still waving (elapsed times tick, legs step); the ticker cancels itself once all are idle.
 const animating = (now) => (!!worker && moodAt({ ...mascot, now }) !== 'idle') || [...live.values()].some((a) => waving(a, Date.now()))
 
+// The modules that follow the run on the ticker (the pinned status line) add a callback to ctx.onTick.
+// They get the few `$` calls they need as `io`, not `$`: the hook checker follows `$` itself only
+// into top-level functions of one file, so the arrows that spell the calls out sit here.
+async function tickModules($, now) {
+  const io = { status: (text) => $.ui.status(text), after: (ms, fn) => $.clock.after(ms, fn), now: () => $.clock.now() }
+  for (const f of ctx.onTick) {
+    try {
+      await f(io, ctx, now)
+    } catch {
+      // one module's tick must not stop the others or the redraw
+    }
+  }
+}
+
 function ensureTicker($) {
   if (tickTimer) return
   tickTimer = $.clock.every(300, async () => {
@@ -417,6 +432,7 @@ function ensureTicker($) {
       tickTimer?.cancel()
       tickTimer = null
     } else tick += 1
+    await tickModules($, now) // also on the tick that stops the ticker, so the last change is seen
     if (panes.length && tick % 3 === 0) await readWire($)
     if (tick % 4 === 0) void refreshAgents($, now)
     $.ui.invalidate('ui.render')

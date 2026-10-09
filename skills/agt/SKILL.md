@@ -11,7 +11,7 @@ Turn one prompt into the cheapest run that does the job well: do it yourself whe
 
 ## The contract
 
-1. **Profile.** Read `~/.agentille/profile.json`. Missing or unreadable → use the defaults (`deliveryStyle: direct`, `tone: peer-to-peer`, `preTaskQuestioning: ambiguous-only`, `thinkingDepth: complex-only`) and never stop. With no profile and no `~/.agentille/state/.tip-shown`, print `tip: /agentille-init makes agents sound like you` once, then create that marker (Write tool, empty).
+1. **Profile.** Read `~/.agentille/profile.json`. Missing or unreadable → use the defaults (`deliveryStyle: direct`, `tone: peer-to-peer`, `preTaskQuestioning: ambiguous-only`, `thinkingDepth: complex-only`) and never stop. With no profile and no `~/.agentille/state/.tip-shown`, print `tip: /agentille-init makes agents sound like you` once, then create that marker (Write tool, empty). Skip this when the mod draws (`display.md` → "When the mod draws").
 2. **Mode.** Resolve it with "Modes" below and print the recon line (`display.md` → "Mid-run lines").
 3. **Solo steps aside.** Print `solo · <why>` and do the task yourself: no run dir, no agents, no report, no card.
 4. **Clarify only when genuinely ambiguous** (never with `preTaskQuestioning: never`; up front with `always`). Explore the repo first; ask at most 3 questions, each with a recommended default. UI viewports default to `profile.viewports` when set, else desktop + mobile, without asking.

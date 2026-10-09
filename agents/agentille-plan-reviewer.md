@@ -1,6 +1,6 @@
 ---
 name: agentille-plan-reviewer
-description: Reviews a planner's draft plan BEFORE execution — checks the goal is right, the steps actually reach it, parallelization is safe, verification is real, and nothing required is missing. Read-only; returns APPROVE or REVISE with specific gaps. Invoked by the agentille master skill after the planner, for multi-step tasks.
+description: agentille plan reviewer — checks a draft plan reaches its goal safely; APPROVE or REVISE. Dispatched only by /agt.
 tools: Read, Grep, Glob, Bash
 model: sonnet
 color: cyan

@@ -1,6 +1,6 @@
 ---
 name: agentille-seo-reviewer
-description: Reviews changed pages for SEO — metadata, Open Graph/Twitter cards, canonical URLs, robots/sitemap/RSS, JSON-LD structured data, heading hierarchy, alt text, internal links, Core Web Vitals hints. Read-only; verifies against built HTML when possible. A squad specialist for content and e-commerce repos.
+description: agentille SEO reviewer — read-only review of metadata, OG cards, canonicals, sitemap and JSON-LD on changed pages. Dispatched only by /agt.
 tools: Read, Grep, Glob, Bash
 model: sonnet
 effort: medium

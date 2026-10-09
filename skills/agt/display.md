@@ -2,6 +2,17 @@
 
 Presentation only: nothing here changes dispatch. If a line cannot be produced, drop it; never block the result. Solo prints only `solo · <why>`.
 
+## When the mod draws
+
+The skill text then ends with a `## Drawing (agentille mod)` block. With it, the mod already shows these, so skip them:
+
+- the `[agentille v<version>]` suffix on the recon line (the band header shows the version)
+- the TodoWrite progress spine (the swarm line shows the phases)
+- the profile tip (the mod toasts it once)
+- report.md's `## Agents` and `## Raw reports` sections (the mod appends them)
+
+Without that block (mods off, the VS Code chat panel, `claude -p`), do all of them as written below.
+
 ## Mid-run lines
 
 The model writes only these, nothing else between dispatches:
@@ -11,11 +22,11 @@ recon: <mode> · <one-clause reason>   [agentille v<version>]
 ⚑ <agent> <blocked|REVISE|FAIL>: <one line>
 ```
 
-`<version>` is the `version` in the `.claude-plugin/plugin.json` beside this skill (the plugin root above its base directory), the one actually running: never a repo checkout's, which can differ. When you have the `advisor` tool, append ` · advisor` after the reason. One `⚑` line per real problem, when it happens.
+`<version>` (skip it when the mod draws) is the `version` in the `.claude-plugin/plugin.json` beside this skill (the plugin root above its base directory), the one actually running: never a repo checkout's, which can differ. When you have the `advisor` tool, append ` · advisor` after the reason. One `⚑` line per real problem, when it happens.
 
 ## Progress spine
 
-Before the first dispatch, seed TodoWrite with one todo per phase the roster actually has (e.g. plan · build · review · ship). Mark each in progress, then done, as it moves. That is the whole live view you write. With the mod loaded, the switchboard above the prompt shows a swarm line (every agent of the run by phase: plan · build · review) over the dispatch tree (each subagent `◇` and pane session `▣`, its model, live tool, elapsed and tokens) and the newest wire message, each `Agent` call in the transcript is a live row, and a status line under the prompt keeps the run's totals in view; `/agt-deck` opens a fuller view. You do nothing for either.
+Skip this section when the mod draws. Otherwise, before the first dispatch, seed TodoWrite with one todo per phase the roster actually has (e.g. plan · build · review · ship). Mark each in progress, then done, as it moves. That is the whole live view you write. With the mod loaded, the switchboard above the prompt shows a swarm line (every agent of the run by phase: plan · build · review) over the dispatch tree (each subagent `◇` and pane session `▣`, its model, live tool, elapsed and tokens) and the newest wire message, each `Agent` call in the transcript is a live row, and a status line under the prompt keeps the run's totals in view; `/agt-deck` opens a fuller view. You do nothing for either.
 
 ## Agent heads
 
@@ -47,10 +58,10 @@ Write `~/.agentille/state/run-<id>/report.md` once at the end with the Write too
 # /agt run <id> · <task> · <date>
 ## Result         the card's first three lines
 ## Plan           the planner's plan, if any
-## Agents         role · model · effort · elapsed, from ledger.json (skip the section if it is missing)
+## Agents         role · model · effort · elapsed, from ledger.json (skip the section if it is missing, or when the mod draws)
 ## Findings       every P0–P3: file:line, fix, status
 ## Verification   commands and exit codes
-## Raw reports    links to agents/<role>-<n>.md (written by the mod); with mods off, each agent's head
+## Raw reports    links to agents/<role>-<n>.md (written by the mod); with mods off, each agent's head (skip when the mod draws)
 ```
 
 Never copy agent bodies into it: the mod already saved them under `agents/`.

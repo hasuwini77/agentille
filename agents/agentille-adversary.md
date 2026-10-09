@@ -1,6 +1,6 @@
 ---
 name: agentille-adversary
-description: Red-team tester for an agentille gauntlet. Reads the spec and the executor's diff, then writes NEW tests designed to break the implementation — edge cases, hostile input, boundaries, concurrency, error paths. Writes test files only, never source. Reports which of its tests fail (BROKEN) and which the code survived (HELD). Invoked by the agentille master skill inside the gauntlet formation.
+description: agentille gauntlet red-teamer — writes new tests that try to break the executor's diff, reports BROKEN/HELD. Test files only. Dispatched only by /agt.
 tools: Read, Grep, Glob, Bash, Write, Edit
 model: sonnet
 color: red

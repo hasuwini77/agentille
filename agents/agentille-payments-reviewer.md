@@ -1,6 +1,6 @@
 ---
 name: agentille-payments-reviewer
-description: Reviews changed code on money paths — webhook signature and idempotency, server-side price/plan resolution, subscription state, refunds, currency rounding, test-vs-live keys, PCI scope. Read-only; reports severity-classified findings. A squad specialist, dispatched only when the diff touches payments.
+description: agentille payments reviewer — read-only review of money paths (webhooks, pricing, subscriptions, refunds, keys). Dispatched only by /agt.
 tools: Read, Grep, Glob, Bash
 model: opus
 effort: high

@@ -1,6 +1,6 @@
 ---
 name: agentille-ui-prototyper
-description: Pre-build UI design specialist for agentille. Runs BEFORE the executor on frontend work and frames the stylish, anti-generic component design up front — component anatomy, design tokens (palette / type scale / spacing / radii / shadow / motion), every interactive state, responsive + a11y intent, and anti-generic guardrails — then emits a UI Prototype Blueprint the executor builds against. Uses ui-ux-pro-max / impeccable / frontend-design when installed; falls back to its own design taste when they're absent. Read-only on source; never edits files and never commits.
+description: agentille UI prototyper — designs components, tokens and states before the build and hands the executor a Blueprint. Read-only. Dispatched only by /agt.
 tools: Read, Grep, Glob, Bash, Skill
 model: opus
 color: orange

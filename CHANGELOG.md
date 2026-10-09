@@ -2,6 +2,29 @@
 
 All notable changes to agentille are documented here.
 
+## [3.10.0] — 2026-10-09
+
+### Changed
+
+- **The mod takes over the run lines /agt used to print.** When the
+  session draws (a terminal or the desktop app), /agt gets a `Drawing`
+  block and skips four things the mod now covers: the version on the
+  recon line (the band header shows it), the TodoWrite progress spine
+  (the swarm line shows the phases), the profile tip (a toast, once), and
+  report.md's Agents and Raw reports sections (the mod appends them from
+  its own ledger and the saved agent answers). A session that draws
+  nothing, such as the VS Code chat panel or `claude -p`, or a session
+  with mods off, prints all of it as before.
+- **One-line agent descriptions.** Every agent description ships in the
+  Agent tool list of every session, /agt or not. The eleven drop from
+  4.1 KB to 1.6 KB; the agent bodies keep the detail.
+
+### Rationale
+
+- Lines the model prints about a run cost output tokens and tool calls;
+  the same lines drawn by the mod cost nothing. The eval suite still
+  scores 1.00 on all four cases.
+
 ## [3.9.0] — 2026-10-08
 
 ### Added

@@ -1186,13 +1186,13 @@ export function register(on) {
       kids.push(line((m) => Box({ width: 14, children: [m.model ? Text({ color: INK, backgroundColor: colorOf(m.model), children: [chip(m.model)] }) : Text({ dimColor: true, children: ['pane'] })] })))
       if (c.more > 0) kids.push(Text({ dimColor: true, children: ['+' + c.more + ' more'] }))
     }
-    if (decisions.length) {
-      kids.push(rule(els, 'routing'))
-      for (const d of routingLines(decisions)) kids.push(Text({ wrap: 'truncate', children: [Text({ dimColor: true, children: [d.at + '  '] }), d.who + '  ', Text({ color: d.color, children: [d.route] }), Text({ color: d.escalated ? colorOf('fable') : d.drift ? 'warning' : undefined, dimColor: !d.escalated && !d.drift, children: [d.reason] })] }))
-    }
     if (wireLog.length) {
       kids.push(rule(els, 'conversation'))
       for (const w of wireLines(wireLog)) kids.push(Text({ wrap: 'truncate', children: [Text({ dimColor: true, children: [w.at + '  '] }), Text({ color: w.sub ? undefined : hex(WIRE_COLOR), children: [w.arrow + ' '] }), Text({ dimColor: true, children: [w.kind + ' '] }), w.text] }))
+    }
+    if (decisions.length) {
+      kids.push(rule(els, 'routing'))
+      for (const d of routingLines(decisions)) kids.push(Text({ wrap: 'truncate', children: [Text({ dimColor: true, children: [d.at + '  '] }), d.who + '  ', Text({ color: d.color, children: [d.route] }), Text({ color: d.escalated ? colorOf('fable') : d.drift ? 'warning' : undefined, dimColor: !d.escalated && !d.drift, children: [d.reason] })] }))
     }
     const bars = tokenBars(ledger(live, lastRun, paneRoutes), Math.max(8, Math.min(30, cols - 30)))
     if (bars.length) {

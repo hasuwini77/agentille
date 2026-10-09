@@ -1,6 +1,6 @@
 ---
 name: agentille-security-reviewer
-description: Reviews changed code for security issues — secret leaks, injection vectors, auth bypass, unsafe deserialization, CSRF/XSS, dependency CVEs. Read-only; reports findings classified by severity. Used on any task tagged as security-sensitive and when the review gate includes security.
+description: agentille security reviewer — read-only review for secrets, injection, auth bypass, XSS/CSRF and CVEs. Dispatched only by /agt.
 tools: Read, Grep, Glob, Bash
 model: opus
 effort: high

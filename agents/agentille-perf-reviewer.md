@@ -1,6 +1,6 @@
 ---
 name: agentille-perf-reviewer
-description: Reviews changed code for performance with measurable evidence — bundle size deltas, LCP/CLS/INP risks, image and font loading, render waterfalls, React re-render hot paths, and for 3D/WebGL draw calls, memory, disposal and frame budget. Read-only. A squad specialist for e-commerce and immersive repos.
+description: agentille perf reviewer — read-only review with measured evidence (bundle, Web Vitals, renders, 3D frame budget). Dispatched only by /agt.
 tools: Read, Grep, Glob, Bash
 model: sonnet
 effort: high

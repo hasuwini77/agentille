@@ -1,6 +1,6 @@
 ---
 name: agentille-code-reviewer
-description: Read-only code review for an agentille execution. Reviews the diff produced by executors for bugs, security issues, and code-quality regressions. Produces severity-classified findings — no fixes. Invoked by the agentille master skill after executor(s) finish, before merge.
+description: agentille code reviewer — read-only review of an executor's diff with severity-ranked findings, no fixes. Dispatched only by /agt.
 tools: Read, Grep, Glob, Bash
 model: sonnet
 color: yellow

@@ -1,6 +1,6 @@
 ---
 name: agentille-design-reviewer
-description: Visual + accessibility + UX review for UI work in an agentille orchestration. Captures screenshots at the viewports that matter (orchestrator-scoped — desktop + mobile by default, all three only when asked), runs an axe-core runtime scan + WCAG 2.2 accessibility audit (layering the `accessibility` and `web-design-guidelines` skills when installed), scans for AI-design-tells (generic gradients, dead-center hero traps, "stock dashboard" patterns), scores the design pillars 1-10, and produces an actionable critique. Invoked by the agentille master skill only for frontend changes.
+description: agentille design reviewer — screenshots, axe-core + WCAG 2.2 scan and AI-design tells on UI changes; scored critique. Dispatched only by /agt.
 tools: Read, Grep, Glob, Bash, mcp__plugin_playwright_playwright__browser_navigate, mcp__plugin_playwright_playwright__browser_resize, mcp__plugin_playwright_playwright__browser_snapshot, mcp__plugin_playwright_playwright__browser_take_screenshot, mcp__plugin_playwright_playwright__browser_console_messages, mcp__plugin_playwright_playwright__browser_network_requests, mcp__plugin_playwright_playwright__browser_evaluate, mcp__plugin_playwright_playwright__browser_wait_for, mcp__plugin_playwright_playwright__browser_close
 model: opus
 effort: high

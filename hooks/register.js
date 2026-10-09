@@ -661,8 +661,9 @@ async function tipOnce($) {
 // /agt writes report.md once at the end; the mod adds the Agents and Raw reports sections it lacks.
 async function completeReport($, path) {
   const run = reportRun(path)
-  if (!run || !home || !path.startsWith(home + '/')) return
+  if (!run || !home) return
   const dir = home + '/.agentille/state/run-' + run
+  if (path !== dir + '/report.md') return
   try {
     const text = await $.fs.read(path)
     const files = (await $.fs.list(dir + '/agents').catch(() => [])).filter((f) => f.kind !== 'dir' && f.name.endsWith('.md')).map((f) => f.name)

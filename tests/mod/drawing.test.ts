@@ -39,6 +39,14 @@ describe('drawing: pure', () => {
     expect(tail).toContain('## Raw reports\n\n- [code-reviewer-1.md](agents/code-reviewer-1.md)\n- [executor-1.md](agents/executor-1.md)')
   })
 
+  test('only the exact headings count, and a second pass adds nothing', async () => {
+    const opts = { agents: [agent('executor', 0)], files: ['executor-1.md'] }
+    expect(reportTail('## Agents and roles\n', opts)).toContain('\n## Agents\n')
+    const once = 'r\n' + reportTail('r\n', opts)
+    expect(reportTail(once, opts)).toBe('')
+    expect(reportTail('## Agents\r\n## Raw reports\r\n', opts)).toBe('')
+  })
+
   test('sections the lead already wrote are left alone', async () => {
     const both = '## Agents\nx\n## Raw reports\ny\n'
     expect(reportTail(both, { agents: [agent('executor', 0)], files: ['executor-1.md'] })).toBe('')
@@ -94,5 +102,15 @@ describe('drawing: in the mod', () => {
     await $.tool.call({ tool: 'Write', file_path: path, content: 'x' } as never)
     expect(written[path]).toContain('## Raw reports\n\n- [executor-1.md](agents/executor-1.md)')
     expect(written[path].startsWith('# /agt run r1\n## Result\nok\n')).toBe(true)
+  })
+
+  test("a subagent's Write and a report outside the state dir are left alone", async ($, on) => {
+    const path = '/h/.agentille/state/run-r1/report.md'
+    const elsewhere = '/h/proj/.agentille/state/run-r1/report.md'
+    const { written } = await boot($, on, ['terminal'], { [path]: 'x\n', [elsewhere]: 'y\n' })
+    await $.tool.call({ tool: 'Write', file_path: path, content: 'x', agentId: 'sub1' } as never)
+    await $.tool.call({ tool: 'Write', file_path: elsewhere, content: 'y' } as never)
+    expect(path in written).toBe(false)
+    expect(elsewhere in written).toBe(false)
   })
 })

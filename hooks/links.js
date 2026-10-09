@@ -6,6 +6,11 @@ const PIECE_RE = /^[a-z0-9][a-z0-9-]{0,23}$/
 export const pieceOf = (hdr) => (PIECE_RE.test(String(hdr?.piece ?? '')) ? hdr.piece : null)
 
 const isBuilder = (r) => (r.agent ?? r.role) === 'executor'
+// The roles that check a built diff: every *-reviewer but the plan-reviewer, and the adversary.
+const isChecker = (r) => {
+  const role = String(r.agent ?? r.role ?? '')
+  return role === 'adversary' || (role.endsWith('-reviewer') && role !== 'plan-reviewer')
+}
 
 // A finished agent's head as a chip: PASS · CONCERNS P1:2 · FAIL P0:1 · APPROVE · REVISE · HELD · BROKEN 2.
 // tone is a theme color name. null when the answer has no head this role writes.
@@ -35,15 +40,19 @@ export function verdictChip(role, answer) {
 
 // A piece's reviewers and adversary hang under the executor that built it, so the tree reads
 // who checks whose diff. A row whose own parent is on screen keeps it; the newest builder of a
-// piece wins (a fix attempt replaces the first build).
+// piece wins (a fix attempt replaces the first build). With exactly one builder on screen, a checker
+// that names no piece is that builder's: the common one-slice run, or a lead that left piece= out.
+// Two builders and no piece say nothing about which diff a reviewer reads, so nothing is linked.
 export function linkPieces(rows) {
   const builders = new Map()
   for (const r of rows) if (r.piece && isBuilder(r)) builders.set(r.piece, r.id)
+  const all = rows.filter(isBuilder)
+  const only = all.length === 1 ? all[0].id : null
   const ids = new Set(rows.map((r) => r.id))
   return rows.map((r) => {
-    if (!r.piece || isBuilder(r)) return r
-    const b = builders.get(r.piece)
-    if (!b || b === r.id || (r.parentId && ids.has(r.parentId))) return r
+    if (isBuilder(r) || !isChecker(r) || (r.parentId && ids.has(r.parentId))) return r
+    const b = r.piece ? builders.get(r.piece) : only
+    if (!b || b === r.id) return r
     return { ...r, parentId: b }
   })
 }

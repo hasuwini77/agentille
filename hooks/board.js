@@ -222,12 +222,13 @@ export function tokenBars(l, width = 20) {
 
 export const PHASES = ['plan', 'build', 'review', 'other']
 
-// The phases at work in a run, in order: "build + review". '' when nothing of the run works.
+// The phases at work in a run, in order: "build + review". '' when none of the run's own roles
+// works, so a plain subagent spawned after a run still reads as a count.
 export function runPhases(agents, routes, run) {
   const at = new Set()
   for (const a of agents.values()) if (a.run === run && a.state === 'working') at.add(phaseOf(a.role))
   for (const r of routes) if (r.run === run && r.end == null) at.add(phaseOf(r.agent ?? r.role))
-  return PHASES.filter((p) => at.has(p)).map((p) => (p === 'other' ? 'agents' : p)).join(' + ')
+  return PHASES.filter((p) => p !== 'other' && at.has(p)).join(' + ')
 }
 const LANE_CAP = 8 // cells per lane before it reads "+n"
 

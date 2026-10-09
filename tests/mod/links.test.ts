@@ -45,9 +45,13 @@ describe('links: pure', () => {
     expect(tree.indexOf('cr')).toBe(tree.indexOf('e2') + 1)
   })
 
-  test('rows without a piece are untouched', async () => {
-    const rows = [row('e', 'executor', null), row('c', 'code-reviewer', null)]
-    expect(linkPieces(rows)).toEqual(rows)
+  test('with one builder, a checker that names no piece is its; planning roles and two builders stay put', async () => {
+    const one = linkPieces([row('e', 'executor', null), row('c', 'code-reviewer', null), row('a', 'adversary', null), row('p', 'plan-reviewer', null), row('u', 'ui-prototyper', null)])
+    expect(one.map((r) => r.parentId)).toEqual([null, 'e', 'e', null, null])
+    const two = [row('e1', 'executor', null), row('e2', 'executor', null), row('c', 'code-reviewer', null)]
+    expect(linkPieces(two)).toEqual(two)
+    const mixed = linkPieces([row('e1', 'executor', 'api'), row('e2', 'executor', 'web'), row('c', 'code-reviewer', null)])
+    expect(mixed.find((r) => r.id === 'c')?.parentId).toBe(null)
   })
 
   test('task and answer lines skip the header and the profile prefix', async () => {
@@ -101,6 +105,7 @@ describe('links: on the board', () => {
     expect(runPhases(agents, [], 'r1')).toBe('build + review')
     expect(runPhases(new Map(), [{ run: 'r1', agent: 'executor', end: null }], 'r1')).toBe('build')
     expect(runPhases(new Map(), [], 'r1')).toBe('')
+    expect(runPhases(new Map([['g', { run: 'r1', role: 'general-purpose', state: 'working' }]]), [], 'r1')).toBe('')
   })
 })
 
@@ -129,6 +134,16 @@ describe('links: in the mod', () => {
     const after = await mount($)
     expect(await after.find({ type: 'Text', text: /^FAIL P0:1$/ })).toBeDefined()
     await after.unmount()
+  })
+
+  test('a one-slice run nests its reviewer under the executor without any piece=', async ($, on) => {
+    spawnAs(on)
+    await $.agent.spawn({ prompt: '[agt run=onerun size=small mode=build]\nbuild it', subagentType: 'agentille:agentille-executor' })
+    await $.agent.spawn({ prompt: '[agt run=onerun size=small mode=review]\nreview it', subagentType: 'agentille:agentille-code-reviewer' })
+    const ui = await mount($)
+    const trees = (await ui.findAll({ type: 'Text', text: /^[│ ]*[├└]─/ })).map((t: any) => t.text)
+    expect(trees.some((t: string) => /^[│ ]+└─/.test(t))).toBe(true)
+    await ui.unmount()
   })
 
   test('a REVISE and a fix attempt show as loops in the band header', async ($, on) => {

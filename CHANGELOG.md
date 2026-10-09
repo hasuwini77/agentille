@@ -9,7 +9,8 @@ All notable changes to agentille are documented here.
 - **Who checks whose piece.** A new `piece=<slug>` field in the dispatch
   header names the slice an agent builds, reviews or attacks. On the band,
   a piece's reviewers and adversary hang under the executor that built it,
-  subagent or pane.
+  subagent or pane. A run with a single executor needs no field: its
+  reviewers hang under it anyway.
 - **Verdict chips.** A finished reviewer row reads its verdict in its tone
   (`PASS`, `CONCERNS P1:2`, `FAIL P0:1`, `APPROVE`, `REVISE`, `HELD`,
   `BROKEN 2`) instead of `done`.

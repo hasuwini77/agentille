@@ -26,7 +26,7 @@ recon: <mode> · <one-clause reason>   [agentille v<version>]
 
 ## Progress spine
 
-Skip this section when the mod draws. Otherwise, before the first dispatch, seed TodoWrite with one todo per phase the roster actually has (e.g. plan · build · review · ship). Mark each in progress, then done, as it moves. That is the whole live view you write. With the mod loaded, the switchboard above the prompt shows a swarm line (every agent of the run by phase: plan · build · review) over the dispatch tree (each subagent `◇` and pane session `▣`, its model, live tool, elapsed and tokens) and the newest wire message, each `Agent` call in the transcript is a live row, and a status line under the prompt keeps the run's totals in view; `/agt-deck` opens a fuller view. You do nothing for either.
+Skip this section when the mod draws. Otherwise, before the first dispatch, seed TodoWrite with one todo per phase the roster actually has (e.g. plan · build · review · ship). Mark each in progress, then done, as it moves. That is the whole live view you write. With the mod loaded, the switchboard above the prompt shows a swarm line (every agent of the run by phase: plan · build · review) over the dispatch tree (each subagent `◇` and pane session `▣`, its model, live tool, elapsed and tokens; a piece's reviewers under its executor, each finished one showing its verdict) and the newest wire message, the run's plan and fix loops in the band header, each `Agent` call in the transcript is a live row, and a status line under the prompt keeps the run's totals in view; `/agt-deck` opens a fuller view, with the run's whole conversation (every dispatch and every answer). You do nothing for either.
 
 ## Agent heads
 

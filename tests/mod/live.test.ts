@@ -113,7 +113,7 @@ describe('band', () => {
     expect(await ui.find({ type: 'Text', text: /▆ high/ })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: /run bandrun/ })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: /^◇$/ })).toBeDefined()
-    expect(await ui.find({ type: 'Text', text: /◇1 ▣0/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /◇1 ▣0/ })).toBeUndefined() // the counts live on the status line
     expect(await ui.find({ type: 'Text', text: /lead · / })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: /▝▜█████▛▘/ })).toBeUndefined()
     await ui.unmount()
@@ -164,7 +164,7 @@ describe('band', () => {
     await $.agent.spawn({ prompt: '[agt run=spinrun size=large mode=review]\nreview', subagentType: 'agentille:agentille-code-reviewer' })
     const props = { word: 'Working', message: null, suffix: '…', mode: 'responding' } as never
     let ui = await $.ui.mount({ plugin: 'agentille', surface: 'terminal', component: 'Spinner', requestId: 'main', props })
-    expect(seen.at(-1).props.suffix).toBe('… · ◇1 working')
+    expect(seen.at(-1).props.suffix).toBe('… · review') // in a run the spinner names the phase; the status line counts
     await ui.unmount()
     ui = await $.ui.mount({ plugin: 'agentille', surface: 'terminal', component: 'Spinner', requestId: 'spin1', props })
     expect(seen.at(-1).props.suffix).toBe('…')

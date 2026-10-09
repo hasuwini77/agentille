@@ -17,7 +17,7 @@ Pre-flight (the mod probes this once; manual equivalent): inside Herdr (`HERDR_E
 When the `## Pane transport` block says the tools are live, open every claude worker with `mcp__agentille__spawn_pane` and close it with `mcp__agentille__close_pane`, on Herdr and tmux alike:
 
 ```
-spawn_pane { run: "<run-id>", role: "exec-1", agent: "executor", header: "[agt run=<run-id> size=small mode=build]", cwd: "<worktree>", task: "<full slice prompt>" }
+spawn_pane { run: "<run-id>", role: "exec-1", agent: "executor", header: "[agt run=<run-id> size=small mode=build piece=<slug>]", cwd: "<worktree>", task: "<full slice prompt>" }
 → Opened agt-<run-id>-exec-1 · sonnet · medium · herdr pane.
 close_pane { name: "agt-<run-id>-exec-1" }
 → Closed agt-<run-id>-exec-1.

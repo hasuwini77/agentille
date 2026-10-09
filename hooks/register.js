@@ -5,7 +5,7 @@
 
 import { DEFAULTS, decide, formationOf, parseHeader, roleOf, verdictOf } from './routing.js'
 import { addUsage, elapsed, endRoute, finish, isAgtPrompt, ledger, ledgerText, newAgent, paneAgents, panesLeft, reapPlan, short, stage, waving } from './live.js'
-import { ACCENT, FRAME_COLOR, INK, WIRE_COLOR, boardRows, cast, castColumns, chip, colorOf, header, hex, leadLine, routingLines, swarm, tokenBars, toolLabel, wireLines, wireRow } from './board.js'
+import { ACCENT, FRAME_COLOR, INK, WIRE_COLOR, boardRows, cast, castColumns, chip, colorOf, header, hex, leadLine, routingLines, runPhases, swarm, tokenBars, toolLabel, wireLines, wireRow } from './board.js'
 import { PUBLISH_MS, doneMessage, freshStatus, logWire, parseTellArgs, parseWire, shortName, statusKey, validLead, wakeDue, wakeMessage, wireEnv, workerStatus } from './wire.js'
 import { activeSquads, allPaths, depsOf, injection } from './squads.js'
 import { BYE_MS, HELLO_MS, MASCOT_COLOR, MODEL_COLOR, agentMood, caption, frame, modelKey, moodAt, parseWorker } from './mascot.js'
@@ -22,6 +22,7 @@ import { registerRows } from './rows.js'
 import { registerStatus } from './status.js'
 import { registerAutocomplete } from './autocomplete.js'
 import { TIP, canDraw, drawingBlock, reportRun, reportTail } from './drawing.js'
+import { answerLine, linkPieces, loopText, party, pieceOf, taskLine, verdictChip } from './links.js'
 
 let settings = { ...DEFAULTS }
 let depth = null
@@ -566,7 +567,7 @@ async function reportDone($, answer) {
   if (!leadSession) return
   const text = doneMessage({ name: wireName, ms: pub.ms ?? 0, model: worker?.model ?? short(pub.model), effort: worker?.effort || pub.effort, tok: pub.tok, answer, reportPath })
   const r = await $.session.send({ to: { sessionId: leadSession }, text }).catch((err) => ({ isDelivered: false, reason: String(err?.message ?? err) }))
-  if (r.isDelivered) logWire(wireLog, { from: shortName(wireName), to: 'lead', kind: 'done', summary: 'reported to the lead', at: Date.now() })
+  if (r.isDelivered) logWire(wireLog, { from: shortName(wireName), to: 'lead', kind: 'done', summary: parseWire(text)?.summary || 'done', at: Date.now() })
   else $.ui.toast('agt wire: the lead did not get the result (' + String(r.reason).slice(0, 80) + ')')
 }
 
@@ -621,7 +622,8 @@ function boardRow(els, r, onFocus, slot = false) {
   kids.push(r.dim ? Text({ color: r.chipColor, dimColor: true, children: [r.chip] }) : Text({ color: INK, backgroundColor: r.chipColor, children: [r.chip] }))
   kids.push(Text({ color: colorOf('fable'), children: [r.escalated ? '↑' : ' '] }))
   if (r.effort) kids.push(Text({ dimColor: true, children: [r.effort] }))
-  kids.push(Box({ flexGrow: 1, flexShrink: 1, children: [Text({ wrap: 'truncate', dimColor: r.dim, children: [Text({ color: r.glyphColor, children: [r.spinner + ' '] }), r.activity] })] }))
+  const activity = r.verdict ? Text({ color: r.verdict, children: [r.activity] }) : r.activity
+  kids.push(Box({ flexGrow: 1, flexShrink: 1, children: [Text({ wrap: 'truncate', dimColor: r.dim && !r.verdict, children: [Text({ color: r.glyphColor, children: [r.spinner + ' '] }), activity] })] }))
   kids.push(Text({ dimColor: true, children: [r.time] }))
   if (r.tok) kids.push(Text({ dimColor: true, children: [r.tok] }))
   if (onFocus) kids.push(Button({ key: 'focus:' + r.id, label: '↗', plain: true, dimColor: true, onPress: onFocus }))
@@ -831,7 +833,9 @@ export function register(on) {
       await $.store.set('fable:' + a.run, run.fable)
     }
     opened.push({ id, name: a.name })
-    paneRoutes.push({ name: a.name, run: a.run, role: a.role, agent: a.agent, model: d.model, effort: d.effort, reason: d.reason, start: Date.now(), end: null })
+    const piece = pieceOf(a.hdr)
+    paneRoutes.push({ name: a.name, run: a.run, role: a.role, agent: a.agent, model: d.model, effort: d.effort, reason: d.reason, start: Date.now(), end: null, piece, verdict: null })
+    logWire(wireLog, { from: 'lead', to: party(shortName(a.name), piece), kind: 'task', summary: taskLine(a.task) || a.agent, at: Date.now() })
     const rec = { at: new Date().toISOString(), role: a.agent, model: d.model, effort: d.effort, reason: d.reason, asked: a.asked, agentId: null, kind: 'pane', pane: a.name }
     decisions.push(rec)
     run.log.push(JSON.stringify(rec))
@@ -912,6 +916,8 @@ export function register(on) {
       // Only the pane whose key the message names: a stale list or a respawned role must not harvest the older pane.
       const hit = w.kind === 'done' && w.key ? panes.find((p) => paneKey(p.id) === w.key && p.name === w.from) : null
       if (hit) { harvested.add(hit.id); wireDone.add(hit.id) }
+      const route = w.kind === 'done' ? paneRoutes.findLast((r) => r.name === w.from) : null
+      if (route) route.verdict = verdictChip(route.agent, w.summary)
       logWire(wireLog, { from, to: wireName ? shortName(wireName) : 'lead', kind: w.kind, summary: w.summary, at: Date.now() })
       $.ui.toast('⇄ ' + from + ' ' + w.kind)
       $.ui.invalidate('ui.render')
@@ -994,6 +1000,7 @@ export function register(on) {
       if (res.agentId) {
         const a = heard(newAgent({ id: res.agentId, role, routed: false, model: res.model, effort: null, reason: off ? drift : null, run: runId, now: Date.now(), parentId: e.parentAgentId ?? null }), e)
         a.fileRun = fileRun
+        a.piece = pieceOf(hdr)
         live.set(res.agentId, a)
       }
       const rec = { at: new Date().toISOString(), role, model: res.model, effort: null, reason: drift, asked: e.model ?? null, agentId: res.agentId ?? null, kind: 'workflow' }
@@ -1026,7 +1033,9 @@ export function register(on) {
       run.fable += 1
       await $.store.set('fable:' + runId, run.fable)
     }
-    if (res.agentId) live.set(res.agentId, newAgent({ id: res.agentId, role, routed: true, model: res.model, effort: d.effort, reason: d.reason, run: runId, now: Date.now(), parentId: e.parentAgentId ?? null }))
+    const piece = pieceOf(hdr)
+    if (res.agentId) live.set(res.agentId, { ...newAgent({ id: res.agentId, role, routed: true, model: res.model, effort: d.effort, reason: d.reason, run: runId, now: Date.now(), parentId: e.parentAgentId ?? null }), piece })
+    if (runId !== 'adhoc') logWire(wireLog, { from: 'lead', to: party(role, piece), kind: 'task', summary: taskLine(e.prompt) || role, at: Date.now(), via: 'sub' })
     const rec = { at: new Date().toISOString(), role, model: res.model, effort: d.effort, reason: d.reason, asked: e.model ?? null, agentId: res.agentId ?? null }
     decisions.push(rec)
     run.log.push(JSON.stringify(rec))
@@ -1103,6 +1112,8 @@ export function register(on) {
     if (a) {
       a.tool = null
       if (a.routed) addFlag($, flagOf(a.role, e.answer))
+      a.verdict = verdictChip(a.role, e.answer)
+      if (a.routed && a.run !== 'adhoc') logWire(wireLog, { from: party(a.role, a.piece), to: 'lead', kind: 'done', summary: answerLine(a.role, e.answer), at: Date.now(), via: 'sub' })
       if (a.role === 'plan-reviewer' && verdictOf(e.answer) === 'REVISE') runState(fileRunOf(a)).revise += 1
       if (a.input + a.output === 0) addUsage(a, e.usage)
       finish(a, Date.now(), e.durationMs)
@@ -1132,13 +1143,13 @@ export function register(on) {
     // No agent rows: the newest wire message alone, no frame.
     if (staged.rows.length === 0) return els.Box({ flexDirection: 'column', children: [...kids, ...(wire ? [wireLine(els, wire)] : []), theirs] })
 
-    const rows = nest(cast(staged, live, lastRun))
+    const rows = nest(linkPieces(cast(staged, live, lastRun)))
     const cols = (e.props.bodyColumns ?? 80) - 4
     const view = boardRows(rows, { now, tick, cols, wire: wireStatus, transport, view: e.props.view?.agentId ?? null })
     const sw = swarm({ agents: live, routes: paneRoutes, run: lastRun, tick })
     const room = Math.max(1, (e.props.maxRows ?? 10) - 4 - kids.length - (wire ? 1 : 0) - (sw ? 1 : 0))
     const waiting = rows.filter((r) => r.state === 'working').length
-    const inner = [boardHeader(els, header({ run: lastRun, formation: runs.get(lastRun)?.formation, squads: squads.map((q) => q.name), rows, tally: staged.tally }), runningVersion)]
+    const inner = [boardHeader(els, header({ run: lastRun, formation: runs.get(lastRun)?.formation, squads: squads.map((q) => q.name), loops: loopText(runs.get(lastRun)) }), runningVersion)]
     if (sw) inner.push(swarmLine(els, sw))
     if (rows.length) inner.push(leadRow(els, leadLine({ model: leadModel, busy: e.props.isWorking, waiting })))
     const shown = view.slice(0, room)
@@ -1160,7 +1171,7 @@ export function register(on) {
     const all = [...staged.rows, ...[...live.values()].filter((a) => a.run === lastRun && !staged.rows.includes(a))]
     const rows = cast({ rows: all.map((r) => (r.kind === 'pane' && !r.model ? { ...r, model: wireStatus.get(r.name)?.model ?? null } : r)), tally: { working: 0 } }, live, lastRun)
     const cols = e.props.bodyColumns ?? 80
-    const kids = [boardHeader(els, header({ run: lastRun, formation: runs.get(lastRun)?.formation, squads: squads.map((q) => q.name), rows, tally: staged.tally }))]
+    const kids = [boardHeader(els, header({ run: lastRun, formation: runs.get(lastRun)?.formation, squads: squads.map((q) => q.name), loops: loopText(runs.get(lastRun)) }), runningVersion)]
     if (rows.length === 0 && decisions.length === 0 && wireLog.length === 0) {
       kids.push(Text({ dimColor: true, children: ['No agents yet. Type /agt "task": every dispatch shows up here.'] }))
       return Box({ flexDirection: 'column', children: kids })
@@ -1175,13 +1186,13 @@ export function register(on) {
       kids.push(line((m) => Box({ width: 14, children: [m.model ? Text({ color: INK, backgroundColor: colorOf(m.model), children: [chip(m.model)] }) : Text({ dimColor: true, children: ['pane'] })] })))
       if (c.more > 0) kids.push(Text({ dimColor: true, children: ['+' + c.more + ' more'] }))
     }
+    if (wireLog.length) {
+      kids.push(rule(els, 'conversation'))
+      for (const w of wireLines(wireLog)) kids.push(Text({ wrap: 'truncate', children: [Text({ dimColor: true, children: [w.at + '  '] }), Text({ color: w.sub ? undefined : hex(WIRE_COLOR), children: [w.arrow + ' '] }), Text({ dimColor: true, children: [w.kind + ' '] }), w.text] }))
+    }
     if (decisions.length) {
       kids.push(rule(els, 'routing'))
       for (const d of routingLines(decisions)) kids.push(Text({ wrap: 'truncate', children: [Text({ dimColor: true, children: [d.at + '  '] }), d.who + '  ', Text({ color: d.color, children: [d.route] }), Text({ color: d.escalated ? colorOf('fable') : d.drift ? 'warning' : undefined, dimColor: !d.escalated && !d.drift, children: [d.reason] })] }))
-    }
-    if (wireLog.length) {
-      kids.push(rule(els, 'wire'))
-      for (const w of wireLines(wireLog)) kids.push(Text({ wrap: 'truncate', children: [Text({ dimColor: true, children: [w.at + '  '] }), Text({ color: hex(WIRE_COLOR), children: [w.arrow + ' '] }), Text({ dimColor: true, children: [w.kind + ' '] }), w.text] }))
     }
     const bars = tokenBars(ledger(live, lastRun, paneRoutes), Math.max(8, Math.min(30, cols - 30)))
     if (bars.length) {
@@ -1209,8 +1220,10 @@ export function register(on) {
     const subs = [...live.values()].filter((a) => a.state === 'working').length
     const sessions = panes.filter((p) => p.state === 'working').length
     if (subs + sessions === 0) return next(e)
-    const parts = [subs ? '◇' + subs : '', sessions ? '▣' + sessions : ''].filter(Boolean).join(' ')
-    return next({ ...e, props: { ...e.props, suffix: (e.props.suffix ?? '') + ' · ' + parts + ' working' } })
+    // In an /agt run the status line holds the counts; the spinner names the phases at work.
+    const phases = lastRun === 'adhoc' ? '' : runPhases(live, paneRoutes, lastRun)
+    const parts = phases || [subs ? '◇' + subs : '', sessions ? '▣' + sessions : ''].filter(Boolean).join(' ') + ' working'
+    return next({ ...e, props: { ...e.props, suffix: (e.props.suffix ?? '') + ' · ' + parts } })
   })
 
   registerRows(on, ctx)

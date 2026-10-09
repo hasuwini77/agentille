@@ -112,7 +112,7 @@ export function boardRows(rows, { now, tick = 0, cols = 80, wire = new Map(), tr
     let activity
     if (r.state === 'blocked') activity = '⚑ waiting on you'
     else if (broken || paused) activity = ls.word
-    else if (done) activity = r.kind === 'sub' ? 'done' : r.state
+    else if (done) activity = r.verdict?.text ?? (r.kind === 'sub' ? 'done' : r.state)
     else if (r.state === 'open') activity = 'open'
     else activity = tool ?? (escalation(r.reason) ? '↑ ' + r.reason : isDrift(r.reason) ? '≠ ' + r.reason : r.kind === 'pane' ? 'working' : 'thinking')
     return {
@@ -130,6 +130,7 @@ export function boardRows(rows, { now, tick = 0, cols = 80, wire = new Map(), tr
       effort: c.effort ? (effortBar(r.effort) + ' ' + String(r.effort ?? '').slice(0, 4)).padEnd(6) : null,
       spinner: paused ? ls.glyph : busy ? spin(tick, i) : done ? ' ' : '·',
       activity,
+      verdict: done && !broken && r.verdict ? (r.verdict.tone === 'success' ? hex(DONE_COLOR) : r.verdict.tone) : null,
       escalated: escalation(r.reason),
       reason: r.reason && r.reason !== 'table' && r.reason !== 'workflow' ? r.reason : null,
       time: start != null && !r.adopted ? elapsed((r.end ?? now) - start).padStart(5) : '     ',
@@ -141,15 +142,13 @@ export function boardRows(rows, { now, tick = 0, cols = 80, wire = new Map(), tr
 }
 
 // "◆ agentille · run r1 · gauntlet" on the left, "◇2 ▣1 · 50.3k" on the right.
-export function header({ run, formation = null, squads = [], rows = [], tally }) {
+// The counts and tokens live on the status line under the prompt; the header carries the run's
+// retry loops instead, the one thing no other surface shows.
+export function header({ run, formation = null, squads = [], loops = '' }) {
   const left = ['run ' + run]
   if (formation) left.push(formation)
   if (squads.length) left.push(squads.join('+'))
-  const subs = rows.filter((r) => r.kind === 'sub' && r.state === 'working').length
-  const panes = rows.filter((r) => r.kind === 'pane' && r.state !== 'done' && r.state !== 'idle').length
-  const right = [KIND_GLYPH.sub + subs + ' ' + KIND_GLYPH.pane + panes]
-  if (tally.tok) right.push(tokens(tally.tok))
-  return { left: left.join(' · '), right: right.join(' · ') }
+  return { left: left.join(' · '), right: loops }
 }
 
 // The tree's root: the lead session itself.
@@ -159,8 +158,9 @@ export function leadLine({ model, busy, waiting }) {
 }
 
 // The newest wire message worth a row: ⇄ exec-1 → lead "slice built" 12s.
+// Subagent traffic (`via: 'sub'`) is left to the rows' verdicts and the deck.
 export function wireRow(log, now) {
-  const m = log[log.length - 1]
+  const m = log.findLast((x) => x.via !== 'sub')
   if (!m || now - m.at > WIRE_SHOW_MS) return null
   const ago = Math.max(0, Math.round((now - m.at) / 1000))
   return { arrow: m.from + ' → ' + m.to, text: '"' + cut(m.summary, 60) + '"', ago: ago < 60 ? ago + 's' : Math.floor(ago / 60) + 'm' }
@@ -203,9 +203,9 @@ export function routingLines(decisions, n = 8) {
   }))
 }
 
-// The wire log, newest last: "12:12:01  exec-1 → lead  done  slice 1 built".
-export function wireLines(log, n = 6) {
-  return log.slice(-n).map((m) => ({ at: clock(new Date(m.at).toISOString()), arrow: (m.from + ' → ' + m.to).padEnd(18), kind: m.kind.padEnd(5), text: cut(m.summary, 70) }))
+// The run's conversation, newest last: "12:12:01  lead → code-reviewer:api  task  review the api diff".
+export function wireLines(log, n = 12) {
+  return log.slice(-n).map((m) => ({ at: clock(new Date(m.at).toISOString()), arrow: cut(m.from + ' → ' + m.to, 30).padEnd(30), kind: m.kind.padEnd(5), text: cut(m.summary, 70), sub: m.via === 'sub' }))
 }
 
 // Token bars per role from a ledger (live.js), widest first.
@@ -221,6 +221,15 @@ export function tokenBars(l, width = 20) {
 // ── the swarm line: the whole run in one line, by phase ──────────────────────
 
 export const PHASES = ['plan', 'build', 'review', 'other']
+
+// The phases at work in a run, in order: "build + review". '' when none of the run's own roles
+// works, so a plain subagent spawned after a run still reads as a count.
+export function runPhases(agents, routes, run) {
+  const at = new Set()
+  for (const a of agents.values()) if (a.run === run && a.state === 'working') at.add(phaseOf(a.role))
+  for (const r of routes) if (r.run === run && r.end == null) at.add(phaseOf(r.agent ?? r.role))
+  return PHASES.filter((p) => p !== 'other' && at.has(p)).join(' + ')
+}
 const LANE_CAP = 8 // cells per lane before it reads "+n"
 
 export function phaseOf(role) {

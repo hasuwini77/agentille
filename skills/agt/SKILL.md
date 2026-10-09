@@ -44,12 +44,13 @@ The recon line always names the mode and a one-clause reason (the matching row, 
 
 Every `agentille:agentille-*` dispatch prompt starts with one line:
 
-`[agt run=<id> size=<small|large> risk=<none|auth|money|data> mode=<build|fix|diagnose|review|research> fable=<auto|forced> formation=<none|duel|gauntlet|relay>]`
+`[agt run=<id> size=<small|large> risk=<none|auth|money|data> mode=<build|fix|diagnose|review|research> fable=<auto|forced> formation=<none|duel|gauntlet|relay> piece=<slug>]`
 
 - `size=large`: plan ≥6 steps or a shared contract, or a diff with logic in >1 file, >~150 LoC, or a public API/schema change.
 - `risk`: auth/sessions → `auth`, payments/webhooks → `money`, migrations → `data`.
 - `mode=fix` on every fix attempt; `diagnose` for the read-only root-cause planner.
 - `fable=forced` only when the user typed `--fable`.
+- `piece=<slug>` (lowercase, ≤24 chars) names the slice: its executor, adversary and reviewers share it, so the mod draws each reviewer under the build it checks. Omit it for planning roles and single-piece runs.
 
 With the mod loaded it routes model + effort from this line and logs to `routing.jsonl` (`/agt-routing`). Still pass `model:` every time: the skill must work with mods off.
 

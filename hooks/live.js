@@ -133,7 +133,7 @@ function newestRoute(routes, name, open = false) {
 
 export function withRoute(pane, routes = []) {
   const r = newestRoute(routes, pane.name)
-  return { ...pane, agent: r?.agent ?? null, model: r?.model ?? null, effort: r?.effort ?? null, reason: r?.reason ?? null, start: r?.start ?? null }
+  return { ...pane, agent: r?.agent ?? null, model: r?.model ?? null, effort: r?.effort ?? null, reason: r?.reason ?? null, start: r?.start ?? null, piece: r?.piece ?? null, verdict: r?.verdict ?? null }
 }
 
 export function endRoute(routes, name, now) {

@@ -75,9 +75,10 @@ describe('board', () => {
     expect(plain).toMatchObject({ activity: 'thinking', escalated: false, reason: null })
   })
 
-  test('header counts working subagents and live sessions; lead line says what the lead does', async () => {
+  test('header names the run and its loops, not the counts; lead line says what the lead does', async () => {
     const rows = [{ kind: 'sub', state: 'working' }, { kind: 'sub', state: 'done' }, { kind: 'pane', state: 'working' }, { kind: 'pane', state: 'idle' }]
-    expect(header({ run: 'r1', formation: 'gauntlet', rows, tally: { tok: 50_300 } })).toEqual({ left: 'run r1 · gauntlet', right: '◇1 ▣1 · 50.3k' })
+    expect(header({ run: 'r1', formation: 'gauntlet' })).toEqual({ left: 'run r1 · gauntlet', right: '' })
+    expect(header({ run: 'r1', squads: ['saas'], loops: 'plan ↺1' })).toEqual({ left: 'run r1 · saas', right: 'plan ↺1' })
     expect(leadLine({ model: 'claude-opus-5-5', busy: false, waiting: 2 })).toMatchObject({ text: 'lead · opus 5.5', state: 'waiting on 2' })
     expect(leadLine({ model: null, busy: true, waiting: 0 }).state).toBe('orchestrating')
   })

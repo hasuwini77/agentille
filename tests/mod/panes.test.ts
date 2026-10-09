@@ -323,7 +323,6 @@ describe('tmux band', () => {
     await start($, on, { mtimes: { '/h/.agentille/state/run-r9/done-planner': FRESH } })
     const ui = await $.ui.mount({ plugin: 'agentille', surface: 'terminal', component: 'AbovePrompt', props: { hasSurvey: false, isWorking: true, maxRows: 10, bodyColumns: 100 } as never })
     expect(await ui.find({ type: 'Text', text: /executor/ })).toBeDefined()
-    expect(await ui.find({ type: 'Text', text: /◇0 ▣1/ })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: /planner/ })).toBeUndefined()
     expect(await ui.find({ type: 'Text', text: /^open\s*$/ })).toBeUndefined()
     await ui.unmount()

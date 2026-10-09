@@ -2,6 +2,31 @@
 
 All notable changes to agentille are documented here.
 
+## [3.11.0] — 2026-10-09
+
+### Added
+
+- **Who checks whose piece.** A new `piece=<slug>` field in the dispatch
+  header names the slice an agent builds, reviews or attacks. On the band,
+  a piece's reviewers and adversary hang under the executor that built it,
+  subagent or pane.
+- **Verdict chips.** A finished reviewer row reads its verdict in its tone
+  (`PASS`, `CONCERNS P1:2`, `FAIL P0:1`, `APPROVE`, `REVISE`, `HELD`,
+  `BROKEN 2`) instead of `done`.
+- **The run's conversation in `/agt-deck`.** Every dispatch (`lead →
+  code-reviewer:api` with its task line) and every answer (its verdict or
+  first line), right under the cast. A worker pane logs its real summary,
+  not "reported to the lead".
+- **Loops on the band header.** `plan ↺n · fix ×n` when the plan was
+  revised or a fix was retried.
+
+### Changed
+
+- One job per surface: the band header no longer repeats the working
+  count and tokens the status line holds, and in a run the spinner names
+  the phases at work (`build + review`) instead of the count. Plain
+  subagents outside /agt keep the count.
+
 ## [3.10.0] — 2026-10-09
 
 ### Changed

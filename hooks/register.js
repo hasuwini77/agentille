@@ -21,9 +21,11 @@ import { adopt, applyStatus, nest, quietWorkflows } from './tree.js'
 import { registerRows } from './rows.js'
 import { registerStatus } from './status.js'
 import { registerAutocomplete } from './autocomplete.js'
+import { TIP, canDraw, drawingBlock, reportRun, reportTail } from './drawing.js'
 
 let settings = { ...DEFAULTS }
 let depth = null
+let profileMissing = false   // no readable ~/.agentille/profile.json: the tip is due once
 let home = null
 let weeklyPct = null
 let lastRun = 'adhoc'
@@ -158,7 +160,8 @@ async function loadProfile($) {
     depth = p.thinkingDepth ?? null
     settings = { ...DEFAULTS, ...(p.routing ?? {}) }
   } catch {
-    // no profile yet: /agt itself tells the user to run /agentille-init
+    // no profile yet: the tip says /agentille-init (the mod's toast when it draws, else /agt's line)
+    profileMissing = true
   }
 }
 
@@ -579,13 +582,13 @@ async function readWire($) {
 
 // ── drawing (takes resolved elements, never $) ────────────────────────────────
 
-function boardHeader(els, h) {
+function boardHeader(els, h, version = null) {
   const { Box, Text } = els
   return Box({
     flexDirection: 'row',
     justifyContent: 'space-between',
     children: [
-      Text({ wrap: 'truncate', children: [Text({ color: hex(ACCENT), children: ['◆ agentille'] }), Text({ dimColor: true, children: ['  ' + h.left] })] }),
+      Text({ wrap: 'truncate', children: [Text({ color: hex(ACCENT), children: ['◆ agentille'] }), Text({ dimColor: true, children: [(version ? ' v' + version : '') + '  ' + h.left] })] }),
       Text({ dimColor: true, children: [h.right] }),
     ],
   })
@@ -644,6 +647,31 @@ function workerBand(els, e, now) {
   const [head, body, legs] = frame(mood, tick >> 1, worker.agent)
   const orange = hex(MASCOT_COLOR)
   return [Text({ color: orange, children: [head] }), Text({ color: orange, children: [body] }), Box({ flexDirection: 'row', children: [Text({ color: orange, children: [legs + '   '] }), capText] })]
+}
+
+// The profile tip, once per machine: the same marker /agt writes when it prints the tip itself.
+async function tipOnce($) {
+  if (!profileMissing || !home) return
+  const marker = home + '/.agentille/state/.tip-shown'
+  if (await $.fs.exists(marker).catch(() => true)) return
+  $.ui.toast(TIP, { timeoutMs: 8000 })
+  await $.fs.write(marker, '').catch(() => {})
+}
+
+// /agt writes report.md once at the end; the mod adds the Agents and Raw reports sections it lacks.
+async function completeReport($, path) {
+  const run = reportRun(path)
+  if (!run || !home || !path.startsWith(home + '/')) return
+  const dir = home + '/.agentille/state/run-' + run
+  try {
+    const text = await $.fs.read(path)
+    const files = (await $.fs.list(dir + '/agents').catch(() => [])).filter((f) => f.kind !== 'dir' && f.name.endsWith('.md')).map((f) => f.name)
+    const agents = [...live.values()].filter((a) => fileRunOf(a) === run)
+    const tail = reportTail(text, { agents, routes: paneRoutes.filter((r) => r.run === run), files })
+    if (tail) await $.fs.write(path, text + tail)
+  } catch {
+    // the report is the lead's; a missing section never fails its Write
+  }
 }
 
 export function register(on) {
@@ -869,7 +897,9 @@ export function register(on) {
     agtTurn = true
     const t = await transportOf($)
     if (t !== 'none') ensurePolling($)
-    return next({ ...e, text: e.text + squadBlock + transportBlock(t, paneTools && !selfName) })
+    const draws = canDraw(await $.session.surfaces().catch(() => []))
+    if (draws) await tipOnce($)
+    return next({ ...e, text: e.text + squadBlock + transportBlock(t, paneTools && !selfName) + drawingBlock(draws) })
   })
 
   // Worker results arrive as peer messages: log them for the band and the deck, then let the
@@ -890,6 +920,12 @@ export function register(on) {
 
   // What each agent is doing right now, for its band row: a subagent's call carries its agentId;
   // a worker pane's own main loop publishes for its lead. Observe only.
+  on('tool.call', { tool: 'Write' }, async ($, e, next) => {
+    const r = await next(e)
+    if (!e.agentId && reportRun(e.file_path)) await completeReport($, e.file_path)
+    return r
+  })
+
   on('tool.call', async ($, e, next) => {
     if (e.agentId) {
       const a = live.get(e.agentId)
@@ -1101,7 +1137,7 @@ export function register(on) {
     const sw = swarm({ agents: live, routes: paneRoutes, run: lastRun, tick })
     const room = Math.max(1, (e.props.maxRows ?? 10) - 4 - kids.length - (wire ? 1 : 0) - (sw ? 1 : 0))
     const waiting = rows.filter((r) => r.state === 'working').length
-    const inner = [boardHeader(els, header({ run: lastRun, formation: runs.get(lastRun)?.formation, squads: squads.map((q) => q.name), rows, tally: staged.tally }))]
+    const inner = [boardHeader(els, header({ run: lastRun, formation: runs.get(lastRun)?.formation, squads: squads.map((q) => q.name), rows, tally: staged.tally }), runningVersion)]
     if (sw) inner.push(swarmLine(els, sw))
     if (rows.length) inner.push(leadRow(els, leadLine({ model: leadModel, busy: e.props.isWorking, waiting })))
     const shown = view.slice(0, room)

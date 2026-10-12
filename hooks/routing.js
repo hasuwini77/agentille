@@ -80,7 +80,7 @@ export function decide({ role, hdr = {}, run = { revise: 0, fixes: 0, fable: 0 }
   }
 
   // Ladder rung 1–2: effort first, on observed failure.
-  if (role === 'planner' && run.revise === 1) { effort = 'max'; reasons.push('plan REVISE ×1') }
+  if (role === 'planner' && run.revise === 1) { model = 'opus'; effort = 'max'; reasons.push('plan REVISE ×1') }
   if (role === 'executor' && hdr.mode === 'fix') {
     const attempt = run.fixes // this dispatch already counted
     if (attempt === 2) { effort = 'high'; reasons.push('fix attempt 2') }

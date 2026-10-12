@@ -250,6 +250,8 @@ for name, other in (('routing.js TABLE', table), ('routing.md "Default routing"'
     for r in sorted(other - roles):
         print('FAIL %s lists role %s but agents/agentille-%s.md does not exist' % (name, r, r)); bad = 1
 mods = json.load(open('hooks/hooks.json')).get('modules', [])
+if not mods:
+    print('FAIL hooks.json lists no modules (key missing or renamed?)'); bad = 1
 for m in mods:
     if not os.path.isfile(os.path.join('hooks', m)):
         print('FAIL hooks.json module %s does not exist under hooks/' % m); bad = 1
@@ -269,9 +271,10 @@ hdr "Mod import (node)"
 if ! command -v node >/dev/null 2>&1; then
   warn "node not found — mod import check skipped"
 else
-  nmajor=$(node -p 'process.versions.node.split(".")[0]' 2>/dev/null)
-  if ! [[ "$nmajor" =~ ^[0-9]+$ ]] || [ "$nmajor" -lt 22 ]; then
-    warn "node ${nmajor:-?} < 22 — mod import check skipped"
+  # No package.json marks hooks/ as ESM, so the import leans on module-type detection: on by default from 22.7.
+  nmajor=$(node -p 'process.versions.node' 2>/dev/null)
+  if [ "$(node -p 'const [a,b]=process.versions.node.split(".").map(Number); a>22||(a===22&&b>=7)?1:0' 2>/dev/null)" != 1 ]; then
+    warn "node ${nmajor:-?} < 22.7 — mod import check skipped"
   else
     imp=$(node -e "import('./hooks/register.js').then(()=>{},e=>{console.error(e&&e.message||e);process.exit(1)})" 2>&1); irc=$?
     if [ "$irc" = 0 ]; then

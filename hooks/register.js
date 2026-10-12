@@ -187,10 +187,11 @@ function applyDisplay() {
 const PROFILE_FILE = '/.agentille/profile.json'
 
 // Read-merge-write one display key into ~/.agentille/profile.json: every other key stays, 2-space
-// indent, trailing newline. The folder is made only when the first write fails, so a host without
-// $.process still works once ~/.agentille exists. → null on success, else why not.
+// indent, trailing newline. The old file is copied to profile.json.bak first; a host without $.process
+// still works once ~/.agentille exists.
+// → null on success, else why not.
 async function saveDisplay($, key, value) {
-  if (!home) return 'no home folder to keep it in'
+  if (!home) return 'no home folder'
   const path = home + PROFILE_FILE
   const shown = '~' + PROFILE_FILE
   let profile = null
@@ -199,28 +200,56 @@ async function saveDisplay($, key, value) {
     text = await $.fs.read(path)
   } catch {
     // unreadable is not missing: a file we cannot read is the person's, and a write would replace it
-    if (await $.fs.exists(path).catch(() => true)) return shown + ' is unreadable; left untouched'
+    if (await $.fs.exists(path).catch(() => true)) return shown + ' is unreadable'
   }
   if (text !== null) {
-    try { profile = JSON.parse(text) } catch { return shown + ' is not valid JSON; left untouched' }
-    if (profile === null || typeof profile !== 'object' || Array.isArray(profile)) return shown + ' is not a JSON object; left untouched'
+    try { profile = JSON.parse(text) } catch { return shown + ' is not valid JSON' }
+    if (profile === null || typeof profile !== 'object' || Array.isArray(profile)) return shown + ' is not a JSON object'
+    try { await $.fs.write(path + '.bak', text) } catch { return 'could not back up ' + shown }
   }
   const next = withDisplay(profile, key, value)
   const body = profileJson(next)
-  try {
-    await $.fs.write(path, body)
-  } catch {
+  // With $.process: make the folder, write a .tmp beside the file and mv it over (no torn write).
+  // Without it, or when mv fails: write the file directly; the .bak above is the way back.
+  let made = null
+  try { made = (await $.process.run(['mkdir', '-p', home + '/.agentille'], PROBE)).exitCode } catch { /* no $.process on this host */ }
+  if (made === 0) {
     try {
-      const made = await $.process.run(['mkdir', '-p', home + '/.agentille'], PROBE)
-      if (made.exitCode !== 0) return 'could not create ~/.agentille'
+      await $.fs.write(path + '.tmp', body)
+      if ((await $.process.run(['mv', '-f', path + '.tmp', path], PROBE)).exitCode === 0) made = 'moved'
+    } catch { /* the direct write below */ }
+  }
+  if (made !== 'moved') {
+    try {
       await $.fs.write(path, body)
     } catch {
-      return 'could not write ' + shown
+      return made !== null && made !== 0 ? 'could not create ~/.agentille' : 'could not write ' + shown
     }
   }
   profileDisplay = cleanDisplay(next.display)
   applyDisplay()
   return null
+}
+
+// A toggle: profile.json when it can be written, else the mod store as before. Always applied now.
+// → '' when saved in profile.json, else the one line saying where it went.
+async function setDisplay($, key, value) {
+  const why = await saveDisplay($, key, value)
+  if (!why) return ''
+  const sets =
+    key === 'deck' ? { deckAuto: value === 'auto' } :
+    key === 'focus' ? { focusMode: value ? 'on' : 'off' } :
+    { highlightOn: value !== 'off', highlightAll: value === 'all' }
+  const names = { deckAuto: 'deck:auto', focusMode: 'focus:mode', highlightOn: 'highlight:on', highlightAll: 'highlight:all' }
+  storedRaw = { ...storedRaw, ...sets }
+  delete profileDisplay[key]
+  applyDisplay()
+  try {
+    for (const [k, v] of Object.entries(sets)) await $.store.set(names[k], v)
+  } catch {
+    return 'applied for this session only: ' + why + ' and the mod store refused it'
+  }
+  return "saved in this machine's mod store, not in profile.json: " + why
 }
 
 const MOVED = (key) => '\nmoved: display.' + key + ' in ~/.agentille/profile.json — this command goes away in v4'
@@ -811,15 +840,16 @@ export function register(on) {
   on('command.run', { command: 'agt-deck' }, async ($, e) => {
     const a = String(e.args ?? '').trim().toLowerCase()
     if (a && a !== 'auto' && a !== 'off') return { text: 'Usage: /agt-deck [auto|off]' }
+    let note = ''
     if (a) {
-      const why = await saveDisplay($, 'deck', a)
-      if (why) return { text: 'deck: ' + why }
-      if (!deckAuto) return { text: 'deck: opens only when you type /agt-deck (display.deck: off)' }
+      note = await setDisplay($, 'deck', a)
+      if (!deckAuto) return { text: 'deck: opens only when you type /agt-deck (display.deck: off)' + (note && '\n' + note) }
     }
     const o = await $.ui.open({ id: DECK, title: 'agentille' })
     const auto = deckAuto ? ' · opens on every /agt (/agt-deck off to stop)' : ''
-    if (o?.isPlaced === false) return { text: 'deck waits: ' + (o.reason ?? 'no surface here places panes') + auto }
-    return { text: 'deck open' + auto }
+    const tail = note && '\n' + note
+    if (o?.isPlaced === false) return { text: 'deck waits: ' + (o.reason ?? 'no surface here places panes') + auto + tail }
+    return { text: 'deck open' + auto + tail }
   })
 
   // Typed only. The worker gets it as a peer message over the wire; a Herdr worker without the
@@ -956,23 +986,23 @@ export function register(on) {
   on('command.run', { command: 'agt-focus' }, async ($, e) => {
     const a = parseFocusArgs(e.args)
     if (a.error) return { text: a.error }
+    let note = ''
     if (a.on !== undefined) {
-      const why = await saveDisplay($, 'focus', a.on)
-      if (why) return { text: 'focus: ' + why }
+      note = await setDisplay($, 'focus', a.on)
       $.ui.invalidate('ui.render')
     }
-    return { text: focusText(focusOn, focusLines(Date.now())) + MOVED('focus') }
+    return { text: focusText(focusOn, focusLines(Date.now())) + (note && '\n' + note) + MOVED('focus') }
   })
 
   on('command.run', { command: 'agt-highlight' }, async ($, e) => {
     const a = parseHighlightArgs(e.args)
     if (a.error) return { text: a.error }
+    let note = ''
     if (a.on !== undefined) {
-      const why = await saveDisplay($, 'highlight', !a.on ? 'off' : a.all ? 'all' : 'on')
-      if (why) return { text: 'highlight: ' + why }
+      note = await setDisplay($, 'highlight', !a.on ? 'off' : a.all ? 'all' : 'on')
       $.ui.invalidate('ui.render')
     }
-    return { text: highlightText(highlightOn, highlightAll) + MOVED('highlight') }
+    return { text: highlightText(highlightOn, highlightAll) + (note && '\n' + note) + MOVED('highlight') }
   })
 
   on('command.run', { command: 'agt-squads' }, async ($) => ({ text: (await squadsView($)) + ALIAS('squads') }))

@@ -229,35 +229,28 @@ describe('wire: a worker the lead gave no wire identity', () => {
 
 describe('deck: unplaced', () => {
   test('/agt-deck says the deck waits when the surface does not place it', async ($, on) => {
-    on('env.get', async ($: any, e: any) => ({ value: e.name === 'HOME' ? '/u' : undefined }))
+    on('env.get', async () => ({ value: undefined }))
     on('session.start', async ($: any, e: any) => ({ cwd: e.cwd }))
     on('command.register', async () => ({ value: undefined }))
     on('fs.read', async () => ({ deny: 'no profile' }))
-    on('fs.write', async () => ({ value: undefined }))
-    on('fs.exists', async () => ({ value: false }))
-    on('process.run', async () => ({ value: { exitCode: 0, stdout: '', stderr: '' } }))
     on('store.get', async () => ({ value: undefined }))
     on('store.set', async () => ({ value: undefined }))
     on('ui.open', async () => ({ value: { isPlaced: false, reason: 'terminal too narrow' } }) as never)
     on('ui.render', async () => ({ type: 'engine', ref: 0 }) as never)
     await $.session.start({ cwd: '/w', surface: null, isInteractive: false })
     const r = await $.command.run({ command: 'agt-deck', args: 'auto', origin: { kind: 'composer' } } as never)
-    expect(r.text).toBe('deck waits: terminal too narrow · opens on every /agt (/agt-deck off to stop)')
+    expect(r.text).toBe("deck waits: terminal too narrow · opens on every /agt (/agt-deck off to stop)\nsaved in this machine's mod store, not in profile.json: no home folder")
   })
 })
 
 describe('deck', () => {
   test('/agt-deck opens the pane, auto is remembered, and the pane draws routing', async ($, on) => {
-    const files: Record<string, string> = {}
     const stored: Record<string, any> = {}
     const opened: string[] = []
-    on('env.get', async ($: any, e: any) => ({ value: e.name === 'HOME' ? '/u' : undefined }))
+    on('env.get', async () => ({ value: undefined }))
     on('session.start', async ($: any, e: any) => ({ cwd: e.cwd }))
     on('command.register', async () => ({ value: undefined }))
-    on('fs.read', async ($: any, e: any) => (e.path in files ? { value: files[e.path] } : { deny: 'no profile' }))
-    on('fs.write', async ($: any, e: any) => { files[e.path] = e.text; return { value: undefined } })
-    on('fs.exists', async ($: any, e: any) => ({ value: e.path in files }))
-    on('process.run', async () => ({ value: { exitCode: 0, stdout: '', stderr: '' } }))
+    on('fs.read', async () => ({ deny: 'no profile' }))
     on('store.get', async ($: any, e: any) => ({ value: stored[e.key] }))
     on('store.set', async ($: any, e: any) => { stored[e.key] = e.value; return { value: undefined } })
     on('ui.open', async ($: any, e: any) => { opened.push(e.id); return { value: { isOpen: true } } as never })
@@ -266,7 +259,8 @@ describe('deck', () => {
     await $.session.start({ cwd: '/w', surface: null, isInteractive: false })
     const r = await $.command.run({ command: 'agt-deck', args: 'auto', origin: { kind: 'composer' } } as never)
     expect(r.text).toContain('opens on every /agt')
-    expect(JSON.parse(files['/u/.agentille/profile.json']).display).toEqual({ deck: 'auto' })
+    expect(r.text).toContain("saved in this machine's mod store, not in profile.json: no home folder")
+    expect(stored['deck:auto']).toBe(true)
     expect(opened).toEqual(['agt-deck'])
     await $.agent.spawn({ prompt: '[agt run=deckrun size=large mode=review]\nreview', subagentType: 'agentille:agentille-planner' })
     const ui = await $.ui.mount({ plugin: 'agentille', surface: 'terminal', component: 'Pane', requestId: 'agt-deck', props: { title: 'agentille', isFocused: false, bodyColumns: 100, placement: 'dock' } as never })
@@ -274,8 +268,10 @@ describe('deck', () => {
     expect(await ui.find({ type: 'Text', text: /planner/ })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: /▝▜█████▛▘/ })).toBeDefined()
     await ui.unmount()
-    expect((await $.command.run({ command: 'agt-deck', args: 'off', origin: { kind: 'composer' } } as never)).text).toContain('only when you type')
-    expect(JSON.parse(files['/u/.agentille/profile.json']).display).toEqual({ deck: 'off' })
+    const off = (await $.command.run({ command: 'agt-deck', args: 'off', origin: { kind: 'composer' } } as never)).text
+    expect(off).toContain('only when you type')
+    expect(off).toContain("saved in this machine's mod store, not in profile.json: no home folder")
+    expect(stored['deck:auto']).toBe(false)
   })
 })
 

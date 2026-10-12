@@ -239,7 +239,7 @@ describe('highlight: in the mod', () => {
     on('fs.read', async ($: any, e: any) => (e.path in files ? { value: files[e.path] } : { deny: 'ENOENT' }))
     on('fs.write', async ($: any, e: any) => { files[e.path] = e.text; return { value: undefined } })
     on('fs.exists', async ($: any, e: any) => ({ value: e.path in files }))
-    on('process.run', async () => ({ value: { exitCode: 0, stdout: '', stderr: '' } }))
+    on('process.run', async ($: any, e: any) => ({ value: { exitCode: e.argv?.[0] === 'mkdir' ? 0 : 1, stdout: '', stderr: '' } }))
     on('session.start', async ($: any, e: any) => ({ cwd: e.cwd }))
     on('command.register', async () => ({ value: undefined }))
     return files

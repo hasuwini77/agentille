@@ -11,6 +11,7 @@ import { activeSquads, allPaths, depsOf, explain, injection, squadsText } from '
 import { BYE_MS, HELLO_MS, MASCOT_COLOR, MODEL_COLOR, agentMood, caption, frame, modelKey, moodAt, parseWorker } from './mascot.js'
 import { MARK, SPAN_COLOR, highlightFor, highlightText, litFor, parseHighlightArgs, spans } from './highlight.js'
 import { flagOf, focusText, paneFlags, parseFocusArgs } from './focus.js'
+import { cleanDisplay, highlightFlags, resolveDisplay, storedDisplay } from './settings.js'
 import {
   CLOSE_TOOL, HERDR_START_TIMEOUT, PROBE, SPAWN_TOOL, closeTarget, focusArgv, herdrMetaArgv, spawnToolInput, SAFE_RUN, SPAWN_ROLE, TMUX_LIST_ARGV, answerFile, doneFile, herdrCloseArgv, herdrPaneIdOf, herdrPromptArgv, herdrSplitArgv, herdrStartArgv,
   isFreshDone, isLead, newRunId, paneKey, paneName, paneRole, parseSpawnArgs, parseTmuxList, pickTransport, quietSpawn, reapPool, scopeRows, splitName, splitPlan, tmuxEvenArgv, tmuxKillArgv, tmuxPaneAgents, tmuxPaneIdOf,
@@ -76,7 +77,10 @@ let wireName = null          // worker: its own agt- name (AGENTILLE_NAME), wher
 let leadSession = null       // worker: the lead's session id (AGENTILLE_LEAD), where it reports
 const pub = { state: 'starting', tool: null, tok: 0, model: null, effort: null, start: null, at: 0 } // worker's published status
 let lastMeta = ''            // worker: the last Herdr sidebar title it reported
-let deckAuto = false         // /agt-deck auto: the deck opens on every typed /agt
+let deckAuto = false         // display.deck = auto: the deck opens on every typed /agt
+let profileDisplay = {}      // the valid keys of ~/.agentille/profile.json → display
+let storedRaw = {}           // the old $.store toggles, read once at session start (back-compat)
+let display = resolveDisplay({}, {}) // the display settings in effect, and where each came from
 const DECK = 'agt-deck'
 const FLAG_TTL_MS = 30 * 60_000
 const FOCUS_COLOR = { next: '#3fb950', flag: '#f85149' }
@@ -156,15 +160,27 @@ async function installedSkew($) {
 
 async function loadProfile($) {
   home = (await $.env.get('HOME')) ?? null
+  profileDisplay = {}
   if (!home) return
   try {
     const p = JSON.parse(await $.fs.read(home + '/.agentille/profile.json'))
     depth = p.thinkingDepth ?? null
     settings = { ...DEFAULTS, ...(p.routing ?? {}) }
+    profileDisplay = cleanDisplay(p.display)
   } catch {
     // no profile yet: the tip says /agentille-init (the mod's toast when it draws, else /agt's line)
     profileMissing = true
   }
+}
+
+// profile.display → old store value → default, applied to the three live switches.
+function applyDisplay() {
+  display = resolveDisplay(profileDisplay, storedDisplay(storedRaw))
+  deckAuto = display.values.deck === 'auto'
+  focusOn = display.values.focus
+  const h = highlightFlags(display.values.highlight)
+  highlightOn = h.on
+  highlightAll = h.all
 }
 
 async function loadSquads($) {
@@ -701,15 +717,18 @@ export function register(on) {
     wireName = /^agt-[A-Za-z0-9_-]+$/.test((await $.env.get('AGENTILLE_NAME')) ?? '') ? await $.env.get('AGENTILLE_NAME') : null
     leadSession = wireName ? validLead(await $.env.get('AGENTILLE_LEAD')) : null
     if (worker) { pub.model = worker.model; pub.effort = worker.effort || null }
-    deckAuto = (await $.store.get('deck:auto')) === true
     await $.command.register({ name: 'agt-deck', description: 'Open the agentille deck: the cast, routing timeline, wire log and tokens. auto = open on every /agt · off', argumentHint: '[auto|off]', immediate: true })
     await $.command.register({ name: 'agt-tell', description: 'Send a message to a worker pane over the wire', argumentHint: '<worker> <message>', immediate: true })
     await $.command.register({ name: 'agt-routing', description: 'Show the model + effort agentille picked for each agent this session', immediate: true })
     await $.command.register({ name: 'agt-spawn', description: 'Open a routed claude pane beside this one (Herdr or tmux); it is never reaped', argumentHint: '"task" [--model sonnet|opus|haiku|fable]' })
     await $.command.register({ name: 'agt-ledger', description: 'Tokens per agent role for the latest agentille run', immediate: true })
-    focusOn = (await $.store.get('focus:mode')) !== 'off'
-    highlightOn = (await $.store.get('highlight:on')) !== false
-    highlightAll = (await $.store.get('highlight:all')) === true
+    storedRaw = {
+      deckAuto: await $.store.get('deck:auto'),
+      focusMode: await $.store.get('focus:mode'),
+      highlightOn: await $.store.get('highlight:on'),
+      highlightAll: await $.store.get('highlight:all'),
+    }
+    applyDisplay()
     await $.command.register({ name: 'agt-highlight', description: 'Highlight replies: an essentials card, paths, versions and numbers lit. on (/agt only) · all · off', argumentHint: '[on|all|off]', immediate: true })
     await $.command.register({ name: 'agt-squads', description: 'Rescan this repo and show which squads match, which nearly do, and the reviewers they add', immediate: true })
     await $.command.register({ name: 'agt-focus', description: 'Show agent flags above the prompt (a REVISE, a FAIL, a blocked pane). on · off', argumentHint: '[on|off]', immediate: true })

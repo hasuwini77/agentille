@@ -1,6 +1,8 @@
 // agentille links — who works on which piece, what each finished agent said, and the lead's side
 // of the conversation. Pure on purpose: register.js reads headers and answers, board.js draws.
 
+import { verdictOf } from './routing.js'
+
 // `piece=<slug>` in the [agt …] header names the slice an agent builds, reviews or attacks.
 const PIECE_RE = /^[a-z0-9][a-z0-9-]{0,23}$/
 export const pieceOf = (hdr) => (PIECE_RE.test(String(hdr?.piece ?? '')) ? hdr.piece : null)
@@ -18,8 +20,7 @@ export function verdictChip(role, answer) {
   const a = String(answer ?? '')
   const r = String(role ?? '')
   if (r === 'plan-reviewer') {
-    // The first verdict word decides, as routing.js verdictOf reads it.
-    const v = /\b(APPROVE|REVISE)\b/.exec(a)?.[1]
+    const v = verdictOf(a)
     return v ? { text: v, tone: v === 'APPROVE' ? 'success' : 'warning' } : null
   }
   if (r === 'adversary') {

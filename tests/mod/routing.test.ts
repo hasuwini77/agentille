@@ -22,6 +22,12 @@ describe('policy', () => {
     expect(verdictOf('no verdict')).toBe(null)
   })
 
+  test('the VERDICT line beats stray verdict words', async () => {
+    expect(verdictOf('nothing to REVISE.\nVERDICT: APPROVE')).toBe('APPROVE')
+    expect(verdictOf('Looks fine, no need to APPROVE blindly.\n**VERDICT:** REVISE · BLOCKER:1')).toBe('REVISE')
+    expect(verdictOf('  VERDICT: APPROVE\nREVISE later')).toBe('APPROVE')
+  })
+
   test('table: size, risk and quick depth', async () => {
     expect(decide({ role: 'code-reviewer', hdr: {}, run: fresh(), settings: S })).toMatchObject({ model: 'sonnet', effort: 'medium' })
     expect(decide({ role: 'code-reviewer', hdr: { size: 'large' }, run: fresh(), settings: S })).toMatchObject({ model: 'opus', effort: 'high' })

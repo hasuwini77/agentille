@@ -53,10 +53,12 @@ export function parseHeader(prompt) {
   return h
 }
 
-// First verdict word in a plan-reviewer answer, or null.
+// A plan-reviewer's verdict, or null. Its `VERDICT: APPROVE|REVISE` line (markdown emphasis tolerated)
+// decides; only without one does the first stray verdict word, so "nothing to REVISE" cannot flip it.
 export function verdictOf(answer) {
-  const m = /\b(APPROVE|REVISE)\b/.exec(String(answer ?? ''))
-  return m ? m[1] : null
+  const a = String(answer ?? '')
+  const m = /^[^\w\n]*VERDICT[^\w\n]*(APPROVE|REVISE)\b/im.exec(a) ?? /\b(APPROVE|REVISE)\b/.exec(a)
+  return m ? m[1].toUpperCase() : null
 }
 
 function base(role, hdr, depth) {

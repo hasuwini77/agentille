@@ -3,6 +3,8 @@
 // Flags are read straight off agent results (a REVISE, a FAIL verdict, a failed check, a
 // blocked pane). No model call.
 
+import { verdictOf } from './routing.js'
+
 export function words(text) {
   const t = String(text ?? '').trim()
   return t ? t.split(/\s+/).length : 0
@@ -12,8 +14,7 @@ export function words(text) {
 // the executor's VERIFICATION block carries real exit codes and counts.
 export function flagOf(role, answer) {
   const a = String(answer ?? '')
-  // The first verdict word decides, as routing.js verdictOf reads it: "APPROVE — nothing warrants a REVISE" is an approval.
-  if (role === 'plan-reviewer' && /\b(APPROVE|REVISE)\b/.exec(a)?.[1] === 'REVISE') return role + ' asked for a revised plan'
+  if (role === 'plan-reviewer' && verdictOf(a) === 'REVISE') return role + ' asked for a revised plan'
   const v = /VERDICT:\s*(FAIL|CONCERNS)\b/.exec(a)
   if (v && role.endsWith('reviewer')) return role + ': ' + v[1] + (v[1] === 'FAIL' ? ' — blocks ship' : ' — fix before ship')
   if (role === 'adversary') {

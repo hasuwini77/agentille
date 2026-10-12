@@ -221,6 +221,46 @@ PY
   printf '%s\n' "$mirror_out" | grep -qE '^(PASS|FAIL)' || fail "mirror: comparison produced no result (is skills/agt/routing.md → \"Default routing\" intact?)"
 fi
 
+# ── 6b'. Role parity (agents/ ↔ routing.js TABLE ↔ routing.md ↔ hooks.json) ───
+# A role added in one place and forgotten in another fails at runtime (an
+# unrouted agent, a doc row the mod ignores). The mirror check above compares
+# cells; this compares the role sets, plus the modules hooks.json loads.
+hdr "Role parity"
+if ! command -v python3 >/dev/null 2>&1; then
+  warn "parity: python3 not found — role parity skipped"
+else
+  parity_out=$(python3 - <<'PY'
+import glob, json, os, re
+roles = {os.path.basename(f)[len('agentille-'):-3] for f in glob.glob('agents/agentille-*.md')}
+code = open('hooks/routing.js').read()
+block = code.split('const TABLE = {', 1)[1].split('\n}', 1)[0]
+table = set(re.findall(r"^\s*'?([a-z-]+)'?:\s*\{\s*base:", block, re.M))
+doc = open('skills/agt/routing.md').read()
+sec = doc.split('## Default routing', 1)[1].split('\n## ', 1)[0]
+rows = set()
+for line in sec.splitlines():
+    c = [x.strip() for x in line.strip().strip('|').split('|')]
+    if len(c) == 5 and c[0] != 'role' and not set(c[0]) <= set('-'):
+        rows.add(c[0])
+bad = 0
+for name, other in (('routing.js TABLE', table), ('routing.md "Default routing"', rows)):
+    for r in sorted(roles - other):
+        print('FAIL agents/agentille-%s.md has no row in %s' % (r, name)); bad = 1
+    for r in sorted(other - roles):
+        print('FAIL %s lists role %s but agents/agentille-%s.md does not exist' % (name, r, r)); bad = 1
+mods = json.load(open('hooks/hooks.json')).get('modules', [])
+for m in mods:
+    if not os.path.isfile(os.path.join('hooks', m)):
+        print('FAIL hooks.json module %s does not exist under hooks/' % m); bad = 1
+if not bad: print('PASS %d agent roles match routing.js and routing.md; %d hooks.json module(s) exist' % (len(roles), len(mods)))
+PY
+)
+  while IFS= read -r line; do
+    case "$line" in PASS*) pass "parity: ${line#PASS }";; FAIL*) fail "parity: ${line#FAIL }";; esac
+  done <<< "$parity_out"
+  printf '%s\n' "$parity_out" | grep -qE '^(PASS|FAIL)' || fail "parity: comparison produced no result (is routing.js TABLE or routing.md → \"Default routing\" intact?)"
+fi
+
 # ── 6c. The mod: Claude Code's own validator + its tests ────────────────────
 # Skipped (WARN) where the claude CLI is absent, e.g. CI runners without it.
 hdr "Mod (hooks/register.js)"

@@ -8,7 +8,10 @@ describe('aliases: in the mod', () => {
   const squadConfig = { squads: [{ name: 'saas', label: 'Micro SaaS', minScore: 2, signals: { deps: ['stripe', 'next-auth'], paths: [] }, adds: ['payments-reviewer'], checklists: {} }] }
 
   // A fake home: files is the disk (path → text), mkdirs the `mkdir -p` calls, opened the panes ui.open was asked for.
-  const boot = async ($: any, on: any, files: Record<string, string>, opts: { mkdirExit?: number; writeFails?: boolean } = {}) => {
+  // opts: mkdirExit = mkdir's exit code · writeFails = every write is refused · noProcess = $.process is absent ·
+  // dirExists = ~/.agentille is already there (a write needs it, and only mkdir -p can make it) · unreadable = reads of the profile are refused
+  const boot = async ($: any, on: any, files: Record<string, string>, opts: { mkdirExit?: number; writeFails?: boolean; noProcess?: boolean; dirExists?: boolean; unreadable?: boolean } = {}) => {
+    let dirMade = opts.dirExists === true || PROFILE in files
     const mkdirs: string[][] = []
     const opened: string[] = []
     on('env.get', async ($: any, e: any) => ({ value: e.name === 'HOME' ? '/u' : undefined }))
@@ -18,25 +21,30 @@ describe('aliases: in the mod', () => {
     on('tool.register', async ($: any, e: any) => ({ value: { tool: 'mcp__agentille__' + e.name } }))
     on('ui.toast', async () => ({ value: undefined }))
     on('fs.read', async ($: any, e: any) => {
+      if (e.path === PROFILE && opts.unreadable) return { deny: 'EACCES' }
       if (e.path in files) return { value: files[e.path] }
       if (e.path.endsWith('/.claude-plugin/squads.json')) return { value: JSON.stringify(squadConfig) }
       if (e.path === '/work/repo/package.json') return { value: JSON.stringify({ dependencies: { stripe: '1', 'next-auth': '1' } }) }
       return { deny: 'ENOENT' }
     })
     on('fs.write', async ($: any, e: any) => {
-      if (opts.writeFails) return { deny: 'read-only' }
+      if (opts.writeFails || !dirMade) return { deny: 'read-only' }
       files[e.path] = e.text
       return { value: undefined }
     })
     on('fs.list', async () => ({ value: [] }))
-    on('fs.exists', async () => ({ value: false }))
+    on('fs.exists', async ($: any, e: any) => ({ value: e.path in files || (e.path === PROFILE && opts.unreadable === true) }))
     on('store.get', async () => ({ value: undefined }))
     on('store.set', async () => ({ value: undefined }))
     on('ui.panes', async () => ({ value: [] }))
     on('ui.open', async ($: any, e: any) => { opened.push(e.id); return { value: { isOpen: true } } as never })
     on('ui.render', async () => ({ type: 'engine', ref: 0 }) as never)
     on('process.run', async ($: any, e: any) => {
-      if (e.argv?.[0] === 'mkdir') mkdirs.push(e.argv)
+      if (opts.noProcess) return { deny: 'no process here' }
+      if (e.argv?.[0] === 'mkdir') {
+        mkdirs.push(e.argv)
+        if ((opts.mkdirExit ?? 0) === 0) dirMade = true
+      }
       return { value: { exitCode: e.argv?.[0] === 'mkdir' ? (opts.mkdirExit ?? 0) : 1, stdout: '', stderr: '' } }
     })
     on('agent.spawn', async ($: any, e: any) => ({ model: e.model ?? 'opus', agentId: 'a1' }))
@@ -94,7 +102,7 @@ describe('aliases: in the mod', () => {
     const files: Record<string, string> = {}
     const { mkdirs } = await boot($, on, files)
     await run($, 'agt-focus', 'off')
-    expect(mkdirs).toEqual([['mkdir', '-p', '/u/.agentille']])
+    expect(mkdirs).toEqual([['mkdir', '-p', '/u/.agentille']]) // the first write failed, so the folder was made, then the write retried
     expect(files[PROFILE]).toBe('{\n  "display": {\n    "focus": false\n  }\n}\n')
   })
 
@@ -117,6 +125,28 @@ describe('aliases: in the mod', () => {
     await boot($, on, files, { mkdirExit: 1 })
     expect(await run($, 'agt-focus', 'off')).toBe('focus: could not create ~/.agentille')
     expect(files).toEqual({})
+  })
+
+  test('a host without $.process still saves once ~/.agentille exists, and never runs mkdir', async ($, on) => {
+    const files: Record<string, string> = {}
+    const { mkdirs } = await boot($, on, files, { noProcess: true, dirExists: true })
+    expect(await run($, 'agt-focus', 'off')).toContain('focus: off')
+    expect(saved(files)).toEqual({ display: { focus: false } })
+    expect(mkdirs).toEqual([])
+  })
+
+  test('a host without $.process and without the folder says so instead of failing', async ($, on) => {
+    const files: Record<string, string> = {}
+    await boot($, on, files, { noProcess: true })
+    expect(await run($, 'agt-focus', 'off')).toBe('focus: could not write ~/.agentille/profile.json')
+    expect(files).toEqual({})
+  })
+
+  test('a profile that exists but cannot be read is never replaced', async ($, on) => {
+    const files = { [PROFILE]: '{"name":"x"}' }
+    await boot($, on, files, { unreadable: true })
+    expect(await run($, 'agt-highlight', 'off')).toBe('highlight: ~/.agentille/profile.json is unreadable; left untouched')
+    expect(files[PROFILE]).toBe('{"name":"x"}')
   })
 
   test('a bad argument changes nothing and writes nothing', async ($, on) => {

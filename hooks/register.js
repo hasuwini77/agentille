@@ -187,25 +187,36 @@ function applyDisplay() {
 const PROFILE_FILE = '/.agentille/profile.json'
 
 // Read-merge-write one display key into ~/.agentille/profile.json: every other key stays, 2-space
-// indent, trailing newline, file and folder created when missing. → null on success, else why not.
+// indent, trailing newline. The folder is made only when the first write fails, so a host without
+// $.process still works once ~/.agentille exists. → null on success, else why not.
 async function saveDisplay($, key, value) {
   if (!home) return 'no home folder to keep it in'
   const path = home + PROFILE_FILE
+  const shown = '~' + PROFILE_FILE
   let profile = null
   let text = null
-  try { text = await $.fs.read(path) } catch { /* no profile yet */ }
+  try {
+    text = await $.fs.read(path)
+  } catch {
+    // unreadable is not missing: a file we cannot read is the person's, and a write would replace it
+    if (await $.fs.exists(path).catch(() => true)) return shown + ' is unreadable; left untouched'
+  }
   if (text !== null) {
-    try { profile = JSON.parse(text) } catch { return path.replace(home, '~') + ' is not valid JSON; left untouched' }
-    if (profile === null || typeof profile !== 'object' || Array.isArray(profile)) return path.replace(home, '~') + ' is not a JSON object; left untouched'
-  } else {
-    const made = await $.process.run(['mkdir', '-p', home + '/.agentille'], PROBE).catch(() => null)
-    if (!made || made.exitCode !== 0) return 'could not create ~/.agentille'
+    try { profile = JSON.parse(text) } catch { return shown + ' is not valid JSON; left untouched' }
+    if (profile === null || typeof profile !== 'object' || Array.isArray(profile)) return shown + ' is not a JSON object; left untouched'
   }
   const next = withDisplay(profile, key, value)
+  const body = profileJson(next)
   try {
-    await $.fs.write(path, profileJson(next))
+    await $.fs.write(path, body)
   } catch {
-    return 'could not write ' + path.replace(home, '~')
+    try {
+      const made = await $.process.run(['mkdir', '-p', home + '/.agentille'], PROBE)
+      if (made.exitCode !== 0) return 'could not create ~/.agentille'
+      await $.fs.write(path, body)
+    } catch {
+      return 'could not write ' + shown
+    }
   }
   profileDisplay = cleanDisplay(next.display)
   applyDisplay()

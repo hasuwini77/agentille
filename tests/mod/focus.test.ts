@@ -101,6 +101,7 @@ describe('focus: in the mod', () => {
     on('env.get', async ($: any, e: any) => ({ value: e.name === 'HOME' ? '/u' : undefined }))
     on('fs.read', async ($: any, e: any) => (e.path in files ? { value: files[e.path] } : { deny: 'ENOENT' }))
     on('fs.write', async ($: any, e: any) => { files[e.path] = e.text; return { value: undefined } })
+    on('fs.exists', async ($: any, e: any) => ({ value: e.path in files }))
     on('process.run', async () => ({ value: { exitCode: 0, stdout: '', stderr: '' } }))
     on('session.start', async ($: any, e: any) => ({ cwd: e.cwd }))
     on('command.register', async () => ({ value: undefined }))

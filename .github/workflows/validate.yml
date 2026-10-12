@@ -2,7 +2,8 @@ name: validate
 
 # Structural lint for the agentille plugin — version drift, a versioned
 # marketplace.json, broken agent-namespace refs, dangling doc cross-refs,
-# a missing hook script, and PII leaks. NOT a behavioral test of /agt's
+# a missing hook script, role drift between agents/routing, a mod that fails
+# to import under node, and PII leaks. NOT a behavioral test of /agt's
 # dispatch (scored by the local eval suite in evals/: `claude plugin eval`,
 # see .claude/CLAUDE.md). See also scripts/validate.sh.
 
@@ -17,5 +18,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       # jq is preinstalled on ubuntu-latest runners; no setup needed.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
       - name: Run structural validator
         run: bash scripts/validate.sh

@@ -2,7 +2,8 @@
 # agentille structural validator — a linter for the failure classes a
 # markdown-prompt plugin actually ships: version drift, a versioned
 # marketplace.json, broken agent-namespace references, dangling doc
-# cross-refs, a missing hook script, and PII leaks into a public repo.
+# cross-refs, a missing hook script, agent/routing role drift, a mod that
+# fails to import under node, and PII leaks into a public repo.
 #
 # This is NOT a behavioral test framework. Dispatch decisions are scored by
 # the local eval suite in evals/ (`claude plugin eval`, see .claude/CLAUDE.md).
@@ -259,6 +260,26 @@ PY
     case "$line" in PASS*) pass "parity: ${line#PASS }";; FAIL*) fail "parity: ${line#FAIL }";; esac
   done <<< "$parity_out"
   printf '%s\n' "$parity_out" | grep -qE '^(PASS|FAIL)' || fail "parity: comparison produced no result (is routing.js TABLE or routing.md → \"Default routing\" intact?)"
+fi
+
+# ── 6b''. Mod loads under node (hooks/register.js static import graph) ───────
+# The mod is plain ESM; a syntax error or a bad import anywhere in the graph
+# only shows up when Claude Code loads it. A clean import is the CI bar.
+hdr "Mod import (node)"
+if ! command -v node >/dev/null 2>&1; then
+  warn "node not found — mod import check skipped"
+else
+  nmajor=$(node -p 'process.versions.node.split(".")[0]' 2>/dev/null)
+  if ! [[ "$nmajor" =~ ^[0-9]+$ ]] || [ "$nmajor" -lt 22 ]; then
+    warn "node ${nmajor:-?} < 22 — mod import check skipped"
+  else
+    imp=$(node -e "import('./hooks/register.js').then(()=>{},e=>{console.error(e&&e.message||e);process.exit(1)})" 2>&1); irc=$?
+    if [ "$irc" = 0 ]; then
+      pass "hooks/register.js imports cleanly (node $nmajor)"
+    else
+      fail "hooks/register.js failed to import:"; printf '%s\n' "$imp" | head -8 | sed 's/^/    /'
+    fi
+  fi
 fi
 
 # ── 6c. The mod: Claude Code's own validator + its tests ────────────────────

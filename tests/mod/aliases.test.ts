@@ -151,6 +151,15 @@ describe('aliases: in the mod', () => {
     expect(stored['highlight:on']).toBe(false)
   })
 
+  test('a read-only profile that already sets the key: the switch is for this session only, and says so', async ($, on) => {
+    const { stored } = await boot($, on, { [PROFILE]: JSON.stringify({ display: { highlight: 'all' } }) }, { writeFails: true })
+    const text = await run($, 'agt-highlight', 'off')
+    expect(text).toContain('applied for this session only')
+    expect(text).toContain('display.highlight in profile.json wins next session')
+    expect(text).toContain('Highlight: off')
+    expect(stored['highlight:on']).toBe(false)
+  })
+
   test('a folder that cannot be created falls back to the mod store and writes no file', async ($, on) => {
     const files: Record<string, string> = {}
     const { stored } = await boot($, on, files, { mkdirExit: 1 })

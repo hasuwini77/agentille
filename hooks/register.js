@@ -244,6 +244,7 @@ async function setDisplay($, key, value) {
     key === 'focus' ? { focusMode: value ? 'on' : 'off' } :
     { highlightOn: value !== 'off', highlightAll: value === 'all' }
   const names = { deckAuto: 'deck:auto', focusMode: 'focus:mode', highlightOn: 'highlight:on', highlightAll: 'highlight:all' }
+  const profileWins = Object.hasOwn(profileDisplay, key) // a profile value comes back next session
   storedRaw = { ...storedRaw, ...sets }
   delete profileDisplay[key]
   applyDisplay()
@@ -252,6 +253,7 @@ async function setDisplay($, key, value) {
   } catch {
     return 'applied for this session only: ' + why + ' and the mod store refused it'
   }
+  if (profileWins) return 'applied for this session only: ' + why + ', and display.' + key + ' in profile.json wins next session'
   return "saved in this machine's mod store, not in profile.json: " + why
 }
 

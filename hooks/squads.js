@@ -10,17 +10,52 @@ export function depsOf(pkgText) {
   }
 }
 
-// existing: Set of squad signal paths that exist in the repo
+// One squad's signals split into found and not found. existing: Set of signal paths that exist in the repo.
+function scored(s, deps, existing) {
+  const matched = []
+  const missing = []
+  for (const d of s.signals?.deps ?? []) (deps.has(d) ? matched : missing).push(d)
+  for (const p of s.signals?.paths ?? []) (existing.has(p) ? matched : missing).push(p)
+  return { matched, missing, minScore: s.minScore ?? 2 }
+}
+
 export function activeSquads(config, deps, existing) {
   const out = []
   for (const s of config?.squads ?? []) {
-    const matched = [
-      ...(s.signals?.deps ?? []).filter((d) => deps.has(d)),
-      ...(s.signals?.paths ?? []).filter((p) => existing.has(p)),
-    ]
-    if (matched.length >= (s.minScore ?? 2)) out.push({ name: s.name, label: s.label, matched, adds: s.adds ?? [], checklists: s.checklists ?? {} })
+    const { matched, minScore } = scored(s, deps, existing)
+    if (matched.length >= minScore) out.push({ name: s.name, label: s.label, matched, adds: s.adds ?? [], checklists: s.checklists ?? {} })
   }
   return out
+}
+
+// Every squad with its score, for /agt-squads. A near-miss is inactive with score > 0.
+export function explain(config, deps, existing) {
+  return (config?.squads ?? []).map((s) => {
+    const { matched, missing, minScore } = scored(s, deps, existing)
+    return { name: s.name, label: s.label, score: matched.length, minScore, matched, missing, adds: s.adds ?? [], active: matched.length >= minScore }
+  })
+}
+
+const MISSING_SHOWN = 5
+
+function rowText(r) {
+  const gone = r.missing.length > MISSING_SHOWN ? r.missing.slice(0, MISSING_SHOWN).join(', ') + ', +' + (r.missing.length - MISSING_SHOWN) + ' more' : r.missing.join(', ')
+  return [
+    '- ' + r.name + ' (' + r.label + ') ' + r.score + '/' + r.minScore,
+    '  found: ' + (r.matched.join(', ') || 'none'),
+    '  missing: ' + (gone || 'none'),
+    '  adds: ' + (r.adds.join(', ') || 'none'),
+  ].join('\n')
+}
+
+export function squadsText(rows) {
+  const active = rows.filter((r) => r.active)
+  const near = rows.filter((r) => !r.active && r.score > 0)
+  if (active.length === 0 && near.length === 0) return 'No squads detected: no squad signal (package.json dep or repo path) matches this repo.'
+  const out = []
+  if (active.length) out.push('Active squads', ...active.map(rowText))
+  if (near.length) out.push('Near misses (score below minimum)', ...near.map(rowText))
+  return out.join('\n')
 }
 
 export function allPaths(config) {

@@ -16,6 +16,12 @@ describe('policy', () => {
     expect(roleOf('other:planner')).toBe(null)
   })
 
+  test('prototype keys are not roles', async () => {
+    expect(roleOf('agentille:agentille-constructor')).toBe(null)
+    expect(roleOf('agentille:agentille-toString')).toBe(null)
+    expect(roleOf('agentille:agentille-__proto__')).toBe(null)
+  })
+
   test('reads the first verdict word', async () => {
     expect(verdictOf('REVISE\n- [BLOCKER] x → y')).toBe('REVISE')
     expect(verdictOf('APPROVE — sound plan')).toBe('APPROVE')

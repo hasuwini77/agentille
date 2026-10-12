@@ -37,7 +37,7 @@ export const DEFAULTS = { autoFable: true, maxFablePerRun: 1, fableWeeklyCeiling
 export function roleOf(subagentType) {
   if (typeof subagentType !== 'string' || !subagentType.startsWith(ROLE_PREFIX)) return null
   const role = subagentType.slice(ROLE_PREFIX.length)
-  return TABLE[role] ? role : null
+  return Object.hasOwn(TABLE, role) ? role : null
 }
 
 // "[agt run=a1b2 size=large risk=auth mode=fix fable=auto]" on the prompt's first line

@@ -49,6 +49,7 @@ function rowText(r) {
 }
 
 export function squadsText(rows) {
+  if (rows === null) return 'squads.json is unreadable: squad detection is off until it parses again.'
   const active = rows.filter((r) => r.active)
   const near = rows.filter((r) => !r.active && r.score > 0)
   if (active.length === 0 && near.length === 0) return 'No squads detected: no squad signal (package.json dep or repo path) matches this repo.'

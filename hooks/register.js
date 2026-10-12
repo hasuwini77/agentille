@@ -51,7 +51,7 @@ let selfTab = null           // herdr: the lead's own tab, where its workers spl
 let paneTools = false        // spawn_pane / close_pane registered for this lead
 let squads = []              // active squads for this repo
 let squadBlock = ''
-let squadRows = []           // every squad scored, for /agt-squads
+let squadRows = []           // every squad scored, for /agt-squads; null when squads.json is unreadable
 let transport = null        // 'herdr' | 'tmux' | 'none', probed once at session start
 let tick = 0
 let pollTimer = null         // pane polling: runs only while panes may exist
@@ -181,7 +181,7 @@ async function loadSquads($) {
     squadBlock = injection(squads)
   } catch {
     squads = []
-    squadRows = []
+    squadRows = null
     squadBlock = ''
   }
 }

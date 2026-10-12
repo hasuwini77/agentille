@@ -63,6 +63,10 @@ describe('squads: text', () => {
     expect(squadsText(explain(config, new Set(), new Set()))).toMatch(/^No squads detected/)
     expect(squadsText([])).toMatch(/^No squads detected/)
   })
+
+  test('an unreadable squads.json blames the config, not the repo', () => {
+    expect(squadsText(null)).toMatch(/^squads\.json is unreadable/)
+  })
 })
 
 describe('squads: in the mod', () => {

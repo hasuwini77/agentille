@@ -25,7 +25,7 @@ hdr()  { printf '\n%s== %s ==%s\n' "$B" "$1" "$X"; }
 
 # ── 1. JSON validity ─────────────────────────────────────────────────────────
 hdr "JSON validity"
-for j in .claude-plugin/plugin.json .claude-plugin/marketplace.json hooks/hooks.json; do
+for j in .claude-plugin/plugin.json .claude-plugin/marketplace.json .claude-plugin/squads.json hooks/hooks.json; do
   if [ ! -f "$j" ]; then fail "$j missing"; continue; fi
   if jq -e . "$j" >/dev/null 2>&1; then pass "$j parses"; else fail "$j is not valid JSON"; fi
 done
@@ -88,6 +88,16 @@ while IFS= read -r ref; do
   resolves "$ref" || { fail "'$ref' resolves to no agent file"; bad=1; }
 done < <(grep -rhoE 'agentille:agentille-[a-z-]+' skills agents 2>/dev/null | sort -u)
 [ "$bad" = 0 ] && pass "all agentille:agentille-* refs in skills/ and agents/ resolve"
+
+# Every role a squad adds must have an agent file (a typo here silently adds nothing)
+sqbad=0; sqn=0
+while IFS= read -r role; do
+  [ -n "$role" ] || continue
+  sqn=$((sqn+1))
+  [ -f "agents/agentille-${role}.md" ] || { fail "squads.json adds '$role': no agents/agentille-${role}.md"; sqbad=1; }
+done < <(jq -r '.squads[]?.adds[]?' .claude-plugin/squads.json 2>/dev/null | sort -u)
+[ "$sqbad" = 0 ] && [ "$sqn" -gt 0 ] && pass "all $sqn squads.json 'adds' roles resolve to an agent file"
+[ "$sqn" = 0 ] && warn "squads.json adds no roles (or did not parse)"
 
 # ── 5. EVERY hook script declared by hooks.json exists and is executable ─────
 # All of them, not just the first: a hook whose script is missing or lost its

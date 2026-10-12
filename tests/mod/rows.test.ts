@@ -166,7 +166,7 @@ describe('rows: in the transcript', () => {
     await $.agent.spawn({ prompt: '[agt run=wfrun size=large mode=review]\nreview', subagentType: 'agentille:agentille-code-reviewer', model: 'haiku', ...wf } as never)
     expect(asked).toEqual(['haiku']) // untouched: the table would have said opus
     expect(toasts.some((t) => /workflow code-reviewer runs haiku — table says opus · high/.test(t))).toBe(true)
-    expect((await $.command.run({ command: 'agt-routing' })).text).toBe('code-reviewer → claude-haiku-4-5  (workflow, table says opus · high)')
+    expect((await $.command.run({ command: 'agt-info', args: 'routing' })).text).toBe('code-reviewer → claude-haiku-4-5  (workflow, table says opus · high)')
   })
 
   test('a workflow agent with no header joins the run in progress', async ($, on) => {

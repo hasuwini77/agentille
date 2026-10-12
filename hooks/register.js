@@ -11,7 +11,7 @@ import { activeSquads, allPaths, depsOf, explain, injection, squadsText } from '
 import { BYE_MS, HELLO_MS, MASCOT_COLOR, MODEL_COLOR, agentMood, caption, frame, modelKey, moodAt, parseWorker } from './mascot.js'
 import { MARK, SPAN_COLOR, highlightFor, highlightText, litFor, parseHighlightArgs, spans } from './highlight.js'
 import { flagOf, focusText, paneFlags, parseFocusArgs } from './focus.js'
-import { cleanDisplay, highlightFlags, resolveDisplay, storedDisplay } from './settings.js'
+import { cleanDisplay, highlightFlags, profileJson, resolveDisplay, storedDisplay, withDisplay } from './settings.js'
 import { ledgerSummary, overviewText, parseInfoArgs, routeText, routingSummary, squadsSummary } from './info.js'
 import {
   CLOSE_TOOL, HERDR_START_TIMEOUT, PROBE, SPAWN_TOOL, closeTarget, focusArgv, herdrMetaArgv, spawnToolInput, SAFE_RUN, SPAWN_ROLE, TMUX_LIST_ARGV, answerFile, doneFile, herdrCloseArgv, herdrPaneIdOf, herdrPromptArgv, herdrSplitArgv, herdrStartArgv,
@@ -183,6 +183,37 @@ function applyDisplay() {
   highlightOn = h.on
   highlightAll = h.all
 }
+
+const PROFILE_FILE = '/.agentille/profile.json'
+
+// Read-merge-write one display key into ~/.agentille/profile.json: every other key stays, 2-space
+// indent, trailing newline, file and folder created when missing. → null on success, else why not.
+async function saveDisplay($, key, value) {
+  if (!home) return 'no home folder to keep it in'
+  const path = home + PROFILE_FILE
+  let profile = null
+  let text = null
+  try { text = await $.fs.read(path) } catch { /* no profile yet */ }
+  if (text !== null) {
+    try { profile = JSON.parse(text) } catch { return path.replace(home, '~') + ' is not valid JSON; left untouched' }
+    if (profile === null || typeof profile !== 'object' || Array.isArray(profile)) return path.replace(home, '~') + ' is not a JSON object; left untouched'
+  } else {
+    const made = await $.process.run(['mkdir', '-p', home + '/.agentille'], PROBE).catch(() => null)
+    if (!made || made.exitCode !== 0) return 'could not create ~/.agentille'
+  }
+  const next = withDisplay(profile, key, value)
+  try {
+    await $.fs.write(path, profileJson(next))
+  } catch {
+    return 'could not write ' + path.replace(home, '~')
+  }
+  profileDisplay = cleanDisplay(next.display)
+  applyDisplay()
+  return null
+}
+
+const MOVED = (key) => '\nmoved: display.' + key + ' in ~/.agentille/profile.json — this command goes away in v4'
+const ALIAS = (view) => '\nmoved: /agt-info ' + view
 
 function routingView() {
   if (decisions.length === 0) return 'No agentille dispatches this session.'
@@ -732,11 +763,11 @@ export function register(on) {
     wireName = /^agt-[A-Za-z0-9_-]+$/.test((await $.env.get('AGENTILLE_NAME')) ?? '') ? await $.env.get('AGENTILLE_NAME') : null
     leadSession = wireName ? validLead(await $.env.get('AGENTILLE_LEAD')) : null
     if (worker) { pub.model = worker.model; pub.effort = worker.effort || null }
-    await $.command.register({ name: 'agt-deck', description: 'Open the agentille deck: the cast, routing timeline, wire log and tokens. auto = open on every /agt · off', argumentHint: '[auto|off]', immediate: true })
+    await $.command.register({ name: 'agt-deck', description: 'Open the agentille deck: the cast, routing timeline, wire log and tokens. auto = open on every /agt (saved as display.deck) · off', argumentHint: '[auto|off]', immediate: true })
     await $.command.register({ name: 'agt-tell', description: 'Send a message to a worker pane over the wire', argumentHint: '<worker> <message>', immediate: true })
-    await $.command.register({ name: 'agt-routing', description: 'Show the model + effort agentille picked for each agent this session', immediate: true })
+    await $.command.register({ name: 'agt-routing', description: 'Moved to /agt-info routing: the model + effort agentille picked for each agent this session', immediate: true })
     await $.command.register({ name: 'agt-spawn', description: 'Open a routed claude pane beside this one (Herdr or tmux); it is never reaped', argumentHint: '"task" [--model sonnet|opus|haiku|fable]' })
-    await $.command.register({ name: 'agt-ledger', description: 'Tokens per agent role for the latest agentille run', immediate: true })
+    await $.command.register({ name: 'agt-ledger', description: 'Moved to /agt-info ledger: tokens per agent role for the latest agentille run', immediate: true })
     storedRaw = {
       deckAuto: await $.store.get('deck:auto'),
       focusMode: await $.store.get('focus:mode'),
@@ -745,9 +776,9 @@ export function register(on) {
     }
     applyDisplay()
     await $.command.register({ name: 'agt-info', description: 'Settings in effect, routing, ledger, squads, or a route dry-run: routing | ledger | squads | route <role>', argumentHint: '[routing|ledger|squads|route <role> [size=…] [risk=…] [depth=…]]', immediate: true })
-    await $.command.register({ name: 'agt-highlight', description: 'Highlight replies: an essentials card, paths, versions and numbers lit. on (/agt only) · all · off', argumentHint: '[on|all|off]', immediate: true })
-    await $.command.register({ name: 'agt-squads', description: 'Rescan this repo and show which squads match, which nearly do, and the reviewers they add', immediate: true })
-    await $.command.register({ name: 'agt-focus', description: 'Show agent flags above the prompt (a REVISE, a FAIL, a blocked pane). on · off', argumentHint: '[on|off]', immediate: true })
+    await $.command.register({ name: 'agt-highlight', description: 'Highlight replies: on (/agt only) · all · off. Saved as display.highlight in profile.json; goes away in v4', argumentHint: '[on|all|off]', immediate: true })
+    await $.command.register({ name: 'agt-squads', description: 'Moved to /agt-info squads: which squads match this repo, which nearly do, and the reviewers they add', immediate: true })
+    await $.command.register({ name: 'agt-focus', description: 'Agent flags above the prompt (a REVISE, a FAIL, a blocked pane): on · off. Saved as display.focus in profile.json; goes away in v4', argumentHint: '[on|off]', immediate: true })
     if (transport !== 'none') {
       // One look now: a lead restarted mid-run sees its leftover panes. It reaps only those whose answer
       // was written after this look; an older one is flagged "not harvested" and left to the person.
@@ -770,9 +801,9 @@ export function register(on) {
     const a = String(e.args ?? '').trim().toLowerCase()
     if (a && a !== 'auto' && a !== 'off') return { text: 'Usage: /agt-deck [auto|off]' }
     if (a) {
-      deckAuto = a === 'auto'
-      await $.store.set('deck:auto', deckAuto)
-      if (!deckAuto) return { text: 'deck: opens only when you type /agt-deck' }
+      const why = await saveDisplay($, 'deck', a)
+      if (why) return { text: 'deck: ' + why }
+      if (!deckAuto) return { text: 'deck: opens only when you type /agt-deck (display.deck: off)' }
     }
     const o = await $.ui.open({ id: DECK, title: 'agentille' })
     const auto = deckAuto ? ' · opens on every /agt (/agt-deck off to stop)' : ''
@@ -799,7 +830,7 @@ export function register(on) {
     return { text: '⇄ sent to ' + a.name }
   })
 
-  on('command.run', { command: 'agt-routing' }, async () => ({ text: routingView() }))
+  on('command.run', { command: 'agt-routing' }, async () => ({ text: routingView() + ALIAS('routing') }))
 
   // The one place for read-only facts: settings in effect, the three old views, and a routing dry-run.
   on('command.run', { command: 'agt-info' }, async ($, e) => {
@@ -915,29 +946,27 @@ export function register(on) {
     const a = parseFocusArgs(e.args)
     if (a.error) return { text: a.error }
     if (a.on !== undefined) {
-      focusOn = a.on
-      await $.store.set('focus:mode', a.on ? 'on' : 'off')
+      const why = await saveDisplay($, 'focus', a.on)
+      if (why) return { text: 'focus: ' + why }
       $.ui.invalidate('ui.render')
     }
-    return { text: focusText(focusOn, focusLines(Date.now())) }
+    return { text: focusText(focusOn, focusLines(Date.now())) + MOVED('focus') }
   })
 
   on('command.run', { command: 'agt-highlight' }, async ($, e) => {
     const a = parseHighlightArgs(e.args)
     if (a.error) return { text: a.error }
     if (a.on !== undefined) {
-      highlightOn = a.on
-      highlightAll = a.all
-      await $.store.set('highlight:on', a.on)
-      await $.store.set('highlight:all', a.all)
+      const why = await saveDisplay($, 'highlight', !a.on ? 'off' : a.all ? 'all' : 'on')
+      if (why) return { text: 'highlight: ' + why }
       $.ui.invalidate('ui.render')
     }
-    return { text: highlightText(highlightOn, highlightAll) }
+    return { text: highlightText(highlightOn, highlightAll) + MOVED('highlight') }
   })
 
-  on('command.run', { command: 'agt-squads' }, async ($) => ({ text: await squadsView($) }))
+  on('command.run', { command: 'agt-squads' }, async ($) => ({ text: (await squadsView($)) + ALIAS('squads') }))
 
-  on('command.run', { command: 'agt-ledger' }, async () => ({ text: ledgerView() }))
+  on('command.run', { command: 'agt-ledger' }, async () => ({ text: ledgerView() + ALIAS('ledger') }))
 
   // A typed /agt starts a clean run; a task notification, plugin or peer turn is not the person's prompt.
   on('prompt.submit', async ($, e, next) => {

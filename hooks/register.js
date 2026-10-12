@@ -12,6 +12,7 @@ import { BYE_MS, HELLO_MS, MASCOT_COLOR, MODEL_COLOR, agentMood, caption, frame,
 import { MARK, SPAN_COLOR, highlightFor, highlightText, litFor, parseHighlightArgs, spans } from './highlight.js'
 import { flagOf, focusText, paneFlags, parseFocusArgs } from './focus.js'
 import { cleanDisplay, highlightFlags, resolveDisplay, storedDisplay } from './settings.js'
+import { ledgerSummary, overviewText, parseInfoArgs, routeText, routingSummary, squadsSummary } from './info.js'
 import {
   CLOSE_TOOL, HERDR_START_TIMEOUT, PROBE, SPAWN_TOOL, closeTarget, focusArgv, herdrMetaArgv, spawnToolInput, SAFE_RUN, SPAWN_ROLE, TMUX_LIST_ARGV, answerFile, doneFile, herdrCloseArgv, herdrPaneIdOf, herdrPromptArgv, herdrSplitArgv, herdrStartArgv,
   isFreshDone, isLead, newRunId, paneKey, paneName, paneRole, parseSpawnArgs, parseTmuxList, pickTransport, quietSpawn, reapPool, scopeRows, splitName, splitPlan, tmuxEvenArgv, tmuxKillArgv, tmuxPaneAgents, tmuxPaneIdOf,
@@ -181,6 +182,20 @@ function applyDisplay() {
   const h = highlightFlags(display.values.highlight)
   highlightOn = h.on
   highlightAll = h.all
+}
+
+function routingView() {
+  if (decisions.length === 0) return 'No agentille dispatches this session.'
+  return decisions.slice(-30).map((d) => d.role + ' → ' + d.model + (d.effort ? ' · ' + d.effort : '') + (d.reason === 'table' ? '' : '  (' + d.reason + ')') + (d.kind === 'pane' ? ' · pane' : '')).join('\n')
+}
+
+function ledgerView() {
+  return ledgerText(ledger(live, lastRun, paneRoutes))
+}
+
+async function squadsView($) {
+  await loadSquads($)
+  return squadsText(squadRows)
 }
 
 async function loadSquads($) {
@@ -729,6 +744,7 @@ export function register(on) {
       highlightAll: await $.store.get('highlight:all'),
     }
     applyDisplay()
+    await $.command.register({ name: 'agt-info', description: 'Settings in effect, routing, ledger, squads, or a route dry-run: routing | ledger | squads | route <role>', argumentHint: '[routing|ledger|squads|route <role> [size=…] [risk=…] [depth=…]]', immediate: true })
     await $.command.register({ name: 'agt-highlight', description: 'Highlight replies: an essentials card, paths, versions and numbers lit. on (/agt only) · all · off', argumentHint: '[on|all|off]', immediate: true })
     await $.command.register({ name: 'agt-squads', description: 'Rescan this repo and show which squads match, which nearly do, and the reviewers they add', immediate: true })
     await $.command.register({ name: 'agt-focus', description: 'Show agent flags above the prompt (a REVISE, a FAIL, a blocked pane). on · off', argumentHint: '[on|off]', immediate: true })
@@ -783,9 +799,19 @@ export function register(on) {
     return { text: '⇄ sent to ' + a.name }
   })
 
-  on('command.run', { command: 'agt-routing' }, async () => {
-    if (decisions.length === 0) return { text: 'No agentille dispatches this session.' }
-    return { text: decisions.slice(-30).map((d) => d.role + ' → ' + d.model + (d.effort ? ' · ' + d.effort : '') + (d.reason === 'table' ? '' : '  (' + d.reason + ')') + (d.kind === 'pane' ? ' · pane' : '')).join('\n') }
+  on('command.run', { command: 'agt-routing' }, async () => ({ text: routingView() }))
+
+  // The one place for read-only facts: settings in effect, the three old views, and a routing dry-run.
+  on('command.run', { command: 'agt-info' }, async ($, e) => {
+    const a = parseInfoArgs(e.args)
+    if (a.error) return { text: a.error }
+    if (a.view === 'routing') return { text: routingView() }
+    if (a.view === 'ledger') return { text: ledgerView() }
+    if (a.view === 'squads') return { text: await squadsView($) }
+    if (a.view === 'route') return { text: routeText({ ...a, depth: a.depth ?? depth }, settings, weeklyPct) }
+    await loadSquads($)
+    const log = runs.get(lastRun)?.log ?? []
+    return { text: overviewText({ display, squads: squadsSummary(squadRows), routing: routingSummary(log), ledger: ledgerSummary(ledger(live, lastRun, paneRoutes)) }) }
   })
 
   // Typed only: a plugin, a scheduled task or a notification never opens a pane.
@@ -909,12 +935,9 @@ export function register(on) {
     return { text: highlightText(highlightOn, highlightAll) }
   })
 
-  on('command.run', { command: 'agt-squads' }, async ($) => {
-    await loadSquads($)
-    return { text: squadsText(squadRows) }
-  })
+  on('command.run', { command: 'agt-squads' }, async ($) => ({ text: await squadsView($) }))
 
-  on('command.run', { command: 'agt-ledger' }, async () => ({ text: ledgerText(ledger(live, lastRun, paneRoutes)) }))
+  on('command.run', { command: 'agt-ledger' }, async () => ({ text: ledgerView() }))
 
   // A typed /agt starts a clean run; a task notification, plugin or peer turn is not the person's prompt.
   on('prompt.submit', async ($, e, next) => {

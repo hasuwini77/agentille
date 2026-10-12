@@ -53,8 +53,9 @@ describe('policy', () => {
 })
 
 describe('Fable is rare', () => {
-  test('one REVISE only raises effort', async () => {
+  test('one REVISE moves the planner to opus · max, whatever the depth', async () => {
     expect(decide({ role: 'planner', hdr: {}, run: { ...fresh(), revise: 1 }, settings: S })).toMatchObject({ model: 'opus', effort: 'max', fable: false })
+    expect(decide({ role: 'planner', hdr: {}, run: { ...fresh(), revise: 1 }, depth: 'quick', settings: S })).toMatchObject({ model: 'opus', effort: 'max', fable: false })
   })
 
   test('two REVISEs make the planner a Fable candidate', async () => {

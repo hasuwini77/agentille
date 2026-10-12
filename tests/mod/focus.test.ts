@@ -96,12 +96,21 @@ describe('focus: in the mod', () => {
     expect(asked.length).toBe(0)
   })
 
-  test('/agt-focus off hides the flags, is remembered, and on brings them back', async ($, on) => {
-    const { stored } = setup(on)
+  test('/agt-focus off hides the flags, is written to profile.json, and on brings them back', async ($, on) => {
+    const files: Record<string, string> = {}
+    on('env.get', async ($: any, e: any) => ({ value: e.name === 'HOME' ? '/u' : undefined }))
+    on('fs.read', async ($: any, e: any) => (e.path in files ? { value: files[e.path] } : { deny: 'ENOENT' }))
+    on('fs.write', async ($: any, e: any) => { files[e.path] = e.text; return { value: undefined } })
+    on('fs.exists', async ($: any, e: any) => ({ value: e.path in files }))
+    on('process.run', async ($: any, e: any) => ({ value: { exitCode: e.argv?.[0] === 'mkdir' ? 0 : 1, stdout: '', stderr: '' } }))
+    on('session.start', async ($: any, e: any) => ({ cwd: e.cwd }))
+    on('command.register', async () => ({ value: undefined }))
+    setup(on)
+    await $.session.start({ cwd: '/w', surface: null, isInteractive: false })
     await $.agent.spawn({ prompt: '[agt run=f2 size=small mode=review]\nreview', subagentType: 'agentille:agentille-code-reviewer', model: 'sonnet' })
     await complete($, 'VERDICT: CONCERNS\nP1: unchecked input', 'r1')
     await $.command.run({ command: 'agt-focus', args: 'off' })
-    expect(stored).toContainEqual(expect.objectContaining({ key: 'focus:mode', value: 'off' }))
+    expect(JSON.parse(files['/u/.agentille/profile.json']).display).toEqual({ focus: false })
     const hidden = await band($)
     expect(await hidden.find({ type: 'Text', text: /⚑ code-reviewer/ })).toBeUndefined()
     await hidden.unmount()

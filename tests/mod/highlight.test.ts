@@ -233,6 +233,19 @@ describe('highlight: in the mod', () => {
     on('ui.render', async () => ({ type: 'engine', ref: 0 }) as never)
     mock.clock(on, { now: 1_000_000 })
   }
+  // A home folder whose profile.json the toggle commands write to.
+  const fakeHome = (on: any, files: Record<string, string> = {}) => {
+    on('env.get', async ($: any, e: any) => ({ value: e.name === 'HOME' ? '/u' : undefined }))
+    on('fs.read', async ($: any, e: any) => (e.path in files ? { value: files[e.path] } : { deny: 'ENOENT' }))
+    on('fs.write', async ($: any, e: any) => { files[e.path] = e.text; return { value: undefined } })
+    on('fs.exists', async ($: any, e: any) => ({ value: e.path in files }))
+    on('process.run', async ($: any, e: any) => ({ value: { exitCode: e.argv?.[0] === 'mkdir' ? 0 : 1, stdout: '', stderr: '' } }))
+    on('session.start', async ($: any, e: any) => ({ cwd: e.cwd }))
+    on('command.register', async () => ({ value: undefined }))
+    return files
+  }
+  const start = ($: any) => $.session.start({ cwd: '/w', surface: null, isInteractive: false })
+  const display = (files: Record<string, string>) => JSON.parse(files['/u/.agentille/profile.json']).display
   const say = ($: any, text: string, origin?: any) => $.prompt.submit({ text, wait: false, ...(origin ? { origin } : {}) })
   const mount = ($: any, requestId: string, text = REPLY) =>
     $.ui.mount({ plugin: 'agentille', surface: 'terminal', component: 'AssistantMessage', requestId, props: { text } as never })
@@ -260,8 +273,9 @@ describe('highlight: in the mod', () => {
   })
 
   test('a plain prompt, /agt-highlight off and a 30-word reply all draw as the engine does', async ($, on) => {
-    const stored: any[] = []
-    setup(on, stored)
+    const files = fakeHome(on)
+    setup(on)
+    await start($)
     await say($, 'explain the diff')
     let ui = await mount($, 'p1')
     expect(await ui.find({ type: 'Text', text: /→ / })).toBeUndefined()
@@ -274,7 +288,7 @@ describe('highlight: in the mod', () => {
     await ui.unmount()
 
     expect((await $.command.run({ command: 'agt-highlight', args: 'off' })).text).toContain('Highlight: off')
-    expect(stored).toContainEqual(expect.objectContaining({ key: 'highlight:on', value: false }))
+    expect(display(files)).toEqual({ highlight: 'off' })
     await say($, '/agt tag the release')
     ui = await mount($, 'p3')
     expect(await ui.find({ type: 'Text', text: /→ / })).toBeUndefined()
@@ -283,10 +297,11 @@ describe('highlight: in the mod', () => {
   })
 
   test('/agt-highlight all covers a plain prompt, and on goes back to /agt only', async ($, on) => {
-    const stored: any[] = []
-    setup(on, stored)
+    const files = fakeHome(on)
+    setup(on)
+    await start($)
     expect((await $.command.run({ command: 'agt-highlight', args: 'all' })).text).toContain('Highlight: all')
-    expect(stored).toContainEqual(expect.objectContaining({ key: 'highlight:all', value: true }))
+    expect(display(files)).toEqual({ highlight: 'all' })
     await say($, 'explain the diff')
     let ui = await mount($, 'a1')
     expect(await ui.find({ type: 'Text', text: /→ / })).toBeDefined()
@@ -299,7 +314,7 @@ describe('highlight: in the mod', () => {
     await ui.unmount()
 
     expect((await $.command.run({ command: 'agt-highlight', args: 'on' })).text).toContain('Highlight: on')
-    expect(stored).toContainEqual(expect.objectContaining({ key: 'highlight:all', value: false }))
+    expect(display(files)).toEqual({ highlight: 'on' })
     await say($, 'explain the diff again')
     ui = await mount($, 'a3')
     expect(await ui.find({ type: 'Markdown' })).toBeUndefined()

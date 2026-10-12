@@ -16,7 +16,7 @@ description: Optional setup for agentille. Asks up to 5 skippable questions (nam
    3. **tone** — `peer-to-peer` | `mentor` | `formal` | `blunt` | `casual` `[peer-to-peer]`
    4. **preTaskQuestioning** — `never` | `ambiguous-only` | `always` `[ambiguous-only]`
    5. **neverDo** — things agents must never do, comma-separated `[none]`
-3. **Merge, never replace.** Read-merge-write: load the profile, set only the fields the user answered, and write it back (2-space indent, trailing newline). Keep every other key untouched: unknown keys, `projects`, `routing`, `thinkingDepth`. Never write the file wholesale from scratch. Skipped questions write nothing.
+3. **Merge, never replace.** Read-merge-write: load the profile, set only the fields the user answered, and write it back (2-space indent, trailing newline). Keep every other key untouched: unknown keys, `projects`, `routing`, `display`, `thinkingDepth`. Never write the file wholesale from scratch. Skipped questions write nothing.
 4. Print the path and the resulting values in one short block. Re-running asks again with the saved values as defaults.
 
 ## Profile fields
@@ -30,6 +30,7 @@ description: Optional setup for agentille. Asks up to 5 skippable questions (nam
 | `neverDo` | list of hard prohibitions, passed to every agent | `[]` |
 | `thinkingDepth` | `always` / `complex-only` / `quick`; edit by hand | `complex-only` |
 | `routing` | `{autoFable, maxFablePerRun, fableWeeklyCeiling, advisorOnOpus}`; edit by hand | built-in |
+| `display` | `{deck: auto\|off, focus: true\|false, highlight: on\|all\|off}`; edit by hand | `{off, true, on}` |
 | `viewports` | design-reviewer default, any of `desktop` / `tablet` / `mobile`; edit by hand | desktop + mobile |
 | `projects[]` | repos registered by `/agentille-project` | `[]` |
 

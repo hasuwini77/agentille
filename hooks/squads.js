@@ -28,7 +28,7 @@ export function activeSquads(config, deps, existing) {
   return out
 }
 
-// Every squad with its score, for /agt-squads. A near-miss is inactive with score > 0.
+// Every squad with its score, for /agt-info squads. A near-miss is inactive with score > 0.
 export function explain(config, deps, existing) {
   return (config?.squads ?? []).map((s) => {
     const { matched, missing, minScore } = scored(s, deps, existing)

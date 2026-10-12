@@ -239,7 +239,7 @@ describe('deck: unplaced', () => {
     on('ui.render', async () => ({ type: 'engine', ref: 0 }) as never)
     await $.session.start({ cwd: '/w', surface: null, isInteractive: false })
     const r = await $.command.run({ command: 'agt-deck', args: 'auto', origin: { kind: 'composer' } } as never)
-    expect(r.text).toBe('deck waits: terminal too narrow · opens on every /agt (/agt-deck off to stop)')
+    expect(r.text).toBe("deck waits: terminal too narrow · opens on every /agt (/agt-deck off to stop)\nsaved in this machine's mod store, not in profile.json: no home folder")
   })
 })
 
@@ -259,6 +259,7 @@ describe('deck', () => {
     await $.session.start({ cwd: '/w', surface: null, isInteractive: false })
     const r = await $.command.run({ command: 'agt-deck', args: 'auto', origin: { kind: 'composer' } } as never)
     expect(r.text).toContain('opens on every /agt')
+    expect(r.text).toContain("saved in this machine's mod store, not in profile.json: no home folder")
     expect(stored['deck:auto']).toBe(true)
     expect(opened).toEqual(['agt-deck'])
     await $.agent.spawn({ prompt: '[agt run=deckrun size=large mode=review]\nreview', subagentType: 'agentille:agentille-planner' })
@@ -267,7 +268,9 @@ describe('deck', () => {
     expect(await ui.find({ type: 'Text', text: /planner/ })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: /▝▜█████▛▘/ })).toBeDefined()
     await ui.unmount()
-    expect((await $.command.run({ command: 'agt-deck', args: 'off', origin: { kind: 'composer' } } as never)).text).toContain('only when you type')
+    const off = (await $.command.run({ command: 'agt-deck', args: 'off', origin: { kind: 'composer' } } as never)).text
+    expect(off).toContain('only when you type')
+    expect(off).toContain("saved in this machine's mod store, not in profile.json: no home folder")
     expect(stored['deck:auto']).toBe(false)
   })
 })

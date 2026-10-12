@@ -775,7 +775,7 @@ describe('pane tools: in the mod', () => {
     const fix = { agent: 'executor', header: '[agt run=k7f2ab size=small mode=fix]' }
     expect((await spawn($, { run: 'k7f2ab', role: 'fix-1', task: 'fix it', ...fix })).deny).toContain('Could not open')
     await $.agent.spawn({ prompt: '[agt run=k7f2ab size=small mode=fix]\nfix', subagentType: 'agentille:agentille-executor' })
-    expect((await $.command.run({ command: 'agt-routing' })).text).toBe('executor → sonnet · medium')
+    expect((await $.command.run({ command: 'agt-info', args: 'routing' })).text).toBe('executor → sonnet · medium')
   })
 
   test('a forced fable security-reviewer is refused as a pane and records nothing', async ($, on) => {

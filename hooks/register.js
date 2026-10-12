@@ -7,7 +7,7 @@ import { DEFAULTS, decide, formationOf, parseHeader, roleOf, verdictOf } from '.
 import { addUsage, elapsed, endRoute, finish, isAgtPrompt, ledger, ledgerText, newAgent, paneAgents, panesLeft, reapPlan, short, stage, waving } from './live.js'
 import { ACCENT, FRAME_COLOR, INK, WIRE_COLOR, boardRows, cast, castColumns, chip, colorOf, header, hex, leadLine, routingLines, runPhases, swarm, tokenBars, toolLabel, wireLines, wireRow } from './board.js'
 import { PUBLISH_MS, doneMessage, freshStatus, logWire, parseTellArgs, parseWire, shortName, statusKey, validLead, wakeDue, wakeMessage, wireEnv, workerStatus } from './wire.js'
-import { activeSquads, allPaths, depsOf, injection } from './squads.js'
+import { activeSquads, allPaths, depsOf, explain, injection, squadsText } from './squads.js'
 import { BYE_MS, HELLO_MS, MASCOT_COLOR, MODEL_COLOR, agentMood, caption, frame, modelKey, moodAt, parseWorker } from './mascot.js'
 import { MARK, SPAN_COLOR, highlightFor, highlightText, litFor, parseHighlightArgs, spans } from './highlight.js'
 import { flagOf, focusText, paneFlags, parseFocusArgs } from './focus.js'
@@ -51,6 +51,7 @@ let selfTab = null           // herdr: the lead's own tab, where its workers spl
 let paneTools = false        // spawn_pane / close_pane registered for this lead
 let squads = []              // active squads for this repo
 let squadBlock = ''
+let squadRows = []           // every squad scored, for /agt-squads
 let transport = null        // 'herdr' | 'tmux' | 'none', probed once at session start
 let tick = 0
 let pollTimer = null         // pane polling: runs only while panes may exist
@@ -174,10 +175,13 @@ async function loadSquads($) {
     try { pkg = await $.fs.read(cwd + '/package.json') } catch { /* not a node repo */ }
     const existing = new Set()
     for (const p of allPaths(config)) if (await $.fs.exists(cwd + '/' + p)) existing.add(p)
-    squads = activeSquads(config, depsOf(pkg), existing)
+    const deps = depsOf(pkg)
+    squads = activeSquads(config, deps, existing)
+    squadRows = explain(config, deps, existing)
     squadBlock = injection(squads)
   } catch {
     squads = []
+    squadRows = []
     squadBlock = ''
   }
 }
@@ -707,6 +711,7 @@ export function register(on) {
     highlightOn = (await $.store.get('highlight:on')) !== false
     highlightAll = (await $.store.get('highlight:all')) === true
     await $.command.register({ name: 'agt-highlight', description: 'Highlight replies: an essentials card, paths, versions and numbers lit. on (/agt only) · all · off', argumentHint: '[on|all|off]', immediate: true })
+    await $.command.register({ name: 'agt-squads', description: 'Rescan this repo and show which squads match, which nearly do, and the reviewers they add', immediate: true })
     await $.command.register({ name: 'agt-focus', description: 'Show agent flags above the prompt (a REVISE, a FAIL, a blocked pane). on · off', argumentHint: '[on|off]', immediate: true })
     if (transport !== 'none') {
       // One look now: a lead restarted mid-run sees its leftover panes. It reaps only those whose answer
@@ -883,6 +888,11 @@ export function register(on) {
       $.ui.invalidate('ui.render')
     }
     return { text: highlightText(highlightOn, highlightAll) }
+  })
+
+  on('command.run', { command: 'agt-squads' }, async ($) => {
+    await loadSquads($)
+    return { text: squadsText(squadRows) }
   })
 
   on('command.run', { command: 'agt-ledger' }, async () => ({ text: ledgerText(ledger(live, lastRun, paneRoutes)) }))

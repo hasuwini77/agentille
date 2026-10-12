@@ -52,7 +52,7 @@ Every `agentille:agentille-*` dispatch prompt starts with one line:
 - `fable=forced` only when the user typed `--fable`.
 - `piece=<slug>` (lowercase, ≤24 chars) names the slice: its executor, adversary and reviewers share it, so the mod draws each reviewer under the build it checks. Omit it for planning roles and single-piece runs.
 
-With the mod loaded it routes model + effort from this line and logs to `routing.jsonl` (`/agt-routing`). Still pass `model:` every time: the skill must work with mods off.
+With the mod loaded it routes model + effort from this line and logs to `routing.jsonl` (`/agt-info routing`). Still pass `model:` every time: the skill must work with mods off.
 
 Profile prefix (skip it when every value is a default and `neverDo` is empty):
 

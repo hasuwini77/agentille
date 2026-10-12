@@ -89,6 +89,18 @@ describe('drawing: in the mod', () => {
     expect(toasts).toEqual([TIP])
   })
 
+  test('a profile holding only display (a toggle made it) still gets the tip; a voice key stops it', async ($, on) => {
+    const { toasts } = await boot($, on, ['terminal'], { '/h/.agentille/profile.json': '{"display":{"focus":false}}' })
+    await $.skill.prompt({ skill: 'agt', text: 'base' })
+    expect(toasts).toEqual([TIP])
+  })
+
+  test('a profile with a voice key gets no tip', async ($, on) => {
+    const { toasts } = await boot($, on, ['terminal'], { '/h/.agentille/profile.json': '{"tone":"blunt","display":{"focus":false}}' })
+    await $.skill.prompt({ skill: 'agt', text: 'base' })
+    expect(toasts).toEqual([])
+  })
+
   test('a session that draws nothing gets no marker and no toast', async ($, on) => {
     const { toasts } = await boot($, on, [])
     const r = await $.skill.prompt({ skill: 'agt', text: 'base' })

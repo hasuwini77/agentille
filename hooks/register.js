@@ -11,7 +11,7 @@ import { activeSquads, allPaths, depsOf, explain, injection, squadsText } from '
 import { BYE_MS, HELLO_MS, MASCOT_COLOR, MODEL_COLOR, agentMood, caption, frame, modelKey, moodAt, parseWorker } from './mascot.js'
 import { MARK, SPAN_COLOR, highlightFor, highlightText, litFor, parseHighlightArgs, spans } from './highlight.js'
 import { flagOf, focusText, paneFlags, parseFocusArgs } from './focus.js'
-import { cleanDisplay, highlightFlags, profileJson, resolveDisplay, storedDisplay, withDisplay } from './settings.js'
+import { cleanDisplay, hasVoice, highlightFlags, profileJson, resolveDisplay, storedDisplay, withDisplay } from './settings.js'
 import { ledgerSummary, overviewText, parseInfoArgs, routeText, routingSummary, squadsSummary } from './info.js'
 import {
   CLOSE_TOOL, HERDR_START_TIMEOUT, PROBE, SPAWN_TOOL, closeTarget, focusArgv, herdrMetaArgv, spawnToolInput, SAFE_RUN, SPAWN_ROLE, TMUX_LIST_ARGV, answerFile, doneFile, herdrCloseArgv, herdrPaneIdOf, herdrPromptArgv, herdrSplitArgv, herdrStartArgv,
@@ -28,7 +28,7 @@ import { answerLine, linkPieces, loopText, party, pieceOf, taskLine, verdictChip
 
 let settings = { ...DEFAULTS }
 let depth = null
-let profileMissing = false   // no readable ~/.agentille/profile.json: the tip is due once
+let profileMissing = false   // no profile with a voice (missing, unreadable, or only a display block): the tip is due once
 let home = null
 let weeklyPct = null
 let lastRun = 'adhoc'
@@ -162,9 +162,12 @@ async function installedSkew($) {
 async function loadProfile($) {
   home = (await $.env.get('HOME')) ?? null
   profileDisplay = {}
+  profileMissing = false
   if (!home) return
   try {
     const p = JSON.parse(await $.fs.read(home + '/.agentille/profile.json'))
+    // a toggle can create a profile that holds only display: that is still a profile with no voice
+    profileMissing = !hasVoice(p)
     depth = p.thinkingDepth ?? null
     settings = { ...DEFAULTS, ...(p.routing ?? {}) }
     profileDisplay = cleanDisplay(p.display)

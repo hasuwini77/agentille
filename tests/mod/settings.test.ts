@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'claude-code/testing'
-import { DISPLAY_DEFAULTS, cleanDisplay, displayText, highlightFlags, profileJson, resolveDisplay, storedDisplay, withDisplay } from '../../hooks/settings.js'
+import { DISPLAY_DEFAULTS, cleanDisplay, displayText, hasVoice, highlightFlags, profileJson, resolveDisplay, storedDisplay, withDisplay } from '../../hooks/settings.js'
 
 describe('settings: display parsing', () => {
   test('nothing set: every key is its default', () => {
@@ -73,6 +73,15 @@ describe('settings: writing the profile', () => {
     expect(t).toMatch(/deck\s+auto\s+profile/)
     expect(t).toMatch(/focus\s+false\s+store/)
     expect(t).toMatch(/highlight\s+on\s+default/)
+  })
+})
+
+describe('settings: voice keys', () => {
+  test('a profile counts as one only with a voice key; display and routing alone do not', () => {
+    expect(hasVoice({ tone: 'blunt' })).toBe(true)
+    expect(hasVoice({ neverDo: [] })).toBe(true)
+    expect(hasVoice({ display: { focus: false }, routing: {}, thinkingDepth: 'quick', projects: [] })).toBe(false)
+    for (const junk of [null, undefined, [], 'x', 3]) expect(hasVoice(junk)).toBe(false)
   })
 })
 

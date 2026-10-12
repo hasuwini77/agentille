@@ -10,7 +10,8 @@ describe('info: arguments', () => {
     for (const v of ['routing', 'ledger', 'squads']) expect(parseInfoArgs(' ' + v.toUpperCase() + ' ')).toEqual({ view: v })
   })
 
-  test('anything else shows the usage', () => {
+  test('anything else shows the usage, which lists every depth value', () => {
+    for (const d of ['quick', 'complex-only', 'always']) expect(INFO_USAGE).toContain(d)
     expect(parseInfoArgs('weather')).toEqual({ error: INFO_USAGE })
     expect(parseInfoArgs('routing now')).toEqual({ error: INFO_USAGE })
   })
@@ -39,6 +40,12 @@ describe('info: route dry-run', () => {
     expect(t.split('\n')[0]).toBe('planner → opus · high · table')
     expect(t).toContain('1st REVISE')
     expect(t).toContain('2nd REVISE')
+  })
+
+  test('depth=quick: the planner\'s 1st REVISE climbs to opus · max, whatever the quick pick was', () => {
+    const t = route('planner', {}, 'quick')
+    expect(t.split('\n')[0]).toBe('planner depth=quick → sonnet · medium · table')
+    expect(t).toMatch(/1st REVISE\s+opus · max · plan REVISE ×1/)
   })
 
   test('size, risk and depth change the pick the way the dispatch header does', () => {

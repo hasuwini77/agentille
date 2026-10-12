@@ -66,3 +66,11 @@ export function displayText({ values, from }) {
   const word = (k) => from[k] === 'default' ? 'default' : from[k]
   return DISPLAY_KEYS.map((k) => '  ' + k.padEnd(10) + String(values[k]).padEnd(6) + word(k)).join('\n')
 }
+
+// Keys that make a profile a voice (what /agentille-init writes). A file holding only `display` or
+// `routing` has none, so the init tip still shows.
+export const VOICE_KEYS = ['name', 'role', 'deliveryStyle', 'tone', 'preTaskQuestioning', 'neverDo']
+
+export function hasVoice(profile) {
+  return profile !== null && typeof profile === 'object' && !Array.isArray(profile) && VOICE_KEYS.some((k) => k in profile)
+}

@@ -5,7 +5,7 @@ import { ROLES, decide } from './routing.js'
 import { elapsed, short, tokens } from './live.js'
 import { displayText } from './settings.js'
 
-export const INFO_USAGE = 'Usage: /agt-info [routing|ledger|squads|route <role> [size=small|large] [risk=none|auth|money|data] [depth=quick]]'
+export const INFO_USAGE = 'Usage: /agt-info [routing|ledger|squads|route <role> [size=small|large] [risk=none|auth|money|data] [depth=quick|complex-only|always]]'
 
 const SIZES = ['small', 'large']
 const RISKS = ['none', 'auth', 'money', 'data']

@@ -2,6 +2,35 @@
 
 All notable changes to agentille are documented here.
 
+## [3.12.0] — 2026-10-12
+
+### Added
+
+- **`/agt-squads`.** Rescans the repo and shows which squads are active,
+  the near-misses (some signals but below the minimum score), the
+  signals found and missing, and the reviewers each squad adds. A
+  dependency installed mid-session shows up on the next `/agt`. A broken
+  `squads.json` says so instead of reporting that no squad matches.
+- **Role parity in the validator.** `scripts/validate.sh` checks that the
+  agent files, the `routing.js` table and the `routing.md` rows name the
+  same roles, that every role `squads.json` adds has an agent file, and
+  that every `hooks.json` module exists.
+- **CI imports the mod.** CI sets up node 22 and the validator imports
+  `hooks/register.js`, so a broken module fails the build instead of a
+  warning. Locally the check is skipped, with a warning, without node
+  22.7+.
+
+### Fixed
+
+- A plan review that mentions "REVISE" in passing but ends on
+  `VERDICT: APPROVE` no longer counts as a revision. Before, it raised
+  the effort level for the next planner. The verdict line now wins, and
+  the band's verdict chips and focus flags use the same parser.
+- Built-in object keys such as `constructor` no longer resolve as
+  agentille roles. Before, routing threw on them.
+- `squads.json` is parsed as JSON by the validator.
+- The README command table lists `/agt-focus`.
+
 ## [3.11.0] — 2026-10-09
 
 ### Added

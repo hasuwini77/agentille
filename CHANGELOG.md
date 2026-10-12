@@ -2,6 +2,43 @@
 
 All notable changes to agentille are documented here.
 
+## [3.13.0] — 2026-10-12
+
+### Added
+
+- **`/agt-info`.** One read-only command for the facts the mod holds. No
+  argument gives an overview: display settings and where each came from,
+  active squads, the last run's routing and ledger. `routing`, `ledger`
+  and `squads` print what the old commands print; `route <role>`
+  dry-runs the routing table and its escalation rungs under your own
+  profile.
+- **Display settings in `profile.json`.** A `display` block
+  (`deck`, `focus`, `highlight`) is read at session start.
+  `/agt-focus`, `/agt-highlight` and `/agt-deck` write it
+  (read-merge-write, other keys kept).
+
+### Changed
+
+- Eight commands down to five. `/agt-routing`, `/agt-ledger` and
+  `/agt-squads` still work and point to `/agt-info`. `/agt-focus` and
+  `/agt-highlight` say they go away in v4. One release of overlap.
+- A planner re-dispatched after a plan review `REVISE` now runs on Opus
+  at max effort, not only max effort.
+
+### Fixed
+
+- Hosts without `$.process` (desktop app, VS Code) can toggle focus,
+  highlight and the deck again: the write no longer runs `mkdir` first.
+- A failed profile write falls back to the mod store and says so. A
+  write backs up `profile.json` to `profile.json.bak` and goes through a
+  temp file, so a torn write cannot lose the profile. An unreadable
+  profile is left alone.
+- The `/agentille-init` tip shows until the profile holds a voice key,
+  so a profile created by a display toggle no longer hides it. `/agt`
+  still applies such a profile's `routing` and `thinkingDepth`.
+- A toggle says when it lasts only this session (a read-only
+  `profile.json` that sets the key wins at the next start).
+
 ## [3.12.0] — 2026-10-12
 
 ### Added

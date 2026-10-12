@@ -16,10 +16,22 @@ describe('policy', () => {
     expect(roleOf('other:planner')).toBe(null)
   })
 
+  test('prototype keys are not roles', async () => {
+    expect(roleOf('agentille:agentille-constructor')).toBe(null)
+    expect(roleOf('agentille:agentille-toString')).toBe(null)
+    expect(roleOf('agentille:agentille-__proto__')).toBe(null)
+  })
+
   test('reads the first verdict word', async () => {
     expect(verdictOf('REVISE\n- [BLOCKER] x → y')).toBe('REVISE')
     expect(verdictOf('APPROVE — sound plan')).toBe('APPROVE')
     expect(verdictOf('no verdict')).toBe(null)
+  })
+
+  test('the VERDICT line beats stray verdict words', async () => {
+    expect(verdictOf('nothing to REVISE.\nVERDICT: APPROVE')).toBe('APPROVE')
+    expect(verdictOf('Looks fine, no need to APPROVE blindly.\n**VERDICT:** REVISE · BLOCKER:1')).toBe('REVISE')
+    expect(verdictOf('  VERDICT: APPROVE\nREVISE later')).toBe('APPROVE')
   })
 
   test('table: size, risk and quick depth', async () => {

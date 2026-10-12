@@ -37,7 +37,7 @@ export const DEFAULTS = { autoFable: true, maxFablePerRun: 1, fableWeeklyCeiling
 export function roleOf(subagentType) {
   if (typeof subagentType !== 'string' || !subagentType.startsWith(ROLE_PREFIX)) return null
   const role = subagentType.slice(ROLE_PREFIX.length)
-  return TABLE[role] ? role : null
+  return Object.hasOwn(TABLE, role) ? role : null
 }
 
 // "[agt run=a1b2 size=large risk=auth mode=fix fable=auto]" on the prompt's first line
@@ -53,10 +53,12 @@ export function parseHeader(prompt) {
   return h
 }
 
-// First verdict word in a plan-reviewer answer, or null.
+// A plan-reviewer's verdict, or null. Its `VERDICT: APPROVE|REVISE` line (markdown emphasis tolerated)
+// decides; only without one does the first stray verdict word, so "nothing to REVISE" cannot flip it.
 export function verdictOf(answer) {
-  const m = /\b(APPROVE|REVISE)\b/.exec(String(answer ?? ''))
-  return m ? m[1] : null
+  const a = String(answer ?? '')
+  const m = /^[^\w\n]*VERDICT[^\w\n]*(APPROVE|REVISE)\b/im.exec(a) ?? /\b(APPROVE|REVISE)\b/.exec(a)
+  return m ? m[1].toUpperCase() : null
 }
 
 function base(role, hdr, depth) {

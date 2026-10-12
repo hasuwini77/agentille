@@ -58,6 +58,7 @@ Skip it for one-file edits, typos, renames and questions: a plain prompt is chea
 | `/agt-deck [auto\|off]` | A side pane with the run's cast, routing timeline, wire log and token bars · open it on every `/agt` · stop |
 | `/agt-tell <worker> <message>` | Message a worker pane over the wire |
 | `/agt-routing` · `/agt-ledger` | Routing decisions · tokens per role this session |
+| `/agt-focus on\|off` | Show agent flags (a REVISE, a FAIL, a blocked pane) above the prompt · stop |
 | `/agt-highlight on\|all\|off` | Essentials card and lit paths on `/agt` replies · on every long reply · off |
 | `/agentille-project` · `/agentille-claude-md` | Seed a repo's CLAUDE.md · tune an existing one |
 

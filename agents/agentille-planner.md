@@ -23,6 +23,7 @@ The first line is the head the lead relays: `PLAN: <n> steps · <p> parallel-saf
 ```
 GOAL: <one sentence: what success looks like>
 ASSUMPTIONS: <bullets>
+HOTSPOTS: <shared files ≥2 slices need → B0 step> | none
 STEPS:
 1. [PARALLEL-OK|SEQUENTIAL] <step> → <output artifact>
 ACCEPTANCE:
@@ -54,6 +55,7 @@ Each bucket maps 1:1 to a step; keep them in sync. Waves hold buckets whose depe
 - **Goal-backward.** State the goal and verification first, then derive steps. List outcomes, not activities; no "consider/explore/investigate" steps. Every step ends in a concrete artifact.
 - **Mark parallelism honestly.** Parallel-safe only if the steps touch different files AND neither needs the other's output; when in doubt, SEQUENTIAL.
 - **Slice vertically** (one thin end-to-end capability plus its test), not by layer, with exact disjoint file sets. Two chunks sharing a file are SEQUENTIAL or merged.
+- **Freeze shared hotspots first.** Before marking anything PARALLEL-OK, list the files two or more slices would change: package manifests and lockfiles, schema and migrations, shared types and barrel `index` files, route/nav/DI registries, global config (tsconfig, env schema, theme), i18n catalogs. If any exist, step 1 is a SEQUENTIAL `B0 contract` that lands them all (dependencies, schema, types, registry entries, stubs) in wave 1 alone; every parallel slice depends on B0 and only consumes it, and no other slice touches a lockfile. B0 is frozen like a relay contract: a slice that needs it changed reports `CONTRACT:`.
 - **Coupled by an interface, not files?** Mark `coupled-by: <interface>`; the lead can run a relay (`skills/agt/formations.md`). State the shared contract once.
 - **Every slice builds alone.** A removed or renamed file lives in the same slice as every importer, and a changed export with its callers. A slice that cannot build without a sibling means the split is wrong.
 - **Size chunks to ≤ ~20% of an executor's context** (about 2,500 lines of read set on a 200k window). Prefer small vertical slices to fat ones, but never split below break-even: a 3-line edit is not its own chunk.

@@ -19,7 +19,7 @@ Instruction files (CLAUDE.md / AGENTS.md) are not preloaded for you. When a step
 
 1. **Goal.** Does GOAL match what the user asked? A perfect plan for the wrong goal is the costliest failure → BLOCKER.
 2. **Coverage.** Do the steps together reach the goal? Name what is required but missing: error/empty/loading states, migrations, config, auth, tests, cleanup → HIGH or BLOCKER.
-3. **Parallel safety.** Every `PARALLEL-OK` pair touches different files and consumes none of the other's output. A false-parallel is the top cause of conflicts and lost work → BLOCKER.
+3. **Parallel safety.** Every `PARALLEL-OK` pair touches different files and consumes none of the other's output. A false-parallel is the top cause of conflicts and lost work → BLOCKER. A manifest, lockfile, schema, shared type or registry that two parallel steps would edit, with no `B0 contract` step landing it first → BLOCKER.
 4. **Verification is real.** A command, test, screenshot or exit code; "looks correct" is not → REVISE.
 5. **Scope.** Gold-plating in STEPS (do less)? OUT-OF-SCOPE hiding something the user needs (do more)?
 6. **Ordering.** Does a step consume what a later step produces?

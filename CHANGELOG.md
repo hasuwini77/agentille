@@ -2,6 +2,49 @@
 
 All notable changes to agentille are documented here.
 
+## [3.14.0] — 2026-10-17
+
+### Added
+
+- **Levels.** `/agt` detects one of three levels, or takes one word to
+  force it: `low` (solo, or one executor plus reviewers), `medium` (up to
+  3 executor subagents in parallel) and `heavy` (one Herdr/tmux pane per
+  slice). This folds the separate /crew and /herd orchestrators into
+  `/agt`. The recon line and the card name the level.
+- **Factory mode.** `/agt next "task"` queues a task in
+  `.agentille/backlog.md`. `/agt next` claims the first open item, runs
+  it, merges on green or escalates, and keeps going until the backlog is
+  empty, an item escalates, or 5 items ran (`skills/agt/factory.md`).
+- **Acceptance criteria.** The planner writes numbered ACCEPTANCE
+  criteria. The executor proves each by number, and a criterion with no
+  evidence blocks like a P1.
+- **Escalate checklist.** After review passes, the lead merges unless
+  the diff touches auth, payments, deploy/CI/env, migrations, email or
+  production data, or dependencies, or rests on a business assumption.
+- **Session-end sweep.** A SessionEnd hook closes every idle or done
+  `agt-` pane in the lead's tab.
+
+### Changed
+
+- **Fix rounds resume the same executor** over `SendMessage` instead of
+  starting a fresh one, so the slice is not re-read. At most 2 rounds.
+- **Panes close fast.** A harvested worker pane closes about 10 s after
+  it reads done (it was 90 s), or 60 s after idle (it was 300 s).
+  `/agt-spawn` panes now close themselves once their answer is saved.
+- **Integration follows a PR flow on main.** Per slice: an issue, a
+  `feat/` or `fix/` branch, and a PR with `Closes #n`. PRs merge one at a
+  time after the gate. The lead tags main when the repo already uses
+  `vX.Y.Z` tags. A repo marked `no-mistakes` stops at the PR, and one
+  marked `local-only` merges locally.
+- Autocomplete offers `low`, `medium`, `heavy`, `next` and `--fable`.
+  `--mode`, `--plan` and `--formation` still work but are no longer
+  offered.
+
+### Removed
+
+- `/agt-routing`, `/agt-ledger` and `/agt-squads`. Use
+  `/agt-info routing|ledger|squads`.
+
 ## [3.13.0] — 2026-10-12
 
 ### Added

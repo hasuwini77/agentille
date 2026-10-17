@@ -258,7 +258,6 @@ async function setDisplay($, key, value) {
 }
 
 const MOVED = (key) => '\nmoved: display.' + key + ' in ~/.agentille/profile.json — this command goes away in v4'
-const ALIAS = (view) => '\nmoved: /agt-info ' + view
 
 function routingView() {
   if (decisions.length === 0) return 'No agentille dispatches this session.'
@@ -813,9 +812,7 @@ export function register(on) {
     if (worker) { pub.model = worker.model; pub.effort = worker.effort || null }
     await $.command.register({ name: 'agt-deck', description: 'Open the agentille deck: the cast, routing timeline, wire log and tokens. auto = open on every /agt (saved as display.deck) · off', argumentHint: '[auto|off]', immediate: true })
     await $.command.register({ name: 'agt-tell', description: 'Send a message to a worker pane over the wire', argumentHint: '<worker> <message>', immediate: true })
-    await $.command.register({ name: 'agt-routing', description: 'Moved to /agt-info routing: the model + effort agentille picked for each agent this session', immediate: true })
     await $.command.register({ name: 'agt-spawn', description: 'Open a routed claude pane beside this one (Herdr or tmux); it closes itself once its answer is saved', argumentHint: '"task" [--model sonnet|opus|haiku|fable]' })
-    await $.command.register({ name: 'agt-ledger', description: 'Moved to /agt-info ledger: tokens per agent role for the latest agentille run', immediate: true })
     storedRaw = {
       deckAuto: await $.store.get('deck:auto'),
       focusMode: await $.store.get('focus:mode'),
@@ -825,7 +822,6 @@ export function register(on) {
     applyDisplay()
     await $.command.register({ name: 'agt-info', description: 'Settings in effect, routing, ledger, squads, or a route dry-run: routing | ledger | squads | route <role>', argumentHint: '[routing|ledger|squads|route <role> [size=…] [risk=…] [depth=…]]', immediate: true })
     await $.command.register({ name: 'agt-highlight', description: 'Highlight replies: on (/agt only) · all · off. Saved as display.highlight in profile.json; goes away in v4', argumentHint: '[on|all|off]', immediate: true })
-    await $.command.register({ name: 'agt-squads', description: 'Moved to /agt-info squads: which squads match this repo, which nearly do, and the reviewers they add', immediate: true })
     await $.command.register({ name: 'agt-focus', description: 'Agent flags above the prompt (a REVISE, a FAIL, a blocked pane): on · off. Saved as display.focus in profile.json; goes away in v4', argumentHint: '[on|off]', immediate: true })
     if (transport !== 'none') {
       // One look now: a lead restarted mid-run sees its leftover panes. It reaps only those whose answer
@@ -879,9 +875,7 @@ export function register(on) {
     return { text: '⇄ sent to ' + a.name }
   })
 
-  on('command.run', { command: 'agt-routing' }, async () => ({ text: routingView() + ALIAS('routing') }))
-
-  // The one place for read-only facts: settings in effect, the three old views, and a routing dry-run.
+  // The one place for read-only facts: settings in effect, routing, ledger and squads views, and a routing dry-run.
   on('command.run', { command: 'agt-info' }, async ($, e) => {
     const a = parseInfoArgs(e.args)
     if (a.error) return { text: a.error }
@@ -912,7 +906,7 @@ export function register(on) {
     return { text: 'Opened ' + name + ' · ' + a.model + ' · ' + t + ' pane.' }
   })
 
-  // /agt panes mode: the same openPane as /agt-spawn, with the input validated here.
+  // /agt heavy level: the same openPane as /agt-spawn, with the input validated here.
   on('tool.call', { tool: 'mcp__agentille__spawn_pane' }, async ($, e) => {
     if (selfName || worker) return { deny: 'This is a worker pane (' + (selfName ?? worker.agent) + '); workers do not open panes.' }
     // An update since this session started leaves it on old code: its workers would never report.
@@ -1012,10 +1006,6 @@ export function register(on) {
     }
     return { text: highlightText(highlightOn, highlightAll) + (note && '\n' + note) + MOVED('highlight') }
   })
-
-  on('command.run', { command: 'agt-squads' }, async ($) => ({ text: (await squadsView($)) + ALIAS('squads') }))
-
-  on('command.run', { command: 'agt-ledger' }, async () => ({ text: ledgerView() + ALIAS('ledger') }))
 
   // A typed /agt starts a clean run; a task notification, plugin or peer turn is not the person's prompt.
   on('prompt.submit', async ($, e, next) => {

@@ -1,6 +1,6 @@
 # Workflow tier — scripted fan-out without panes
 
-Applies when the task has ≥2 disjoint slices, there is no pane transport, and the `Workflow` tool exists. A user-typed `/agt` satisfies the tool's opt-in. When the tool is absent, degrade silently to subagent waves: no message, same roster. The run dir is kept (`SKILL.md` → "The contract"); never delete it.
+Applies on the heavy level when there is no pane transport and the `Workflow` tool exists. A user-typed `/agt` satisfies the tool's opt-in. When the tool is absent, degrade silently to subagent waves: no message, same roster. The run dir is kept (`SKILL.md` → "The contract"); never delete it.
 
 ## Role → stage map
 

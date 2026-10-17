@@ -1,6 +1,6 @@
 # Routing — category, roster, model + effort
 
-How `/agt` turns a task into roles and models, after `SKILL.md` → "Modes" picked the mode.
+How `/agt` turns a task into roles and models, after `SKILL.md` → "Levels" picked the level.
 
 ## Category
 
@@ -20,7 +20,7 @@ Multipliers: **hasUI** (UI/UX/styling/component/page/screen, or a `.tsx/.css/.sc
 
 ## Stage 2 classify
 
-Only when the mode table falls through. One inline Haiku call, never the planner. Send the task, ask for ONLY `{"mode": "subagent|parallel|solo", "roster": ["agentille:agentille-…"], "reasoning": "<one sentence>"}`. `parallel` = panes in Herdr/tmux, else workflow, else subagent waves. Use its roster as is. Malformed JSON → `subagent` plus a one-line note; never crash. If parallel vs sequential hinges on a question, ask it in the clarify round; the provisional mode is `subagent`.
+Only when the level table falls through. One inline Haiku call, never the planner. Send the task, ask for ONLY `{"level": "low|medium|heavy", "roster": ["agentille:agentille-…"], "reasoning": "<one sentence>"}`. `heavy` = panes in Herdr/tmux, else workflow, else subagent waves; `medium` = parallel executor subagents; `low` = one executor (or solo when the roster is empty). Use its roster as is. Malformed JSON → `low` plus a one-line note; never crash. If the level hinges on a question, ask it in the clarify round; the provisional level is `low`.
 
 ## Roster
 

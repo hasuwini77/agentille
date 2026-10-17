@@ -26,7 +26,7 @@ The first word may force a level; otherwise detect it. First match wins.
 
 - **low**: solo, or one executor plus the reviewers its diff needs. A forced `low` on a multi-slice task builds the slices one after another with one executor.
 - **medium**: planner, then up to 3 executor subagents at once (each in its own worktree), then the review fan-out.
-- **heavy**: planner, then one pane per slice through `spawn_pane` (`panes-mode.md`); planners and reviewers stay subagents; serial merge.
+- **heavy**: planner, then one pane per slice through `spawn_pane` (`panes-mode.md`); planners and reviewers stay subagents; serial merge. A task that asks for Codex workers runs heavy (`panes-mode.md` → "Codex workers").
 - **Risk gate:** auth, money or data work never runs solo, and runs the gauntlet when the repo has a test runner (`formations.md`).
 - `--fable` is the only flag (`routing.md` → "Escalation ladder"). Old flags still work but are never suggested: `--mode solo|subagent|panes|herdr` = low|medium|heavy|heavy, `--plan` = stop after the plan review ("go" resumes it), `--formation <f>` = that formation.
 

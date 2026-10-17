@@ -25,11 +25,17 @@ close_pane { name: "agt-<run-id>-exec-1" }
 
 The mod routes model and effort from `agent` + `header` through the same table as a subagent (`routing.md` → "Default routing") and ignores any `model` you pass. Roles that must stay subagents are denied with the reason; run them as subagents. A failed pane falls back to a subagent.
 
-Layout is the mod's call: the first worker splits right of the lead; later workers stack below the previous worker. Each worker pane's own band shows a small mascot (hello, working, bye) drawn by the mod at zero model tokens. The lead's band lists every worker as a `▣` row beside its `◇` subagents, with the tool the worker is running and its tokens, and Herdr's sidebar labels each worker by role and model.
+Layout is the mod's call: the first worker splits right of the lead; later workers stack below the previous worker. On Herdr, a run that will open ≥3 pane workers (slices plus adversaries) passes `layout: "tab"` on every `spawn_pane`: its workers then stack in their own `agt-<run>` tab, the lead's tab stays whole, and the tab closes with its last worker. tmux ignores it. Each worker pane's own band shows a small mascot (hello, working, bye) drawn by the mod at zero model tokens. The lead's band lists every worker as a `▣` row beside its `◇` subagents, with the tool the worker is running and its tokens, and Herdr's sidebar labels each worker by role and model.
 
 The mod enforces the `agt-<run>-<role>` name (32 chars max), no duplicate name, an absolute existing `cwd`, no focus change. `close_pane` reaches only `agt-` panes in your own tab or window, never a `/agt-spawn` pane. Worker panes get no tools, so they cannot fan out.
 
 Pane answers never reach the mod's result hook, so a pane worker raises no `⚑`: read the harvest yourself. Still yours: isolation (one worktree per slice) and the tmux done-file instruction.
+
+## Codex workers
+
+Only when the person's task asks for Codex ("codex builds the API slice"); never picked on your own. Herdr only, executor only: `spawn_pane { …, agent: "executor", vendor: "codex" }`. Codex runs on the person's own Codex config (model, sandbox, approvals) and cannot load the agentille executor or the mod, so its `task` carries the whole contract: the slice, its file set, `branch:`/`base:`/`issue:`, the ACCEPTANCE criteria, the executor's Output format with `VERIFICATION:`, and the `BLOCKED:` rule (`agents/agentille-executor.md`). The mod adds one line telling it to write its report to its answer file. No wire message comes: harvest from the `[agt wake]` message or that file, then `close_pane`. Review, gate and merge are the same as for a Claude slice. On tmux, or without Codex installed, the spawn is refused: say so in one line and run the slice on Claude.
+
+**Startup prompts.** The mod accepts the folder-trust prompt only for the lead's own repo and its worktrees, and skips Codex's update notice. Any other startup prompt fails the spawn: the slice falls back to a subagent.
 
 ## The wire — workers report back on their own
 
@@ -121,7 +127,7 @@ Peers never message each other; everything routes through the lead.
 
 - The lead closes each pane right after harvesting it (`close_pane`), not at a run-end sweep.
 - The mod's reaper closes any harvested `agt-` pane ~10 s after it reads `done` (60 s after `idle` while the lead is not mid-turn), `/agt-spawn` panes included.
-- When the lead session ends, the mod's SessionEnd sweep closes every `idle` or `done` `agt-` pane in the lead's tab; `working`, `blocked` and `unknown` panes are left alone.
+- When the lead session ends, the mod's SessionEnd sweep closes every `idle` or `done` `agt-` pane in the lead's tab and its run tabs; `working`, `blocked` and `unknown` panes are left alone.
 
 ## Failure → degrade
 

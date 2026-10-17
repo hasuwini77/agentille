@@ -15,6 +15,7 @@ const MODEL_RE = /^(haiku|sonnet|opus|fable|claude-[a-z0-9.-]+)$/
 export const PROBE = { timeoutMs: 5000 }
 export const HERDR_START_TIMEOUT = { timeoutMs: 60000 }
 const TAB = '\t'
+const TAB_ID = /^[A-Za-z0-9:_-]+$/
 
 export const SPAWN_ROLE = 'spawn'
 export const DEFAULT_MODEL = 'sonnet'
@@ -220,7 +221,92 @@ export function herdrPaneIdOf(stdout) {
   }
 }
 
-export const herdrStartArgv = ({ name, pane, model, effort, agent }) => ['herdr', 'agent', 'start', name, '--kind', 'claude', '--pane', pane, '--timeout', '45000', '--', ...agentArgs(agent), '--model', model, ...effortArgs(effort)]
+export const VENDORS = ['claude', 'codex']
+export const LAYOUTS = ['stack', 'tab']
+// Codex starts on the person's own config (model, sandbox, approvals); only the update nag is switched off.
+// herdr: a new tab for a whole run, labelled agt-<run>, never focused. Same env as a split pane.
+export function herdrTabArgv({ workspace, cwd, run, agent, model, effort, env = [] }) {
+  return ['herdr', 'tab', 'create', '--workspace', workspace, '--cwd', cwd, '--label', 'agt-' + run, '--env', 'AGENTILLE_RUN=' + run, '--env', workerEnv({ agent, model, effort }), ...env.flatMap((v) => ['--env', v]), '--no-focus']
+}
+
+// tab create stdout → { tab, pane } (the new tab and its root pane), else null.
+export function herdrTabOf(stdout) {
+  try {
+    const r = JSON.parse(stdout).result
+    const tab = r?.tab?.tab_id
+    const pane = r?.root_pane?.pane_id
+    return TAB_ID.test(tab ?? '') && typeof pane === 'string' && pane ? { tab, pane } : null
+  } catch {
+    return null
+  }
+}
+
+export const herdrTabListArgv = (workspace) => ['herdr', 'tab', 'list', '--workspace', workspace]
+
+// tab list stdout → the tab ids herdr still has, or null when the answer is unreadable.
+export function herdrTabIds(stdout) {
+  try {
+    return JSON.parse(stdout).result.tabs.map((t) => t.tab_id).filter((id) => TAB_ID.test(id ?? ''))
+  } catch {
+    return null
+  }
+}
+
+// Where a lead keeps the ids of the run tabs it made, so the SessionEnd sweep can find them.
+export function tabsFile(home, leadPane) {
+  const key = paneKey(leadPane)
+  return home && key ? home + '/.agentille/state/lead-' + key + '.tabs' : null
+}
+
+// One tab id per line; anything that is not a tab id is dropped.
+export const tabIdsOf = (text) => String(text ?? '').split('\n').map((l) => l.trim()).filter((l) => TAB_ID.test(l))
+
+// Layout: a heavy run may take its own tab on herdr; tmux and the default stack in the lead's tab or window.
+// `opened` is { id, run, tab? }: a run tab is live while one of its panes is.
+export function placePlan({ transport, layout, run, lead, opened = [], live = [] }) {
+  const alive = (o) => live.some((p) => p.id === o.id)
+  if (transport === 'herdr' && layout === 'tab') {
+    const mine = opened.filter((o) => o.run === run && o.tab && alive(o))
+    return mine.length ? { target: mine[mine.length - 1].id, direction: 'down', tab: mine[0].tab } : { newTab: true }
+  }
+  return splitPlan({ lead, opened: opened.filter((o) => !o.tab), live })
+}
+
+// ── startup dialogs: a fresh worker can stop on a screen only a keypress clears ─────────
+
+// A screen read from a blocked worker → 'trust' | 'update' | null.
+export function startupDialog(text) {
+  const t = String(text ?? '')
+  if (/Update available/i.test(t) && /\bSkip\b/.test(t)) return 'update'
+  if (/Do you trust the (contents of this directory|files in this folder)\?/i.test(t)) return 'trust'
+  return null
+}
+
+// Trust: the preselected "Yes" takes Enter. Update: the second row, Skip.
+export const dialogKeys = (kind) => (kind === 'trust' ? ['enter'] : kind === 'update' ? ['down', 'enter'] : [])
+
+export const herdrReadArgv = (name) => ['herdr', 'agent', 'read', name, '--source', 'detection', '--lines', '40']
+export const herdrKeysArgv = (name, keys) => ['herdr', 'agent', 'send-keys', name, ...keys]
+// agent wait stdout → the agent's status (idle, done, blocked, …), or null.
+export function agentStatusOf(stdout) {
+  try {
+    return JSON.parse(stdout).result?.agent?.agent_status ?? null
+  } catch {
+    return null
+  }
+}
+
+export const herdrWaitArgv = (name) => ['herdr', 'agent', 'wait', name, '--timeout', '15000']
+
+// The line to show when a screen is not a known dialog: its first non-empty line, 120 chars at most.
+export const screenLine = (text) => String(text ?? '').split('\n').map((l) => l.trim()).find(Boolean)?.slice(0, 120) ?? 'the pane is blocked on an unknown screen'
+
+// What Codex is asked to do last, so the harvest, reaper and wake paths find its answer like a Claude pane's.
+export const codexTask = (task, file) => task + '\n\nWhen you finish, write your complete final report to ' + file + ' and stop.'
+
+export const herdrStartArgv = ({ name, pane, model, effort, agent, vendor }) => (vendor === 'codex'
+  ? ['herdr', 'agent', 'start', name, '--kind', 'codex', '--pane', pane, '--timeout', '45000', '--', '-c', 'check_for_update_on_startup=false']
+  : ['herdr', 'agent', 'start', name, '--kind', 'claude', '--pane', pane, '--timeout', '45000', '--', ...agentArgs(agent), '--model', model, ...effortArgs(effort)])
 export const herdrPromptArgv = (name, task) => ['herdr', 'agent', 'prompt', name, task]
 export const herdrCloseArgv = (id) => ['herdr', 'pane', 'close', id]
 
@@ -267,6 +353,8 @@ export const SPAWN_TOOL = {
       header: { type: 'string', description: 'This run\'s full [agt run=… size=… risk=… mode=… fable=…] line.' },
       model: { type: 'string', enum: TOOL_MODELS, description: 'Ignored: the mod routes model and effort from agent + header. Kept so older prompts validate.' },
       cwd: { type: 'string', description: 'Absolute directory to start in (the slice worktree). Default: this session\'s directory.' },
+      layout: { type: 'string', enum: LAYOUTS, description: '"tab": on Herdr, this run\'s workers share a new tab of their own. Default "stack" (lead\'s tab); tmux ignores it.' },
+      vendor: { type: 'string', enum: VENDORS, description: '"codex": run this executor in Codex on your own Codex config (Herdr only). Default "claude".' },
     },
     required: ['run', 'role', 'task', 'agent', 'header'],
     additionalProperties: false,
@@ -285,7 +373,7 @@ export const CLOSE_TOOL = {
   },
 }
 
-// spawn_pane input → { run, role, name, agent, header, hdr, asked, model, task, cwd } or { error }. `live` is the
+// spawn_pane input → { run, role, name, agent, header, hdr, asked, model, task, cwd, layout, vendor } or { error }. `live` is the
 // panes the mod sees now; a name already on screen is refused rather than doubled.
 export function spawnToolInput(input, live = []) {
   const i = input ?? {}
@@ -298,6 +386,8 @@ export function spawnToolInput(input, live = []) {
   const asked = str(i.model) || null
   const model = asked ?? DEFAULT_MODEL
   const cwd = i.cwd === undefined ? null : str(i.cwd)
+  const layout = i.layout === undefined ? 'stack' : str(i.layout)
+  const vendor = i.vendor === undefined ? 'claude' : str(i.vendor)
   if (!SAFE_RUN.test(run)) return { error: 'run must be the run id from the [agt run=…] header.' }
   if (!ROLE_RE.test(role)) return { error: 'role must be lowercase letters, digits and dashes.' }
   if (role === SPAWN_ROLE) return { error: '"spawn" is reserved for a typed /agt-spawn.' }
@@ -308,20 +398,24 @@ export function spawnToolInput(input, live = []) {
   if (!hdr) return { error: 'header must be the run\'s [agt run=… …] line.' }
   if (hdr.run !== run) return { error: 'header run=' + hdr.run + ' does not match run ' + run + '.' }
   if (!TOOL_MODELS.includes(model)) return { error: 'model must be one of ' + TOOL_MODELS.join(', ') + '. Fable runs only through the routing guard or a typed /agt-spawn.' }
+  if (!LAYOUTS.includes(layout)) return { error: 'layout must be one of ' + LAYOUTS.join(', ') + '.' }
+  if (!VENDORS.includes(vendor)) return { error: 'vendor must be one of ' + VENDORS.join(', ') + '.' }
+  if (vendor === 'codex' && agent !== 'executor') return { error: 'vendor codex is for the executor only; ' + agent + ' runs on Claude.' }
   if (!task) return { error: 'task is empty.' }
   if (BARE_WORD.test(task)) return { error: 'A one-word task would run as a claude subcommand. Send the full worker prompt.' }
   if (cwd !== null && (!cwd.startsWith('/') || cwd.includes('\0'))) return { error: 'cwd must be an absolute path.' }
   if (live.some((p) => p.name === name)) return { error: name + ' is already open. Pick another role or close it first.' }
-  return { run, role, name, agent, header, hdr, asked, model, task, cwd }
+  return { run, role, name, agent, header, hdr, asked, model, task, cwd, layout, vendor }
 }
 
 // close_pane input → { pane } from the panes this session owns, or { error }. `tab`, when
-// given, keeps a herdr close inside the lead's own tab.
+// given (one id or a list), keeps a herdr close inside the lead's own tab and the run tabs it made.
 export function closeTarget(input, live = [], tab = null) {
+  const tabs = tab === null ? null : [tab].flat()
   const name = typeof input?.name === 'string' ? input.name.trim() : ''
   const n = splitName(name)
   if (!n) return { error: 'name must be an agt-<run>-<role> pane name.' }
   if (n.role === SPAWN_ROLE) return { error: name + ' was opened by a typed /agt-spawn; only the automatic reaper closes it.' }
-  const pane = live.find((p) => p.name === name && (tab === null || p.tab === tab))
+  const pane = live.find((p) => p.name === name && (tabs === null || tabs.includes(p.tab)))
   return pane ? { pane } : { error: 'No pane named ' + name + ' in this tab or window.' }
 }

@@ -14,7 +14,7 @@ import { flagOf, focusText, paneFlags, parseFocusArgs } from './focus.js'
 import { cleanDisplay, hasVoice, highlightFlags, profileJson, resolveDisplay, storedDisplay, withDisplay } from './settings.js'
 import { ledgerSummary, overviewText, parseInfoArgs, routeText, routingSummary, squadsSummary } from './info.js'
 import {
-  CLOSE_TOOL, HERDR_START_TIMEOUT, PROBE, SPAWN_TOOL, closeTarget, focusArgv, herdrMetaArgv, spawnToolInput, SAFE_RUN, SPAWN_ROLE, TMUX_LIST_ARGV, answerFile, doneFile, herdrCloseArgv, herdrPaneIdOf, herdrPromptArgv, herdrSplitArgv, herdrStartArgv,
+  CLOSE_TOOL, HERDR_START_TIMEOUT, agentStatusOf, codexTask, dialogKeys, herdrKeysArgv, herdrReadArgv, herdrTabArgv, herdrTabIds, herdrTabListArgv, herdrTabOf, herdrWaitArgv, placePlan, screenLine, startupDialog, tabIdsOf, tabsFile, PROBE, SPAWN_TOOL, closeTarget, focusArgv, herdrMetaArgv, spawnToolInput, SAFE_RUN, SPAWN_ROLE, TMUX_LIST_ARGV, answerFile, doneFile, herdrCloseArgv, herdrPaneIdOf, herdrPromptArgv, herdrSplitArgv, herdrStartArgv,
   isFreshDone, isLead, newRunId, paneKey, paneName, paneRole, parseSpawnArgs, parseTmuxList, pickTransport, quietSpawn, reapPool, scopeRows, splitName, splitPlan, tmuxEvenArgv, tmuxKillArgv, tmuxPaneAgents, tmuxPaneIdOf,
   advisorEnv, tmuxSplitArgv, tmuxTagArgvs, transportBlock,
 } from './panes.js'
@@ -50,6 +50,8 @@ const firstSeen = new Map()  // pane id → when this session first listed it: a
 let selfName = null          // this pane's name when it is an agt-* worker
 let worker = null            // { agent, model, effort } from AGENTILLE_WORKER: this session is a worker pane
 let selfTab = null           // herdr: the lead's own tab, where its workers split
+let selfWorkspace = null     // herdr: the lead's workspace, where a run tab opens
+const ownedTabs = new Set()  // herdr: run tabs this session created; its panes are reaped, closed and swept like the lead's tab's
 let paneTools = false        // spawn_pane / close_pane registered for this lead
 let squads = []              // active squads for this repo
 let squadBlock = ''
@@ -425,6 +427,7 @@ async function pollHerdr($) {
   const me = list.find((p) => p.pane_id === selfPane)
   selfName = me && typeof me.name === 'string' && me.name.startsWith('agt-') ? me.name : null
   selfTab = me?.tab_id ?? null
+  selfWorkspace = me?.workspace_id ?? selfWorkspace
   // Show the workspace's agt-* panes; reap only the lead's own tab, where herdr mode
   // splits its workers. Workers (panes that are themselves agt-*) never reap.
   const real = paneAgents(list, selfPane).filter((p) => !me || p.workspace === me.workspace_id)
@@ -434,10 +437,57 @@ async function pollHerdr($) {
   forgetGone(panes)
   await notePaneExits($)
   if (me && !selfName) {
-    const mine = real.filter((p) => p.tab === me.tab_id)
+    await pruneTabs($, me.workspace_id)
+    const mine = real.filter((p) => p.tab === me.tab_id || ownedTabs.has(p.tab))
     await sweep($, reapPool(mine), now, 'herdr', (p) => $.process.run(herdrCloseArgv(p.id)))
   }
   $.ui.invalidate('ui.render')
+}
+
+// The run tabs this lead made, one id per line where the SessionEnd sweep reads them. A failed write loses
+// only the sweep's reach, so it never blocks.
+async function saveTabs($) {
+  const file = tabsFile(home, await $.env.get('HERDR_PANE_ID'))
+  if (file) await $.fs.write(file, [...ownedTabs].map((t) => t + '\n').join('')).catch(() => {})
+}
+
+// A run tab herdr no longer lists is gone (its last pane closed): forget it.
+async function pruneTabs($, workspace) {
+  if (!ownedTabs.size || !workspace) return
+  const r = await $.process.run(herdrTabListArgv(workspace), PROBE).catch(() => null)
+  const ids = r?.exitCode === 0 ? herdrTabIds(r.stdout) : null
+  if (!ids) return
+  const gone = [...ownedTabs].filter((t) => !ids.includes(t))
+  for (const t of gone) ownedTabs.delete(t)
+  if (gone.length) await saveTabs($)
+}
+
+// The lead's cwd and a pane's cwd are the same repo when they share a git common dir (a worktree does).
+async function sameRepo($, a, b) {
+  if (a === b) return true
+  const dir = async (d) => {
+    const r = await $.process.run(['git', '-C', d, 'rev-parse', '--path-format=absolute', '--git-common-dir'], PROBE).catch(() => null)
+    return r?.exitCode === 0 ? String(r.stdout).trim() : ''
+  }
+  const [x, y] = await Promise.all([dir(a), dir(b)])
+  return !!x && x === y
+}
+
+// A fresh worker stopped on a startup screen (agent_not_ready): classify it, press the keys that clear it, up to
+// 3 times. A trust prompt is accepted only for the lead's own repo; anything else throws and the pane is closed.
+async function clearDialogs($, name, cwd) {
+  for (let i = 0; i < 3; i++) {
+    const read = await $.process.run(herdrReadArgv(name), PROBE)
+    const screen = String(read.stdout ?? '')
+    const kind = startupDialog(screen)
+    if (!kind) throw new Error(screenLine(screen))
+    if (kind === 'trust' && !(await sameRepo($, cwd, await $.session.cwd()))) throw new Error(cwd + ' needs a one-time trust: open it once by hand.')
+    await runOk($, herdrKeysArgv(name, dialogKeys(kind)), PROBE)
+    const w = await $.process.run(herdrWaitArgv(name), { timeoutMs: 20000 }).catch(() => null)
+    const status = w?.exitCode === 0 ? agentStatusOf(w.stdout) : null
+    if (status === 'idle' || status === 'done') return
+  }
+  throw new Error('startup dialogs did not clear after 3 tries')
 }
 
 async function runOk($, argv, init) {
@@ -448,7 +498,7 @@ async function runOk($, argv, init) {
 
 // One claude pane beside this one, named agt-<run>-<role>, never focused. A half-made
 // pane is closed again before the error goes up. `split` stacks it beside an earlier worker
-// instead of the lead. Returns the new pane id.
+// instead of the lead; `newTab` opens a herdr run tab. Returns { id, tab }.
 async function openPane($, t, o) {
   if (t === 'tmux') {
     const lead = await $.env.get('TMUX_PANE')
@@ -465,31 +515,55 @@ async function openPane($, t, o) {
     }
     // Even out the stack; a cosmetic failure never loses the worker.
     if (o.split && o.split.target !== lead) await $.process.run(tmuxEvenArgv(id), PROBE).catch(() => {})
-    return id
+    return { id, tab: null }
   }
   const lead = await $.env.get('HERDR_PANE_ID')
   if (!lead) throw new Error('HERDR_PANE_ID is not set')
-  const pane = o.split?.target ?? lead
-  const id = herdrPaneIdOf((await runOk($, herdrSplitArgv({ pane, cwd: o.cwd, run: o.run, direction: o.split?.direction, agent: o.agent, model: o.model, effort: o.effort, env: [...wireEnv({ name: o.name, lead: sessionId }), ...advisorEnv(o.model, settings)] }), PROBE)).stdout)
-  if (!id) throw new Error('herdr gave no pane id')
+  const env = [...wireEnv({ name: o.name, lead: sessionId }), ...advisorEnv(o.model, settings)]
+  let id
+  let tab = o.split?.tab ?? null
+  if (o.newTab) {
+    const workspace = selfWorkspace ?? (await $.env.get('HERDR_WORKSPACE_ID'))
+    if (!workspace) throw new Error('HERDR_WORKSPACE_ID is not set')
+    const made = herdrTabOf((await runOk($, herdrTabArgv({ workspace, cwd: o.cwd, run: o.run, agent: o.agent, model: o.model, effort: o.effort, env }), PROBE)).stdout)
+    if (!made) throw new Error('herdr gave no tab id')
+    id = made.pane
+    tab = made.tab
+    ownedTabs.add(tab)
+    await saveTabs($)
+  } else {
+    const pane = o.split?.target ?? lead
+    id = herdrPaneIdOf((await runOk($, herdrSplitArgv({ pane, cwd: o.cwd, run: o.run, direction: o.split?.direction, agent: o.agent, model: o.model, effort: o.effort, env }), PROBE)).stdout)
+    if (!id) throw new Error('herdr gave no pane id')
+  }
   try {
     // A fresh pane is busy while its shell starts up (a login banner, a slow rc): herdr says
     // agent_pane_busy, so wait and try again for up to ~10s.
     for (let attempt = 0; ; attempt++) {
-      const r = await $.process.run(herdrStartArgv({ name: o.name, pane: id, model: o.model, effort: o.effort, agent: o.agent }), HERDR_START_TIMEOUT)
+      const r = await $.process.run(herdrStartArgv({ name: o.name, pane: id, model: o.model, effort: o.effort, agent: o.agent, vendor: o.vendor }), HERDR_START_TIMEOUT)
       if (r.exitCode === 0) break
+      if (/agent_not_ready/.test(r.stderr ?? '')) {
+        await clearDialogs($, o.name, o.cwd)
+        break
+      }
       if (!/agent_pane_busy/.test(r.stderr ?? '') || attempt >= 20) throw new Error('herdr agent start exited ' + r.exitCode + (r.stderr ? ': ' + String(r.stderr).trim().slice(0, 120) : ''))
       await $.clock.sleep(500)
     }
-    await runOk($, herdrPromptArgv(o.name, o.task), PROBE)
+    // Codex has no pane tools of ours: it saves its answer where the harvest, reaper and wake paths look.
+    const task = o.vendor === 'codex' ? codexTask(o.task, answerFile(home, o.run, splitName(o.name).role, paneKey(id))) : o.task
+    await runOk($, herdrPromptArgv(o.name, task), PROBE)
   } catch (err) {
     await $.process.run(herdrCloseArgv(id), PROBE).catch(() => {})
+    if (o.newTab) {
+      ownedTabs.delete(tab) // a run tab's only pane closing takes the tab with it
+      await saveTabs($)
+    }
     throw err
   }
   // Herdr's sidebar names the worker by role and route; cosmetic, so a failure is ignored.
   const meta = herdrMetaArgv(id, { display: '▣ ' + shortName(o.name) + ' · ' + o.model })
   if (meta) await $.process.run(meta, PROBE).catch(() => {})
-  return id
+  return { id, tab }
 }
 
 // tmux has no agent status, so a pane is working until its done-file appears or tmux
@@ -932,16 +1006,22 @@ export function register(on) {
     // Counted only once the pane opens: a failed split is not a fix attempt.
     const fixes = run.fixes + (a.agent === 'executor' && a.hdr.mode === 'fix' ? 1 : 0)
     run.fable = Math.max(run.fable, Number((await $.store.get('fable:' + a.run)) ?? 0))
-    const d = decide({ role: a.agent, hdr: a.hdr, run: { ...run, fixes }, depth, settings, weeklyPct })
+    const codex = a.vendor === 'codex'
+    if (codex && t !== 'herdr') return { deny: 'Codex panes need Herdr; run this slice as a Claude pane or subagent.' }
+    // Codex runs on the person's own config: no routed model or effort, no Fable count.
+    const d = codex ? { model: 'codex', effort: '', reason: 'table', fable: false } : decide({ role: a.agent, hdr: a.hdr, run: { ...run, fixes }, depth, settings, weeklyPct })
     const r = paneRole(a.agent)
     if (!r.pane) return { deny: r.why }
     await pollNow($, t)
     opened = opened.filter((o) => panes.some((p) => p.id === o.id))
     const lead = t === 'tmux' ? await $.env.get('TMUX_PANE') : await $.env.get('HERDR_PANE_ID')
-    const plan = splitPlan({ lead, opened, live: panes })
+    const plan = placePlan({ transport: t, layout: a.layout, run: a.run, lead, opened, live: panes })
     let id
+    let tab
     try {
-      id = await openPane($, t, { run: a.run, name: a.name, agent: a.agent, model: d.model, effort: d.effort, task: a.task, cwd, split: { target: plan.target, direction: plan.direction } })
+      const made = await openPane($, t, { run: a.run, name: a.name, agent: a.agent, vendor: a.vendor, model: d.model, effort: d.effort, task: a.task, cwd, newTab: !!plan.newTab, split: plan.newTab ? null : { target: plan.target, direction: plan.direction, tab: plan.tab } })
+      id = made.id
+      tab = made.tab
     } catch (err) {
       return { deny: 'Could not open a ' + t + ' pane: ' + String(err?.message ?? err).slice(0, 160) }
     }
@@ -956,7 +1036,7 @@ export function register(on) {
       run.fable += 1
       await $.store.set('fable:' + a.run, run.fable)
     }
-    opened.push({ id, name: a.name })
+    opened.push({ id, name: a.name, run: a.run, tab })
     const piece = pieceOf(a.hdr)
     paneRoutes.push({ name: a.name, run: a.run, role: a.role, agent: a.agent, model: d.model, effort: d.effort, reason: d.reason, start: Date.now(), end: null, piece, verdict: null })
     logWire(wireLog, { from: 'lead', to: party(shortName(a.name), piece), kind: 'task', summary: taskLine(a.task) || a.agent, at: Date.now() })
@@ -968,7 +1048,7 @@ export function register(on) {
     ensurePolling($)
     ensureTicker($)
     if (d.reason !== 'table') $.ui.toast('agt ↑ ' + a.agent + ' → ' + d.model + ' · ' + d.effort + ' — ' + d.reason)
-    return { result: 'Opened ' + a.name + ' · ' + d.model + ' · ' + d.effort + ' · ' + t + ' pane.' + (d.reason === 'table' ? '' : ' (' + d.reason + ')') }
+    return { result: 'Opened ' + a.name + ' · ' + d.model + (codex ? '' : ' · ' + d.effort) + ' · ' + t + ' pane.' + (d.reason === 'table' ? '' : ' (' + d.reason + ')') }
   })
 
   on('tool.call', { tool: 'mcp__agentille__close_pane' }, async ($, e) => {
@@ -976,7 +1056,7 @@ export function register(on) {
     const t = await transportOf($)
     if (t === 'none') return { deny: 'No pane transport here.' }
     await pollNow($, t)
-    const c = closeTarget(e, panes, t === 'herdr' ? selfTab : null)
+    const c = closeTarget(e, panes, t === 'herdr' && selfTab ? [selfTab, ...ownedTabs] : null)
     if (c.error) return { deny: c.error }
     const r = await $.process.run(t === 'herdr' ? herdrCloseArgv(c.pane.id) : tmuxKillArgv(c.pane.id), PROBE).catch(() => null)
     if (!r || r.exitCode !== 0) return { deny: 'Could not close ' + c.pane.name + '.' }

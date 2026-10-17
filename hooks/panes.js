@@ -296,7 +296,8 @@ export function agentStatusOf(stdout) {
   }
 }
 
-export const herdrWaitArgv = (name) => ['herdr', 'agent', 'wait', name, '--timeout', '15000']
+// `agent wait` returns a stale `blocked` at once after a dialog clears, so the lead polls `agent get` instead.
+export const herdrGetArgv = (name) => ['herdr', 'agent', 'get', name]
 
 // The line to show when a screen is not a known dialog: its first non-empty line, 120 chars at most.
 export const screenLine = (text) => String(text ?? '').split('\n').map((l) => l.trim()).find(Boolean)?.slice(0, 120) ?? 'the pane is blocked on an unknown screen'

@@ -1,6 +1,6 @@
 import { describe, expect, mock, test } from 'claude-code/testing'
 import { advisorEnv, EFFORTS, PANE_RULE, splitPlan, tmuxEvenArgv, SPAWN_TOOL, closeTarget, paneRole, doneFile, spawnToolInput, TOOL_MODELS, herdrCloseArgv, herdrPaneIdOf, herdrPromptArgv, herdrSplitArgv, herdrStartArgv, isFreshDone, isLead, newRunId, paneName, parseSpawnArgs, parseTmuxList, pickTransport, quietSpawn, reapPool, scopeRows, splitName, tmuxKillArgv, tmuxPaneAgents, tmuxPaneIdOf, tmuxSplitArgv, tmuxTagArgvs, transportBlock, TMUX_LIST_FORMAT } from '../../hooks/panes.js'
-import { agentStatusOf, codexTask, dialogKeys, herdrKeysArgv, herdrReadArgv, herdrTabArgv, herdrTabIds, herdrTabListArgv, herdrTabOf, herdrWaitArgv, placePlan, screenLine, startupDialog, tabIdsOf, tabsFile } from '../../hooks/panes.js'
+import { agentStatusOf, codexTask, dialogKeys, herdrKeysArgv, herdrReadArgv, herdrTabArgv, herdrTabIds, herdrTabListArgv, herdrTabOf, herdrGetArgv, placePlan, screenLine, startupDialog, tabIdsOf, tabsFile } from '../../hooks/panes.js'
 import { DONE_GRACE_MS, reapPlan } from '../../hooks/live.js'
 import { ROLES, roleOf } from '../../hooks/routing.js'
 
@@ -1363,7 +1363,7 @@ describe('startup dialogs', () => {
   test('argv builders and status parsing', () => {
     expect(herdrReadArgv('agt-a-b')).toEqual(['herdr', 'agent', 'read', 'agt-a-b', '--source', 'detection', '--lines', '40'])
     expect(herdrKeysArgv('agt-a-b', ['down', 'enter'])).toEqual(['herdr', 'agent', 'send-keys', 'agt-a-b', 'down', 'enter'])
-    expect(herdrWaitArgv('agt-a-b')).toEqual(['herdr', 'agent', 'wait', 'agt-a-b', '--timeout', '15000'])
+    expect(herdrGetArgv('agt-a-b')).toEqual(['herdr', 'agent', 'get', 'agt-a-b'])
     expect(agentStatusOf(JSON.stringify({ result: { agent: { agent_status: 'idle' } } }))).toBe('idle')
     expect(agentStatusOf('')).toBe(null)
   })

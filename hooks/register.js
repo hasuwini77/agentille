@@ -14,7 +14,7 @@ import { flagOf, focusText, paneFlags, parseFocusArgs } from './focus.js'
 import { cleanDisplay, hasVoice, highlightFlags, profileJson, resolveDisplay, storedDisplay, withDisplay } from './settings.js'
 import { ledgerSummary, overviewText, parseInfoArgs, routeText, routingSummary, squadsSummary } from './info.js'
 import {
-  CLOSE_TOOL, HERDR_START_TIMEOUT, agentStatusOf, codexTask, dialogKeys, herdrKeysArgv, herdrReadArgv, herdrTabArgv, herdrTabIds, herdrTabListArgv, herdrTabOf, herdrWaitArgv, placePlan, screenLine, startupDialog, tabIdsOf, tabsFile, PROBE, SPAWN_TOOL, closeTarget, focusArgv, herdrMetaArgv, spawnToolInput, SAFE_RUN, SPAWN_ROLE, TMUX_LIST_ARGV, answerFile, doneFile, herdrCloseArgv, herdrPaneIdOf, herdrPromptArgv, herdrSplitArgv, herdrStartArgv,
+  CLOSE_TOOL, HERDR_START_TIMEOUT, agentStatusOf, codexTask, dialogKeys, herdrKeysArgv, herdrReadArgv, herdrTabArgv, herdrTabIds, herdrTabListArgv, herdrTabOf, herdrGetArgv, placePlan, screenLine, startupDialog, tabIdsOf, tabsFile, PROBE, SPAWN_TOOL, closeTarget, focusArgv, herdrMetaArgv, spawnToolInput, SAFE_RUN, SPAWN_ROLE, TMUX_LIST_ARGV, answerFile, doneFile, herdrCloseArgv, herdrPaneIdOf, herdrPromptArgv, herdrSplitArgv, herdrStartArgv,
   isFreshDone, isLead, newRunId, paneKey, paneName, paneRole, parseSpawnArgs, parseTmuxList, pickTransport, quietSpawn, reapPool, scopeRows, splitName, splitPlan, tmuxEvenArgv, tmuxKillArgv, tmuxPaneAgents, tmuxPaneIdOf,
   advisorEnv, tmuxSplitArgv, tmuxTagArgvs, transportBlock,
 } from './panes.js'
@@ -483,9 +483,14 @@ async function clearDialogs($, name, cwd) {
     if (!kind) throw new Error(screenLine(screen))
     if (kind === 'trust' && !(await sameRepo($, cwd, await $.session.cwd()))) throw new Error(cwd + ' needs a one-time trust: open it once by hand.')
     await runOk($, herdrKeysArgv(name, dialogKeys(kind)), PROBE)
-    const w = await $.process.run(herdrWaitArgv(name), { timeoutMs: 20000 }).catch(() => null)
-    const status = w?.exitCode === 0 ? agentStatusOf(w.stdout) : null
-    if (status === 'idle' || status === 'done') return
+    // herdr reads the cleared screen about 0.5 s later; poll up to 10 s, then look for a next dialog.
+    for (let n = 0; n < 20; n++) {
+      await $.clock.sleep(500)
+      const g = await $.process.run(herdrGetArgv(name), PROBE).catch(() => null)
+      const status = g?.exitCode === 0 ? agentStatusOf(g.stdout) : null
+      if (status === 'idle' || status === 'done') return
+      if (status === 'blocked' && n >= 3) break
+    }
   }
   throw new Error('startup dialogs did not clear after 3 tries')
 }

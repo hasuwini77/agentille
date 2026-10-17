@@ -18,7 +18,7 @@ describe('live', () => {
     expect(paneAgents([{ ...herdr[0], tab_id: 'w1:t1', workspace_id: 'w1' }], null)[0]).toMatchObject({ tab: 'w1:t1', workspace: 'w1' })
   })
 
-  test('a harvested pane: done reaps at 90 s, idle only between lead turns, a state change resets the clock', async () => {
+  test('a harvested pane: done reaps at 10 s, idle only between lead turns, a state change resets the clock', async () => {
     const ok = () => true
     const seen = new Map()
     const p = paneAgents(herdr, 'w1:p1')

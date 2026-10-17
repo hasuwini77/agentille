@@ -1,14 +1,14 @@
 // The pinned agt status line under the prompt: one line of what the run is doing, so the
 // count survives the band scrolling out of view. Wired in register.js.
 
-import { DONE_GRACE_MS, stage, tokens } from './live.js'
+import { STATUS_GRACE_MS, stage, tokens } from './live.js'
 
 // The line, or undefined to clear it: nothing works and every finished agent is past the grace.
 // Only an /agt run pins one: a plain subagent's run is `adhoc`, and the band already shows it.
 // `usd` is the measured session cost (session.measure), never an agent's share of it.
 export function statusText({ run, subs, panes, done, tok, usd, ctxPct, lastLeftAt, now }) {
   if (run === 'adhoc') return undefined
-  if (subs + panes === 0 && (done === 0 || now - (lastLeftAt ?? 0) >= DONE_GRACE_MS)) return undefined
+  if (subs + panes === 0 && (done === 0 || now - (lastLeftAt ?? 0) >= STATUS_GRACE_MS)) return undefined
   let text = 'agt ' + run + ' · ◇' + subs + ' ▣' + panes + ' working · ' + done + ' done · ' + tokens(tok) + ' tok'
   if (usd != null) text += ' · $' + usd.toFixed(2) + ' session'
   if (ctxPct != null) text += ' · ctx ' + Math.round(ctxPct) + '%'
@@ -71,7 +71,7 @@ async function refresh(io, ctx, at) {
   pin(io, text)
 
   // Nothing works but the grace still runs: nothing else redraws, so a timer clears the line.
-  const due = text !== undefined && subs + panes === 0 && lastLeftAt != null ? lastLeftAt + DONE_GRACE_MS + 500 : 0
+  const due = text !== undefined && subs + panes === 0 && lastLeftAt != null ? lastLeftAt + STATUS_GRACE_MS + 500 : 0
   if (due === st.timerDue) return
   st.timer?.cancel()
   st.timer = null

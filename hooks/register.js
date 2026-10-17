@@ -382,7 +382,7 @@ async function isHarvested($, p) {
 // the pane and how to read it, so the lead does not wait blind. Once per pane. A blocked pane waits on the person.
 async function wakeLead($, pool, now, t) {
   if (!sessionId) return
-  for (const p of wakeDue(pool, paneSeen, wireDone, woken, now)) {
+  for (const p of wakeDue(pool.filter((q) => q.role !== SPAWN_ROLE), paneSeen, wireDone, woken, now)) { // a spawn pane has no lead run to wake
     woken.add(p.id)
     const text = wakeMessage({ name: p.name, transport: t, id: p.id, answerPath: await answerOf($, p) })
     const r = await $.session.send({ to: { sessionId }, text }).catch((err) => ({ isDelivered: false, reason: String(err?.message ?? err) }))
@@ -428,13 +428,14 @@ async function pollHerdr($) {
   selfTab = me?.tab_id ?? null
   // Show the workspace's agt-* panes; reap only the lead's own tab, where herdr mode
   // splits its workers. Workers (panes that are themselves agt-*) never reap.
-  panes = quietSpawn(paneAgents(list, selfPane).filter((p) => !me || p.workspace === me.workspace_id))
+  const real = paneAgents(list, selfPane).filter((p) => !me || p.workspace === me.workspace_id)
+  panes = quietSpawn(real) // the band shows a spawn pane as `open`; the reaper below sees its real state
   const now = await $.clock.now()
   for (const p of panes) if (!firstSeen.has(p.id)) firstSeen.set(p.id, now)
   forgetGone(panes)
   await notePaneExits($)
   if (me && !selfName) {
-    const mine = panes.filter((p) => p.tab === me.tab_id)
+    const mine = real.filter((p) => p.tab === me.tab_id)
     await sweep($, reapPool(mine), now, 'herdr', (p) => $.process.run(herdrCloseArgv(p.id)))
   }
   $.ui.invalidate('ui.render')
@@ -494,7 +495,7 @@ async function openPane($, t, o) {
 
 // tmux has no agent status, so a pane is working until its done-file appears or tmux
 // calls it dead. Panes are scoped to the lead's own window; only an unnamed lead reaps,
-// and tmux has no idle state, so only the 90s done grace applies.
+// and tmux has no idle state, so only the 10s done grace applies.
 async function pollTmux($) {
   let rows = []
   try {
@@ -516,7 +517,8 @@ async function pollTmux($) {
   const done = new Map()
   for (const r of scoped) {
     const n = splitName(r.agt)
-    const file = n && n.role !== SPAWN_ROLE && !r.dead && doneFile(home, n.run, n.role)
+    // A worker writes done-<role>; a /agt-spawn pane has no such instruction, so its saved answer is its done signal.
+    const file = n && !r.dead && (n.role === SPAWN_ROLE ? answerFile(home, n.run, n.role, paneKey(r.id)) : doneFile(home, n.run, n.role))
     if (!file) continue
     try {
       done.set(r.agt, isFreshDone(await $.fs.stat(file), firstSeen.get(r.id)))
@@ -524,10 +526,11 @@ async function pollTmux($) {
       // missing or unreadable counts as not done
     }
   }
-  panes = tmuxPaneAgents(rows, selfPane, done)
+  const real = tmuxPaneAgents(rows, selfPane, done)
+  panes = quietSpawn(real)
   await notePaneExits($)
   if (isLead(rows, selfPane)) {
-    await sweep($, reapPool(panes), now, 'tmux', (p) => $.process.run(tmuxKillArgv(p.id), PROBE))
+    await sweep($, reapPool(real), now, 'tmux', (p) => $.process.run(tmuxKillArgv(p.id), PROBE))
   }
   $.ui.invalidate('ui.render')
 }
@@ -811,7 +814,7 @@ export function register(on) {
     await $.command.register({ name: 'agt-deck', description: 'Open the agentille deck: the cast, routing timeline, wire log and tokens. auto = open on every /agt (saved as display.deck) · off', argumentHint: '[auto|off]', immediate: true })
     await $.command.register({ name: 'agt-tell', description: 'Send a message to a worker pane over the wire', argumentHint: '<worker> <message>', immediate: true })
     await $.command.register({ name: 'agt-routing', description: 'Moved to /agt-info routing: the model + effort agentille picked for each agent this session', immediate: true })
-    await $.command.register({ name: 'agt-spawn', description: 'Open a routed claude pane beside this one (Herdr or tmux); it is never reaped', argumentHint: '"task" [--model sonnet|opus|haiku|fable]' })
+    await $.command.register({ name: 'agt-spawn', description: 'Open a routed claude pane beside this one (Herdr or tmux); it closes itself once its answer is saved', argumentHint: '"task" [--model sonnet|opus|haiku|fable]' })
     await $.command.register({ name: 'agt-ledger', description: 'Moved to /agt-info ledger: tokens per agent role for the latest agentille run', immediate: true })
     storedRaw = {
       deckAuto: await $.store.get('deck:auto'),

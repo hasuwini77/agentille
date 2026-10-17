@@ -1,90 +1,63 @@
 import { describe, expect, test } from 'claude-code/testing'
-import { AGT_FLAGS, AGT_VALUES, agtSuggestions, autocompleteHook, registerAutocomplete } from '../../hooks/autocomplete.js'
+import { AGT_FLAGS, AGT_LEVELS, agtSuggestions, autocompleteHook, registerAutocomplete } from '../../hooks/autocomplete.js'
 
 // The event for a draft with the caret at its end: the token is the last run of non-whitespace.
 const ev = (text: string) => {
   const start = text.search(/\S*$/)
   return { text, cursor: text.length, token: text.slice(start), start }
 }
+const texts = (rows: { text: string }[]) => rows.map((r) => r.text)
 
-describe('autocomplete: agtSuggestions', () => {
-  test('offers every flag for a bare dash after /agt', async () => {
-    expect(agtSuggestions(ev('/agt -')).map((r) => r.text)).toEqual(AGT_FLAGS.map((f) => f.text))
+describe('autocomplete: levels', () => {
+  test('the first word after /agt offers every level', () => {
+    expect(texts(agtSuggestions(ev('/agt ')))).toEqual(['low', 'medium', 'heavy', 'next'])
+    expect(texts(agtSuggestions(ev('/agt ')))).toEqual(texts(AGT_LEVELS))
   })
 
-  test('narrows by prefix', async () => {
-    expect(agtSuggestions(ev('/agt --mo')).map((r) => r.text)).toEqual(['--mode'])
-    expect(agtSuggestions(ev('/agt "fix it" --f')).map((r) => r.text)).toEqual(['--fable', '--formation'])
-    expect(agtSuggestions(ev('/agentille:agt --pl')).map((r) => r.text)).toEqual(['--plan'])
+  test('narrows by prefix, also for /agentille:agt and leading space', () => {
+    expect(texts(agtSuggestions(ev('/agt he')))).toEqual(['heavy'])
+    expect(texts(agtSuggestions(ev('/agt m')))).toEqual(['medium'])
+    expect(texts(agtSuggestions(ev('/agentille:agt n')))).toEqual(['next'])
+    expect(texts(agtSuggestions(ev('  /agt l')))).toEqual(['low'])
   })
 
-  test('every row carries a description', async () => {
-    for (const r of agtSuggestions(ev('/agt -'))) expect(r.description).toBeTruthy()
+  test('every row carries a description', () => {
+    for (const r of [...AGT_LEVELS, ...AGT_FLAGS]) expect(r.description).toBeTruthy()
   })
 
-  test('nothing for a finished flag, an unknown flag, plain words or the command itself', async () => {
-    expect(agtSuggestions(ev('/agt --mode'))).toEqual([])
-    expect(agtSuggestions(ev('/agt --zzz'))).toEqual([])
-    expect(agtSuggestions(ev('/agt fix'))).toEqual([])
-    expect(agtSuggestions(ev('--mo'))).toEqual([])
+  test('nothing for a finished level, later words, the command itself or old flags', () => {
+    expect(agtSuggestions(ev('/agt heavy'))).toEqual([])
+    expect(agtSuggestions(ev('/agt heavy h'))).toEqual([])
+    expect(agtSuggestions(ev('/agt fix it l'))).toEqual([])
+    expect(agtSuggestions(ev('/agt zzz'))).toEqual([])
     expect(agtSuggestions(ev('/agt'))).toEqual([])
+    expect(agtSuggestions(ev('low'))).toEqual([])
+    expect(agtSuggestions(ev('/agt --mode'))).toEqual([])
+    expect(agtSuggestions(ev('/agt --plan'))).toEqual([])
   })
 })
 
-describe('autocomplete: values', () => {
-  test('the word after --mode completes to its values', () => {
-    expect(agtSuggestions(ev('/agt --mode p')).map((r) => r.text)).toEqual(['panes'])
-    expect(agtSuggestions(ev('/agt --mode s')).map((r) => r.text)).toEqual(['subagent', 'solo'])
-    expect(agtSuggestions(ev('/agt "fix it" --mode su')).map((r) => r.text)).toEqual(['subagent'])
-    expect(agtSuggestions(ev('/agt --mode  p')).map((r) => r.text)).toEqual(['panes'])
-  })
-
-  test('the word after --formation completes to its values', () => {
-    expect(agtSuggestions(ev('/agt --formation g')).map((r) => r.text)).toEqual(['gauntlet'])
-    expect(agtSuggestions(ev('/agentille:agt --plan --formation d')).map((r) => r.text)).toEqual(['duel'])
-    expect(agtSuggestions(ev('/agt --formation r')).map((r) => r.text)).toEqual(['relay'])
-  })
-
-  test('every value row carries a description', () => {
-    for (const rows of Object.values(AGT_VALUES)) for (const r of rows) expect(r.description).toBeTruthy()
-  })
-
-  test('nothing for a finished value, an unknown value, other flags or plain words', () => {
-    expect(agtSuggestions(ev('/agt --mode panes'))).toEqual([])
-    expect(agtSuggestions(ev('/agt --mode zzz'))).toEqual([])
-    expect(agtSuggestions(ev('/agt --fable p'))).toEqual([])
-    expect(agtSuggestions(ev('/agt --plan s'))).toEqual([])
-    expect(agtSuggestions(ev('/agt fix p'))).toEqual([])
-    expect(agtSuggestions(ev('/agt --mode p ok')).map((r) => r.text)).toEqual([])
-  })
-
-  test('the flag before the value is found across any whitespace, however long the draft', () => {
-    expect(agtSuggestions(ev('/agt "fix it"\n--mode p')).map((r) => r.text)).toEqual(['panes'])
-    expect(agtSuggestions(ev('/agt --mode\tp')).map((r) => r.text)).toEqual(['panes'])
-    expect(agtSuggestions(ev('/agt --formation \n  g')).map((r) => r.text)).toEqual(['gauntlet'])
-    expect(agtSuggestions(ev('/agt ' + 'word '.repeat(5000) + '--mode s')).map((r) => r.text)).toEqual(['subagent', 'solo'])
-    expect(agtSuggestions(ev('/agt ' + 'x'.repeat(5000) + ' p'))).toEqual([])
-  })
-
-  test('the hook appends value rows after next', async () => {
-    const r = await autocompleteHook({}, ev('/agt --mode p'), async () => ({ suggestions: [] }))
-    expect(r.suggestions.map((s: { text: string }) => s.text)).toEqual(['panes'])
+describe('autocomplete: --fable', () => {
+  test('is the only flag', () => {
+    expect(texts(agtSuggestions(ev('/agt -')))).toEqual(['--fable'])
+    expect(texts(agtSuggestions(ev('/agt heavy --f')))).toEqual(['--fable'])
+    expect(agtSuggestions(ev('/agt --fable'))).toEqual([])
+    expect(agtSuggestions(ev('/agt --mo'))).toEqual([])
   })
 })
 
 describe('autocomplete: autocompleteHook', () => {
   test('appends its rows after next', async () => {
     const own = { text: '--mine' }
-    const next = async () => ({ suggestions: [own] })
-    const r = await autocompleteHook({}, ev('/agt --mo'), next)
-    expect(r.suggestions.map((s: { text: string }) => s.text)).toEqual(['--mine', '--mode'])
+    const r = await autocompleteHook({}, ev('/agt --f'), async () => ({ suggestions: [own] }))
+    expect(texts(r.suggestions)).toEqual(['--mine', '--fable'])
   })
 
   test('with no rows of its own, returns next at once', async () => {
     const out = { suggestions: [{ text: 'x' }] }
     let calls = 0
     const next = async () => (calls++, out)
-    expect(await autocompleteHook({}, ev('/agt fix'), next)).toBe(out)
+    expect(await autocompleteHook({}, ev('/agt fix it'), next)).toBe(out)
     expect(calls).toBe(1)
   })
 
@@ -94,12 +67,11 @@ describe('autocomplete: autocompleteHook', () => {
     expect(calls).toHaveLength(1)
     const [event, matcher, hook] = calls[0]
     expect(event).toBe('prompt.autocomplete')
-    // matched on the draft, not the token: a value after `--mode ` is a plain word
     expect(matcher.token).toBeUndefined()
-    expect(matcher.text.test('/agt --mode p')).toBe(true)
-    expect(matcher.text.test('/agentille:agt --formation g')).toBe(true)
-    expect(matcher.text.test('/agt-ledger --m')).toBe(false)
-    expect(matcher.text.test('hello --mode p')).toBe(false)
+    expect(matcher.text.test('/agt he')).toBe(true)
+    expect(matcher.text.test('/agentille:agt n')).toBe(true)
+    expect(matcher.text.test('/agt-info he')).toBe(false)
+    expect(matcher.text.test('hello he')).toBe(false)
     expect(hook).toBe(autocompleteHook)
   })
 })
@@ -115,20 +87,19 @@ describe('autocomplete: through the runtime', () => {
     on('prompt.autocomplete', async () => ({ suggestions: [] }))
     await $.session.start({ cwd: '/w', surface: null, isInteractive: false })
   }
-  const ask = async ($: any, text: string) => ((await $.prompt.autocomplete(ev(text))) as { suggestions: { text: string }[] }).suggestions.map((r) => r.text)
+  const ask = async ($: any, text: string) => texts(((await $.prompt.autocomplete(ev(text))) as { suggestions: { text: string }[] }).suggestions)
 
-  test('a typed /agt draft gets flag rows and value rows', async ($, on) => {
+  test('a typed /agt draft gets level rows and the flag row', async ($, on) => {
     await boot($, on)
-    expect(await ask($, '/agt --mo')).toEqual(['--mode'])
-    expect(await ask($, '/agt --mode p')).toEqual(['panes'])
-    expect(await ask($, '  /agentille:agt "fix it"\n--formation g')).toEqual(['gauntlet'])
+    expect(await ask($, '/agt he')).toEqual(['heavy'])
+    expect(await ask($, '/agt --f')).toEqual(['--fable'])
+    expect(await ask($, '  /agentille:agt n')).toEqual(['next'])
   })
 
   test('another command or plain text gets nothing', async ($, on) => {
     await boot($, on)
-    expect(await ask($, '/agt-ledger --mo')).toEqual([])
-    expect(await ask($, '/agt-ledger --mode p')).toEqual([])
-    expect(await ask($, 'hello --mo')).toEqual([])
-    expect(await ask($, 'hello --mode p')).toEqual([])
+    expect(await ask($, '/agt-info he')).toEqual([])
+    expect(await ask($, 'hello he')).toEqual([])
+    expect(await ask($, 'hello --f')).toEqual([])
   })
 })

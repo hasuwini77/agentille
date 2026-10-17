@@ -1,26 +1,15 @@
 // /agt flag autocomplete: rows for the token at the cursor while a typed /agt prompt is being written.
 
-// Mirror of skills/agt/SKILL.md argument-hint (flags and their values) + "Run modifiers". Keep in step with both.
-export const AGT_FLAGS = [
-  { text: '--plan', description: 'stop after the plan and its review' },
-  { text: '--mode', description: 'force a mode: panes | subagent | solo' },
-  { text: '--fable', description: 'Fable ceiling on judgment roles' },
-  { text: '--formation', description: 'force a formation: duel | gauntlet | relay' },
+// Mirror of skills/agt/SKILL.md: the one optional level word right after /agt, and the one flag left.
+export const AGT_LEVELS = [
+  { text: 'low', description: 'one stream, may run solo' },
+  { text: 'medium', description: '2-3 small streams as subagents' },
+  { text: 'heavy', description: 'worker panes in Herdr or tmux' },
+  { text: 'next', description: 'build the next item of .agentille/backlog.md' },
 ]
+export const AGT_FLAGS = [{ text: '--fable', description: 'Fable ceiling on judgment roles' }]
 
-// The values a flag takes (SKILL.md "Modes" and "Run modifiers"). `herdr` is a legacy alias of panes: not offered.
-export const AGT_VALUES = {
-  '--mode': [
-    { text: 'panes', description: 'one pane per disjoint slice' },
-    { text: 'subagent', description: 'no panes, agents run in-process' },
-    { text: 'solo', description: 'the main session does it alone' },
-  ],
-  '--formation': [
-    { text: 'duel', description: 'two approaches built apart, the better one wins' },
-    { text: 'gauntlet', description: 'build, then an adversary tries to break it' },
-    { text: 'relay', description: 'contract first, then the slices build in parallel' },
-  ],
-}
+const CMD = /^\/(agentille:)?agt$/
 
 const WS = /\s/
 
@@ -36,15 +25,14 @@ function wordBefore(text, start) {
   return t.slice(at, end)
 }
 
-// Rows for the token, or [] when the token is the command itself or nothing matches. A flag token
-// completes to flags; the word after a flag that takes a value completes to its values. The draft is
-// known to be a typed /agt one: registerAutocomplete's matcher lets nothing else through.
+// Rows for the token, or [] when the token is the command itself or nothing matches. The first word
+// after /agt completes to the levels; a dash completes to the flag. The draft is known to be a typed
+// /agt one: registerAutocomplete's matcher lets nothing else through.
 export function agtSuggestions({ text, token, start }) {
   if (typeof token !== 'string' || !(start > 0)) return []
   const match = (rows) => rows.filter((r) => r.text.startsWith(token) && r.text !== token)
   if (token === '-' || token.startsWith('--')) return match(AGT_FLAGS)
-  const flag = wordBefore(text, start)
-  return Object.hasOwn(AGT_VALUES, flag) ? match(AGT_VALUES[flag]) : []
+  return CMD.test(wordBefore(text, start)) ? match(AGT_LEVELS) : []
 }
 
 // Fires on every keystroke: answer next(e) at once when there is nothing to add.

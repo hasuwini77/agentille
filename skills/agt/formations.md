@@ -13,11 +13,11 @@ Automatic on feature and bugfix work with `risk` auth/money/data and a test runn
 
 ## duel — best of two
 
-Only on request (`--formation duel`, or "try two approaches"). Needs machine-checkable done-criteria. The planner writes two briefs that differ in strategy; two executors build in separate worktrees with `integration: local`; tests judge first, then one `code-reviewer` answers `WINNER: A|B` and `WHY`. The loser's branch is deleted, never pushed.
+Only on request ("try two approaches", "best of two"). Needs machine-checkable done-criteria. The planner writes two briefs that differ in strategy; two executors build in separate worktrees with `integration: local`; tests judge first, then one `code-reviewer` answers `WINNER: A|B` and `WHY`. The loser's branch is deleted, never pushed.
 
 ## relay — contract first, then parallel
 
-Only on request (`--formation relay`, or "contract-first split"), for ≥2 slices coupled by one interface. Leg 1: one executor commits types, stubs and contract tests. Leg 2: the slices build in parallel from that commit; the contract is frozen, and a slice that needs it changed stops and reports `CONTRACT: <what and why>`.
+Only on request ("contract first", "contract-first split"), for ≥2 slices coupled by one interface. Leg 1: one executor commits types, stubs and contract tests. Leg 2: the slices build in parallel from that commit; the contract is frozen, and a slice that needs it changed stops and reports `CONTRACT: <what and why>`.
 
 ## Honest cost
 

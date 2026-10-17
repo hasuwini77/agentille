@@ -1,5 +1,5 @@
 import { describe, expect, mock, test } from 'claude-code/testing'
-import { DONE_GRACE_MS } from '../../hooks/live.js'
+import { STATUS_GRACE_MS } from '../../hooks/live.js'
 import { pin, statusText } from '../../hooks/status.js'
 
 const base = { run: 'r1', subs: 2, panes: 1, done: 3, tok: 12_300, usd: null, ctxPct: null, lastLeftAt: 0, now: 1000 }
@@ -17,10 +17,10 @@ describe('status: the line', () => {
 
   test('cleared once nothing works and every finished agent is past the grace', async () => {
     const idle = { ...base, subs: 0, panes: 0, lastLeftAt: 10_000 }
-    expect(statusText({ ...idle, now: 10_000 + DONE_GRACE_MS - 1 })).toContain('3 done')
-    expect(statusText({ ...idle, now: 10_000 + DONE_GRACE_MS })).toBeUndefined()
+    expect(statusText({ ...idle, now: 10_000 + STATUS_GRACE_MS - 1 })).toContain('3 done')
+    expect(statusText({ ...idle, now: 10_000 + STATUS_GRACE_MS })).toBeUndefined()
     expect(statusText({ ...idle, done: 0, lastLeftAt: null, now: 10_000 })).toBeUndefined()
-    expect(statusText({ ...idle, panes: 1, now: 10_000 + DONE_GRACE_MS * 5 })).toBeDefined()
+    expect(statusText({ ...idle, panes: 1, now: 10_000 + STATUS_GRACE_MS * 5 })).toBeDefined()
   })
 })
 
@@ -74,9 +74,9 @@ describe('status: in the mod', () => {
     await done($, 'st1')
     await clock.advance(300) // the first redraw tick pins it
     expect(lines.at(-1)).toContain('1 done')
-    await clock.advance(DONE_GRACE_MS - 5000)
+    await clock.advance(STATUS_GRACE_MS - 5000)
     expect(lines.at(-1)).toContain('1 done')
-    await clock.advance(7000) // past DONE_GRACE_MS + the timer's half-second margin
+    await clock.advance(7000) // past STATUS_GRACE_MS + the timer's half-second margin
     expect(lines.at(-1)).toBeUndefined()
   })
 

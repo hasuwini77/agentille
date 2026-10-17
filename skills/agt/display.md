@@ -1,6 +1,6 @@
 # Display — what /agt prints
 
-Presentation only: nothing here changes dispatch. If a line cannot be produced, drop it; never block the result. Solo prints only `solo · <why>`.
+Presentation only: nothing here changes dispatch. If a line cannot be produced, drop it; never block the result. Solo prints only its recon line.
 
 ## When the mod draws
 
@@ -18,7 +18,7 @@ Without that block (mods off, the VS Code chat panel, `claude -p`), do all of th
 The model writes only these, nothing else between dispatches:
 
 ```
-recon: <mode> · <one-clause reason>   [agentille v<version>]
+recon: <level> · <solo|subagent|panes|workflow> · <one-clause reason>   [agentille v<version>]
 ⚑ <agent> <blocked|REVISE|FAIL>: <one line>
 ```
 
@@ -40,10 +40,10 @@ Every agent's output starts with a head; relay the head, never the body:
 The only end-of-run output of a non-solo run, at most 8 lines:
 
 ```
-✓ <what changed, one line>  ·  <N> files  ·  <branch or PR #n>  ·  <m>m
+✓ <what changed, one line>  ·  <level>  ·  <N> files  ·  <merged PR #n | branch>  ·  <m>m
 verify: <command> → <result>
 review: <PASS | CONCERNS: n P1 | FAIL: n P0> — <agents run>
-⚑ <only if something needs the user; max 2 lines>
+⚑ <only if something needs the user: escalated, PR ready, P0/P1 left; max 2 lines>
 Open: ~/.agentille/state/run-<id>/report.md
 Next: <one concrete action>
 ```

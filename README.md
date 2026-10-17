@@ -15,14 +15,14 @@ Try it in any repo:
 /agt "add a dark mode toggle to the settings page"
 ```
 
-What happens: it reads your repo, picks the lightest setup that works (one agent for small jobs, parallel agents only when the work really splits), hardens risky changes (auth, payments, data) with a red-team pass, and ends on one short card:
+What happens: it reads your repo and picks a level: low (it just does it, or one builder), medium (2–3 builders in parallel) or heavy (one Herdr or tmux pane per part). It hardens risky changes (auth, payments, data) with a red-team pass, merges on green unless the diff needs a human (auth, money, deploy, migrations, new dependencies, business calls), closes every pane it opened, and ends on one short card:
 
 ```
-✓ dark mode toggle on /settings  ·  4 files  ·  PR #12  ·  6m
+✓ dark mode toggle on /settings  ·  low  ·  4 files  ·  merged PR #12  ·  6m
 verify: npm test → 48 passed
 review: PASS — code-reviewer design-reviewer
 Open: ~/.agentille/state/run-a1b2/report.md
-Next: merge PR #12
+Next: /agt next
 ```
 
 Everything else (plan, findings, each agent's full report) is in that `report.md`. Plain prompts are untouched: `/agt` only runs when you type it.
@@ -40,7 +40,8 @@ Plain Claude is one developer. `/agt` is that developer plus a planner and a rev
 | A risky change (auth, payments, data) | `/agt "add webhook handling for subscription cancellations"` |
 | A review before merge | `/agt "review the changes on this branch"` |
 | A bug across several files | `/agt "debug why checkout totals are off by one cent"` |
-| Unsure of the scope | `/agt --plan "migrate the auth pages to the app router"` |
+| Unsure of the scope | `/agt "plan the migration of the auth pages to the app router"` |
+| Work through a queue | `/agt next "add a 404 page"` to queue it · `/agt next` to build the next item |
 
 What you get over a plain prompt: a separate reviewer checks the work instead of the model that wrote it, each step runs on the model that fits it, independent parts build at the same time, a finished part's reviewers run together rather than one after another, and risky diffs get a red-team pass.
 
@@ -50,12 +51,12 @@ Skip it for one-file edits, typos, renames and questions: a plain prompt is chea
 
 | You type | You get |
 |---|---|
-| `/agt --plan "task"` | The plan and roster first; say "go" to build it |
-| `/agt --mode panes\|subagent\|solo "task"` | Force a mode for one run |
+| `/agt "task"` | The level is detected: low (solo or one builder), medium (2–3 builders in parallel as subagents) or heavy (one Herdr/tmux pane per part) |
+| `/agt low\|medium\|heavy "task"` | Force the level for one run |
+| `/agt next ["task"]` | Build the next item in `.agentille/backlog.md`, merge it on green or escalate, then keep going · with a task: queue it |
 | `/agt --fable "task"` | The top model tier on judgment roles for one run |
-| `/agt --formation duel\|gauntlet\|relay "task"` | Two builds and a judge, an adversary pass, or a contract-first parallel build |
 | `/agt-info [routing\|ledger\|squads\|route <role>]` | Settings in effect, last run's routing and ledger, active squads · or one view: routing decisions, tokens per role, the squad rescan · or a dry-run of what a role would route to, escalation rungs included |
-| `/agt-spawn "task" [--model …]` | One extra routed Claude pane (Herdr or tmux), yours to keep |
+| `/agt-spawn "task" [--model …]` | One extra routed Claude pane (Herdr or tmux); it closes itself once its answer is saved |
 | `/agt-tell <worker> <message>` | Message a worker pane over the wire |
 | `/agt-deck [auto\|off]` | A side pane with the run's cast, routing timeline, wire log and token bars · open it on every `/agt` · stop |
 | `/agentille-project` · `/agentille-claude-md` | Seed a repo's CLAUDE.md · tune an existing one |
@@ -78,7 +79,7 @@ The switches that used to be commands live in a `display` block of `~/.agentille
 - `focus`: agent flags (a REVISE, a FAIL, a blocked pane) above the prompt.
 - `highlight`: `on` lights `/agt` replies, `all` every long reply, `off` none.
 
-Deprecated for one release, removed in v4: `/agt-routing`, `/agt-ledger` and `/agt-squads` print their `/agt-info` view plus a pointer; `/agt-focus` and `/agt-highlight` still work and now write this block.
+`/agt-routing`, `/agt-ledger` and `/agt-squads` were removed in v3.14.0: use `/agt-info routing|ledger|squads`. `/agt-focus` and `/agt-highlight` still work and write this block.
 
 ## How it decides
 

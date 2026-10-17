@@ -166,7 +166,7 @@ describe('workflow agents: runs, toast, deny', () => {
     const res = await $.agent.spawn(wf('wfdeny'))
     expect(res).toEqual({ deny: 'workflow agents are off' })
     expect(toasts).toEqual([])
-    expect((await $.command.run({ command: 'agt-routing' })).text).not.toContain('code-reviewer')
+    expect((await $.command.run({ command: 'agt-info', args: 'routing' })).text).not.toContain('code-reviewer')
   })
 
   test('a workflow takes the band over only from a run with nothing working', async ($, on) => {
@@ -217,7 +217,7 @@ describe('workflow agents: runs, toast, deny', () => {
     const ui = await band($)
     expect(await shownRun(ui, 'runE')).toBe(true) // and the band still shows runE
     await ui.unmount()
-    expect((await $.command.run({ command: 'agt-ledger' })).text).not.toContain('code-reviewer') // nor does /agt-ledger
+    expect((await $.command.run({ command: 'agt-info', args: 'ledger' })).text).not.toContain('code-reviewer') // nor does /agt-info ledger
     await finish($, 'w0') // runE's ledger.json is written when one of its own agents finishes
     const file = writes['/h/.agentille/state/run-runE/ledger.json']
     expect(file).toBeDefined()
@@ -235,7 +235,7 @@ describe('workflow agents: runs, toast, deny', () => {
     }
     await $.agent.spawn(wf(null, 'planner')) // w2, no header, runs fable: what runF's table says
     expect(toasts.filter((t) => t.includes('table says'))).toEqual([])
-    const routing = (await $.command.run({ command: 'agt-routing' })).text
+    const routing = (await $.command.run({ command: 'agt-info', args: 'routing' })).text
     expect(routing).toContain('planner → claude-fable-5')
     expect(routing).not.toContain('table says')
   })

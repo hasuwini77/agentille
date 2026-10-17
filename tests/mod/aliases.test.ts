@@ -63,19 +63,12 @@ describe('aliases: in the mod', () => {
   const run = async ($: any, command: string, args = '') => (await $.command.run({ command, args, origin: { kind: 'composer' } } as never)).text as string
   const saved = (files: Record<string, string>) => JSON.parse(files[PROFILE])
 
-  test('/agt-routing, /agt-ledger and /agt-squads print their /agt-info view plus one moved line', async ($, on) => {
+  test('the redirect-only /agt-routing, /agt-ledger and /agt-squads are gone', async ($, on) => {
     await boot($, on, {})
-    await $.agent.spawn({ prompt: '[agt run=ab12cd size=large mode=build]\nplan it', subagentType: 'agentille:agentille-planner' })
     for (const view of ['routing', 'ledger', 'squads']) {
-      const body = await run($, 'agt-info', view)
-      expect(await run($, 'agt-' + view)).toBe(body + '\nmoved: /agt-info ' + view)
+      await expect(run($, 'agt-' + view)).rejects.toThrow()
+      expect(await run($, 'agt-info', view)).toBeTruthy()
     }
-  })
-
-  test('the empty routing and ledger views carry the notice too', async ($, on) => {
-    await boot($, on, {})
-    expect(await run($, 'agt-routing')).toBe('No agentille dispatches this session.\nmoved: /agt-info routing')
-    expect(await run($, 'agt-ledger')).toBe('No agents in this run yet.\nmoved: /agt-info ledger')
   })
 
   test('/agt-focus off writes display.focus, keeps every other key, and says where it moved', async ($, on) => {

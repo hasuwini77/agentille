@@ -107,14 +107,14 @@ describe('squads: in the mod', () => {
     expect((await $.skill.prompt({ skill: 'agt', text: 'base' })).text).not.toContain('Squads detected')
   })
 
-  test('/agt-squads rescans, so a dep added after start shows up', async ($, on) => {
+  test('/agt-info squads rescans, so a dep added after start shows up', async ($, on) => {
     const repo = { pkg: JSON.stringify({ dependencies: { stripe: '1' } }), paths: [] as string[] }
     await boot($, on, repo)
-    const before = (await $.command.run({ command: 'agt-squads' })).text
+    const before = (await $.command.run({ command: 'agt-info', args: 'squads' })).text
     expect(before).not.toContain('Active squads')
     expect(before).toContain('- saas (Micro SaaS) 1/2')
     repo.pkg = JSON.stringify({ dependencies: { stripe: '1', 'next-auth': '1' } })
-    const after = (await $.command.run({ command: 'agt-squads' })).text
+    const after = (await $.command.run({ command: 'agt-info', args: 'squads' })).text
     expect(after).toContain('Active squads')
     expect(after).toContain('- saas (Micro SaaS) 2/2')
     expect((await $.skill.prompt({ skill: 'agt', text: 'base' })).text).toContain('Squads detected')

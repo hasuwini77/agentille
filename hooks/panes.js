@@ -27,7 +27,7 @@ export function pickTransport({ herdrOk, tmuxOk }) {
   return herdrOk ? 'herdr' : tmuxOk ? 'tmux' : 'none'
 }
 
-export const PANE_RULE = 'Pane rule: panes only when ≥2 slices build at once or `--mode panes`: each slice\'s executor (and the adversary) via spawn_pane (agent + header); everyone else is a subagent. close_pane after harvest.'
+export const PANE_RULE = 'Pane rule: panes open only on the heavy level (auto-picked or typed `/agt heavy`): each slice\'s executor (and the adversary) via spawn_pane (agent + header); everyone else is a subagent. close_pane right after harvest.'
 
 // The block appended to the /agt skill prompt: which transport is live and, when the mod
 // registered the pane tools, the rule for using them.
@@ -125,16 +125,17 @@ export function isFreshDone(stat, since) {
   return stat?.kind === 'file' && typeof stat.mtimeMs === 'number' && typeof since === 'number' && stat.mtimeMs >= since
 }
 
-// /agt-spawn panes are the person's, not a run's: shown as `open`, never as working or done,
-// so they feed no spinner, busy timer or working count.
+// /agt-spawn panes are the person's, not a run's: SHOWN as `open`, never as working or done, so they
+// feed no spinner, busy timer or working count. Display only: the reaper is fed the real state.
 export function quietSpawn(panes) {
   return panes.map((p) => (p.role === SPAWN_ROLE ? { ...p, state: 'open', seq: 0 } : p))
 }
 
 // tmux rows → live.js pane agents. `done` maps pane name → whether a fresh done-file exists.
 // A pane is done when that holds or tmux says it is dead; seq is synthesized for reapPlan().
+// Real states: apply quietSpawn() for display only.
 export function tmuxPaneAgents(rows, selfPane, done) {
-  return quietSpawn(scopeRows(rows, selfPane).map((r) => {
+  return (scopeRows(rows, selfPane).map((r) => {
     const n = splitName(r.agt)
     const finished = r.dead || done.get(r.agt) === true
     return { id: r.id, kind: 'pane', name: r.agt, role: n?.role ?? r.agt, run: n?.run ?? '', vendor: r.vendor || 'claude', state: finished ? 'done' : 'working', seq: finished ? 1 : 0, tab: r.window, workspace: null }
@@ -151,9 +152,10 @@ export const TMUX_LIST_ARGV = ['tmux', 'list-panes', '-a', '-F', TMUX_LIST_FORMA
 
 // ── reaping ───────────────────────────────────────────────────────────────────
 
-// /agt-spawn panes belong to the person, not to a run: never offered to the reaper.
+// The panes offered to the reaper: every agt- pane, /agt-spawn ones included, with their real state.
+// A spawn pane closes like any worker once it is done/idle and its answer is saved.
 export function reapPool(panes) {
-  return panes.filter((p) => p.role !== SPAWN_ROLE)
+  return [...panes]
 }
 
 // ── spawning ──────────────────────────────────────────────────────────────────
@@ -246,7 +248,7 @@ export function paneRole(agent) {
     : { pane: false, why: `${agent} runs as a subagent: only an executor or the adversary gets a pane.` }
 }
 
-// ── pane tools: /agt panes mode opens and closes workers through the mod ──────
+// ── pane tools: the /agt heavy level opens and closes workers through the mod ──────
 
 // Fable is not offered: on a tool it would skip the routing guard. A typed /agt-spawn may still pick it.
 export const TOOL_MODELS = ['sonnet', 'opus', 'haiku']
@@ -254,7 +256,7 @@ export const TOOL_MODELS = ['sonnet', 'opus', 'haiku']
 export const SPAWN_TOOL = {
   name: 'spawn_pane',
   isDeferred: false,
-  description: 'Open one agentille worker pane beside this session (Herdr or tmux, whichever is live), never focused, named agt-<run>-<role>, running Claude on the model and effort agentille routes for `agent`, with the task as its first prompt. Use it for each panes-mode slice in place of raw herdr/tmux commands. The pane is reaped once it sits done; close it yourself with close_pane after harvesting.',
+  description: 'Open one agentille worker pane beside this session (Herdr or tmux, whichever is live), never focused, named agt-<run>-<role>, running Claude on the model and effort agentille routes for `agent`, with the task as its first prompt. Use it for each heavy-level slice in place of raw herdr/tmux commands. The pane closes itself once it is done and its answer is saved; close it yourself with close_pane right after harvesting.',
   inputSchema: {
     type: 'object',
     properties: {
@@ -274,7 +276,7 @@ export const SPAWN_TOOL = {
 export const CLOSE_TOOL = {
   name: 'close_pane',
   isDeferred: false,
-  description: 'Close one agentille worker pane this session opened (an agt-<run>-<role> pane in this tab or window) after you have read its result. Panes opened by a typed /agt-spawn and panes of other sessions are refused.',
+  description: 'Close one agentille worker pane this session opened (an agt-<run>-<role> pane in this tab or window) after you have read its result. Panes opened by a typed /agt-spawn (the reaper closes those) and panes of other sessions are refused.',
   inputSchema: {
     type: 'object',
     properties: { name: { type: 'string', description: 'The pane name, agt-<run>-<role>.' } },
@@ -319,7 +321,7 @@ export function closeTarget(input, live = [], tab = null) {
   const name = typeof input?.name === 'string' ? input.name.trim() : ''
   const n = splitName(name)
   if (!n) return { error: 'name must be an agt-<run>-<role> pane name.' }
-  if (n.role === SPAWN_ROLE) return { error: name + ' was opened by a typed /agt-spawn; it is the person\'s to close.' }
+  if (n.role === SPAWN_ROLE) return { error: name + ' was opened by a typed /agt-spawn; only the automatic reaper closes it.' }
   const pane = live.find((p) => p.name === name && (tab === null || p.tab === tab))
   return pane ? { pane } : { error: 'No pane named ' + name + ' in this tab or window.' }
 }

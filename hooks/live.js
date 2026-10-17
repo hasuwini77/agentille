@@ -3,8 +3,9 @@
 
 import { BYE_MS, modelKey } from './mascot.js'
 
-export const DONE_GRACE_MS = 90_000
-export const IDLE_GRACE_MS = 300_000
+export const DONE_GRACE_MS = 10_000 // a done pane is reaped this fast once its answer is saved
+export const IDLE_GRACE_MS = 60_000 // an idle pane, lead between turns
+export const STATUS_GRACE_MS = 90_000 // how long the status line keeps a finished agent on screen
 export const ON_STAGE = new Set(['working', 'blocked'])
 const LEAVING = new Set(['done', 'idle'])
 const EFFORT_BAR = { low: '▂', medium: '▄', high: '▆', xhigh: '▇', max: '█' }
@@ -38,7 +39,7 @@ export function paneAgents(list, selfPane) {
 }
 
 // Remembers when each pane entered its current state (by state_change_seq) and sorts the panes
-// that sat in done ≥ 90s, or in idle ≥ 300s while the lead has no turn running (an idle worker
+// that sat in done ≥ 10s, or in idle ≥ 60s while the lead has no turn running (an idle worker
 // mid-run is waiting for review, not abandoned). A due pane is only `reap` once `harvested(pane)`
 // says its answer is in hand; otherwise it is `stranded`: kept open and flagged, since closing
 // it would lose the output. With no `harvested` nothing is ever reaped. Only agt-* panes reach here.

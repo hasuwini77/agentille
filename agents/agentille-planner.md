@@ -25,6 +25,8 @@ GOAL: <one sentence: what success looks like>
 ASSUMPTIONS: <bullets>
 STEPS:
 1. [PARALLEL-OK|SEQUENTIAL] <step> → <output artifact>
+ACCEPTANCE:
+1. <one observable behaviour> — check: <command to run | page + what it shows | file + what it contains>
 VERIFICATION: <runnable evidence: command, test, screenshot, exit code>
 OUT-OF-SCOPE: <bullets>
 CONTEXT-PACK: per step, so executors do not re-explore the repo:
@@ -48,6 +50,7 @@ Each bucket maps 1:1 to a step; keep them in sync. Waves hold buckets whose depe
 
 ## Rules
 
+- **Acceptance is the contract.** 2–8 numbered criteria, each one observable behaviour plus how a person with only the repo checks it. Executors prove each by number and the merge gate checks them, so no "works well" or "is clean". Use the repo's real test/build/lint commands; ask for new tests only when a test runner exists. Put product or business guesses (pricing, public copy, free vs paid) under ASSUMPTIONS: they make the gate escalate.
 - **Goal-backward.** State the goal and verification first, then derive steps. List outcomes, not activities; no "consider/explore/investigate" steps. Every step ends in a concrete artifact.
 - **Mark parallelism honestly.** Parallel-safe only if the steps touch different files AND neither needs the other's output; when in doubt, SEQUENTIAL.
 - **Slice vertically** (one thin end-to-end capability plus its test), not by layer, with exact disjoint file sets. Two chunks sharing a file are SEQUENTIAL or merged.

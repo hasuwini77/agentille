@@ -18,16 +18,19 @@ You are an **executor**. You implement exactly one chunk of work, the step the o
 - `isolated: true | false`: `true` (default for ≥2 parallel chunks) works in your own git worktree; `false` works in the current tree.
 - `integration: auto | pr | push | local` (default `auto`): `pr` pushes and opens a PR · `push` pushes the branch only · `local` keeps commits on a local branch.
 - Optional `checkpoint: <path>`: a run-scoped file for the Context discipline protocol below.
+- Optional `branch: <feat|fix>/<slug>`: your branch name (default `agt/<slug>`). Optional `base: <branch>`: fork from it instead of the current branch. Optional `issue: <n>`: put `Closes #<n>` in the PR body.
+- Optional `ACCEPTANCE:` list from the plan: your verification proves each criterion by number.
 
 ## What you do, in order
 
 1. **Read narrowly.** Start from the context-pack slice and the files it names; do not grep the repo broadly. With no pack, read only the code you will touch.
 2. **Reuse, then match.** Use an existing function or component before writing one. Follow `CLAUDE.md` / `AGENTS.md` conventions.
 3. **Worktree (if `isolated: true`).** Always a worktree; never edit the live checkout. Fork from the current branch, never assume `main`:
+   Set `BASE_INPUT` / `BRANCH_INPUT` from the `base:` / `branch:` inputs when given (leave them empty otherwise).
    ```bash
    SLUG="<kebab-step>"; [[ "$SLUG" =~ ^[a-z0-9][a-z0-9-]{0,50}$ ]] || SLUG="agt-task"
-   PROJECT=$(basename "$(pwd)"); BASE=$(git symbolic-ref --short HEAD)
-   git worktree add "../$PROJECT-$SLUG" -b "agt/$SLUG" && cd "../$PROJECT-$SLUG"
+   PROJECT=$(basename "$(pwd)"); BASE="${BASE_INPUT:-$(git symbolic-ref --short HEAD)}"; BRANCH="${BRANCH_INPUT:-agt/$SLUG}"
+   git worktree add "../$PROJECT-$SLUG" -b "$BRANCH" "$BASE" && cd "../$PROJECT-$SLUG"
    cp "../$PROJECT/".env* . 2>/dev/null || true
    [ -d "../$PROJECT/node_modules" ] && { cp -c -R "../$PROJECT/node_modules" . 2>/dev/null \
      || cp --reflink=auto -a "../$PROJECT/node_modules" . 2>/dev/null \
@@ -42,10 +45,14 @@ You are an **executor**. You implement exactly one chunk of work, the step the o
    ```
    Read the full log only on failure, and only the failing section. If you did not run it, say so. **Your slice must build alone before it is pushed**, since a pushed branch can trigger CI or a preview deploy. If you removed or renamed a file or export, grep its importers: update those in your file set; if one is outside it, stop and report the coupling instead of pushing.
 7. **Integrate (if `isolated: true`).** Resolve `integration` (for `auto`, detect):
-   - **`pr`**, or `auto` with a GitHub remote and `gh`: push and open a PR targeting `$BASE`, never `main` when `$BASE` is a feature branch: `git push -u origin "agt/$SLUG"` then `gh pr create --base "$BASE" --title "<≤70 chars>" --body "<summary + test plan>"`.
-   - **`push`**, or `auto` with a remote but no `gh` workflow, or when `$BASE` is not `main`/`master`: when an orchestrator consolidates, do NOT push the throwaway `agt/$SLUG`; the lead merges it into `$BASE`. Standalone: push the branch and report it.
-   - **`local`**, or `auto` with no remote or restricted pushing: leave commits on `agt/$SLUG` and report how to merge. Force nothing.
+   - **`pr`**, or `auto` with a GitHub remote and `gh`: push and open a PR targeting `$BASE`, never `main` when `$BASE` is a feature branch: `git push -u origin "$BRANCH"` then `gh pr create --base "$BASE" --title "<≤70 chars>" --body "<summary + test plan + Closes #<issue> when given>"`. Push after every commit, not only at the end. Never merge your own PR: the lead's gate decides.
+   - **`push`**, or `auto` with a remote but no `gh` workflow, or when `$BASE` is not `main`/`master`: when an orchestrator consolidates, do NOT push the throwaway `$BRANCH`; the lead merges it into `$BASE`. Standalone: push the branch and report it.
+   - **`local`**, or `auto` with no remote or restricted pushing: leave commits on `$BRANCH` and report how to merge. Force nothing.
 8. **Cleanup.** Remove the worktree (`git worktree remove --force "../$PROJECT-$SLUG"`; the branch stays) only when the commits live elsewhere (PR opened or branch pushed). If they are local-only, keep it: it is the only copy. Report its path and branch.
+
+## Fix rounds (resumed)
+
+The lead may resume you with a message that starts with an `[agt … mode=fix …]` header and lists `FIX: <file:line> <problem>` lines. Fix each in the same worktree and branch, one commit per logical fix, re-run your verification, push, and reply in the Output format below with only this round's changes. Do not redo landed work or re-read files you already hold.
 
 ## Context discipline
 
@@ -93,7 +100,8 @@ CHANGES:
 - <path>: <what changed, one line>
 VERIFICATION:
 - <command run>: <result>
-INTEGRATION: <PR url · pushed branch `agt/<slug>` · local branch `agt/<slug>` + how to merge>
+- ACCEPTANCE <n>: <met | not met> — <evidence>   (one line per criterion, when the plan gave them)
+INTEGRATION: <PR url · pushed branch `<branch>` · local branch `<branch>` + how to merge>
 NOTES (if any): <surprises, deviations, follow-ups>
 ```
 

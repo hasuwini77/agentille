@@ -258,7 +258,6 @@ async function setDisplay($, key, value) {
 }
 
 const MOVED = (key) => '\nmoved: display.' + key + ' in ~/.agentille/profile.json — this command goes away in v4'
-const ALIAS = (view) => '\nmoved: /agt-info ' + view
 
 function routingView() {
   if (decisions.length === 0) return 'No agentille dispatches this session.'
@@ -382,7 +381,7 @@ async function isHarvested($, p) {
 // the pane and how to read it, so the lead does not wait blind. Once per pane. A blocked pane waits on the person.
 async function wakeLead($, pool, now, t) {
   if (!sessionId) return
-  for (const p of wakeDue(pool, paneSeen, wireDone, woken, now)) {
+  for (const p of wakeDue(pool.filter((q) => q.role !== SPAWN_ROLE), paneSeen, wireDone, woken, now)) { // a spawn pane has no lead run to wake
     woken.add(p.id)
     const text = wakeMessage({ name: p.name, transport: t, id: p.id, answerPath: await answerOf($, p) })
     const r = await $.session.send({ to: { sessionId }, text }).catch((err) => ({ isDelivered: false, reason: String(err?.message ?? err) }))
@@ -428,13 +427,14 @@ async function pollHerdr($) {
   selfTab = me?.tab_id ?? null
   // Show the workspace's agt-* panes; reap only the lead's own tab, where herdr mode
   // splits its workers. Workers (panes that are themselves agt-*) never reap.
-  panes = quietSpawn(paneAgents(list, selfPane).filter((p) => !me || p.workspace === me.workspace_id))
+  const real = paneAgents(list, selfPane).filter((p) => !me || p.workspace === me.workspace_id)
+  panes = quietSpawn(real) // the band shows a spawn pane as `open`; the reaper below sees its real state
   const now = await $.clock.now()
   for (const p of panes) if (!firstSeen.has(p.id)) firstSeen.set(p.id, now)
   forgetGone(panes)
   await notePaneExits($)
   if (me && !selfName) {
-    const mine = panes.filter((p) => p.tab === me.tab_id)
+    const mine = real.filter((p) => p.tab === me.tab_id)
     await sweep($, reapPool(mine), now, 'herdr', (p) => $.process.run(herdrCloseArgv(p.id)))
   }
   $.ui.invalidate('ui.render')
@@ -494,7 +494,7 @@ async function openPane($, t, o) {
 
 // tmux has no agent status, so a pane is working until its done-file appears or tmux
 // calls it dead. Panes are scoped to the lead's own window; only an unnamed lead reaps,
-// and tmux has no idle state, so only the 90s done grace applies.
+// and tmux has no idle state, so only the 10s done grace applies.
 async function pollTmux($) {
   let rows = []
   try {
@@ -516,7 +516,8 @@ async function pollTmux($) {
   const done = new Map()
   for (const r of scoped) {
     const n = splitName(r.agt)
-    const file = n && n.role !== SPAWN_ROLE && !r.dead && doneFile(home, n.run, n.role)
+    // A worker writes done-<role>; a /agt-spawn pane has no such instruction, so its saved answer is its done signal.
+    const file = n && !r.dead && (n.role === SPAWN_ROLE ? answerFile(home, n.run, n.role, paneKey(r.id)) : doneFile(home, n.run, n.role))
     if (!file) continue
     try {
       done.set(r.agt, isFreshDone(await $.fs.stat(file), firstSeen.get(r.id)))
@@ -524,10 +525,11 @@ async function pollTmux($) {
       // missing or unreadable counts as not done
     }
   }
-  panes = tmuxPaneAgents(rows, selfPane, done)
+  const real = tmuxPaneAgents(rows, selfPane, done)
+  panes = quietSpawn(real)
   await notePaneExits($)
   if (isLead(rows, selfPane)) {
-    await sweep($, reapPool(panes), now, 'tmux', (p) => $.process.run(tmuxKillArgv(p.id), PROBE))
+    await sweep($, reapPool(real), now, 'tmux', (p) => $.process.run(tmuxKillArgv(p.id), PROBE))
   }
   $.ui.invalidate('ui.render')
 }
@@ -810,9 +812,7 @@ export function register(on) {
     if (worker) { pub.model = worker.model; pub.effort = worker.effort || null }
     await $.command.register({ name: 'agt-deck', description: 'Open the agentille deck: the cast, routing timeline, wire log and tokens. auto = open on every /agt (saved as display.deck) · off', argumentHint: '[auto|off]', immediate: true })
     await $.command.register({ name: 'agt-tell', description: 'Send a message to a worker pane over the wire', argumentHint: '<worker> <message>', immediate: true })
-    await $.command.register({ name: 'agt-routing', description: 'Moved to /agt-info routing: the model + effort agentille picked for each agent this session', immediate: true })
-    await $.command.register({ name: 'agt-spawn', description: 'Open a routed claude pane beside this one (Herdr or tmux); it is never reaped', argumentHint: '"task" [--model sonnet|opus|haiku|fable]' })
-    await $.command.register({ name: 'agt-ledger', description: 'Moved to /agt-info ledger: tokens per agent role for the latest agentille run', immediate: true })
+    await $.command.register({ name: 'agt-spawn', description: 'Open a routed claude pane beside this one (Herdr or tmux); it closes itself once its answer is saved', argumentHint: '"task" [--model sonnet|opus|haiku|fable]' })
     storedRaw = {
       deckAuto: await $.store.get('deck:auto'),
       focusMode: await $.store.get('focus:mode'),
@@ -822,7 +822,6 @@ export function register(on) {
     applyDisplay()
     await $.command.register({ name: 'agt-info', description: 'Settings in effect, routing, ledger, squads, or a route dry-run: routing | ledger | squads | route <role>', argumentHint: '[routing|ledger|squads|route <role> [size=…] [risk=…] [depth=…]]', immediate: true })
     await $.command.register({ name: 'agt-highlight', description: 'Highlight replies: on (/agt only) · all · off. Saved as display.highlight in profile.json; goes away in v4', argumentHint: '[on|all|off]', immediate: true })
-    await $.command.register({ name: 'agt-squads', description: 'Moved to /agt-info squads: which squads match this repo, which nearly do, and the reviewers they add', immediate: true })
     await $.command.register({ name: 'agt-focus', description: 'Agent flags above the prompt (a REVISE, a FAIL, a blocked pane): on · off. Saved as display.focus in profile.json; goes away in v4', argumentHint: '[on|off]', immediate: true })
     if (transport !== 'none') {
       // One look now: a lead restarted mid-run sees its leftover panes. It reaps only those whose answer
@@ -876,9 +875,7 @@ export function register(on) {
     return { text: '⇄ sent to ' + a.name }
   })
 
-  on('command.run', { command: 'agt-routing' }, async () => ({ text: routingView() + ALIAS('routing') }))
-
-  // The one place for read-only facts: settings in effect, the three old views, and a routing dry-run.
+  // The one place for read-only facts: settings in effect, routing, ledger and squads views, and a routing dry-run.
   on('command.run', { command: 'agt-info' }, async ($, e) => {
     const a = parseInfoArgs(e.args)
     if (a.error) return { text: a.error }
@@ -909,7 +906,7 @@ export function register(on) {
     return { text: 'Opened ' + name + ' · ' + a.model + ' · ' + t + ' pane.' }
   })
 
-  // /agt panes mode: the same openPane as /agt-spawn, with the input validated here.
+  // /agt heavy level: the same openPane as /agt-spawn, with the input validated here.
   on('tool.call', { tool: 'mcp__agentille__spawn_pane' }, async ($, e) => {
     if (selfName || worker) return { deny: 'This is a worker pane (' + (selfName ?? worker.agent) + '); workers do not open panes.' }
     // An update since this session started leaves it on old code: its workers would never report.
@@ -1009,10 +1006,6 @@ export function register(on) {
     }
     return { text: highlightText(highlightOn, highlightAll) + (note && '\n' + note) + MOVED('highlight') }
   })
-
-  on('command.run', { command: 'agt-squads' }, async ($) => ({ text: (await squadsView($)) + ALIAS('squads') }))
-
-  on('command.run', { command: 'agt-ledger' }, async () => ({ text: ledgerView() + ALIAS('ledger') }))
 
   // A typed /agt starts a clean run; a task notification, plugin or peer turn is not the person's prompt.
   on('prompt.submit', async ($, e, next) => {

@@ -1,10 +1,10 @@
 # Panes mode — workers are panes, not nested agents
 
-Same brain as every mode (roster and routing in `routing.md`, gates in `SKILL.md`), but each worker is a **sibling pane running a real Claude session**. The transport is **Herdr** or **tmux**, picked by the agentille mod and injected into `/agt` as a `## Pane transport` block. A multiplexer tracks one agent per pane, so pane workers have a readable lifecycle and can be closed deterministically. `--mode herdr` is an alias for `--mode panes`.
+The heavy level. Same brain as every level (roster and routing in `routing.md`, gates in `SKILL.md`), but each worker is a **sibling pane running a real Claude session**. The transport is **Herdr** or **tmux**, picked by the agentille mod and injected into `/agt` as a `## Pane transport` block. A multiplexer tracks one agent per pane, so pane workers have a readable lifecycle and can be closed deterministically. `--mode panes` and `--mode herdr` are legacy aliases for `/agt heavy`.
 
 ## When panes open
 
-Panes only for ≥2 disjoint slices that build at once, `--mode panes`, or `/agt-spawn`. Only the executor (one per slice) and the adversary may be panes. Planners, plan-reviewers, the ui-prototyper and ALL reviewers are always subagents; a single executor is a subagent. `--mode subagent` means no panes. No pane transport: workflow if the `Workflow` tool exists, else subagent waves (`workflow-mode.md`).
+Panes only on the heavy level (detected, or typed `/agt heavy`) and for `/agt-spawn`. Only the executor (one per slice) and the adversary may be panes. Planners, plan-reviewers, the ui-prototyper and ALL reviewers are always subagents; a single executor is a subagent. `low` and `medium` never open panes. No pane transport: workflow if the `Workflow` tool exists, else subagent waves (`workflow-mode.md`).
 
 Pre-flight (the mod probes this once; manual equivalent): inside Herdr (`HERDR_ENV=1`, `herdr` on PATH) or tmux (`$TMUX`, `tmux` on PATH), Herdr first. Otherwise fall through silently. Never drive a session from outside one.
 
@@ -59,7 +59,7 @@ herdr agent start "agt-<run-id>-exec-1" --kind claude --pane <pane-id>   # id: .
 
 Then send one prompt: the task, the profile block, the slice's file set, its verification command, its exit criterion. Spawn the whole wave first, then wait. Never focus. Names match `[a-z][a-z0-9_-]{0,31}`; keep the run id 6 chars. The `agt-` prefix is the reap authority.
 
-## The lifecycle state machine — harvest, then reap
+## Harvest, then close
 
 Completion is a read, not a promise:
 
@@ -85,9 +85,9 @@ If `agent read` cannot recover a full response (alternate screen), ask that work
 
 **Teardown.** Before declaring the run done, every `agt-<run>-*` pane is harvested, then closed (explicit harvest → `close_pane`). Verify the run id lists zero panes (`herdr agent list`, or the tmux list below). Say so on the card's `⚑`/`verify:` only if one survived.
 
-**Backstop (the mod).** It closes an idle `agt-` pane only while the lead has no turn running, and a `done` pane after ≥90 s, and only once that pane is harvested: that pane instance's own answer file `agents/pane-<role>.<pane>.md` was written after the pane opened (an earlier pane's file does not count), its wire done message reached you (it names the file, so it harvests only that pane), or you closed it. An older worker's legacy `pane-<role>.md` counts only while exactly one pane has that name. A role you respawn is a new pane and starts unharvested again, even while the earlier pane is still open. An unharvested pane stays open and is flagged once (`⚑ <name> done, not harvested`, or `idle, not harvested`): read it, then `close_pane`. It never touches `working`, `blocked` or `unknown`, nor a pane without the `agt-` prefix. It is a net, not the plan; explicit close after harvest stays mandatory.
+**Backstop (the mod).** It closes an idle `agt-` pane only while the lead has no turn running, and a `done` pane ~10 s after it settles, and only once that pane is harvested: that pane instance's own answer file `agents/pane-<role>.<pane>.md` was written after the pane opened (an earlier pane's file does not count), its wire done message reached you (it names the file, so it harvests only that pane), or you closed it. An older worker's legacy `pane-<role>.md` counts only while exactly one pane has that name. A role you respawn is a new pane and starts unharvested again, even while the earlier pane is still open. An unharvested pane stays open and is flagged once (`⚑ <name> done, not harvested`, or `idle, not harvested`): read it, then `close_pane`. It never touches `working`, `blocked` or `unknown`, nor a pane without the `agt-` prefix. It is a net, not the plan; explicit close after harvest stays mandatory.
 
-**Never close a pane you did not open.** `agt-` prefix = ownership; panes the user opened and `/agt-spawn` panes are theirs.
+**Never close a pane you did not open.** `agt-` prefix = ownership; panes the user opened are theirs. A `/agt-spawn` pane is never yours to close: the mod closes it once its answer is saved.
 
 ## tmux transport
 
@@ -105,25 +105,23 @@ tmux select-pane -t <id> -T <name>
 
 Keep the `--`, and escape `#` as `##` in `<cwd>`. The lead only sees panes in its own window: `tmux list-panes -a -F '#{pane_id}\t#{@agt}\t#{pane_dead}\t#{window_id}'`. Your pane is `$TMUX_PANE`; a pane with no `@agt` is the user's.
 
-**Done signal.** Each worker's last act is writing `~/.agentille/state/run-<run>/done-<role>`: put that instruction in the slice prompt. The mod polls the file; without it tmux workers never read as done. A pane is `done` when that file exists (written after the mod first saw the pane) or the pane is dead. Delete `done-<role>` before (re)spawning a role. There is no `blocked` or `idle` state, so reap only on the done file or a dead pane, never on silence, and `tmux capture-pane -p -t <id> -S -200` an overdue worker first: an approval prompt looks like "still working". The backstop closes a pane once it is harvested and `done` has held 90 s. Two leads in one window can reap each other's workers; run one lead per window.
+**Done signal.** Each worker's last act is writing `~/.agentille/state/run-<run>/done-<role>`: put that instruction in the slice prompt. The mod polls the file; without it tmux workers never read as done. A pane is `done` when that file exists (written after the mod first saw the pane) or the pane is dead. Delete `done-<role>` before (re)spawning a role. There is no `blocked` or `idle` state, so reap only on the done file or a dead pane, never on silence, and `tmux capture-pane -p -t <id> -S -200` an overdue worker first: an approval prompt looks like "still working". The backstop closes a pane once it is harvested and `done` has held ~10 s. Two leads in one window can reap each other's workers; run one lead per window.
 
 ## /agt-spawn — one pane, one routed session
 
-`/agt-spawn "task" [--model sonnet|opus|haiku|fable]` opens one sibling pane on the model you pick (default `sonnet`). Typed only; a one-word lowercase task is refused. It never focuses, shows as `open` in the band, and is never reaped (role `spawn` is exempt from teardown and the backstop): the user closes it. Reply: `Opened <name> · <model> · <transport> pane.`, or `No pane transport here: /agt-spawn needs Claude Code running inside Herdr or tmux.`
+`/agt-spawn "task" [--model sonnet|opus|haiku|fable]` opens one sibling pane on the model you pick (default `sonnet`). Typed only; a one-word lowercase task is refused. It never focuses and shows as `open` in the band. It is not part of any run, so the lead never closes it; the mod closes it ~10 s after it finishes, once its answer is saved and sent to the session that opened it. Reply: `Opened <name> · <model> · <transport> pane.`, or `No pane transport here: /agt-spawn needs Claude Code running inside Herdr or tmux.`
 
 ## Consolidation
 
-Worktrees fork from `$BASE = $(git symbolic-ref --short HEAD)`, the user's current branch; the lead never assumes `main`. Once a slice has a `PASS`, merge it into `$BASE` locally and one at a time:
+Branches, PRs, the ownership check, merge order and tags: `factory.md` → "Integrate". After a slice merges, remove its worktree (`herdr worktree remove --workspace <id> --force` on Herdr, else `git worktree remove --force <path>`).
 
-```bash
-git checkout "$BASE" && git merge --no-ff "agt/<slug>" -m "merge: <piece>"
-git branch -D "agt/<slug>"        # scaffolding; never push agt/* branches
-herdr worktree remove --workspace <id> --force   # Herdr only
-```
+Peers never message each other; everything routes through the lead.
 
-Integration target, by precedence: `--integration` flag → repo `.agentille/config.json` `{"integration": …}` → profile `projects[].integration` → `auto`. `pr` opens a PR from `$BASE` (never `--base main` unless chosen); `push` pushes `$BASE` only (default when `$BASE` ≠ `main`); `local` stays local; `auto` = PR on `main` with `gh`+GitHub, else push `$BASE`.
+## Cleanup — nothing idle survives
 
-**Subagent runs** pipeline review the same way: review each finished piece while the others still build. Peers never message each other; everything routes through the lead.
+- The lead closes each pane right after harvesting it (`close_pane`), not at a run-end sweep.
+- The mod's reaper closes any harvested `agt-` pane ~10 s after it reads `done` (60 s after `idle` while the lead is not mid-turn), `/agt-spawn` panes included.
+- When the lead session ends, the mod's SessionEnd sweep closes every `idle` or `done` `agt-` pane in the lead's tab; `working`, `blocked` and `unknown` panes are left alone.
 
 ## Failure → degrade
 

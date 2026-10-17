@@ -1,6 +1,6 @@
 import { describe, expect, mock, test } from 'claude-code/testing'
 import { advisorEnv, EFFORTS, PANE_RULE, splitPlan, tmuxEvenArgv, SPAWN_TOOL, closeTarget, paneRole, doneFile, spawnToolInput, TOOL_MODELS, herdrCloseArgv, herdrPaneIdOf, herdrPromptArgv, herdrSplitArgv, herdrStartArgv, isFreshDone, isLead, newRunId, paneName, parseSpawnArgs, parseTmuxList, pickTransport, quietSpawn, reapPool, scopeRows, splitName, tmuxKillArgv, tmuxPaneAgents, tmuxPaneIdOf, tmuxSplitArgv, tmuxTagArgvs, transportBlock, TMUX_LIST_FORMAT } from '../../hooks/panes.js'
-import { reapPlan } from '../../hooks/live.js'
+import { DONE_GRACE_MS, reapPlan } from '../../hooks/live.js'
 import { ROLES, roleOf } from '../../hooks/routing.js'
 
 const TAB = '\t'
@@ -28,13 +28,14 @@ describe('transport', () => {
     expect(transportBlock('none', true)).not.toContain('spawn_pane')
   })
 
-  test('the pane rule: parallel slices or --mode panes, executor and adversary only, close after harvest', async () => {
-    expect(PANE_RULE).toContain('≥2 slices')
-    expect(PANE_RULE).toContain('--mode panes')
+  test('the pane rule: heavy level only, executor and adversary only, close right after harvest', async () => {
+    expect(PANE_RULE).toContain('only on the heavy level')
+    expect(PANE_RULE).toContain('/agt heavy')
+    expect(PANE_RULE).not.toContain('--mode')
     expect(PANE_RULE).toContain('executor (and the adversary)')
     expect(PANE_RULE).toContain('everyone else is a subagent')
-    expect(PANE_RULE).toContain('close_pane after harvest')
-    expect(PANE_RULE.length).toBeLessThan(260)
+    expect(PANE_RULE).toContain('close_pane right after harvest')
+    expect(PANE_RULE.length).toBeLessThan(300)
   })
 })
 
@@ -141,10 +142,12 @@ describe('tmux panes', () => {
     expect(isLead(rows, '%9')).toBe(false)
   })
 
-  test('a spawn pane is open, not working, and a leftover done-file cannot turn it done', async () => {
+  test('a spawn pane shows as open in the band but keeps its real state for the reaper', async () => {
     const rows = parseTmuxList([row('%1', ''), row('%2', 'agt-ab12cd-spawn'), row('%3', 'agt-ab12cd-spawn', '1')].join('\n'))
-    const p = tmuxPaneAgents(rows, '%1', new Map([['agt-ab12cd-spawn', true]]))
-    expect(p.map((x) => x.state)).toEqual(['open', 'open'])
+    const p = tmuxPaneAgents(rows, '%1', new Map())
+    expect(p.map((x) => x.state)).toEqual(['working', 'done'])
+    expect(quietSpawn(p).map((x) => x.state)).toEqual(['open', 'open'])
+    expect(tmuxPaneAgents(rows, '%1', new Map([['agt-ab12cd-spawn', true]])).map((x) => x.state)).toEqual(['done', 'done'])
     expect(quietSpawn([{ id: 'w:p1', role: 'spawn', state: 'working', seq: 4 }, { id: 'w:p2', role: 'b1', state: 'working', seq: 4 }]).map((x) => x.state)).toEqual(['open', 'working'])
   })
 
@@ -162,28 +165,28 @@ describe('tmux panes', () => {
     expect(isFreshDone({ kind: 'file', mtimeMs: 5000 }, undefined)).toBe(false)
   })
 
-  test('tmux done waits 90s through the shared reaper, working never reaps', async () => {
+  test('tmux done waits the done grace through the shared reaper, working never reaps', async () => {
     const rows = parseTmuxList([row('%1', ''), row('%2', 'agt-r1-executor'), row('%3', 'agt-r1-reviewer', '1')].join('\n'))
     const p = tmuxPaneAgents(rows, '%1', new Map())
     const seen = new Map()
     const ok = () => true
     expect(reapPlan(p, seen, 0, true, ok).reap).toEqual([])
-    expect(reapPlan(p, seen, 89_999, true, ok).reap).toEqual([])
-    expect(reapPlan(p, seen, 90_000, true, ok).reap.map((x) => x.id)).toEqual(['%3'])
+    expect(reapPlan(p, seen, DONE_GRACE_MS - 1, true, ok).reap).toEqual([])
+    expect(reapPlan(p, seen, DONE_GRACE_MS, true, ok).reap.map((x) => x.id)).toEqual(['%3'])
     expect(reapPlan(p, seen, 10_000_000, true, ok).reap.map((x) => x.id)).toEqual(['%3'])
     expect(reapPlan(p, seen, 10_000_000).reap).toEqual([])
   })
 
-  test('spawn panes are never offered to the reaper, in either transport', async () => {
+  test('spawn panes are offered to the reaper like any worker, with their real state, in either transport', async () => {
     const herdr = [
       { id: 'w1:p2', role: 'spawn', state: 'done', seq: 1 },
       { id: 'w1:p3', role: 'executor', state: 'done', seq: 1 },
       { id: 'w1:p4', role: 'spawn', state: 'idle', seq: 2 },
     ]
-    expect(reapPool(herdr).map((x) => x.id)).toEqual(['w1:p3'])
+    expect(reapPool(herdr).map((x) => x.id)).toEqual(['w1:p2', 'w1:p3', 'w1:p4'])
     const rows = parseTmuxList([row('%1', ''), row('%2', 'agt-ab12cd-spawn', '1'), row('%3', 'agt-ab12cd-spawn-two', '1')].join('\n'))
     const p = reapPool(tmuxPaneAgents(rows, '%1', new Map()))
-    expect(p.map((x) => x.id)).toEqual(['%3'])
+    expect(p.map((x) => x.id)).toEqual(['%2', '%3'])
   })
 })
 
@@ -343,15 +346,37 @@ describe('tmux band', () => {
   const DONE = (role: string) => '/h/.agentille/state/run-r9/done-' + role
   const ANSWER = (role: string) => '/h/.agentille/state/run-r9/agents/pane-' + role + '.md'
 
-  test('a lead kills a done pane only after 90s, never a working or a spawn pane', { timeoutMs: 15_000 }, async ($, on) => {
-    const rows = [row('%1', ''), row('%2', 'agt-r9-executor', '1'), row('%3', 'agt-r9-spawn', '1'), row('%4', 'agt-r9-planner')]
+  test('a lead kills a done pane only after the 10 s grace, never a working one', { timeoutMs: 15_000 }, async ($, on) => {
+    const rows = [row('%1', ''), row('%2', 'agt-r9-executor', '1'), row('%4', 'agt-r9-planner')]
     const { killed, clock } = await start($, on, { rows, mtimes: { [ANSWER('executor')]: FRESH } })
-    await clock.advance(85_000)
+    await clock.advance(5_000)
     expect(killed).toEqual([])
     await clock.advance(10_000)
     expect(killed).toEqual(['%2'])
     await clock.advance(300_000)
     expect(killed).toEqual(['%2'])
+  })
+
+  test('a spawn pane is killed like any worker once it is done and its answer is saved, and not before', { timeoutMs: 15_000 }, async ($, on) => {
+    const rows = [row('%1', ''), row('%3', 'agt-r9-spawn', '1'), row('%4', 'agt-r9-spawn-two', '1')]
+    const { killed, clock } = await start($, on, { rows, mtimes: { [ANSWER('spawn')]: FRESH } })
+    await clock.advance(5_000)
+    expect(killed).toEqual([])
+    await clock.advance(10_000)
+    expect(killed).toEqual(['%3'])
+    await clock.advance(300_000)
+    expect(killed).toEqual(['%3']) // %4 never saved an answer: kept, not lost
+  })
+
+  test('a live spawn pane whose answer file appears turns done and is killed', { timeoutMs: 15_000 }, async ($, on) => {
+    const rows = [row('%1', ''), row('%3', 'agt-r9-spawn')]
+    const mtimes: Record<string, number> = {}
+    const { killed, clock } = await start($, on, { rows, mtimes })
+    await clock.advance(60_000)
+    expect(killed).toEqual([])
+    mtimes['/h/.agentille/state/run-r9/agents/pane-spawn.3.md'] = clock.now() + 1
+    await clock.advance(20_000)
+    expect(killed).toEqual(['%3'])
   })
 
   test('a done pane with no answer saved is never killed, however long it waits', { timeoutMs: 15_000 }, async ($, on) => {
@@ -401,16 +426,16 @@ describe('tmux band', () => {
     await clock.advance(300_000)
     expect(killed).toEqual([])
     mtimes[DONE('planner')] = clock.now() + 1
-    await clock.advance(10_000)
+    await clock.advance(2_000)
     expect(killed).toEqual([])
-    await clock.advance(85_000)
+    await clock.advance(20_000)
     expect(killed).toEqual(['%3'])
   })
 
   test('a tmux pane\'s own instance file (pane-<role>.5.md for %5) harvests it', { timeoutMs: 15_000 }, async ($, on) => {
     const rows = [row('%1', ''), row('%5', 'agt-r9-executor', '1')]
     const { killed, clock } = await start($, on, { rows, mtimes: { '/h/.agentille/state/run-r9/agents/pane-executor.5.md': FRESH } })
-    await clock.advance(95_000)
+    await clock.advance(20_000)
     expect(killed).toEqual(['%5'])
   })
 
@@ -418,7 +443,7 @@ describe('tmux band', () => {
     const rows = [row('%1', ''), row('%5', 'agt-r9-executor', '1')]
     const { killed, clock } = await start($, on, { rows })
     await $.session.receive({ text: '[agt wire] agt-r9-executor done · 0:10\nBuilt it\nFull answer: /h/.agentille/state/run-r9/agents/pane-executor.5.md', origin: { kind: 'peer' } } as never)
-    await clock.advance(95_000)
+    await clock.advance(20_000)
     expect(killed).toEqual(['%5'])
   })
 })
@@ -906,7 +931,7 @@ describe('herdr reaper', () => {
   const finish = (l: any, id: string) => { l.agents.find((a: any) => a.pane_id === id).agent_status = 'done' }
   const flagged = (l: any) => l.toasts.filter((t: string) => t.includes('agt-r9-executor done, not harvested')).length
 
-  test('idle reaps only between lead turns, done reaps at 90 s (answer harvested)', async ($, on) => {
+  test('idle reaps only between lead turns, done reaps at 10 s (answer harvested)', async ($, on) => {
     const idle = await lead($, on, 'idle')
     await begin($)
     await idle.clock.advance(400_000)
@@ -916,10 +941,10 @@ describe('herdr reaper', () => {
     expect(idle.closed).toEqual(['w1:p2'])
   })
 
-  test('a done pane is reaped at 90 s even while the lead works (answer harvested)', async ($, on) => {
+  test('a done pane is reaped at 10 s even while the lead works (answer harvested)', async ($, on) => {
     const done = await lead($, on, 'done')
     await begin($)
-    await done.clock.advance(85_000)
+    await done.clock.advance(5_000)
     expect(done.closed).toEqual([])
     await done.clock.advance(10_000)
     expect(done.closed).toEqual(['w1:p2'])
@@ -1145,7 +1170,7 @@ describe('herdr reaper', () => {
     const older = '/h/.agentille/state/run-r9/agents/pane-executor.w1-p2.md' // an earlier executor held w1:p2 too
     l.files.set(mine, l.clock.now())
     l.files.set(older, l.clock.now())
-    await l.clock.advance(10_000) // the planner's pane is harvested
+    await l.clock.advance(5_000) // the planner's pane is harvested
     l.blind(true) // the list call fails as the planner goes: no poll sees it leave
     l.agents.splice(0, 1)
     l.reuseId('w1:p2')

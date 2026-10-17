@@ -3,7 +3,7 @@ name: solo-one-liner
 description: A one-sentence typo fix with no risk words routes to solo with no agents.
 tags: [routing, solo]
 runs: 3
-expected_outcome: recon names solo and the roster is none.
+expected_outcome: recon is low · solo and the roster is none.
 execution:
   prompt: '/agt "fix the typo recieve -> receive in the README heading"'
   max_turns: 10
@@ -25,7 +25,7 @@ graders:
   - name: recon-solo
     type: regex
     target: last_message
-    pattern: '^recon:\s*solo\b'
+    pattern: '^recon:\s*low\W+solo\b'
     flags: m
     weight: 2
   - name: roster-none

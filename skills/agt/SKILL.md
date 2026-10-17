@@ -40,7 +40,7 @@ Print the recon line before anything else: `recon: <level> · <solo|subagent|pan
 4. **Clarify only when genuinely ambiguous** (never with `preTaskQuestioning: never`; up front with `always`). Explore first; ask at most 3 questions, each with a recommended default.
 5. **Roster, formation, models** → `routing.md`. Start every dispatch with the header below, plus the profile prefix unless every value is a default.
 6. **Run dir.** Create `~/.agentille/state/run-<id>/` and keep it. When a planner ran, write its CONTEXT-PACK to `context-pack.md` there and give each executor only its slice plus `checkpoint: ~/.agentille/state/run-<id>/checkpoint-<name>.md`.
-7. **Plan, then review it.** The plan carries numbered ACCEPTANCE criteria. REVISE → re-plan → review again; a second REVISE → re-plan once more and go on.
+7. **Scout, plan, then review it.** Scouts are optional, medium and heavy only: when the task names no files and the planner would have to map unfamiliar ground in ≥3 areas, first send ≤3 `Explore` subagents with `model: haiku` as one message of background calls, one question each ("which files wire X?"), each answering in ≤15 lines of paths and facts, and hand the answers to the planner under `SCOUTS:`. The plan carries numbered ACCEPTANCE criteria. REVISE → re-plan → review again; a second REVISE → re-plan once more and go on.
 8. **Build, then review**, in dependency order, pipelined: review each finished piece while the others build. Every reviewer a piece needs goes out in ONE message as parallel background `Agent` calls. Fix rounds resume the same executor (`factory.md` → "Fix rounds").
 9. **Gate and integrate.** P0/P1 block. Then the escalate checklist decides merge or ⚑ (`factory.md` → "Gate" and "Integrate").
 10. **Close everything.** Close each `agt-<run>-*` pane the moment its answer is harvested, then confirm the run lists zero panes (`panes-mode.md` → "Harvest, then close"). Stop every background subagent once its handoff is used.
@@ -74,7 +74,7 @@ Communicate: <deliveryStyle>, <tone>.
 - **Never commit to `main` directly.** Work lands through a branch and a PR or a local merge (`factory.md` → "Integrate").
 - **Never let an agent push through context pressure.** An executor that reports `CONTEXT …` is replaced by a fresh one seeded from its checkpoint and slice.
 - **At most 3 executors at once.** Batch the rest in waves.
-- **Executor is never Haiku**; Haiku only classifies. Fable comes only from the ladder or `--fable`.
+- **Executor is never Haiku**; Haiku only classifies and scouts (read-only). Fable comes only from the ladder or `--fable`.
 - **Foreground when it gates.** A dispatch whose result feeds the next step runs in the foreground; independent dispatches go out as one message of background calls, then one wait.
 - **Mods off still works.** The mod only adds the band, routing, the wire between panes and the automatic pane cleanup.
 - **Never close a pane you did not open.** The `agt-` prefix is ownership.

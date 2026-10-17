@@ -73,7 +73,7 @@ Dispatch with aliases (`fable`/`opus`/`sonnet`/`haiku`), never pinned IDs. A pan
 
 ## Hard rules
 
-- **Never use Haiku for the executor**, and never change its model (effort only). Haiku is for Stage 2 classify only.
+- **Never use Haiku for the executor**, and never change its model (effort only). Haiku is for Stage 2 classify and read-only scouts (`SKILL.md` → "The contract") only.
 - **Never downgrade the design-reviewer.**
 - **Declare `model:` on every dispatch** (fallback when the mod is off).
 

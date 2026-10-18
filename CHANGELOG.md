@@ -2,6 +2,17 @@
 
 All notable changes to agentille are documented here.
 
+## [3.15.2] — 2026-10-18
+
+### Fixed
+
+- **No false "verification failed" on an expected non-zero exit.** The
+  executor flag read any `exit 1` in a `VERIFICATION:` block as a failure,
+  so a passing check such as `grep … found nothing (exit 1)` (grep exits 1
+  on no match) put ⚑ on the band after a clean run. Each line is now judged
+  on its own, and a line that reports its non-zero exit as the expected
+  result (found nothing, no matches, as expected) no longer flags.
+
 ## [3.15.1] — 2026-10-18
 
 ### Fixed

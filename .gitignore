@@ -46,3 +46,6 @@ review-*.png
 
 # eval run transcripts: local only (absolute paths inside)
 evals/results/
+
+# Local git worktrees
+.worktrees/

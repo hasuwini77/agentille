@@ -25,11 +25,17 @@ close_pane { name: "agt-<run-id>-exec-1" }
 
 The mod routes model and effort from `agent` + `header` through the same table as a subagent (`routing.md` → "Default routing") and ignores any `model` you pass. Roles that must stay subagents are denied with the reason; run them as subagents. A failed pane falls back to a subagent.
 
-Layout is the mod's call: the first worker splits right of the lead; later workers stack below the previous worker. Each worker pane's own band shows a small mascot (hello, working, bye) drawn by the mod at zero model tokens. The lead's band lists every worker as a `▣` row beside its `◇` subagents, with the tool the worker is running and its tokens, and Herdr's sidebar labels each worker by role and model.
+Layout is the mod's call: the first worker splits right of the lead; later workers stack below the previous worker. On Herdr, a run that will open ≥3 pane workers (slices plus adversaries) passes `layout: "tab"` on every `spawn_pane`: its workers then stack in their own `agt-<run>` tab, the lead's tab stays whole, and the tab closes with its last worker. tmux ignores it. Each worker pane's own band shows a small mascot (hello, working, bye) drawn by the mod at zero model tokens. The lead's band lists every worker as a `▣` row beside its `◇` subagents, with the tool the worker is running and its tokens, and Herdr's sidebar labels each worker by role and model.
 
 The mod enforces the `agt-<run>-<role>` name (32 chars max), no duplicate name, an absolute existing `cwd`, no focus change. `close_pane` reaches only `agt-` panes in your own tab or window, never a `/agt-spawn` pane. Worker panes get no tools, so they cannot fan out.
 
 Pane answers never reach the mod's result hook, so a pane worker raises no `⚑`: read the harvest yourself. Still yours: isolation (one worktree per slice) and the tmux done-file instruction.
+
+## Codex workers
+
+Only when the person's task asks for Codex ("codex builds the API slice"); never picked on your own. Herdr only, executor only: `spawn_pane { …, agent: "executor", vendor: "codex" }`. Codex runs on the person's own Codex config (model, sandbox, approvals) and cannot load the agentille executor or the mod, so its `task` carries the whole contract: the slice, its file set, `branch:`/`base:`/`issue:`, the ACCEPTANCE criteria, the executor's Output format with `VERIFICATION:`, and the `BLOCKED:` rule (`agents/agentille-executor.md`). The mod adds one line telling it to write its report to its answer file. No wire message comes, so the `spawn_pane` result tells you to start `herdr agent wait <name> --until done --until blocked` as a background command: its exit wakes you. Then read the answer file and `close_pane` if the pane is still open (the mod closes it ~10 s after it is done). Review, gate and merge are the same as for a Claude slice. On tmux, or without Codex installed, the spawn is refused: say so in one line and run the slice on Claude.
+
+**Startup prompts.** The mod accepts the folder-trust prompt only for the lead's own repo and its worktrees, and skips Codex's update notice. Any other startup prompt fails the spawn: the slice falls back to a subagent.
 
 ## The wire — workers report back on their own
 
@@ -43,7 +49,7 @@ Full answer: ~/.agentille/state/run-<run>/agents/pane-exec-1.w1-p3.md
 
 That message starts your next turn, so after spawning a wave, **end your turn**: no background `herdr agent wait` loop, no polling. Harvest from the message (read the file only when the head is not enough), then `close_pane`. A `blocked` worker needs the person, not you: the band flags it and Herdr notifies. The person can steer a worker with `/agt-tell <worker> <message>`.
 
-Still end your turn after the wave; the mod backs you up. It never closes a pane whose answer is unharvested (it flags it `⚑ <name> done, not harvested`, or `idle, not harvested`), and if a pane finishes and no wire message arrives within ~20 s it sends you one `[agt wake]` message naming the pane and the read command (`herdr agent read <name> --source recent-unwrapped --lines 200`, or `tmux capture-pane -p -t <id> -S -200`). Harvest from that, then `close_pane`. A blocked pane gets no wake: it waits on the person. If a newer agentille is installed than the one this session runs, `spawn_pane` refuses (restart Claude Code first): an old session's workers cannot report.
+Still end your turn after the wave; the mod backs you up. It never closes a pane whose answer is unharvested (it flags it `⚑ <name> done, not harvested`, or `idle, not harvested`), and if a pane finishes and no wire message arrives within ~20 s it tries to send you one `[agt wake]` message naming the pane and the read command (`herdr agent read <name> --source recent-unwrapped --lines 200`, or `tmux capture-pane -p -t <id> -S -200`). A session cannot message itself, so that usually reaches the person as a `⚑` toast instead of waking you; a wave that stays quiet past its expected time needs the read loop below. A blocked pane gets no wake: it waits on the person. If a newer agentille is installed than the one this session runs, `spawn_pane` refuses (restart Claude Code first): an old session's workers cannot report.
 
 No wire message within the slice's expected time (a worker without the mod, a crash): fall back to the read loop below.
 
@@ -121,7 +127,7 @@ Peers never message each other; everything routes through the lead.
 
 - The lead closes each pane right after harvesting it (`close_pane`), not at a run-end sweep.
 - The mod's reaper closes any harvested `agt-` pane ~10 s after it reads `done` (60 s after `idle` while the lead is not mid-turn), `/agt-spawn` panes included.
-- When the lead session ends, the mod's SessionEnd sweep closes every `idle` or `done` `agt-` pane in the lead's tab; `working`, `blocked` and `unknown` panes are left alone.
+- When the lead session ends, the mod's SessionEnd sweep closes every `idle` or `done` `agt-` pane in the lead's tab and its run tabs; `working`, `blocked` and `unknown` panes are left alone.
 
 ## Failure → degrade
 

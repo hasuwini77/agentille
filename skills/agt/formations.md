@@ -17,7 +17,7 @@ Only on request ("try two approaches", "best of two"). Needs machine-checkable d
 
 ## relay — contract first, then parallel
 
-Only on request ("contract first", "contract-first split"), for ≥2 slices coupled by one interface. Leg 1: one executor commits types, stubs and contract tests. Leg 2: the slices build in parallel from that commit; the contract is frozen, and a slice that needs it changed stops and reports `CONTRACT: <what and why>`.
+Only on request ("contract first", "contract-first split"), for ≥2 slices coupled by one interface. Leg 1: one executor commits types, stubs and contract tests. Leg 2: the slices build in parallel from that commit; the contract is frozen, and a slice that needs it changed stops and reports `CONTRACT: <what and why>`. The planner's `HOTSPOTS` B0 step uses the same freeze without the formation.
 
 ## Honest cost
 

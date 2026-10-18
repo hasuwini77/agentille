@@ -1,5 +1,6 @@
 import { describe, expect, mock, test } from 'claude-code/testing'
 import { advisorEnv, EFFORTS, PANE_RULE, splitPlan, tmuxEvenArgv, SPAWN_TOOL, closeTarget, paneRole, doneFile, spawnToolInput, TOOL_MODELS, herdrCloseArgv, herdrPaneIdOf, herdrPromptArgv, herdrSplitArgv, herdrStartArgv, isFreshDone, isLead, newRunId, paneName, parseSpawnArgs, parseTmuxList, pickTransport, quietSpawn, reapPool, scopeRows, splitName, tmuxKillArgv, tmuxPaneAgents, tmuxPaneIdOf, tmuxSplitArgv, tmuxTagArgvs, transportBlock, TMUX_LIST_FORMAT } from '../../hooks/panes.js'
+import { agentStatusOf, codexNote, codexTask, dialogKeys, herdrKeysArgv, herdrReadArgv, herdrTabArgv, herdrTabIds, herdrTabListArgv, herdrTabOf, herdrGetArgv, placePlan, screenLine, startupDialog, tabIdsOf, tabsFile } from '../../hooks/panes.js'
 import { DONE_GRACE_MS, reapPlan } from '../../hooks/live.js'
 import { ROLES, roleOf } from '../../hooks/routing.js'
 
@@ -637,7 +638,7 @@ describe('pane tools: input', () => {
   const ok = { run: 'k7f2ab', role: 'exec-1', task: 'build the search filter', agent: 'executor', header }
 
   test('a valid spawn defaults to sonnet and the session cwd', async () => {
-    expect(spawnToolInput(ok)).toEqual({ run: 'k7f2ab', role: 'exec-1', name: 'agt-k7f2ab-exec-1', agent: 'executor', header, hdr: { run: 'k7f2ab', size: 'small', mode: 'build' }, asked: null, model: 'sonnet', task: 'build the search filter', cwd: null })
+    expect(spawnToolInput(ok)).toEqual({ run: 'k7f2ab', role: 'exec-1', name: 'agt-k7f2ab-exec-1', agent: 'executor', header, hdr: { run: 'k7f2ab', size: 'small', mode: 'build' }, asked: null, model: 'sonnet', task: 'build the search filter', cwd: null, layout: 'stack', vendor: 'claude' })
     expect(spawnToolInput({ ...ok, model: 'haiku', cwd: '/w/wt-1' })).toMatchObject({ asked: 'haiku', model: 'haiku', cwd: '/w/wt-1' })
   })
 
@@ -1276,5 +1277,111 @@ describe('pane instance keys', () => {
     expect(answerFile('/h', '../x', 'executor')).toBe(null)
     expect(answerFile('/h', 'r9', 'exec/utor')).toBe(null)
     expect(answerFile('/h', 'r9', 'executor', '../p3')).toBe(null)
+  })
+})
+
+describe('run tabs', () => {
+  test('layout and vendor validate, with stack and claude as defaults', () => {
+    const base = { run: 'ab12cd', role: 'exec-1', task: 'build the thing end to end', agent: 'executor', header: '[agt run=ab12cd size=m risk=low mode=build fable=0]' }
+    const ok = spawnToolInput(base) as { layout: string; vendor: string }
+    expect([ok.layout, ok.vendor]).toEqual(['stack', 'claude'])
+    expect((spawnToolInput({ ...base, layout: 'tab', vendor: 'codex' }) as { layout: string; vendor: string }).layout).toBe('tab')
+    expect(spawnToolInput({ ...base, layout: 'grid' }).error).toContain('layout must be one of stack, tab')
+    expect(spawnToolInput({ ...base, vendor: 'gemini' }).error).toContain('vendor must be one of claude, codex')
+    expect(spawnToolInput({ ...base, agent: 'code-reviewer', vendor: 'codex' }).error).toContain('executor only')
+    expect(Object.keys(SPAWN_TOOL.inputSchema.properties)).toEqual(expect.arrayContaining(['layout', 'vendor']))
+  })
+
+  test('closeTarget takes one tab, a list of tabs, or none', () => {
+    const live = [{ name: 'agt-k7f2ab-exec-1', id: 'w1:p2', tab: 't1' }, { name: 'agt-k7f2ab-exec-2', id: 'w1:p3', tab: 't9' }]
+    expect(closeTarget({ name: 'agt-k7f2ab-exec-2' }, live as never, ['t1', 't9'])).toEqual({ pane: live[1] })
+    expect(closeTarget({ name: 'agt-k7f2ab-exec-2' }, live as never, ['t1']).error).toContain('No pane named')
+    expect(closeTarget({ name: 'agt-k7f2ab-exec-2' }, live as never, 't9')).toEqual({ pane: live[1] })
+  })
+
+  test('tab create argv carries the split env; its json gives the tab and root pane', () => {
+    const argv = herdrTabArgv({ workspace: 'w1', cwd: '/work', run: 'ab12cd', agent: 'executor', model: 'sonnet', effort: 'high', env: ['X=1'] })
+    expect(argv).toEqual(['herdr', 'tab', 'create', '--workspace', 'w1', '--cwd', '/work', '--label', 'agt-ab12cd', '--env', 'AGENTILLE_RUN=ab12cd', '--env', 'AGENTILLE_WORKER=executor:sonnet:high', '--env', 'X=1', '--no-focus'])
+    const out = JSON.stringify({ result: { root_pane: { pane_id: 'w1:p8' }, tab: { tab_id: 'w1:t2' } } })
+    expect(herdrTabOf(out)).toEqual({ tab: 'w1:t2', pane: 'w1:p8' })
+    expect(herdrTabOf('nope')).toBe(null)
+    expect(herdrTabOf(JSON.stringify({ result: { tab: { tab_id: 'bad id' }, root_pane: { pane_id: 'p' } } }))).toBe(null)
+    expect(herdrTabIds(JSON.stringify({ result: { tabs: [{ tab_id: 'w1:t1' }, { tab_id: 'w1:t2' }] } }))).toEqual(['w1:t1', 'w1:t2'])
+    expect(herdrTabIds('x')).toBe(null)
+    expect(herdrTabListArgv('w1')).toEqual(['herdr', 'tab', 'list', '--workspace', 'w1'])
+  })
+
+  test('the tabs file is per lead pane; its ids are validated', () => {
+    expect(tabsFile('/h', 'w1:p3')).toBe('/h/.agentille/state/lead-w1-p3.tabs')
+    expect(tabsFile('/h', '')).toBe(null)
+    expect(tabsFile(null, 'w1:p3')).toBe(null)
+    expect(tabIdsOf('w1:t2\n  w1:t3 \nbad id\n../x\n\n')).toEqual(['w1:t2', 'w1:t3'])
+  })
+
+  test('placement: stack by default, a run tab for layout tab on herdr only, later workers split inside it', () => {
+    const live = [{ id: 'p5' }, { id: 'p6' }, { id: 'p7' }]
+    expect(placePlan({ transport: 'herdr', layout: 'tab', run: 'r1', lead: 'p1', opened: [], live })).toEqual({ newTab: true })
+    const opened = [{ id: 'p5', run: 'r1', tab: 't2' }, { id: 'p6', run: 'r1', tab: 't2' }]
+    expect(placePlan({ transport: 'herdr', layout: 'tab', run: 'r1', lead: 'p1', opened, live })).toEqual({ target: 'p6', direction: 'down', tab: 't2' })
+    expect(placePlan({ transport: 'herdr', layout: 'tab', run: 'r2', lead: 'p1', opened, live })).toEqual({ newTab: true })
+    expect(placePlan({ transport: 'herdr', layout: 'tab', run: 'r1', lead: 'p1', opened, live: [{ id: 'p7' }] })).toEqual({ newTab: true })
+    expect(placePlan({ transport: 'tmux', layout: 'tab', run: 'r1', lead: '%1', opened: [], live })).toEqual({ target: '%1', direction: 'right' })
+    expect(placePlan({ transport: 'herdr', layout: 'stack', run: 'r1', lead: 'p1', opened, live })).toEqual({ target: 'p1', direction: 'right' })
+  })
+})
+
+describe('codex panes', () => {
+  test('codex starts with the update nag off and no model, sandbox or approval flags', () => {
+    expect(herdrStartArgv({ name: 'agt-ab12cd-exec-1', pane: 'w1:p5', model: 'codex', effort: '', agent: 'executor', vendor: 'codex' })).toEqual(['herdr', 'agent', 'start', 'agt-ab12cd-exec-1', '--kind', 'codex', '--pane', 'w1:p5', '--timeout', '45000', '--', '-c', 'check_for_update_on_startup=false'])
+  })
+
+  test('the lead is told to wait on the pane in the background, then read the file', () => {
+    const n = codexNote('agt-ab12cd-exec-1', '/h/a.md')
+    expect(n).toContain('herdr agent wait agt-ab12cd-exec-1 --until done --until blocked --timeout 3600000')
+    expect(n).toContain('read /h/a.md, then close_pane if it is still open')
+  })
+
+  test('the task gets one closing line naming the answer file', () => {
+    expect(codexTask('do it', '/h/a.md')).toBe('do it\n\nWhen you finish, write your complete final report to /h/a.md and stop.')
+  })
+})
+
+describe('startup dialogs', () => {
+  const codexTrust = '> You are in /work/repo\n\n  Do you trust the contents of this directory? Working with untrusted contents comes with higher risk of prompt injection.\n\n› 1. Yes, continue\n  2. No, quit\n\n  Press enter to continue'
+  const codexUpdate = '  ✨ Update available! 0.1.0 -> 0.2.0\n\n  1. Update now\n  2. Skip\n  3. Skip until next version\n\n  Press enter to continue'
+  const claudeTrust = ' Do you trust the files in this folder?\n\n /work/repo\n\n ❯ 1. Yes, proceed\n   2. No, exit'
+  const claudeSafety = ' Accessing workspace:\n /work/repo\n Quick safety check: Is this a project you created or one you trust? (Like\n your own code).\n Security guide\n ❯ No, exit\n   Yes, I trust this folder\n Enter to confirm · Esc to cancel'
+
+  test('classifies the real screens', () => {
+    expect(startupDialog(codexTrust)).toBe('trust')
+    expect(startupDialog(codexUpdate)).toBe('update')
+    expect(startupDialog(claudeTrust)).toBe('trust')
+    expect(startupDialog(claudeSafety)).toBe('trust')
+    expect(startupDialog('Error: login required')).toBe(null)
+    expect(startupDialog('')).toBe(null)
+    expect(startupDialog(null)).toBe(null)
+  })
+
+  test('trust moves onto Yes; update moves down to Skip; unknown sends nothing', () => {
+    expect(dialogKeys('trust', codexTrust)).toEqual(['enter'])
+    expect(dialogKeys('trust', claudeTrust)).toEqual(['enter'])
+    expect(dialogKeys('trust', claudeSafety)).toEqual(['down', 'enter'])
+    expect(dialogKeys('trust', '> You are in /work\n  Do you trust the contents of this directory?')).toEqual([])
+    expect(dialogKeys('update')).toEqual(['down', 'enter'])
+    expect(dialogKeys(null)).toEqual([])
+  })
+
+  test('argv builders and status parsing', () => {
+    expect(herdrReadArgv('agt-a-b')).toEqual(['herdr', 'agent', 'read', 'agt-a-b', '--source', 'detection', '--lines', '40'])
+    expect(herdrKeysArgv('agt-a-b', ['down', 'enter'])).toEqual(['herdr', 'agent', 'send-keys', 'agt-a-b', 'down', 'enter'])
+    expect(herdrGetArgv('agt-a-b')).toEqual(['herdr', 'agent', 'get', 'agt-a-b'])
+    expect(agentStatusOf(JSON.stringify({ result: { agent: { agent_status: 'idle' } } }))).toBe('idle')
+    expect(agentStatusOf('')).toBe(null)
+  })
+
+  test('an unknown screen reports its first non-empty line, 120 chars at most', () => {
+    expect(screenLine('\n\n  Please sign in  \nmore')).toBe('Please sign in')
+    expect(screenLine('x'.repeat(300))).toHaveLength(120)
+    expect(screenLine('')).toContain('unknown screen')
   })
 })

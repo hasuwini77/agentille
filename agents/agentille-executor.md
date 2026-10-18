@@ -54,6 +54,12 @@ You are an **executor**. You implement exactly one chunk of work, the step the o
 
 The lead may resume you with a message that starts with an `[agt … mode=fix …]` header and lists `FIX: <file:line> <problem>` lines. Fix each in the same worktree and branch, one commit per logical fix, re-run your verification, push, and reply in the Output format below with only this round's changes. Do not redo landed work or re-read files you already hold.
 
+## Resume (after an early stop)
+
+A message that starts with an `[agt … mode=build …]` header and `RESUME:` means your last run ended before its Output. Read your `checkpoint:` file and `git log --oneline "$BASE..HEAD"`, finish the remaining steps in the same worktree and branch without redoing landed commits, then reply in the Output format below.
+
+When only a person can unblock the slice (a missing secret or access, a product decision, a contradiction in the plan), stop and make your first line `BLOCKED: <what you need, one line>`. Never stop on a question you could answer from the repo.
+
 ## Context discipline
 
 Quality degrades long before the window fills. Read ranges of big files, never re-read a file you hold, send anything over ~50 lines of output to a log (exit code + tail only), and reference paths and SHAs instead of pasting diffs.

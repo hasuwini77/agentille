@@ -10,6 +10,8 @@ export function words(text) {
   return t ? t.split(/\s+/).length : 0
 }
 
+const EXPECTED_EXIT = /found nothing|nothing found|no match(?:es)?|as expected|\(expected\)|expected (?:exit|non-?zero)/i
+
 // One agent's final answer → a flag line, or null. Reviewers share `VERDICT: PASS|CONCERNS|FAIL`;
 // the executor's VERIFICATION block carries real exit codes and counts.
 export function flagOf(role, answer) {
@@ -23,7 +25,9 @@ export function flagOf(role, answer) {
   }
   if (role === 'executor') {
     const ver = (/VERIFICATION:([\s\S]*?)(\n[A-Z]+:|$)/.exec(a) ?? [])[1] ?? ''
-    if (/exit(?:\s*code)?\s*[:=]?\s*[1-9]\d*/i.test(ver) || /\b[1-9]\d* (failed|failing|fail|errors?)\b/i.test(ver)) return 'executor: verification failed'
+    // Each line on its own: a non-zero exit the line calls the expected result (grep's "no match" is exit 1) is a pass.
+    const failed = ver.split('\n').some((l) => (/exit(?:\s*code)?\s*[:=]?\s*[1-9]\d*/i.test(l) && !EXPECTED_EXIT.test(l)) || /\b[1-9]\d* (failed|failing|fail|errors?)\b/i.test(l))
+    if (failed) return 'executor: verification failed'
     if (/did not run|not run|couldn'?t run|could not run/i.test(ver)) return 'executor: verification not run'
     if (/^CONTEXT\s/m.test(a)) return 'executor handed off at its context limit'
   }

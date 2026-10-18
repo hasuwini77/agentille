@@ -44,6 +44,10 @@ describe('focus: flags from agent results', () => {
     expect(flagOf('executor', 'VERIFICATION:\n- tsc --noEmit: exit code 2\n')).toBe('executor: verification failed')
     expect(flagOf('executor', 'VERIFICATION:\n- build: exit code: 1\n')).toBe('executor: verification failed')
     expect(flagOf('executor', 'VERIFICATION:\n- build: exit code: 0\n')).toBe(null)
+    expect(flagOf('executor', 'VERIFICATION:\n- grep -l "<text" out/*.svg found nothing (exit 1)\n- render: exit 0\n')).toBe(null)
+    expect(flagOf('executor', 'VERIFICATION:\n- grep TODO src: no matches, exit 1 as expected\n')).toBe(null)
+    expect(flagOf('executor', 'VERIFICATION:\n- grep: found nothing (exit 1)\n- npm test: exit=1\n')).toBe('executor: verification failed')
+    expect(flagOf('executor', 'VERIFICATION:\n- curl: expected 200, got 401, exit 1\n')).toBe('executor: verification failed')
     expect(flagOf('executor', 'VERIFICATION:\n- tsc: exit 0\nNOTES:\nCONTEXT exec-1 | high | checkpoint x')).toBe('executor handed off at its context limit')
   })
 

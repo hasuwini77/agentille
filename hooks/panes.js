@@ -313,6 +313,9 @@ export const herdrGetArgv = (name) => ['herdr', 'agent', 'get', name]
 export const screenLine = (text) => String(text ?? '').split('\n').map((l) => l.trim()).find(Boolean)?.slice(0, 120) ?? 'the pane is blocked on an unknown screen'
 
 // What Codex is asked to do last, so the harvest, reaper and wake paths find its answer like a Claude pane's.
+// A Codex pane has no wire and a session cannot message itself, so the lead waits on it in the background:
+// that command's exit is what wakes the lead.
+export const codexNote = (name, file) => ' Codex sends no report: run `herdr agent wait ' + name + ' --until done --until blocked --timeout 3600000` in the background now; when it exits, read ' + file + ', then close_pane if it is still open.'
 export const codexTask = (task, file) => task + '\n\nWhen you finish, write your complete final report to ' + file + ' and stop.'
 
 export const herdrStartArgv = ({ name, pane, model, effort, agent, vendor }) => (vendor === 'codex'

@@ -14,7 +14,7 @@ import { flagOf, focusText, paneFlags, parseFocusArgs } from './focus.js'
 import { cleanDisplay, hasVoice, highlightFlags, profileJson, resolveDisplay, storedDisplay, withDisplay } from './settings.js'
 import { ledgerSummary, overviewText, parseInfoArgs, routeText, routingSummary, squadsSummary } from './info.js'
 import {
-  CLOSE_TOOL, HERDR_START_TIMEOUT, agentStatusOf, codexTask, dialogKeys, herdrKeysArgv, herdrReadArgv, herdrTabArgv, herdrTabIds, herdrTabListArgv, herdrTabOf, herdrGetArgv, placePlan, screenLine, startupDialog, tabIdsOf, tabsFile, PROBE, SPAWN_TOOL, closeTarget, focusArgv, herdrMetaArgv, spawnToolInput, SAFE_RUN, SPAWN_ROLE, TMUX_LIST_ARGV, answerFile, doneFile, herdrCloseArgv, herdrPaneIdOf, herdrPromptArgv, herdrSplitArgv, herdrStartArgv,
+  CLOSE_TOOL, HERDR_START_TIMEOUT, agentStatusOf, codexNote, codexTask, dialogKeys, herdrKeysArgv, herdrReadArgv, herdrTabArgv, herdrTabIds, herdrTabListArgv, herdrTabOf, herdrGetArgv, placePlan, screenLine, startupDialog, tabIdsOf, tabsFile, PROBE, SPAWN_TOOL, closeTarget, focusArgv, herdrMetaArgv, spawnToolInput, SAFE_RUN, SPAWN_ROLE, TMUX_LIST_ARGV, answerFile, doneFile, herdrCloseArgv, herdrPaneIdOf, herdrPromptArgv, herdrSplitArgv, herdrStartArgv,
   isFreshDone, isLead, newRunId, paneKey, paneName, paneRole, parseSpawnArgs, parseTmuxList, pickTransport, quietSpawn, reapPool, scopeRows, splitName, splitPlan, tmuxEvenArgv, tmuxKillArgv, tmuxPaneAgents, tmuxPaneIdOf,
   advisorEnv, tmuxSplitArgv, tmuxTagArgvs, transportBlock,
 } from './panes.js'
@@ -1059,7 +1059,7 @@ export function register(on) {
     ensurePolling($)
     ensureTicker($)
     if (d.reason !== 'table') $.ui.toast('agt ↑ ' + a.agent + ' → ' + d.model + ' · ' + d.effort + ' — ' + d.reason)
-    return { result: 'Opened ' + a.name + ' · ' + d.model + (codex ? '' : ' · ' + d.effort) + ' · ' + t + ' pane.' + (d.reason === 'table' ? '' : ' (' + d.reason + ')') }
+    return { result: 'Opened ' + a.name + ' · ' + d.model + (codex ? '' : ' · ' + d.effort) + ' · ' + t + ' pane.' + (d.reason === 'table' ? '' : ' (' + d.reason + ')') + (codex ? codexNote(a.name, answerFile(home, a.run, a.role, paneKey(id))) : '') }
   })
 
   on('tool.call', { tool: 'mcp__agentille__close_pane' }, async ($, e) => {

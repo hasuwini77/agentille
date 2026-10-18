@@ -1,6 +1,6 @@
 import { describe, expect, mock, test } from 'claude-code/testing'
 import { advisorEnv, EFFORTS, PANE_RULE, splitPlan, tmuxEvenArgv, SPAWN_TOOL, closeTarget, paneRole, doneFile, spawnToolInput, TOOL_MODELS, herdrCloseArgv, herdrPaneIdOf, herdrPromptArgv, herdrSplitArgv, herdrStartArgv, isFreshDone, isLead, newRunId, paneName, parseSpawnArgs, parseTmuxList, pickTransport, quietSpawn, reapPool, scopeRows, splitName, tmuxKillArgv, tmuxPaneAgents, tmuxPaneIdOf, tmuxSplitArgv, tmuxTagArgvs, transportBlock, TMUX_LIST_FORMAT } from '../../hooks/panes.js'
-import { agentStatusOf, codexTask, dialogKeys, herdrKeysArgv, herdrReadArgv, herdrTabArgv, herdrTabIds, herdrTabListArgv, herdrTabOf, herdrGetArgv, placePlan, screenLine, startupDialog, tabIdsOf, tabsFile } from '../../hooks/panes.js'
+import { agentStatusOf, codexNote, codexTask, dialogKeys, herdrKeysArgv, herdrReadArgv, herdrTabArgv, herdrTabIds, herdrTabListArgv, herdrTabOf, herdrGetArgv, placePlan, screenLine, startupDialog, tabIdsOf, tabsFile } from '../../hooks/panes.js'
 import { DONE_GRACE_MS, reapPlan } from '../../hooks/live.js'
 import { ROLES, roleOf } from '../../hooks/routing.js'
 
@@ -1333,6 +1333,12 @@ describe('run tabs', () => {
 describe('codex panes', () => {
   test('codex starts with the update nag off and no model, sandbox or approval flags', () => {
     expect(herdrStartArgv({ name: 'agt-ab12cd-exec-1', pane: 'w1:p5', model: 'codex', effort: '', agent: 'executor', vendor: 'codex' })).toEqual(['herdr', 'agent', 'start', 'agt-ab12cd-exec-1', '--kind', 'codex', '--pane', 'w1:p5', '--timeout', '45000', '--', '-c', 'check_for_update_on_startup=false'])
+  })
+
+  test('the lead is told to wait on the pane in the background, then read the file', () => {
+    const n = codexNote('agt-ab12cd-exec-1', '/h/a.md')
+    expect(n).toContain('herdr agent wait agt-ab12cd-exec-1 --until done --until blocked --timeout 3600000')
+    expect(n).toContain('read /h/a.md, then close_pane if it is still open')
   })
 
   test('the task gets one closing line naming the answer file', () => {

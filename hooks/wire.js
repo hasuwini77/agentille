@@ -122,9 +122,8 @@ export function readCommand(transport, id, name) {
 }
 
 // The message the lead sends its own session when a worker finished without reporting.
-export function wakeMessage({ name, transport, id, answerPath = null, closed = false }) {
+export function wakeMessage({ name, transport, id, answerPath = null }) {
   const cmd = readCommand(transport, id, name)
   const read = answerPath ? 'Its answer is saved at ' + answerPath + '; read that.' : cmd ? 'Read it with: ' + cmd : 'Read the pane.'
-  if (closed) return WAKE_TAG + ' ' + name + ' finished and has not reported. ' + read + ' Its pane is already closed.'
   return WAKE_TAG + ' ' + name + ' finished and has not reported. ' + read + ' Then harvest it and close_pane.'
 }

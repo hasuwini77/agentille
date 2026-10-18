@@ -2,6 +2,46 @@
 
 All notable changes to agentille are documented here.
 
+## [3.15.0] — 2026-10-18
+
+### Added
+
+- **Resume once.** An executor that stops before its report (no
+  `VERIFICATION:`, ends on a question, or its pane went done mid-slice)
+  is resumed once from its checkpoint and branch, as `mode=build`, so it
+  never counts as a fix round or climbs the escalation ladder. A worker
+  that truly needs a person reports `BLOCKED: <need>` and is escalated
+  instead.
+- **Shared-file freeze.** The planner lists `HOTSPOTS` (manifests and
+  lockfiles, schema, shared types and barrels, registries, global config,
+  i18n) that two or more slices would edit, and lands them first in a
+  sequential `B0 contract` step. The plan reviewer blocks a plan that
+  lets two parallel slices edit one.
+- **Haiku scouts.** On medium and heavy runs that name no files, up to
+  3 read-only `Explore` subagents on Haiku map the code first, and the
+  planner gets their answers.
+- **Run tabs (Herdr).** `spawn_pane` takes `layout: "tab"`: a run with
+  3 or more pane workers stacks them in its own tab instead of the
+  lead's. The reaper, `close_pane` and the session-end sweep cover the
+  tabs a session opened, and a tab closes with its last worker.
+- **Codex workers (Herdr).** `spawn_pane` takes `vendor: "codex"` for an
+  executor slice when the task asks for Codex. It runs on the person's
+  own Codex config and writes its report to the run's answer file. A
+  Codex pane sends no wire report, so the spawn result tells the lead to
+  start a background `herdr agent wait` on it, and that wait's exit wakes
+  the lead.
+- **Startup prompts.** Opening a pane accepts the folder-trust prompt
+  for the lead's own repo and its worktrees, and skips Codex's update
+  notice. Any other startup prompt fails the spawn, and the slice falls
+  back to a subagent. Claude's trust menu preselects "No", so the keys
+  are read off the screen: move to the Yes line, then confirm.
+
+### Fixed
+
+- The docs no longer promise an `[agt wake]` message for a silent pane.
+  A session cannot message itself, so it reaches the person as a `⚑`
+  toast, and the lead falls back to the read loop.
+
 ## [3.14.0] — 2026-10-17
 
 ### Added

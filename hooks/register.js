@@ -3,7 +3,7 @@
 // routing.js / live.js / board.js / wire.js / squads.js / mascot.js / focus.js; this file
 // observes events, applies decisions, and draws.
 
-import { DEFAULTS, decide, formationOf, parseHeader, roleOf, verdictOf } from './routing.js'
+import { DEFAULTS, decide, formationOf, ladderFixes, parseHeader, roleOf, verdictOf } from './routing.js'
 import { addUsage, elapsed, endRoute, finish, isAgtPrompt, ledger, ledgerText, newAgent, paneAgents, panesLeft, reapPlan, short, stage, waving } from './live.js'
 import { ACCENT, FRAME_COLOR, INK, WIRE_COLOR, boardRows, cast, castColumns, chip, colorOf, header, hex, leadLine, routingLines, runPhases, swarm, tokenBars, toolLabel, wireLines, wireRow } from './board.js'
 import { PUBLISH_MS, doneMessage, freshStatus, logWire, parseTellArgs, parseWire, shortName, statusKey, validLead, wakeDue, wakeMessage, wireEnv, workerStatus } from './wire.js'
@@ -113,7 +113,7 @@ function heard(a, e) {
 }
 
 function runState(id) {
-  if (!runs.has(id)) runs.set(id, { revise: 0, fixes: 0, fable: 0, formation: null, log: [], reports: {} })
+  if (!runs.has(id)) runs.set(id, { revise: 0, fixes: 0, fixesByPiece: {}, fable: 0, formation: null, log: [], reports: {} })
   return runs.get(id)
 }
 
@@ -1014,8 +1014,10 @@ export function register(on) {
     lastRun = a.run
     const run = runState(a.run)
     run.formation = formationOf(a.hdr) ?? run.formation
-    // Counted only once the pane opens: a failed split is not a fix attempt.
-    const fixes = run.fixes + (a.agent === 'executor' && a.hdr.mode === 'fix' ? 1 : 0)
+    // Counted only once the pane opens: a failed split is not a fix attempt. The ladder sees this piece's rounds only.
+    const isFix = a.agent === 'executor' && a.hdr.mode === 'fix'
+    const fixKey = pieceOf(a.hdr) ?? ''
+    const fixes = ladderFixes(run, pieceOf(a.hdr)) + (isFix ? 1 : 0)
     run.fable = Math.max(run.fable, Number((await $.store.get('fable:' + a.run)) ?? 0))
     const codex = a.vendor === 'codex'
     if (codex && t !== 'herdr') return { deny: 'Codex panes need Herdr; run this slice as a Claude pane or subagent.' }
@@ -1042,7 +1044,10 @@ export function register(on) {
     firstSeen.set(id, await $.clock.now())
     for (const s of [harvested, wireDone, woken, strandedToasted]) s.delete(id)
     paneSeen.delete(id)
-    run.fixes = fixes
+    if (isFix) {
+      run.fixes += 1
+      run.fixesByPiece[fixKey] = (run.fixesByPiece[fixKey] ?? 0) + 1
+    }
     if (d.fable) {
       run.fable += 1
       await $.store.set('fable:' + a.run, run.fable)
@@ -1203,7 +1208,7 @@ export function register(on) {
       if (named && (lastRun === 'adhoc' || !busy)) lastRun = named
       agtTurn = true
       // The table pick follows the run in progress (its REVISEs); `run` is only where the log goes.
-      const d = decide({ role, hdr, run: runState(runId), depth, settings, weeklyPct })
+      const d = decide({ role, hdr, run: { ...runState(runId), fixes: ladderFixes(runState(runId), pieceOf(hdr)) }, depth, settings, weeklyPct })
       const res = await next(e)
       if (res.deny) return res
       const off = short(res.model) !== short(d.model)
@@ -1232,11 +1237,15 @@ export function register(on) {
     lastRun = runId
     const run = runState(runId)
     run.formation = formationOf(hdr) ?? run.formation
-    if (role === 'executor' && hdr.mode === 'fix') run.fixes += 1
+    if (role === 'executor' && hdr.mode === 'fix') {
+      const key = pieceOf(hdr) ?? ''
+      run.fixes += 1
+      run.fixesByPiece[key] = (run.fixesByPiece[key] ?? 0) + 1
+    }
     const shared = Number((await $.store.get('fable:' + runId)) ?? 0)
     run.fable = Math.max(run.fable, shared)
 
-    const d = decide({ role, hdr, run, depth, settings, weeklyPct })
+    const d = decide({ role, hdr, run: { ...run, fixes: ladderFixes(run, pieceOf(hdr)) }, depth, settings, weeklyPct })
     const res = await next({ ...e, model: d.model })
     if (res.deny) return res
 

@@ -69,6 +69,16 @@ function base(role, hdr, depth) {
   return row.base
 }
 
+// Fix rounds count per piece (factory.md: at most 2 fix rounds per piece), so two pieces in fix rounds never push each
+// other up the ladder. `run.fixesByPiece` maps piece → rounds ('' = no piece). Without a piece (a diagnose planner, a
+// single-piece run) the ladder sees the worst piece.
+export function ladderFixes(run, piece) {
+  const by = run?.fixesByPiece ?? {}
+  if (piece) return by[piece] ?? 0
+  const all = Object.values(by)
+  return all.length ? Math.max(...all) : 0
+}
+
 // run: { revise, fixes, fable } observed so far · settings: profile.routing merged over DEFAULTS
 // weeklyPct: seven_day percent used, or null when unknown
 export function decide({ role, hdr = {}, run = { revise: 0, fixes: 0, fable: 0 }, depth, settings = DEFAULTS, weeklyPct = null }) {

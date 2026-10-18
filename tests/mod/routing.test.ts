@@ -1,5 +1,5 @@
 import { describe, expect, mock, test } from 'claude-code/testing'
-import { decide, formationOf, parseHeader, roleOf, verdictOf } from '../../hooks/routing.js'
+import { decide, formationOf, ladderFixes, parseHeader, roleOf, verdictOf } from '../../hooks/routing.js'
 
 const fresh = () => ({ revise: 0, fixes: 0, fable: 0 })
 const S = { autoFable: true, maxFablePerRun: 1, fableWeeklyCeiling: 60 }
@@ -60,6 +60,17 @@ describe('Fable is rare', () => {
 
   test('two REVISEs make the planner a Fable candidate', async () => {
     expect(decide({ role: 'planner', hdr: {}, run: { ...fresh(), revise: 2 }, settings: S })).toMatchObject({ model: 'fable', fable: true })
+  })
+
+  test('fix rounds count per piece: one piece in fix rounds never escalates another', async () => {
+    const run = { ...fresh(), fixes: 3, fixesByPiece: { learn: 2, resolve: 1 } }
+    expect(ladderFixes(run, 'resolve')).toBe(1)
+    expect(ladderFixes(run, 'learn')).toBe(2)
+    expect(ladderFixes(run, 'fit')).toBe(0)
+    expect(ladderFixes(run, null)).toBe(2) // no piece: the worst piece
+    expect(ladderFixes(fresh(), null)).toBe(0)
+    // resolve's first fix round (1 + this dispatch = 2 overall, but 1 on its piece) stays at table effort
+    expect(decide({ role: 'executor', hdr: { mode: 'fix', size: 'large' }, run: { ...run, fixes: ladderFixes(run, 'resolve') }, settings: S }).reason).toBe('table')
   })
 
   test('diagnosis goes to Fable only after 3 failed fixes', async () => {

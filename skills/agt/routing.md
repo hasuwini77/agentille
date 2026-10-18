@@ -82,7 +82,7 @@ Dispatch with aliases (`fable`/`opus`/`sonnet`/`haiku`), never pinned IDs. A pan
 Evidence is observed by the mod, not claimed by the lead.
 
 - **Plan:** 1st REVISE → next planner runs opus · max. 2nd REVISE → next planner is a Fable candidate.
-- **Fix:** attempt 2 → executor effort high; attempt ≥3 → max. A `mode=diagnose` planner after ≥3 fixes → Fable candidate.
+- **Fix (per piece):** attempt 2 → executor effort high; attempt ≥3 → max. Rounds are counted per `piece=`, so one piece in fix rounds never raises another's effort. A `mode=diagnose` planner after ≥3 fixes → Fable candidate.
 - **Fable gate** (all must pass, else opus · max with the reason logged): candidate · `profile.routing.autoFable` not false · fewer than `maxFablePerRun` (default 1) Fable spawns this run · weekly plan usage below `fableWeeklyCeiling` (default 60%).
 
 ### Advisor

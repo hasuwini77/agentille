@@ -303,5 +303,8 @@ describe('wire: lead self-wake', () => {
     expect(wakeMessage({ name: 'agt-r1-a', transport: 'tmux', id: '%5' })).toContain('tmux capture-pane -p -t %5 -S -200')
     expect(wakeMessage({ name: 'agt-r1-a', transport: 'tmux', id: '%5', answerPath: '/h/a.md' })).toContain('saved at /h/a.md')
     expect(wakeMessage({ name: 'agt-r1-a', transport: 'none', id: '' })).toContain('Read the pane.')
+    const gone = wakeMessage({ name: 'agt-r1-a', transport: 'herdr', id: 'w1:p5', answerPath: '/h/a.md', closed: true })
+    expect(gone).toContain('saved at /h/a.md')
+    expect(gone.endsWith('Its pane is already closed.')).toBe(true)
   })
 })

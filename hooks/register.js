@@ -383,12 +383,14 @@ async function isHarvested($, p) {
 // the pane and how to read it, so the lead does not wait blind. Once per pane. A blocked pane waits on the person.
 async function wakeLead($, pool, now, t) {
   if (!sessionId) return
-  for (const p of wakeDue(pool.filter((q) => q.role !== SPAWN_ROLE), paneSeen, wireDone, woken, now)) { // a spawn pane has no lead run to wake
-    woken.add(p.id)
-    const text = wakeMessage({ name: p.name, transport: t, id: p.id, answerPath: await answerOf($, p) })
-    const r = await $.session.send({ to: { sessionId }, text }).catch((err) => ({ isDelivered: false, reason: String(err?.message ?? err) }))
-    if (!r.isDelivered) $.ui.toast('agt ⚑ ' + p.name + ' ' + p.state + ' with no report. ' + text.slice(text.indexOf('. ') + 2).slice(0, 120))
-  }
+  for (const p of wakeDue(pool.filter((q) => q.role !== SPAWN_ROLE), paneSeen, wireDone, woken, now)) await wakeOne($, p, t) // a spawn pane has no lead run to wake
+}
+
+async function wakeOne($, p, t, closed = false) {
+  woken.add(p.id)
+  const text = wakeMessage({ name: p.name, transport: t, id: p.id, answerPath: await answerOf($, p), closed })
+  const r = await $.session.send({ to: { sessionId }, text }).catch((err) => ({ isDelivered: false, reason: String(err?.message ?? err) }))
+  if (!r.isDelivered) $.ui.toast('agt ⚑ ' + p.name + ' ' + p.state + ' with no report. ' + text.slice(text.indexOf('. ') + 2).slice(0, 120))
 }
 
 // The lead's reaper. A finished pane closes only once its answer is in hand; until then it stays
@@ -405,6 +407,8 @@ async function sweep($, pool, now, t, close) {
     $.ui.toast('agt ⚑ ' + p.name + ' ' + p.state + ', not harvested')
   }
   for (const p of plan.reap) {
+    // A worker with no wire (a Codex pane) is harvested by its answer file alone: tell the lead before its pane goes.
+    if (sessionId && p.role !== SPAWN_ROLE && !wireDone.has(p.id) && !woken.has(p.id)) await wakeOne($, p, t, true)
     try {
       await close(p)
       $.ui.toast('agt reaped ' + p.name + ' (' + p.state + ')')

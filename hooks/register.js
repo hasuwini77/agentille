@@ -484,7 +484,11 @@ async function clearDialogs($, name, cwd) {
     if (kind === 'trust' && !(await sameRepo($, cwd, await $.session.cwd()))) throw new Error(cwd + ' needs a one-time trust: open it once by hand.')
     const keys = dialogKeys(kind, screen)
     if (!keys.length) throw new Error(screenLine(screen))
-    await runOk($, herdrKeysArgv(name, keys), PROBE)
+    // One key at a time: a menu that has only just drawn drops keys sent in one burst.
+    for (const k of keys) {
+      await $.clock.sleep(300)
+      await runOk($, herdrKeysArgv(name, [k]), PROBE)
+    }
     // herdr reads the cleared screen about 0.5 s later; poll up to 10 s, then look for a next dialog.
     for (let n = 0; n < 20; n++) {
       await $.clock.sleep(500)

@@ -278,12 +278,22 @@ export function placePlan({ transport, layout, run, lead, opened = [], live = []
 export function startupDialog(text) {
   const t = String(text ?? '')
   if (/Update available/i.test(t) && /\bSkip\b/.test(t)) return 'update'
-  if (/Do you trust the (contents of this directory|files in this folder)\?/i.test(t)) return 'trust'
+  if (/Do you trust the (contents of this directory|files in this folder)\?|Is this a project you created or one you trust\?/i.test(t)) return 'trust'
   return null
 }
 
+// The keys that move a trust menu's cursor (❯ or ›) onto its Yes line, then confirm. Claude preselects
+// "No, exit" and Codex "Yes", so the move is read off the screen. null when either line is missing.
+export function trustKeys(text) {
+  const lines = String(text ?? '').split('\n')
+  const cur = lines.findIndex((l) => /^\s*[❯›]\s/.test(l))
+  const yes = lines.findIndex((l) => /^\s*[❯›]?\s*(\d+\.\s*)?Yes\b/.test(l))
+  if (cur < 0 || yes < 0) return null
+  return [...Array(Math.abs(yes - cur)).fill(yes > cur ? 'down' : 'up'), 'enter']
+}
+
 // Trust: the preselected "Yes" takes Enter. Update: the second row, Skip.
-export const dialogKeys = (kind) => (kind === 'trust' ? ['enter'] : kind === 'update' ? ['down', 'enter'] : [])
+export const dialogKeys = (kind, text = '') => (kind === 'trust' ? trustKeys(text) ?? [] : kind === 'update' ? ['down', 'enter'] : [])
 
 export const herdrReadArgv = (name) => ['herdr', 'agent', 'read', name, '--source', 'detection', '--lines', '40']
 export const herdrKeysArgv = (name, keys) => ['herdr', 'agent', 'send-keys', name, ...keys]

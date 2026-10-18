@@ -1344,18 +1344,23 @@ describe('startup dialogs', () => {
   const codexTrust = '> You are in /work/repo\n\n  Do you trust the contents of this directory? Working with untrusted contents comes with higher risk of prompt injection.\n\n› 1. Yes, continue\n  2. No, quit\n\n  Press enter to continue'
   const codexUpdate = '  ✨ Update available! 0.1.0 -> 0.2.0\n\n  1. Update now\n  2. Skip\n  3. Skip until next version\n\n  Press enter to continue'
   const claudeTrust = ' Do you trust the files in this folder?\n\n /work/repo\n\n ❯ 1. Yes, proceed\n   2. No, exit'
+  const claudeSafety = ' Accessing workspace:\n /work/repo\n Quick safety check: Is this a project you created or one you trust? (Like\n your own code).\n Security guide\n ❯ No, exit\n   Yes, I trust this folder\n Enter to confirm · Esc to cancel'
 
   test('classifies the real screens', () => {
     expect(startupDialog(codexTrust)).toBe('trust')
     expect(startupDialog(codexUpdate)).toBe('update')
     expect(startupDialog(claudeTrust)).toBe('trust')
+    expect(startupDialog(claudeSafety)).toBe('trust')
     expect(startupDialog('Error: login required')).toBe(null)
     expect(startupDialog('')).toBe(null)
     expect(startupDialog(null)).toBe(null)
   })
 
-  test('trust takes enter; update moves down to Skip; unknown sends nothing', () => {
-    expect(dialogKeys('trust')).toEqual(['enter'])
+  test('trust moves onto Yes; update moves down to Skip; unknown sends nothing', () => {
+    expect(dialogKeys('trust', codexTrust)).toEqual(['enter'])
+    expect(dialogKeys('trust', claudeTrust)).toEqual(['enter'])
+    expect(dialogKeys('trust', claudeSafety)).toEqual(['down', 'enter'])
+    expect(dialogKeys('trust', '> You are in /work\n  Do you trust the contents of this directory?')).toEqual([])
     expect(dialogKeys('update')).toEqual(['down', 'enter'])
     expect(dialogKeys(null)).toEqual([])
   })

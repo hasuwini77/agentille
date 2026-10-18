@@ -424,12 +424,16 @@ export function spawnToolInput(input, live = []) {
 
 // close_pane input → { pane } from the panes this session owns, or { error }. `tab`, when
 // given (one id or a list), keeps a herdr close inside the lead's own tab and the run tabs it made.
-export function closeTarget(input, live = [], tab = null) {
+// `mine`: names this lead opened. One the reaper already closed after harvest is `gone`, not an error: the lead's
+// close-after-harvest then still reads as done.
+export function closeTarget(input, live = [], tab = null, mine = new Set()) {
   const tabs = tab === null ? null : [tab].flat()
   const name = typeof input?.name === 'string' ? input.name.trim() : ''
   const n = splitName(name)
   if (!n) return { error: 'name must be an agt-<run>-<role> pane name.' }
   if (n.role === SPAWN_ROLE) return { error: name + ' was opened by a typed /agt-spawn; only the automatic reaper closes it.' }
   const pane = live.find((p) => p.name === name && (tabs === null || tabs.includes(p.tab)))
-  return pane ? { pane } : { error: 'No pane named ' + name + ' in this tab or window.' }
+  if (pane) return { pane }
+  if (mine.has(name) && !live.some((p) => p.name === name)) return { gone: name }
+  return { error: 'No pane named ' + name + ' in this tab or window.' }
 }

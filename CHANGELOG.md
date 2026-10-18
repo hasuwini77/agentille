@@ -2,6 +2,18 @@
 
 All notable changes to agentille are documented here.
 
+## [3.15.1] — 2026-10-18
+
+### Fixed
+
+- **Fix ladder per piece.** Fix rounds are counted per `piece=`, not per
+  run. Two pieces in fix rounds no longer push each other up the ladder
+  (a piece's first fix used to run as "fix attempt 2", its second at max
+  effort).
+- **close_pane after the reaper.** Closing a pane this session opened
+  that the reaper already closed after its answer was saved now reports
+  it closed instead of "No pane named …".
+
 ## [3.15.0] — 2026-10-18
 
 ### Added

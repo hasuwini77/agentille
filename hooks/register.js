@@ -39,6 +39,7 @@ const decisions = []         // this session, for /agt-info routing
 let panes = []               // agt-* panes (herdr or tmux) other than this one
 const paneRoutes = []        // PaneRoute[], append-only: how each worker this lead opened was routed
 let opened = []              // { id, name } of panes this lead opened via spawn_pane, in spawn order
+const openedNames = new Set() // every pane name this lead opened, kept after the pane closes
 const staged = new Map()     // pane name → last pane seen on stage (live.js panesLeft)
 const paneSeen = new Map()   // reaper bookkeeping
 const harvested = new Set()  // pane ids whose answer the lead has in hand (a wire done message, a saved answer file, a close_pane)
@@ -1053,6 +1054,7 @@ export function register(on) {
       await $.store.set('fable:' + a.run, run.fable)
     }
     opened.push({ id, name: a.name, run: a.run, tab })
+    openedNames.add(a.name)
     const piece = pieceOf(a.hdr)
     paneRoutes.push({ name: a.name, run: a.run, role: a.role, agent: a.agent, model: d.model, effort: d.effort, reason: d.reason, start: Date.now(), end: null, piece, verdict: null })
     logWire(wireLog, { from: 'lead', to: party(shortName(a.name), piece), kind: 'task', summary: taskLine(a.task) || a.agent, at: Date.now() })
@@ -1072,7 +1074,8 @@ export function register(on) {
     const t = await transportOf($)
     if (t === 'none') return { deny: 'No pane transport here.' }
     await pollNow($, t)
-    const c = closeTarget(e, panes, t === 'herdr' && selfTab ? [selfTab, ...ownedTabs] : null)
+    const c = closeTarget(e, panes, t === 'herdr' && selfTab ? [selfTab, ...ownedTabs] : null, openedNames)
+    if (c.gone) return { result: c.gone + ' is already closed (the reaper closed it after its answer was saved).' }
     if (c.error) return { deny: c.error }
     const r = await $.process.run(t === 'herdr' ? herdrCloseArgv(c.pane.id) : tmuxKillArgv(c.pane.id), PROBE).catch(() => null)
     if (!r || r.exitCode !== 0) return { deny: 'Could not close ' + c.pane.name + '.' }

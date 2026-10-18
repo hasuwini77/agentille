@@ -687,6 +687,10 @@ describe('pane tools: input', () => {
     expect(closeTarget({ name: 'agt-k7f2ab-exec-2' }, live as never, null)).toEqual({ pane: live[1] })
     expect(closeTarget({ name: 'agt-k7f2ab-spawn' }, live as never, 't1').error).toContain('typed /agt-spawn')
     expect(closeTarget({ name: 'build' }, live as never).error).toContain('agt-<run>-<role>')
+    // A pane this lead opened that the reaper already closed is gone, not an error; a stranger's name still errors.
+    expect(closeTarget({ name: 'agt-k7f2ab-fix-1' }, live as never, 't1', new Set(['agt-k7f2ab-fix-1']))).toEqual({ gone: 'agt-k7f2ab-fix-1' })
+    expect(closeTarget({ name: 'agt-k7f2ab-fix-1' }, live as never, 't1').error).toContain('No pane named')
+    expect(closeTarget({ name: 'agt-k7f2ab-exec-2' }, live as never, 't1', new Set(['agt-k7f2ab-exec-2'])).error).toContain('No pane named')
   })
 })
 

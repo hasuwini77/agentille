@@ -531,8 +531,40 @@ export const tmuxTitleArgvs = (id, name) => [
 ]
 export const tmuxTypeArgvs = (id, command) => [['tmux', 'send-keys', '-t', id, '-l', '--', command], ['tmux', 'send-keys', '-t', id, 'Enter']]
 
+// A resting session closes after this long: time to read an answer and type the next prompt.
+export const SESSION_IDLE_MS = 10 * 60_000
+
+// The Herdr sessions a lead closes now: an agent idle (its answer seen) and unfocused for SESSION_IDLE_MS, or one whose
+// agent is gone (claude exited to a bare shell, or the pane was closed by hand: the close checks first). A `done` agent
+// holds an answer nobody has looked at yet, so it stays; a shell is never closed for the person. `since` maps
+// name → when it was first seen resting, updated in place.
+export function sessionSweep(sessions, agents, since, now) {
+  const due = []
+  for (const s of sessions) {
+    if (s.kind === 'shell') continue
+    const a = agents.find((x) => x.name === s.name)
+    if (!a) {
+      due.push(s)
+      continue
+    }
+    if (a.agent_status !== 'idle' || a.focused) {
+      since.delete(s.name)
+      continue
+    }
+    if (!since.has(s.name)) since.set(s.name, now)
+    if (now - since.get(s.name) >= SESSION_IDLE_MS) due.push(s)
+  }
+  return due
+}
+
+// Where a lead lists its Herdr agent sessions, so the SessionEnd sweep closes the idle ones.
+export function sessionsFile(home, leadPane) {
+  const key = paneKey(leadPane)
+  return home && key ? home + '/.agentille/state/lead-' + key + '.sessions' : null
+}
+
 // What the lead may do next with the sessions it opened, without any tool of ours.
 export function sessionsNote(transport, kind) {
-  if (transport === 'herdr' && kind !== 'shell') return ' To send one a prompt: herdr agent prompt <name> "…". To read it: herdr agent read <name> --source recent-unwrapped --lines 120. close_pane <name> closes one when the person asks.'
-  return ' close_pane <name> closes one when the person asks.'
+  if (transport === 'herdr' && kind !== 'shell') return ' Each closes itself after ' + SESSION_IDLE_MS / 60_000 + ' minutes idle and when this session ends. To send one a prompt: herdr agent prompt <name> "…". To read it: herdr agent read <name> --source recent-unwrapped --lines 120. close_pane <name> closes one now when the person asks.'
+  return ' They close only on request: close_pane <name> when the person asks.'
 }

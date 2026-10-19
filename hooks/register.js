@@ -18,7 +18,7 @@ import {
   CLOSE_TOOL, HERDR_START_TIMEOUT, agentStatusOf, codexNote, codexTask, dialogKeys, herdrKeysArgv, herdrReadArgv, herdrTabArgv, herdrTabIds, herdrTabListArgv, herdrTabOf, herdrGetArgv, placePlan, screenLine, startupDialog, tabIdsOf, tabsFile, PROBE, SPAWN_TOOL, closeTarget, focusArgv, herdrMetaArgv, spawnToolInput, SAFE_RUN, SPAWN_ROLE, TMUX_LIST_ARGV, answerFile, doneFile, herdrCloseArgv, herdrPaneIdOf, herdrPromptArgv, herdrSplitArgv, herdrStartArgv,
   isFreshDone, isLead, newRunId, paneKey, paneName, paneRole, parseSpawnArgs, parseTmuxList, pickTransport, quietSpawn, reapPool, scopeRows, splitName, splitPlan, tmuxEvenArgv, tmuxKillArgv, tmuxPaneAgents, tmuxPaneIdOf,
   advisorEnv, tmuxSplitArgv, tmuxTagArgvs, transportBlock,
-  OPEN_SESSIONS_TOOL, herdrPaneGetArgv, herdrRunArgv, herdrSessionSplitArgv, herdrSessionStartArgv, herdrSessionTabArgv, herdrTerminalOf, sessionName, sessionsNote, sessionsToolInput, tmuxSessionSplitArgv, tmuxTitleArgvs, tmuxTypeArgvs,
+  OPEN_SESSIONS_TOOL, herdrPaneGetArgv, herdrRunArgv, herdrSessionSplitArgv, herdrSessionStartArgv, herdrSessionTabArgv, herdrTerminalOf, SESSION_IDLE_MS, sessionName, sessionSweep, sessionsFile, sessionsNote, sessionsToolInput, tmuxSessionSplitArgv, tmuxTitleArgvs, tmuxTypeArgvs,
 } from './panes.js'
 import { cacheDirOf, compareVersions, newerInstalled, skewMessage } from './skew.js'
 import { adopt, applyStatus, nest, quietWorkflows } from './tree.js'
@@ -43,6 +43,7 @@ const paneRoutes = []        // PaneRoute[], append-only: how each worker this l
 let opened = []              // { id, name } of panes this lead opened via spawn_pane, in spawn order
 const openedNames = new Set() // every pane name this lead opened, kept after the pane closes
 let sessions = []            // { id, name, kind, tab, terminal } of the sessions this lead opened via open_sessions, oldest first
+const restingSince = new Map() // session name → when it was first seen idle and unfocused (sessionSweep)
 const staged = new Map()     // pane name → last pane seen on stage (live.js panesLeft)
 const paneSeen = new Map()   // reaper bookkeeping
 const harvested = new Set()  // pane ids whose answer the lead has in hand (a wire done message, a saved answer file, a close_pane)
@@ -447,6 +448,9 @@ async function pollHerdr($) {
     await pruneTabs($, me.workspace_id)
     const mine = real.filter((p) => p.tab === me.tab_id || ownedTabs.has(p.tab))
     await sweep($, reapPool(mine), now, 'herdr', (p) => $.process.run(herdrCloseArgv(p.id)))
+    for (const s of sessionSweep(sessions, list, restingSince, now)) {
+      if ((await closeSession($, 'herdr', s)) === 'closed') $.ui.toast('agt ◆ closed ' + s.name + ': idle ' + SESSION_IDLE_MS / 60_000 + ' min')
+    }
   }
   $.ui.invalidate('ui.render')
 }
@@ -493,6 +497,13 @@ async function cleanWorkspace($, { all = false, auto = false, panesOnly = false 
     for (const p of close) if ((await run(herdrCloseArgv(p.id)))?.exitCode === 0) r.closed.push(p.name)
     r.keep.push(...plan.keep)
     for (const k of staleTabs(keys, list, paneKey)) if ((await run(['rm', '-f', dir + '/lead-' + k + '.tabs']))?.exitCode === 0) r.tabs += 1
+    // A lead that died skipped its SessionEnd sweep: close its idle sessions, then drop its list.
+    const sessKeys = dir ? (await $.fs.list(dir).catch(() => [])).map((f) => f.name).filter((n) => /^lead-[\w-]+\.sessions$/.test(n)).map((n) => n.slice(5, -9)) : []
+    for (const k of staleTabs(sessKeys, list, paneKey)) {
+      const names = String(await $.fs.read(dir + '/lead-' + k + '.sessions').catch(() => '')).split('\n').filter((n) => /^s-[\w-]+$/.test(n))
+      for (const a of list) if (names.includes(a.name) && a.agent_status === 'idle' && !a.focused && (await run(herdrCloseArgv(a.pane_id)))?.exitCode === 0) r.closed.push(a.name)
+      await run(['rm', '-f', dir + '/lead-' + k + '.sessions'])
+    }
   } else if (transport === 'tmux') {
     const res = await run(TMUX_LIST_ARGV)
     let rows = res?.exitCode === 0 ? parseTmuxList(res.stdout) : []
@@ -600,6 +611,34 @@ async function startAgent($, argv, name, cwd) {
     if (!/agent_pane_busy/.test(r.stderr ?? '') || attempt >= 20) throw new Error('herdr agent start exited ' + r.exitCode + (r.stderr ? ': ' + String(r.stderr).trim().slice(0, 120) : ''))
     await $.clock.sleep(500)
   }
+}
+
+// The Herdr agent sessions this lead has open, one name per line, where the SessionEnd sweep reads them. A failed
+// write loses only the sweep's reach, so it never blocks.
+async function saveSessions($) {
+  const file = sessionsFile(home, await $.env.get('HERDR_PANE_ID'))
+  if (file) await $.fs.write(file, sessions.filter((s) => s.kind !== 'shell' && s.terminal).map((s) => s.name + '\n').join('')).catch(() => {})
+}
+
+// Close one session this lead opened → 'closed' | 'gone' | 'failed'. herdr can hand a closed pane's id out again,
+// so a herdr pane closes only while it still holds the session's terminal; tmux pane ids never repeat.
+async function closeSession($, t, s) {
+  const forget = async () => {
+    sessions = sessions.filter((x) => x !== s)
+    restingSince.delete(s.name)
+    if (t === 'herdr') await saveSessions($)
+  }
+  if (t === 'herdr') {
+    const g = await $.process.run(herdrPaneGetArgv(s.id), PROBE).catch(() => null)
+    if (g?.exitCode !== 0 || !s.terminal || herdrTerminalOf(g.stdout) !== s.terminal) {
+      await forget()
+      return 'gone'
+    }
+  }
+  const r = await $.process.run(t === 'herdr' ? herdrCloseArgv(s.id) : tmuxKillArgv(s.id), PROBE).catch(() => null)
+  if (t === 'herdr' && r?.exitCode !== 0) return 'failed'
+  await forget()
+  return r?.exitCode === 0 ? 'closed' : 'gone'
 }
 
 // One session pane the person asked for, never focused: below `o.after` (the session before it), else right of
@@ -800,7 +839,7 @@ function ensurePolling($) {
   quietPolls = 0
   pollTimer = $.clock.every(5000, () => {
     pollNow($, transport).then(() => {
-      if (panes.length || working()) { quietPolls = 0; ensureTicker($); return }
+      if (panes.length || sessions.length || working()) { quietPolls = 0; ensureTicker($); return }
       if (++quietPolls >= 12) { pollTimer?.cancel(); pollTimer = null }
     })
   })
@@ -1312,6 +1351,8 @@ export function register(on) {
       names.push(name)
     }
     if (!names.length) return { deny: 'Could not open a ' + t + ' pane: ' + failed }
+    if (t === 'herdr') await saveSessions($)
+    ensurePolling($)
     const what = a.kind === 'claude' ? 'Claude' + (a.model ? ' · ' + a.model : '') : a.kind === 'codex' ? 'Codex' : 'shell'
     const stop = failed ? ' Session ' + (names.length + 1) + ' failed: ' + failed : ''
     return { result: 'Opened ' + names.join(', ') + ' · ' + what + ' · ' + t + (names.length > 1 ? ' panes.' : ' pane.') + stop + sessionsNote(t, a.kind) }
@@ -1323,18 +1364,9 @@ export function register(on) {
     if (t === 'none') return { deny: 'No pane transport here.' }
     const s = sessions.find((x) => x.name === (typeof e.name === 'string' ? e.name.trim() : ''))
     if (s) {
-      // herdr can hand a closed pane's id out again: close it only while it still holds the session's terminal.
-      if (t === 'herdr') {
-        const g = await $.process.run(herdrPaneGetArgv(s.id), PROBE).catch(() => null)
-        if (g?.exitCode !== 0 || !s.terminal || herdrTerminalOf(g.stdout) !== s.terminal) {
-          sessions = sessions.filter((x) => x !== s)
-          return { result: s.name + ' is already closed.' }
-        }
-      }
-      const r = await $.process.run(t === 'herdr' ? herdrCloseArgv(s.id) : tmuxKillArgv(s.id), PROBE).catch(() => null)
-      if (t === 'herdr' && r?.exitCode !== 0) return { deny: 'Could not close ' + s.name + '.' }
-      sessions = sessions.filter((x) => x !== s)
-      return { result: r?.exitCode === 0 ? 'Closed ' + s.name + '.' : s.name + ' is already closed.' }
+      const c = await closeSession($, t, s)
+      if (c === 'failed') return { deny: 'Could not close ' + s.name + '.' }
+      return { result: c === 'closed' ? 'Closed ' + s.name + '.' : s.name + ' is already closed.' }
     }
     await pollNow($, t)
     const c = closeTarget(e, panes, t === 'herdr' && selfTab ? [selfTab, ...ownedTabs] : null, openedNames)

@@ -534,20 +534,16 @@ export const tmuxTypeArgvs = (id, command) => [['tmux', 'send-keys', '-t', id, '
 // A resting session closes after this long: time to read an answer and type the next prompt.
 export const SESSION_IDLE_MS = 10 * 60_000
 
-// The Herdr sessions a lead closes now: an agent idle (its answer seen) and unfocused for SESSION_IDLE_MS, or one whose
-// agent is gone (claude exited to a bare shell, or the pane was closed by hand: the close checks first). A `done` agent
-// holds an answer nobody has looked at yet, so it stays; a shell is never closed for the person. `since` maps
-// name → when it was first seen resting, updated in place.
+// The Herdr sessions a lead closes now: an agent idle (its answer seen) and unfocused for SESSION_IDLE_MS. A `done`
+// agent holds an answer nobody has looked at yet, so it stays. A shell is never closed for the person, and neither is a
+// session whose agent left (claude exited to a bare shell the person may be using). `since` maps name → when it was
+// first seen resting, updated in place.
 export function sessionSweep(sessions, agents, since, now) {
   const due = []
   for (const s of sessions) {
     if (s.kind === 'shell') continue
     const a = agents.find((x) => x.name === s.name)
-    if (!a) {
-      due.push(s)
-      continue
-    }
-    if (a.agent_status !== 'idle' || a.focused) {
+    if (!a || a.agent_status !== 'idle' || a.focused) {
       since.delete(s.name)
       continue
     }

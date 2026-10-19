@@ -448,6 +448,11 @@ async function pollHerdr($) {
     await pruneTabs($, me.workspace_id)
     const mine = real.filter((p) => p.tab === me.tab_id || ownedTabs.has(p.tab))
     await sweep($, reapPool(mine), now, 'herdr', (p) => $.process.run(herdrCloseArgv(p.id)))
+    // A session with no agent listed is a shell or a pane closed by hand: only a gone one is forgotten.
+    for (const s of sessions.filter((x) => !list.some((a) => a.name === x.name))) {
+      const g = await $.process.run(herdrPaneGetArgv(s.id), PROBE).catch(() => null)
+      if (g?.exitCode !== 0 || herdrTerminalOf(g.stdout) !== s.terminal) await forgetSession($, s)
+    }
     for (const s of sessionSweep(sessions, list, restingSince, now)) {
       if ((await closeSession($, 'herdr', s)) === 'closed') $.ui.toast('agt ◆ closed ' + s.name + ': idle ' + SESSION_IDLE_MS / 60_000 + ' min')
     }
@@ -615,30 +620,32 @@ async function startAgent($, argv, name, cwd) {
 
 // The Herdr agent sessions this lead has open, one name per line, where the SessionEnd sweep reads them. A failed
 // write loses only the sweep's reach, so it never blocks.
+// With none left the old list stays: its names match no agent, and SessionEnd removes the file.
 async function saveSessions($) {
   const file = sessionsFile(home, await $.env.get('HERDR_PANE_ID'))
-  if (file) await $.fs.write(file, sessions.filter((s) => s.kind !== 'shell' && s.terminal).map((s) => s.name + '\n').join('')).catch(() => {})
+  if (file && sessions.length) await $.fs.write(file, sessions.filter((s) => s.kind !== 'shell' && s.terminal).map((s) => s.name + '\n').join('')).catch(() => {})
 }
 
 // Close one session this lead opened → 'closed' | 'gone' | 'failed'. herdr can hand a closed pane's id out again,
 // so a herdr pane closes only while it still holds the session's terminal; tmux pane ids never repeat.
 async function closeSession($, t, s) {
-  const forget = async () => {
-    sessions = sessions.filter((x) => x !== s)
-    restingSince.delete(s.name)
-    if (t === 'herdr') await saveSessions($)
-  }
   if (t === 'herdr') {
     const g = await $.process.run(herdrPaneGetArgv(s.id), PROBE).catch(() => null)
     if (g?.exitCode !== 0 || !s.terminal || herdrTerminalOf(g.stdout) !== s.terminal) {
-      await forget()
+      await forgetSession($, s)
       return 'gone'
     }
   }
   const r = await $.process.run(t === 'herdr' ? herdrCloseArgv(s.id) : tmuxKillArgv(s.id), PROBE).catch(() => null)
   if (t === 'herdr' && r?.exitCode !== 0) return 'failed'
-  await forget()
+  await forgetSession($, s)
   return r?.exitCode === 0 ? 'closed' : 'gone'
+}
+
+async function forgetSession($, s) {
+  sessions = sessions.filter((x) => x !== s)
+  restingSince.delete(s.name)
+  if (s.terminal) await saveSessions($)
 }
 
 // One session pane the person asked for, never focused: below `o.after` (the session before it), else right of

@@ -1614,8 +1614,10 @@ describe('sessions: the idle sweep', () => {
     expect(since.has('s-a-1')).toBe(false)
   })
 
-  test('a session whose agent is gone is due (the close checks the pane first); a shell never is', () => {
-    expect(sessionSweep([s('s-a-1'), s('s-a-2', 'shell')], [], new Map(), 0).map((x) => x.name)).toEqual(['s-a-1'])
+  test('a session whose agent left (a bare shell now) and a shell are never due', () => {
+    const since = new Map()
+    expect(sessionSweep([s('s-a-1'), s('s-a-2', 'shell')], [], since, 0)).toEqual([])
+    expect(sessionSweep([s('s-a-1'), s('s-a-2', 'shell')], [], since, SESSION_IDLE_MS * 2)).toEqual([])
   })
 
   test('the sessions file sits beside the run-tabs file', () => {
@@ -1663,7 +1665,7 @@ describe('sessions: the idle sweep', () => {
     expect(seen).not.toContainEqual(['herdr', 'pane', 'close', 'w1:p5'])
     for (let t = 0; t < SESSION_IDLE_MS / 2 + 15_000; t += 5000) await clock.advance(5000)
     expect(seen).toContainEqual(['herdr', 'pane', 'close', 'w1:p5'])
-    expect(writes['/h/.agentille/state/lead-w1-p1.sessions']).toBe('')
+    expect(writes['/h/.agentille/state/lead-w1-p1.sessions']).toBe(name + '\n')
     expect(toasts.some((t) => t.includes('closed ' + name))).toBe(true)
   })
 })
@@ -1701,5 +1703,42 @@ describe('sessions: /agt-clean after a lead died', () => {
     expect(closed).toEqual(['w1:p5'])
     expect(seen).toContainEqual(['rm', '-f', '/h/.agentille/state/lead-w1-p9.sessions'])
     expect(seen).not.toContainEqual(['rm', '-f', '/h/.agentille/state/lead-w1-p2.sessions'])
+  })
+})
+
+describe('sessions: an agent that left', () => {
+  test('a session whose claude exited stays open; once its pane is gone the lead forgets it', async ($, on) => {
+    const seen: string[][] = []
+    let listed = true
+    let paneAlive = true
+    on('env.get', async ($: any, e: any) => ({ value: ({ HERDR_ENV: '1', HERDR_PANE_ID: 'w1:p1', HOME: '/h' } as any)[e.name] }))
+    on('session.cwd', async () => ({ value: '/work/repo' }))
+    on('session.start', async ($: any, e: any) => ({ cwd: e.cwd }))
+    on('command.register', async () => ({ value: undefined }))
+    on('tool.register', async ($: any, e: any) => ({ value: { tool: 'mcp__agentille__' + e.name } }))
+    on('fs.read', async () => ({ deny: 'no profile' }))
+    on('fs.write', async () => ({ value: undefined }))
+    on('store.get', async () => ({ value: undefined }))
+    on('process.run', async ($: any, e: any) => {
+      seen.push(e.argv)
+      const cmd = e.argv.slice(0, 3).join(' ')
+      const out = (o: unknown) => ({ value: { exitCode: 0, stdout: JSON.stringify(o), stderr: '' } })
+      if (cmd === 'herdr pane split') return out({ result: { pane: { pane_id: 'w1:p5', terminal_id: 'term_5' } } })
+      if (cmd === 'herdr pane get') return paneAlive ? out({ result: { pane: { pane_id: 'w1:p5', terminal_id: 'term_5', focused: false } } }) : { value: { exitCode: 1, stdout: '', stderr: 'pane_not_found' } }
+      if (cmd === 'herdr agent list') {
+        const name = seen.find((a) => a.slice(0, 3).join(' ') === 'herdr agent start')?.[3]
+        return out({ result: { agents: [{ name: null, pane_id: 'w1:p1', agent_status: 'working', tab_id: 't1', workspace_id: 'w1' }, ...(name && listed ? [{ name, pane_id: 'w1:p5', agent_status: 'idle', tab_id: 't1', workspace_id: 'w1' }] : [])] } })
+      }
+      return { value: { exitCode: 0, stdout: '', stderr: '' } }
+    })
+    const clock = mock.clock(on, { now: 1_000_000 })
+    await $.session.start({ cwd: '/work/repo', surface: null, isInteractive: false })
+    const name = (await $.tool.call({ tool: 'mcp__agentille__open_sessions', count: 1 } as never)).result.match(/s-[a-z0-9]{6}-1/)[0]
+    listed = false
+    for (let t = 0; t < SESSION_IDLE_MS + 30_000; t += 5000) await clock.advance(5000)
+    expect(seen).not.toContainEqual(['herdr', 'pane', 'close', 'w1:p5'])
+    paneAlive = false
+    await clock.advance(5000)
+    expect((await $.tool.call({ tool: 'mcp__agentille__close_pane', name } as never)).deny).toContain('agt-<run>-<role>')
   })
 })

@@ -2,6 +2,39 @@
 
 All notable changes to agentille are documented here.
 
+## [3.18.0] — 2026-10-19
+
+### Added
+
+- **`open_sessions` tool.** A plain prompt like "open three sessions" opens
+  real Herdr or tmux panes beside the lead, unfocused: Claude by default,
+  Codex (Herdr) or a plain shell, up to 8, each with an optional first
+  prompt, model, directory and layout. Session panes are named `s-<run>-<n>`,
+  never `agt-`, so the reaper, the band and the wire leave them alone.
+  `close_pane` closes them on request.
+- **Idle sessions close themselves.** On Herdr, a Claude or Codex session
+  idle and unfocused for 10 minutes is closed, with a toast. The SessionEnd
+  sweep closes the exiting lead's idle sessions, and `/agt-clean` closes a
+  dead lead's idle ones and drops its `lead-<key>.sessions` list.
+
+### Changed
+
+- `close_pane` accepts the session panes this lead opened as well as its
+  `agt-` workers.
+
+### Fixed
+
+- A session whose agent exited to a bare shell is never auto-closed, and a
+  session pane closed by hand is forgotten instead of retried.
+
+### Rationale
+
+- Asking for sessions used to end in subagents, which are not panes the
+  person can type into. Auto-close is limited to what can be read safely:
+  a `done` session holds an unseen answer and stays; shells, agentless
+  panes and tmux sessions expose no idle state, so they close only on
+  request. `claude --resume` brings back a closed one.
+
 ## [3.17.0] — 2026-10-19
 
 ### Added

@@ -2,6 +2,27 @@
 
 All notable changes to agentille are documented here.
 
+## [3.17.0] — 2026-10-19
+
+### Added
+
+- **Answers shaped for a fast read.** Under `display.highlight: all`, each
+  question typed in the lead session carries a short answer style: a
+  one-line answer, at most 6 bullets, and a `Your move:` list only when the
+  person has to act. Worker panes, `/agt` runs and slash commands never get
+  it, so agent reports keep their parsed format.
+- **The panel reads that shape.** Its headline is the answer's first line
+  with the turn's time beside it. The person's steps sit in their own amber
+  **▶ your move** box, numbered, with a hanging indent. A shaped answer with
+  nothing to do ends on "✓ nothing needed from you".
+
+### Changed
+
+- **`/agt-clean` takes no arguments.** It closes finished orphan panes and
+  this session's panes whose answer was never read, removes merged and
+  clean `agt/*` worktrees and deletes merged `agt/*` branches. `dry` and
+  `all` are gone: one command, one behaviour.
+
 ## [3.16.0] — 2026-10-19
 
 ### Added

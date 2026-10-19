@@ -378,10 +378,10 @@ export const SPAWN_TOOL = {
 export const CLOSE_TOOL = {
   name: 'close_pane',
   isDeferred: false,
-  description: 'Close one agentille worker pane this session opened (an agt-<run>-<role> pane in this tab or window) after you have read its result. Panes opened by a typed /agt-spawn (the reaper closes those) and panes of other sessions are refused.',
+  description: 'Close one agentille worker pane this session opened (an agt-<run>-<role> pane in this tab or window) after you have read its result, or a session it opened with open_sessions (s-<run>-<n>) when the person asks. Panes opened by a typed /agt-spawn (the reaper closes those) and panes of other sessions are refused.',
   inputSchema: {
     type: 'object',
-    properties: { name: { type: 'string', description: 'The pane name, agt-<run>-<role>.' } },
+    properties: { name: { type: 'string', description: 'The pane name, agt-<run>-<role> or s-<run>-<n>.' } },
     required: ['name'],
     additionalProperties: false,
   },
@@ -436,4 +436,103 @@ export function closeTarget(input, live = [], tab = null, mine = new Set()) {
   if (pane) return { pane }
   if (mine.has(name) && !live.some((p) => p.name === name)) return { gone: name }
   return { error: 'No pane named ' + name + ' in this tab or window.' }
+}
+
+// ── sessions: interactive panes the person asked for, not workers ──────────────
+
+// What open_sessions can start. A session is the person's own, like a pane they opened by hand: no agt- name,
+// no worker env and no wire, so the band, the reaper, the SessionEnd sweep and /agt-clean never touch it.
+export const SESSION_KINDS = ['claude', 'codex', 'shell']
+export const MAX_SESSIONS = 8
+
+// s-<run>-<n>: unique per herdr server through the run id, and never agt-.
+export function sessionName(run, i) {
+  const name = 's-' + run + '-' + i
+  return SAFE_RUN.test(run) && Number.isInteger(i) && i > 0 && NAME_RE.test(name) ? name : null
+}
+
+export const OPEN_SESSIONS_TOOL = {
+  name: 'open_sessions',
+  isDeferred: false,
+  description: 'Open interactive sessions beside this one as Herdr or tmux panes, never focused: Claude by default, or Codex or a plain shell. Use it whenever the person asks to open or start sessions, panes, terminals, Claudes or Codexes ("open three sessions"): that is a direct action, not orchestration, so never answer it with subagents. Each session belongs to the person, like one opened by hand: no worker, no reaper, no reports. Not for delegating work.',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      count: { type: 'integer', minimum: 1, maximum: MAX_SESSIONS, description: 'How many sessions. Default: one per task, else 1.' },
+      tasks: { type: 'array', items: { type: 'string' }, maxItems: MAX_SESSIONS, description: 'Optional first prompt per session, in order (a command to run for a shell). Only when the person gave one.' },
+      kind: { type: 'string', enum: SESSION_KINDS, description: 'What runs in each pane. Default "claude"; "codex" needs Herdr.' },
+      model: { type: 'string', enum: TOOL_MODELS, description: 'Claude only, when the person named a model. Default: their own default model.' },
+      cwd: { type: 'string', description: 'Absolute directory to start in. Default: this session\'s directory.' },
+      layout: { type: 'string', enum: LAYOUTS, description: '"tab": on Herdr, the sessions share a new tab. Default "stack" beside this pane; tmux ignores it.' },
+    },
+    additionalProperties: false,
+  },
+}
+
+// open_sessions input → { count, tasks, kind, model, cwd, layout } or { error }. `tasks` has one entry per
+// session, null where none was given.
+export function sessionsToolInput(input) {
+  const i = input ?? {}
+  const str = (v) => (typeof v === 'string' ? v.trim() : '')
+  const given = i.tasks === undefined ? [] : i.tasks
+  if (!Array.isArray(given) || given.some((t) => typeof t !== 'string')) return { error: 'tasks must be a list of strings.' }
+  const count = i.count === undefined ? Math.max(1, given.length) : i.count
+  const kind = i.kind === undefined ? 'claude' : str(i.kind)
+  const model = i.model === undefined ? null : str(i.model)
+  const cwd = i.cwd === undefined ? null : str(i.cwd)
+  const layout = i.layout === undefined ? 'stack' : str(i.layout)
+  if (!Number.isInteger(count) || count < 1 || count > MAX_SESSIONS) return { error: 'count must be a whole number from 1 to ' + MAX_SESSIONS + '.' }
+  if (given.length > count) return { error: given.length + ' tasks for ' + count + ' sessions: give one task per session at most.' }
+  if (!SESSION_KINDS.includes(kind)) return { error: 'kind must be one of ' + SESSION_KINDS.join(', ') + '.' }
+  if (model !== null && !TOOL_MODELS.includes(model)) return { error: 'model must be one of ' + TOOL_MODELS.join(', ') + '.' }
+  if (model !== null && kind !== 'claude') return { error: 'model applies to Claude sessions only.' }
+  if (!LAYOUTS.includes(layout)) return { error: 'layout must be one of ' + LAYOUTS.join(', ') + '.' }
+  if (cwd !== null && (!cwd.startsWith('/') || cwd.includes('\0'))) return { error: 'cwd must be an absolute path.' }
+  const tasks = Array.from({ length: count }, (_, n) => str(given[n]) || null)
+  if (kind === 'claude' && tasks.some((t) => t && BARE_WORD.test(t))) return { error: 'A one-word task would run as a claude subcommand. Say more.' }
+  return { count, tasks, kind, model, cwd, layout }
+}
+
+// herdr: a plain split or tab, with none of a worker's env.
+export const herdrSessionSplitArgv = ({ pane, cwd, direction }) => ['herdr', 'pane', 'split', '--pane', pane, '--direction', direction === 'down' ? 'down' : 'right', '--cwd', cwd, '--no-focus']
+export const herdrSessionTabArgv = ({ workspace, cwd, label }) => ['herdr', 'tab', 'create', '--workspace', workspace, '--cwd', cwd, '--label', label, '--no-focus']
+
+export const herdrSessionStartArgv = ({ name, pane, kind, model }) => (kind === 'codex'
+  ? ['herdr', 'agent', 'start', name, '--kind', 'codex', '--pane', pane, '--timeout', '45000', '--', '-c', 'check_for_update_on_startup=false']
+  : ['herdr', 'agent', 'start', name, '--kind', 'claude', '--pane', pane, '--timeout', '45000', '--', ...(model ? ['--model', model] : [])])
+export const herdrRunArgv = (pane, command) => ['herdr', 'pane', 'run', pane, command]
+export const herdrPaneGetArgv = (pane) => ['herdr', 'pane', 'get', pane]
+
+// A pane's terminal id from split, tab create or pane get stdout: herdr can hand a closed pane's id out again,
+// the terminal id never repeats. null when unreadable.
+export function herdrTerminalOf(stdout) {
+  try {
+    const r = JSON.parse(stdout).result
+    const t = (r?.pane ?? r?.root_pane)?.terminal_id
+    return typeof t === 'string' && t ? t : null
+  } catch {
+    return null
+  }
+}
+
+// tmux: a plain split running claude (the task as its first prompt) or the person's shell. tmux pane ids never repeat.
+export function tmuxSessionSplitArgv({ target, cwd, direction, shell, kind, model, task }) {
+  const head = ['tmux', 'split-window', '-d', direction === 'down' ? '-v' : '-h', '-P', '-F', '#{pane_id}', '-t', target, '-c', cwd.replace(/#/g, '##')]
+  if (kind !== 'claude') return head
+  const tail = [...(model ? ['--model', model] : []), ...(task ? ['--', task] : [])]
+  const base = String(shell ?? '').split('/').pop()
+  if (base === 'zsh' || base === 'bash') return [...head, shell, '-ic', 'claude "$@"', 's', ...tail]
+  return [...head, 'claude', ...tail]
+}
+
+export const tmuxTitleArgvs = (id, name) => [
+  ['tmux', 'set-option', '-p', '-t', id, 'allow-set-title', 'off'],
+  ['tmux', 'select-pane', '-t', id, '-T', name],
+]
+export const tmuxTypeArgvs = (id, command) => [['tmux', 'send-keys', '-t', id, '-l', '--', command], ['tmux', 'send-keys', '-t', id, 'Enter']]
+
+// What the lead may do next with the sessions it opened, without any tool of ours.
+export function sessionsNote(transport, kind) {
+  if (transport === 'herdr' && kind !== 'shell') return ' To send one a prompt: herdr agent prompt <name> "…". To read it: herdr agent read <name> --source recent-unwrapped --lines 120. close_pane <name> closes one when the person asks.'
+  return ' close_pane <name> closes one when the person asks.'
 }

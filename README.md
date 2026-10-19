@@ -82,6 +82,16 @@ The switches that used to be commands live in a `display` block of `~/.agentille
 
 `/agt-routing`, `/agt-ledger` and `/agt-squads` were removed in v3.14.0: use `/agt-info routing|ledger|squads`. `/agt-focus` and `/agt-highlight` still work and write this block.
 
+## Sessions
+
+Ask in a plain prompt: "open three sessions", "open a codex session", "open two shells in ../api". The mod opens real Herdr or tmux panes beside yours, unfocused, up to 8 at once. Each one is yours, like a pane opened by hand: no worker role, no reports, no `/agt`.
+
+- **Kinds**: Claude (default, on your default model unless you name one), Codex (Herdr only) or a plain shell. Give each one a first prompt in the same sentence if you like.
+- **Follow-ups**: on Herdr, your session can prompt one (`herdr agent prompt <name> "…"`) or read its screen (`herdr agent read <name>`). "Close both sessions" closes them.
+- **Auto-close**: a Herdr Claude or Codex session closes after 10 minutes idle and unfocused, and when your session exits. One with an answer you have not looked at yet stays open.
+- **Never auto-closed**: shells, a session whose agent has exited, and every tmux session. They close when you ask or when you close the pane.
+- **Got one closed too early?** `claude --resume` in that directory brings the conversation back.
+
 ## How it decides
 
 - **Solo** for a small, one-sentence task. **Subagents** for sequential work. **Panes** (Herdr or tmux) only when 2+ slices can build at once; each worker pane shows a small mascot that says hi, walks while it works and waves bye. The pick is always printed with a one-line reason.

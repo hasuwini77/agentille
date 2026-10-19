@@ -231,17 +231,69 @@ const clock = (ms) => {
   return s < 60 ? s + 's' : Math.floor(s / 60) + 'm ' + String(s % 60).padStart(2, '0') + 's'
 }
 
-// The final answer's panel: tone (ok · flag · fail · plain) colours the frame, head names it, the
-// card is the essentials strip (none for a run's own ✓/✗ card or a short answer), body is lit.
-export function panel(text, { ms } = {}) {
+// How a main-session answer should be shaped, sent beside each typed prompt under
+// display.highlight: all. The panel reads the same shape back: a headline, bullets, a move block.
+export const ANSWER_STYLE = [
+  '[agentille answer style] Shape your final answer for a two-second read:',
+  '- Line 1: the answer or outcome in at most 15 words. No preamble.',
+  '- Then at most 6 bullets, one fact each, at most 15 words. No paragraphs, no step-by-step recap of what you did.',
+  '- If the user must act, end with a line "Your move:" then numbered steps, one action each, any command in backticks.',
+  '- If nothing is needed from the user, leave the "Your move:" section out.',
+  '- Code, tables and headings only when they carry the answer itself.',
+].join('\n')
+
+// A move block opens on a line naming the user's turn ("Your move:", "Action needed:", "You do:").
+const MOVE = /^\s*(?:#{1,6}\s*)?(?:[*_]{1,2})?\s*(?:▶\s*)?(?:your move|action needed|you do|on your end|to do on your side)\b(?:[*_]{1,2})?\s*[:—-]?\s*(?:[*_]{1,2})?\s*(.*)$/i
+const STEP = /^\s*(?:[-*+]|\d+[.)])\s+/
+
+// The text → { main, move }: the move block's steps (list markers dropped), or null when there is none.
+// It runs from its opening line to the end, or to the next heading. Fenced lines never open one.
+export function splitMove(text) {
+  const lines = String(text ?? '').split('\n')
+  const fenced = fenceMask(lines)
+  const at = lines.findIndex((l, i) => !fenced[i] && MOVE.test(l))
+  if (at < 0) return { main: String(text ?? ''), move: null }
+  let stop = lines.length
+  for (let i = at + 1; i < lines.length; i++) if (!fenced[i] && /^\s*#{1,6}\s/.test(lines[i])) { stop = i; break }
+  const inline = MOVE.exec(lines[at])[1].replace(/[*_]{2}/g, '').trim()
+  const steps = [inline, ...lines.slice(at + 1, stop)].map((l) => l.replace(STEP, '').replace(/\*\*|__/g, '').trim()).filter(Boolean)
+  const main = [...lines.slice(0, at), ...lines.slice(stop)].join('\n').replace(/\s+$/, '')
+  return { main, move: steps.length ? steps : null }
+}
+
+// The first line becomes the panel's headline when it reads as one: short, not code, a table or a list.
+function headline(main) {
+  const lines = main.split('\n')
+  const i = lines.findIndex((l) => l.trim())
+  if (i < 0) return { head: null, rest: main }
+  const raw = lines[i].trim()
+  if (/^(```|~~~|\||>|[-*+]\s|\d+[.)]\s)/.test(raw)) return { head: null, rest: main }
+  const head = raw.replace(/^#{1,6}\s+/, '').replace(/\*\*|__/g, '').trim()
+  if (!head || head.length > 120) return { head: null, rest: main }
+  return { head, rest: lines.slice(i + 1).join('\n').replace(/^\s+|\s+$/g, '') }
+}
+
+// The final answer's panel. tone colours the frame (fail · ok · move · flag · plain); head is the
+// answer's own first line (or "answer"); time is the turn's; card is the essentials strip, kept only for
+// an unshaped long answer; body is lit; move is the user's steps; idle says "nothing needed from you"
+// for a shaped answer that has no move.
+export function panel(text, { ms, shaped = false } = {}) {
   const t = String(text ?? '')
+  const { main, move } = splitMove(t)
+  const { head, rest } = headline(main)
   const lead = t.trimStart()
-  const final = isFinalCard(t)
-  const card = final || words(t) < CARD_MIN_WORDS ? [] : essentials(t)
-  const lit = lightTokens(t)
-  const tone = lead.startsWith('✗') ? 'fail' : lead.startsWith('✓') ? 'ok' : card.some((c) => c.kind === 'flag') ? 'flag' : 'plain'
-  const head = '◆ answer' + (typeof ms === 'number' && ms > 0 ? ' · ' + clock(ms) : '')
-  return { tone, head, card, body: lit.length <= LIT_MAX ? lit : t }
+  const card = shaped || move || isFinalCard(t) || words(t) < CARD_MIN_WORDS ? [] : essentials(t)
+  const lit = lightTokens(rest)
+  const tone = lead.startsWith('✗') ? 'fail' : move ? 'move' : lead.startsWith('✓') ? 'ok' : card.some((c) => c.kind === 'flag') ? 'flag' : 'plain'
+  return {
+    tone,
+    head: head ?? 'answer',
+    time: typeof ms === 'number' && ms > 0 ? clock(ms) : null,
+    card,
+    body: rest ? (lit.length <= LIT_MAX ? lit : rest) : null,
+    move,
+    idle: shaped && !move,
+  }
 }
 
 export function parseHighlightArgs(args) {
@@ -255,6 +307,6 @@ export function parseHighlightArgs(args) {
 
 export function highlightText(on, all = false) {
   if (!on) return 'Highlight: off — replies draw as usual. /agt-highlight on turns it back on.'
-  const which = all ? 'all — every long reply gets' : 'on — /agt replies get'
-  return 'Highlight: ' + which + ' an essentials card and a dim body with paths, versions, refs and numbers lit.' + (all ? '' : ' /agt-highlight all covers plain prompts too.')
+  if (all) return 'Highlight: all — every long reply is lit, and each answer comes short and framed: a headline, bullets, and a ▶ your move box when you have something to do.'
+  return 'Highlight: on — /agt replies get an essentials card and a dim body with paths, versions, refs and numbers lit, and the final answer is framed. /agt-highlight all shapes every answer.'
 }

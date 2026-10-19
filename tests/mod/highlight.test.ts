@@ -1,6 +1,6 @@
 import { describe, expect, mock, test } from 'claude-code/testing'
 import { words } from '../../hooks/focus.js'
-import { CARD_MIN_WORDS, LIT_MEMO_MAX, essentials, highlight, highlightFor, highlightText, isAnswerBlock, lightTokens, litFor, panel, parseHighlightArgs, spans } from '../../hooks/highlight.js'
+import { CARD_MIN_WORDS, LIT_MEMO_MAX, essentials, highlight, highlightFor, highlightText, isAnswerBlock, lightTokens, litFor, panel, parseHighlightArgs, spans, splitMove } from '../../hooks/highlight.js'
 
 const T = '`'
 const FENCE = T + T + T
@@ -215,6 +215,7 @@ describe('highlight: deciding', () => {
     expect(highlightText(true)).toContain('Highlight: on')
     expect(highlightText(true)).toContain('/agt-highlight all')
     expect(highlightText(true, true)).toContain('Highlight: all — every long reply')
+    expect(highlightText(true, true)).toContain('your move')
     expect(highlightText(false)).toContain('/agt-highlight on')
   })
 })
@@ -227,14 +228,27 @@ describe('highlight: panel', () => {
     expect(isAnswerBlock('a', '  ')).toBe(false)
   })
 
-  test('tone follows the card mark or a flag; short answers get no strip', async () => {
+  test('the first line is the headline; short answers get no strip', async () => {
     expect(panel('✓ tagged v2.6.0').tone).toBe('ok')
     expect(panel('✗ build failed').tone).toBe('fail')
     expect(panel('✓ tagged v2.6.0').card).toEqual([])
-    expect(panel('Short answer.', { ms: 3000 })).toEqual({ tone: 'plain', head: '◆ answer · 3s', card: [], body: 'Short answer.' })
+    expect(panel('Short answer.', { ms: 3000 })).toEqual({ tone: 'plain', head: 'Short answer.', time: '3s', card: [], body: null, move: null, idle: false })
+    expect(panel('## Done\n- a\n- b', { ms: 64_000 })).toMatchObject({ head: 'Done', time: '1m 04s', body: '- a\n- b' })
+    expect(panel('- a list first\n- b').head).toBe('answer')
     const long = 'The build failed on hooks/live.js. ' + Array.from({ length: 40 }, (_, i) => 'w' + i).join(' ')
     expect(panel(long).tone).toBe('flag')
-    expect(panel(long).body).toContain('`hooks/live.js`')
+    expect(panel(long).head).toBe('answer') // a first line past 120 characters is no headline
+  })
+
+  test('a "Your move:" block becomes numbered steps, cut from the body', async () => {
+    expect(splitMove('Done.\n- a\n\n**Your move:**\n1. run `npm i`\n2. restart')).toEqual({ main: 'Done.\n- a', move: ['run `npm i`', 'restart'] })
+    expect(splitMove('x\nAction needed: restart Claude')).toEqual({ main: 'x', move: ['restart Claude'] })
+    expect(splitMove('x\n## Your move\n- a\n## Notes\nn')).toEqual({ main: 'x\n## Notes\nn', move: ['a'] })
+    expect(splitMove('```\nYour move: no\n```').move).toBeNull()
+    expect(splitMove('Nothing for you.').move).toBeNull()
+    const p = panel('Shipped v3.16.0.\n- tests green\n\nYour move:\n1. restart Claude', { shaped: true })
+    expect(p).toMatchObject({ tone: 'move', head: 'Shipped v3.16.0.', body: '- tests green', move: ['restart Claude'], idle: false, card: [] })
+    expect(panel('Shipped.\n- tests green', { shaped: true }).idle).toBe(true)
   })
 })
 
@@ -242,13 +256,15 @@ describe('highlight: in the mod', () => {
   const REPLY = 'Next: tag v2.6.0. The change is in hooks/live.js and it is green. ' + Array.from({ length: 40 }, (_, i) => 'w' + i).join(' ')
   const SHORT = Array.from({ length: 30 }, (_, i) => 'w' + i).join(' ')
 
+  const submitted: any[] = []
   const setup = (on: any, stored: any[] = []) => {
+    submitted.length = 0
     on('store.get', async () => ({ value: undefined }))
     on('store.set', async ($: any, e: any) => { stored.push(e); return { value: undefined } })
     on('ui.panes', async () => ({ value: [] }))
     on('ui.open', async () => ({ value: { isPlaced: true } }))
     on('ui.close', async () => ({ value: undefined }))
-    on('prompt.submit', async ($: any, e: any) => ({ text: e.text }))
+    on('prompt.submit', async ($: any, e: any) => { submitted.push(e); return { text: e.text, context: e.context } })
     on('ui.render', async () => ({ type: 'engine', ref: 0 }) as never)
     mock.clock(on, { now: 1_000_000 })
   }
@@ -345,11 +361,12 @@ describe('highlight: in the mod', () => {
     on('turn.complete', async ($: any, e: any) => ({ text: e.answer }))
     await say($, '/agt tag the release')
     let ui = await mount($, 'z0')
-    expect(await ui.find({ type: 'Text', text: /◆ answer/ })).toBeUndefined()
+    expect(await ui.find({ type: 'Text', text: /^◆ $/ })).toBeUndefined()
     await ui.unmount()
     await $.turn.complete({ answer: 'Narration first.\n\n' + REPLY, durationMs: 64_000, isAborted: false, turnId: 't1', reason: 'answer' } as never)
     ui = await mount($, 'z1')
-    expect(await ui.find({ type: 'Text', text: /◆ answer · 1m 04s/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /· 1m 04s/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /^◆ $/ })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: /→ / })).toBeDefined()
     const md: any = await ui.find({ type: 'Markdown' })
     expect(md.props.text).toContain('`hooks/live.js`')
@@ -358,7 +375,7 @@ describe('highlight: in the mod', () => {
     // A subagent's answer is not the main turn's.
     await $.turn.complete({ agentId: 'sub', answer: REPLY + ' sub', durationMs: 5, isAborted: false, turnId: 't2', reason: 'answer' } as never)
     ui = await mount($, 'z2', REPLY + ' sub')
-    expect(await ui.find({ type: 'Text', text: /◆ answer/ })).toBeUndefined()
+    expect(await ui.find({ type: 'Text', text: /^◆ $/ })).toBeUndefined()
     await ui.unmount()
   })
 
@@ -371,8 +388,46 @@ describe('highlight: in the mod', () => {
     await say($, '/agt tag the release')
     await $.turn.complete({ answer: REPLY, durationMs: 10, isAborted: false, turnId: 't1', reason: 'answer' } as never)
     const ui = await mount($, 'o1')
-    expect(await ui.find({ type: 'Text', text: /◆ answer/ })).toBeUndefined()
+    expect(await ui.find({ type: 'Text', text: /^◆ $/ })).toBeUndefined()
     await ui.unmount()
+  })
+
+  test('under all, a typed question carries the answer style and its answer draws a move box', async ($, on) => {
+    fakeHome(on)
+    setup(on)
+    const sent = submitted
+    on('turn.complete', async ($: any, e: any) => ({ text: e.answer }))
+    await start($)
+    await $.command.run({ command: 'agt-highlight', args: 'all' })
+    await say($, 'why is CI red?')
+    expect(sent.at(-1).context?.join('\n')).toContain('Your move:')
+    const answer = 'CI fails on a stale lockfile.\n- npm ci rejects it\n\nYour move:\n1. run `npm install`\n2. push'
+    await $.turn.complete({ answer, durationMs: 4000, isAborted: false, turnId: 't1', reason: 'answer' } as never)
+    let ui = await mount($, 'y1', answer)
+    expect(await ui.find({ type: 'Text', text: /▶ your move/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /^1\.$/ })).toBeDefined()
+    const md: any = await ui.find({ type: 'Markdown' })
+    expect(md.props.text).not.toContain('Your move')
+    await ui.unmount()
+
+    await say($, 'and the tests?')
+    await $.turn.complete({ answer: 'All green.\n- 464 pass', durationMs: 2000, isAborted: false, turnId: 't2', reason: 'answer' } as never)
+    ui = await mount($, 'y2', 'All green.\n- 464 pass')
+    expect(await ui.find({ type: 'Text', text: /nothing needed from you/ })).toBeDefined()
+    await ui.unmount()
+
+    // Slash commands and /agt runs get no style.
+    await say($, '/agt tag the release')
+    expect(sent.at(-1).context ?? []).toEqual([])
+    await say($, '/agt-clean')
+    expect(sent.at(-1).context ?? []).toEqual([])
+  })
+
+  test('with highlight on (the default) no style is sent', async ($, on) => {
+    setup(on)
+    const sent = submitted
+    await say($, 'why is CI red?')
+    expect(sent.at(-1).context ?? []).toEqual([])
   })
 
   test('a bad argument shows the usage and changes nothing', async ($, on) => {

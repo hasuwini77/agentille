@@ -727,7 +727,7 @@ describe('pane tools: in the mod', () => {
   test('a lead with a transport registers both tools; no transport registers none', async ($, on) => {
     const a = setup(on, TMUX, { 'tmux list-panes': { stdout: ['%1', '', 'claude', '0', '@1'].join(T) + '\n' } })
     await $.session.start({ cwd: '/work/repo', surface: null, isInteractive: false })
-    expect(a.tools).toEqual(['spawn_pane', 'close_pane'])
+    expect(a.tools).toEqual(['spawn_pane', 'close_pane', 'open_sessions'])
   })
 
   test('no transport: none registered', async ($, on) => {
@@ -1387,5 +1387,207 @@ describe('startup dialogs', () => {
     expect(screenLine('\n\n  Please sign in  \nmore')).toBe('Please sign in')
     expect(screenLine('x'.repeat(300))).toHaveLength(120)
     expect(screenLine('')).toContain('unknown screen')
+  })
+})
+
+import { MAX_SESSIONS, OPEN_SESSIONS_TOOL, SESSION_KINDS, herdrSessionSplitArgv, herdrSessionStartArgv, herdrSessionTabArgv, herdrTerminalOf, sessionName, sessionsNote, sessionsToolInput, tmuxSessionSplitArgv, tmuxTitleArgvs, tmuxTypeArgvs } from '../../hooks/panes.js'
+
+describe('sessions: helpers', () => {
+  test('session names are s-<run>-<n>, never agt-, so no reaper, band or sweep picks them up', () => {
+    expect(sessionName('k7f2ab', 1)).toBe('s-k7f2ab-1')
+    expect(sessionName('k7f2ab', 8)).toBe('s-k7f2ab-8')
+    expect(sessionName('k7f2ab', 0)).toBe(null)
+    expect(sessionName('../x', 1)).toBe(null)
+    expect(splitName(sessionName('k7f2ab', 1))).toBe(null)
+    expect(paneAgentsOf([{ name: 's-k7f2ab-1', pane_id: 'w1:p5' }])).toEqual([])
+  })
+
+  test('the tool loads eagerly and says when to use it', () => {
+    expect(OPEN_SESSIONS_TOOL.isDeferred).toBe(false)
+    expect(OPEN_SESSIONS_TOOL.description).toContain('open or start sessions')
+    expect(OPEN_SESSIONS_TOOL.description).toContain('never answer it with subagents')
+    expect(OPEN_SESSIONS_TOOL.inputSchema.properties.model.enum).not.toContain('fable')
+  })
+
+  test('input: count, tasks, kind, model, cwd and layout, with defaults', () => {
+    expect(sessionsToolInput({})).toEqual({ count: 1, tasks: [null], kind: 'claude', model: null, cwd: null, layout: 'stack' })
+    expect(sessionsToolInput({ count: 3 })).toMatchObject({ count: 3, tasks: [null, null, null] })
+    expect(sessionsToolInput({ tasks: ['fix the header', 'write the docs'] })).toMatchObject({ count: 2, tasks: ['fix the header', 'write the docs'] })
+    expect(sessionsToolInput({ count: 3, tasks: ['fix the header'] }).tasks).toEqual(['fix the header', null, null])
+    expect(sessionsToolInput({ count: 2, model: 'opus', cwd: '/w', layout: 'tab' })).toMatchObject({ model: 'opus', cwd: '/w', layout: 'tab' })
+    expect(sessionsToolInput({ kind: 'shell', tasks: ['htop'] })).toMatchObject({ kind: 'shell', tasks: ['htop'] })
+    expect(sessionsToolInput(undefined)).toMatchObject({ count: 1 })
+  })
+
+  test('input: bad values are refused', () => {
+    expect(sessionsToolInput({ count: 0 }).error).toContain('1 to ' + MAX_SESSIONS)
+    expect(sessionsToolInput({ count: MAX_SESSIONS + 1 }).error).toContain('1 to ' + MAX_SESSIONS)
+    expect(sessionsToolInput({ count: 1.5 }).error).toContain('whole number')
+    expect(sessionsToolInput({ count: 1, tasks: ['a b', 'c d'] }).error).toContain('one task per session')
+    expect(sessionsToolInput({ tasks: 'do it' }).error).toContain('list of strings')
+    expect(sessionsToolInput({ kind: 'gemini' }).error).toContain('kind must be one of ' + SESSION_KINDS.join(', '))
+    expect(sessionsToolInput({ model: 'fable' }).error).toContain('model must be one of')
+    expect(sessionsToolInput({ kind: 'shell', model: 'opus' }).error).toContain('Claude sessions only')
+    expect(sessionsToolInput({ layout: 'grid' }).error).toContain('layout must be one of')
+    expect(sessionsToolInput({ cwd: 'repo' }).error).toContain('absolute')
+    expect(sessionsToolInput({ tasks: ['plugin'] }).error).toContain('one-word task')
+  })
+
+  test('herdr argv: a plain split and tab with no worker env, and the person\'s default model unless one is named', () => {
+    const split = herdrSessionSplitArgv({ pane: 'w1:p1', cwd: '/w', direction: 'right' })
+    expect(split).toEqual(['herdr', 'pane', 'split', '--pane', 'w1:p1', '--direction', 'right', '--cwd', '/w', '--no-focus'])
+    expect(herdrSessionTabArgv({ workspace: 'w1', cwd: '/w', label: 'sessions' })).not.toContain('--env')
+    expect(herdrSessionStartArgv({ name: 's-k7f2ab-1', pane: 'w1:p5', kind: 'claude', model: null }).slice(-1)).toEqual(['--'])
+    expect(herdrSessionStartArgv({ name: 's-k7f2ab-1', pane: 'w1:p5', kind: 'claude', model: 'opus' }).slice(-2)).toEqual(['--model', 'opus'])
+    expect(herdrSessionStartArgv({ name: 's-k7f2ab-1', pane: 'w1:p5', kind: 'codex', model: null })).toContain('codex')
+  })
+
+  test('tmux argv: claude with no worker env, the task after --, and a bare shell for kind shell', () => {
+    const argv = tmuxSessionSplitArgv({ target: '%1', cwd: '/w', direction: 'right', shell: '/bin/zsh', kind: 'claude', model: null, task: 'fix it' })
+    expect(argv.some((x) => x.startsWith('AGENTILLE_'))).toBe(false)
+    expect(argv.slice(-6)).toEqual(['/bin/zsh', '-ic', 'claude "$@"', 's', '--', 'fix it'])
+    expect(tmuxSessionSplitArgv({ target: '%1', cwd: '/w', direction: 'down', shell: '/bin/fish', kind: 'claude', model: 'haiku', task: null }).slice(-3)).toEqual(['claude', '--model', 'haiku'])
+    expect(tmuxSessionSplitArgv({ target: '%1', cwd: '/w', direction: 'down', shell: '/bin/zsh', kind: 'shell', model: null, task: 'htop' }).at(-1)).toBe('/w')
+    expect(tmuxTitleArgvs('%9', 's-k7f2ab-1').flat()).not.toContain('@agt')
+    expect(tmuxTypeArgvs('%9', 'npm run dev')).toEqual([['tmux', 'send-keys', '-t', '%9', '-l', '--', 'npm run dev'], ['tmux', 'send-keys', '-t', '%9', 'Enter']])
+  })
+
+  test('the terminal id comes from a split, a tab or a pane get', () => {
+    expect(herdrTerminalOf(JSON.stringify({ result: { pane: { pane_id: 'w1:p5', terminal_id: 'term_1' } } }))).toBe('term_1')
+    expect(herdrTerminalOf(JSON.stringify({ result: { root_pane: { pane_id: 'w1:p5', terminal_id: 'term_2' } } }))).toBe('term_2')
+    expect(herdrTerminalOf('nope')).toBe(null)
+  })
+
+  test('the note points herdr agents at prompt and read, and everyone at close_pane', () => {
+    expect(sessionsNote('herdr', 'claude')).toContain('herdr agent prompt <name>')
+    expect(sessionsNote('herdr', 'shell')).not.toContain('herdr agent')
+    expect(sessionsNote('tmux', 'claude')).toContain('close_pane')
+  })
+})
+
+import { paneAgents as paneAgentsOf } from '../../hooks/live.js'
+
+describe('sessions: in the mod', () => {
+  const setup = (on: any, vars: Record<string, string>, table: Record<string, any> = {}) => {
+    const seen: string[][] = []
+    const tools: string[] = []
+    on('env.get', async ($: any, e: any) => ({ value: vars[e.name] }))
+    on('session.cwd', async () => ({ value: '/work/repo' }))
+    on('session.start', async ($: any, e: any) => ({ cwd: e.cwd }))
+    on('command.register', async () => ({ value: undefined }))
+    on('tool.register', async ($: any, e: any) => { tools.push(e.name); return { value: { tool: 'mcp__agentille__' + e.name } } })
+    on('fs.read', async () => ({ deny: 'no profile' }))
+    on('fs.exists', async () => ({ value: false }))
+    on('fs.stat', async ($: any, e: any) => (e.path.startsWith('/work/') ? { value: { kind: 'dir', size: 0, mtimeMs: 0, isLink: false } } : { deny: 'ENOENT' }))
+    on('store.get', async () => ({ value: undefined }))
+    on('ui.panes', async () => ({ value: [] }))
+    on('process.run', async ($: any, e: any) => {
+      seen.push(e.argv)
+      const key = Object.keys(table).find((k) => e.argv.join(' ').startsWith(k))
+      const v = key === undefined ? {} : typeof table[key] === 'function' ? table[key](e.argv) : table[key]
+      return { value: { exitCode: 0, stdout: '', stderr: '', ...v } }
+    })
+    mock.clock(on, { now: 1_000_000 })
+    return { seen, tools }
+  }
+  const HERDR = { HERDR_ENV: '1', HERDR_PANE_ID: 'w1:p1', HOME: '/h' }
+  const TMUX = { TMUX: '/tmp/tmux-1/default,1,0', TMUX_PANE: '%1', SHELL: '/bin/zsh', HOME: '/h' }
+  let next = 4
+  const herdrSplit = () => ({ stdout: JSON.stringify({ result: { pane: { pane_id: 'w1:p' + ++next, terminal_id: 'term_' + next } } }) })
+  const open = ($: any, input: Record<string, unknown>) => $.tool.call({ tool: 'mcp__agentille__open_sessions', ...input })
+  const close = ($: any, name: string) => $.tool.call({ tool: 'mcp__agentille__close_pane', name })
+
+  test('a lead with a transport registers open_sessions next to the pane tools', async ($, on) => {
+    const a = setup(on, TMUX, { 'tmux list-panes': { stdout: ['%1', '', 'claude', '0', '@1'].join('\t') + '\n' } })
+    await $.session.start({ cwd: '/work/repo', surface: null, isInteractive: false })
+    expect(a.tools).toEqual(['spawn_pane', 'close_pane', 'open_sessions'])
+  })
+
+  test('herdr: three sessions stack right of the lead, then down, with no worker env and no prompt', async ($, on) => {
+    next = 4
+    const { seen } = setup(on, HERDR, { 'herdr pane split': herdrSplit })
+    const r = await open($, { count: 3 })
+    expect(r.result).toMatch(/^Opened s-([a-z0-9]{6})-1, s-\1-2, s-\1-3 · Claude · herdr panes\./)
+    const splits = seen.filter((a) => a.slice(0, 3).join(' ') === 'herdr pane split')
+    expect(splits.map((a) => [a[4], a[6]])).toEqual([['w1:p1', 'right'], ['w1:p5', 'down'], ['w1:p6', 'down']])
+    expect(splits.flat().some((x) => x.startsWith('AGENTILLE_'))).toBe(false)
+    const starts = seen.filter((a) => a.slice(0, 3).join(' ') === 'herdr agent start')
+    expect(starts.map((a) => a[3])).toEqual(expect.arrayContaining([expect.stringMatching(/^s-[a-z0-9]{6}-1$/)]))
+    expect(starts.every((a) => a.at(-1) === '--')).toBe(true)
+    expect(seen.some((a) => a.slice(0, 3).join(' ') === 'herdr agent prompt')).toBe(false)
+  })
+
+  test('herdr: a task becomes the first prompt; a named model rides on start', async ($, on) => {
+    next = 4
+    const { seen } = setup(on, HERDR, { 'herdr pane split': herdrSplit })
+    await open($, { tasks: ['fix the header'], model: 'opus' })
+    expect(seen.find((a) => a.slice(0, 3).join(' ') === 'herdr agent start')!.slice(-2)).toEqual(['--model', 'opus'])
+    expect(seen.find((a) => a.slice(0, 3).join(' ') === 'herdr agent prompt')!.at(-1)).toBe('fix the header')
+  })
+
+  test('herdr: a second call stacks under the last session; a gone one falls back to the lead', async ($, on) => {
+    next = 4
+    let refuse = false
+    const { seen } = setup(on, HERDR, { 'herdr pane split': (argv: string[]) => (refuse && argv[4] !== 'w1:p1' ? { exitCode: 1, stderr: 'pane_not_found' } : herdrSplit()) })
+    await open($, {})
+    await open($, {})
+    refuse = true
+    await open($, {})
+    const splits = seen.filter((a) => a.slice(0, 3).join(' ') === 'herdr pane split').map((a) => [a[4], a[6]])
+    expect(splits).toEqual([['w1:p1', 'right'], ['w1:p5', 'down'], ['w1:p6', 'down'], ['w1:p1', 'right']])
+  })
+
+  test('herdr: a shell session runs its command and starts no agent', async ($, on) => {
+    next = 4
+    const { seen } = setup(on, HERDR, { 'herdr pane split': herdrSplit })
+    const r = await open($, { kind: 'shell', tasks: ['npm run dev'] })
+    expect(r.result).toContain('· shell · herdr pane.')
+    expect(seen.some((a) => a.slice(0, 3).join(' ') === 'herdr agent start')).toBe(false)
+    expect(seen).toContainEqual(['herdr', 'pane', 'run', 'w1:p5', 'npm run dev'])
+  })
+
+  test('herdr: a failed start closes that pane and reports the sessions already open', async ($, on) => {
+    next = 4
+    let starts = 0
+    const { seen } = setup(on, HERDR, { 'herdr pane split': herdrSplit, 'herdr agent start': () => (++starts === 2 ? { exitCode: 1, stderr: 'boom' } : {}) })
+    const r = await open($, { count: 3 })
+    expect(r.result).toMatch(/^Opened s-[a-z0-9]{6}-1 · Claude · herdr pane\. Session 2 failed: herdr agent start exited 1: boom/)
+    expect(seen).toContainEqual(['herdr', 'pane', 'close', 'w1:p6'])
+  })
+
+  test('close_pane closes a session only while its pane still holds the same terminal', async ($, on) => {
+    next = 4
+    let term = 'term_5'
+    const { seen } = setup(on, HERDR, { 'herdr pane split': herdrSplit, 'herdr pane get': () => ({ stdout: JSON.stringify({ result: { pane: { pane_id: 'w1:p5', terminal_id: term } } }) }) })
+    const name = (await open($, { count: 2 })).result.match(/s-[a-z0-9]{6}-1/)[0]
+    expect((await close($, name)).result).toBe('Closed ' + name + '.')
+    expect(seen).toContainEqual(['herdr', 'pane', 'close', 'w1:p5'])
+    term = 'term_99'
+    const other = name.replace(/-1$/, '-2')
+    expect((await close($, other)).result).toBe(other + ' is already closed.')
+    expect(seen).not.toContainEqual(['herdr', 'pane', 'close', 'w1:p6'])
+  })
+
+  test('tmux: claude with the task as its argument, a title and no @agt tag', async ($, on) => {
+    const { seen } = setup(on, TMUX, { 'tmux split-window': { stdout: '%9\n' } })
+    const r = await open($, { tasks: ['fix the header'] })
+    expect(r.result).toMatch(/^Opened s-[a-z0-9]{6}-1 · Claude · tmux pane\. close_pane/)
+    const split = seen.find((a) => a[1] === 'split-window')!
+    expect(split.slice(-2)).toEqual(['--', 'fix the header'])
+    expect(split.some((x) => x.startsWith('AGENTILLE_'))).toBe(false)
+    expect(seen.some((a) => a.includes('@agt'))).toBe(false)
+    expect(seen.some((a) => a[1] === 'select-pane' && /^s-/.test(a.at(-1)!))).toBe(true)
+  })
+
+  test('refusals: no transport, codex on tmux, a missing cwd, a worker pane', async ($, on) => {
+    setup(on, TMUX, { 'tmux split-window': { stdout: '%9\n' } })
+    expect((await open($, { kind: 'codex' })).deny).toBe('Codex sessions need Herdr.')
+    expect((await open($, { cwd: '/nope' })).deny).toBe('/nope is not a directory.')
+    expect((await open($, { count: 9 })).deny).toContain('1 to 8')
+  })
+
+  test('no transport: refused', async ($, on) => {
+    setup(on, {})
+    expect((await open($, {})).deny).toContain('No pane transport here')
   })
 })

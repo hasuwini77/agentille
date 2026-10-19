@@ -1,6 +1,6 @@
 import { describe, expect, mock, test } from 'claude-code/testing'
 import { words } from '../../hooks/focus.js'
-import { CARD_MIN_WORDS, LIT_MEMO_MAX, essentials, highlight, highlightFor, highlightText, lightTokens, litFor, parseHighlightArgs, spans } from '../../hooks/highlight.js'
+import { CARD_MIN_WORDS, LIT_MEMO_MAX, essentials, highlight, highlightFor, highlightText, isAnswerBlock, lightTokens, litFor, panel, parseHighlightArgs, spans } from '../../hooks/highlight.js'
 
 const T = '`'
 const FENCE = T + T + T
@@ -219,6 +219,25 @@ describe('highlight: deciding', () => {
   })
 })
 
+describe('highlight: panel', () => {
+  test('the answer block is the answer\'s tail', async () => {
+    expect(isAnswerBlock('a\n\nb', 'b')).toBe(true)
+    expect(isAnswerBlock('a\n\nb', 'a')).toBe(false)
+    expect(isAnswerBlock('', 'a')).toBe(false)
+    expect(isAnswerBlock('a', '  ')).toBe(false)
+  })
+
+  test('tone follows the card mark or a flag; short answers get no strip', async () => {
+    expect(panel('✓ tagged v2.6.0').tone).toBe('ok')
+    expect(panel('✗ build failed').tone).toBe('fail')
+    expect(panel('✓ tagged v2.6.0').card).toEqual([])
+    expect(panel('Short answer.', { ms: 3000 })).toEqual({ tone: 'plain', head: '◆ answer · 3s', card: [], body: 'Short answer.' })
+    const long = 'The build failed on hooks/live.js. ' + Array.from({ length: 40 }, (_, i) => 'w' + i).join(' ')
+    expect(panel(long).tone).toBe('flag')
+    expect(panel(long).body).toContain('`hooks/live.js`')
+  })
+})
+
 describe('highlight: in the mod', () => {
   const REPLY = 'Next: tag v2.6.0. The change is in hooks/live.js and it is green. ' + Array.from({ length: 40 }, (_, i) => 'w' + i).join(' ')
   const SHORT = Array.from({ length: 30 }, (_, i) => 'w' + i).join(' ')
@@ -318,6 +337,41 @@ describe('highlight: in the mod', () => {
     await say($, 'explain the diff again')
     ui = await mount($, 'a3')
     expect(await ui.find({ type: 'Markdown' })).toBeUndefined()
+    await ui.unmount()
+  })
+
+  test('the block closing a main turn\'s answer draws as the framed panel, at full brightness', async ($, on) => {
+    setup(on)
+    on('turn.complete', async ($: any, e: any) => ({ text: e.answer }))
+    await say($, '/agt tag the release')
+    let ui = await mount($, 'z0')
+    expect(await ui.find({ type: 'Text', text: /◆ answer/ })).toBeUndefined()
+    await ui.unmount()
+    await $.turn.complete({ answer: 'Narration first.\n\n' + REPLY, durationMs: 64_000, isAborted: false, turnId: 't1', reason: 'answer' } as never)
+    ui = await mount($, 'z1')
+    expect(await ui.find({ type: 'Text', text: /◆ answer · 1m 04s/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /→ / })).toBeDefined()
+    const md: any = await ui.find({ type: 'Markdown' })
+    expect(md.props.text).toContain('`hooks/live.js`')
+    expect(md.props.dimColor).toBeUndefined()
+    await ui.unmount()
+    // A subagent's answer is not the main turn's.
+    await $.turn.complete({ agentId: 'sub', answer: REPLY + ' sub', durationMs: 5, isAborted: false, turnId: 't2', reason: 'answer' } as never)
+    ui = await mount($, 'z2', REPLY + ' sub')
+    expect(await ui.find({ type: 'Text', text: /◆ answer/ })).toBeUndefined()
+    await ui.unmount()
+  })
+
+  test('with highlight off the final answer draws as the engine does', async ($, on) => {
+    fakeHome(on)
+    setup(on)
+    on('turn.complete', async ($: any, e: any) => ({ text: e.answer }))
+    await start($)
+    await $.command.run({ command: 'agt-highlight', args: 'off' })
+    await say($, '/agt tag the release')
+    await $.turn.complete({ answer: REPLY, durationMs: 10, isAborted: false, turnId: 't1', reason: 'answer' } as never)
+    const ui = await mount($, 'o1')
+    expect(await ui.find({ type: 'Text', text: /◆ answer/ })).toBeUndefined()
     await ui.unmount()
   })
 

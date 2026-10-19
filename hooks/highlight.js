@@ -5,6 +5,8 @@
 //                 Skipped for a final card (an answer opening with ✓ or ✗): it would repeat it.
 //   lightTokens — wrap paths, versions, refs and numbers in backticks so the dim body
 //                 shows them lit. Code, links and fences are never touched.
+//   panel       — the turn's final answer, framed: a head, the essentials, the body lit at full
+//                 brightness. Narration between tool calls stays dim, so the eye lands on the answer.
 
 import { words } from './focus.js'
 
@@ -214,6 +216,32 @@ export function litFor(memo, id, { on, agtTurn }) {
     if (memo.size > LIT_MEMO_MAX) memo.delete(memo.keys().next().value)
   }
   return !!on && memo.get(id)
+}
+
+// The block that closes the main turn's answer: its text is the answer's tail (a reply drawn in
+// several blocks frames only its last).
+export function isAnswerBlock(answer, text) {
+  const a = String(answer ?? '').trim()
+  const t = String(text ?? '').trim()
+  return !!a && !!t && a.endsWith(t)
+}
+
+const clock = (ms) => {
+  const s = Math.max(0, Math.round((ms ?? 0) / 1000))
+  return s < 60 ? s + 's' : Math.floor(s / 60) + 'm ' + String(s % 60).padStart(2, '0') + 's'
+}
+
+// The final answer's panel: tone (ok · flag · fail · plain) colours the frame, head names it, the
+// card is the essentials strip (none for a run's own ✓/✗ card or a short answer), body is lit.
+export function panel(text, { ms } = {}) {
+  const t = String(text ?? '')
+  const lead = t.trimStart()
+  const final = isFinalCard(t)
+  const card = final || words(t) < CARD_MIN_WORDS ? [] : essentials(t)
+  const lit = lightTokens(t)
+  const tone = lead.startsWith('✗') ? 'fail' : lead.startsWith('✓') ? 'ok' : card.some((c) => c.kind === 'flag') ? 'flag' : 'plain'
+  const head = '◆ answer' + (typeof ms === 'number' && ms > 0 ? ' · ' + clock(ms) : '')
+  return { tone, head, card, body: lit.length <= LIT_MAX ? lit : t }
 }
 
 export function parseHighlightArgs(args) {

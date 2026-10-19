@@ -2,6 +2,34 @@
 
 All notable changes to agentille are documented here.
 
+## [3.16.0] — 2026-10-19
+
+### Added
+
+- **Answer panel.** The answer that ends a lit turn (`/agt` turns, or every
+  turn with `display.highlight: all`) draws in a rounded frame: a head with
+  the turn's time, a ✓/⚑/→ strip for a long answer, then the body at full
+  brightness with paths, versions, refs and numbers lit. The frame is green
+  for a ✓ card, red for ✗, amber when the answer flags something.
+  Narration between tool calls keeps its dim style, so the answer stands out.
+- **`/agt-clean [dry|all]`.** Closes finished `agt-*` panes that no live
+  lead owns (a lead that crashed or was killed never ran its SessionEnd
+  sweep), drops the run-tab files of gone leads, removes `agt/*` worktrees
+  whose branch is merged and whose checkout is clean, and deletes merged
+  `agt/*` branches. A working or blocked pane, an unmerged branch and a
+  checkout with changes are never touched: the report names them as kept.
+  `dry` lists without acting; `all` also closes this session's panes whose
+  answer was never read.
+- **The cleaner runs on its own.** At session start (finished orphan panes
+  only) and when an `/agt` run ends on its ✓/✗ card (panes and merged
+  worktrees). It toasts one line only when it removed something.
+
+### Rationale
+
+- Long replies read as one block; framing only the final answer gives the
+  eye one place to land. Runs that end abnormally left panes, tab files and
+  worktrees behind; the sweep only covered a clean session exit.
+
 ## [3.15.2] — 2026-10-18
 
 ### Fixed

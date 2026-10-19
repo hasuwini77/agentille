@@ -5,11 +5,12 @@
 
 import { DEFAULTS, decide, formationOf, ladderFixes, parseHeader, roleOf, verdictOf } from './routing.js'
 import { addUsage, elapsed, endRoute, finish, isAgtPrompt, ledger, ledgerText, newAgent, paneAgents, panesLeft, reapPlan, short, stage, waving } from './live.js'
-import { ACCENT, FRAME_COLOR, INK, WIRE_COLOR, boardRows, cast, castColumns, chip, colorOf, header, hex, leadLine, routingLines, runPhases, swarm, tokenBars, toolLabel, wireLines, wireRow } from './board.js'
+import { ACCENT, DONE_COLOR, FRAME_COLOR, INK, WIRE_COLOR, boardRows, cast, castColumns, chip, colorOf, header, hex, leadLine, routingLines, runPhases, swarm, tokenBars, toolLabel, wireLines, wireRow } from './board.js'
 import { PUBLISH_MS, doneMessage, freshStatus, logWire, parseTellArgs, parseWire, shortName, statusKey, validLead, wakeDue, wakeMessage, wireEnv, workerStatus } from './wire.js'
 import { activeSquads, allPaths, depsOf, explain, injection, squadsText } from './squads.js'
 import { BYE_MS, HELLO_MS, MASCOT_COLOR, MODEL_COLOR, agentMood, caption, frame, modelKey, moodAt, parseWorker } from './mascot.js'
-import { MARK, SPAN_COLOR, highlightFor, highlightText, litFor, parseHighlightArgs, spans } from './highlight.js'
+import { MARK, SPAN_COLOR, highlightFor, highlightText, isAnswerBlock, litFor, panel, parseHighlightArgs, spans } from './highlight.js'
+import { cleanText, herdrOrphans, orphanPlan, parseCleanArgs, parseWorktrees, staleTabs, tmuxOrphans, worktreePlan } from './clean.js'
 import { flagOf, focusText, paneFlags, parseFocusArgs } from './focus.js'
 import { cleanDisplay, hasVoice, highlightFlags, profileJson, resolveDisplay, storedDisplay, withDisplay } from './settings.js'
 import { ledgerSummary, overviewText, parseInfoArgs, routeText, routingSummary, squadsSummary } from './info.js'
@@ -71,6 +72,8 @@ let highlightOn = true       // /agt replies get an essentials card and lit toke
 let highlightAll = false     // …and so does every other long reply (/agt-highlight all)
 const litMemo = new Map()    // message id → was it an /agt turn when first drawn
 const hlMemo = new Map()     // message id → { text, highlight() result }
+const panelMemo = new Map()  // message id → { text, panel() result }: the blocks that closed a main turn's answer
+let lastAnswer = null        // { text, ms, id } of the newest main-turn answer; its closing block draws as the panel
 let runningVersion = null    // this module's own agentille version, read from its plugin.json at session start
 let skewToasted = false
 let sessionId = null         // this session's id: workers it opens send their results here
@@ -463,6 +466,82 @@ async function pruneTabs($, workspace) {
   if (gone.length) await saveTabs($)
 }
 
+// ── the cleaner ──────────────────────────────────────────────────────────────
+// Panes: agt-* panes no live lead owns (their lead died before its SessionEnd sweep) close once
+// finished; with `all`, this lead's stranded panes too. Run-tab files of gone leads are dropped.
+// Git (not on `panes` alone): agt/* worktrees merged and clean are removed, merged agt/* branches deleted.
+// Clean means done/idle/dead panes, merged branches and clean checkouts only; the rest is reported, never touched.
+async function cleanWorkspace($, { dry = false, all = false, auto = false, panesOnly = false } = {}) {
+  const r = { closed: [], tabs: 0, removed: [], branches: [], keep: [] }
+  const run = (argv) => $.process.run(argv, PROBE).catch(() => null)
+  if (transport === 'herdr') {
+    const res = await run(['herdr', 'agent', 'list'])
+    let list = []
+    try { list = JSON.parse(res?.stdout ?? '').result?.agents ?? [] } catch { /* herdr down: nothing to judge */ }
+    // A lead missing from the list cannot tell a dead lead's tab from its own: judge nothing.
+    const self = await $.env.get('HERDR_PANE_ID')
+    if (!list.some((a) => a.pane_id === self && !String(a.name ?? '').startsWith('agt-'))) list = []
+    const dir = home ? home + '/.agentille/state' : null
+    const keys = dir ? (await $.fs.list(dir).catch(() => [])).map((f) => f.name).filter((n) => /^lead-[\w-]+\.tabs$/.test(n)).map((n) => n.slice(5, -5)) : []
+    const tabs = new Map()
+    for (const k of keys) tabs.set(k, String(await $.fs.read(dir + '/lead-' + k + '.tabs').catch(() => '')).split('\n').filter(Boolean))
+    const plan = orphanPlan(herdrOrphans(list, (id) => tabs.get(paneKey(id))))
+    const close = [...plan.close, ...(all ? panes.filter((p) => strandedNow.has(p.id) && !plan.close.some((c) => c.id === p.id)) : [])]
+    for (const p of close) if (dry || (await run(herdrCloseArgv(p.id)))?.exitCode === 0) r.closed.push(p.name)
+    r.keep.push(...plan.keep)
+    for (const k of staleTabs(keys, list, paneKey)) if (dry || (await run(['rm', '-f', dir + '/lead-' + k + '.tabs']))?.exitCode === 0) r.tabs += 1
+  } else if (transport === 'tmux') {
+    const res = await run(TMUX_LIST_ARGV)
+    let rows = res?.exitCode === 0 ? parseTmuxList(res.stdout) : []
+    if (!isLead(rows, await $.env.get('TMUX_PANE'))) rows = []
+    const done = new Set()
+    for (const row of rows) {
+      const n = splitName(row.agt)
+      const file = n && doneFile(home, n.run, n.role)
+      if (file && (await $.fs.exists(file).catch(() => false))) done.add(row.id)
+    }
+    const plan = orphanPlan(tmuxOrphans(rows, (row) => done.has(row.id)))
+    const close = [...plan.close, ...(all ? panes.filter((p) => strandedNow.has(p.id) && !plan.close.some((c) => c.id === p.id)) : [])]
+    for (const p of close) if (dry || (await run(tmuxKillArgv(p.id)))?.exitCode === 0) r.closed.push(p.name)
+    r.keep.push(...plan.keep)
+  }
+  if (!all) for (const p of panes) if (strandedNow.has(p.id)) r.keep.push({ what: p.name, why: 'answer not read · /agt-clean all' })
+  if (!panesOnly) await cleanGit($, run, r, dry)
+  if (r.closed.length) $.ui.invalidate('ui.render')
+  if (auto && (r.closed.length || r.removed.length || r.branches.length)) $.ui.toast(cleanText({ ...r, keep: [] }))
+  return r
+}
+
+async function cleanGit($, run, r, dry) {
+  const cwd = await $.session.cwd().catch(() => null)
+  if (!cwd) return
+  const git = (...a) => run(['git', '-C', cwd, ...a])
+  const wl = await git('worktree', 'list', '--porcelain')
+  if (wl?.exitCode !== 0) return
+  const trees = parseWorktrees(wl.stdout)
+  const lines = (x) => (x?.exitCode === 0 ? String(x.stdout).split('\n').map((l) => l.trim()).filter(Boolean) : [])
+  const base = lines(await git('symbolic-ref', '--short', 'refs/remotes/origin/HEAD'))[0]
+  const merged = new Set()
+  for (const ref of [base, 'HEAD'].filter(Boolean)) for (const b of lines(await git('branch', '--merged', ref, '--format=%(refname:short)', '--list', 'agt/*'))) merged.add(b)
+  const dirty = new Set()
+  for (const t of trees.slice(1)) {
+    if (!t.branch?.startsWith('agt/') || t.prunable || !merged.has(t.branch)) continue
+    const st = await run(['git', '-C', t.path, 'status', '--porcelain'])
+    if (st?.exitCode !== 0 || String(st.stdout).trim()) dirty.add(t.path)
+  }
+  const plan = worktreePlan(trees, merged, dirty, lines(await git('branch', '--format=%(refname:short)', '--list', 'agt/*')))
+  r.keep.push(...plan.keep)
+  for (const t of plan.remove) {
+    if (dry || (await git('worktree', 'remove', t.path))?.exitCode === 0) r.removed.push(t.branch)
+    else r.keep.push({ what: t.branch, why: 'git refused to remove the worktree' })
+  }
+  for (const b of plan.deleteBranches) {
+    if (!dry && !r.removed.includes(b) && plan.remove.some((t) => t.branch === b)) continue
+    if (dry || (await git('branch', '-d', b))?.exitCode === 0) r.branches.push(b)
+  }
+  if (plan.prune && !dry) await git('worktree', 'prune')
+}
+
 // The lead's cwd and a pane's cwd are the same repo when they share a git common dir (a worktree does).
 async function sameRepo($, a, b) {
   if (a === b) return true
@@ -718,6 +797,32 @@ function cardBox(els, items) {
   })
 }
 
+// The final answer's frame: green for a ✓ card, red for ✗, amber when it flags something.
+const TONE_COLOR = { ok: DONE_COLOR, fail: 0xf85149, flag: 0xf2a33a, plain: ACCENT }
+
+function answerBox(els, p) {
+  const { Box, Text, Markdown } = els
+  const color = hex(TONE_COLOR[p.tone] ?? ACCENT)
+  const kids = [Text({ color, children: [p.head] })]
+  if (p.card.length) kids.push(Box({ marginTop: 1, children: [cardBox(els, p.card)] }))
+  kids.push(Box({ marginTop: 1, children: [Markdown({ text: p.body })] }))
+  return Box({ flexDirection: 'column', borderStyle: 'round', borderColor: color, paddingX: 1, children: kids })
+}
+
+// The panel for a message id, once it is known to close the newest answer; kept per id after that.
+function answerPanel(id, text) {
+  if (!id || typeof text !== 'string') return null
+  const hit = panelMemo.get(id)
+  if (hit && hit.text === text) return hit.p
+  if (!hit && !(lastAnswer && (lastAnswer.id === id || (!lastAnswer.id && isAnswerBlock(lastAnswer.text, text))))) return null
+  if (lastAnswer && !lastAnswer.id && !hit) lastAnswer.id = id
+  const p = panel(text, { ms: lastAnswer?.id === id ? lastAnswer.ms : undefined })
+  panelMemo.delete(id)
+  panelMemo.set(id, { text, p })
+  if (panelMemo.size > 200) panelMemo.delete(panelMemo.keys().next().value)
+  return p
+}
+
 const focusRow = (els, text) => els.Text({ color: FOCUS_COLOR.flag, wrap: 'truncate', children: ['⚑ ' + text] })
 
 // ── the wire (worker side publishes and reports; lead side reads) ─────────────
@@ -908,12 +1013,15 @@ export function register(on) {
     applyDisplay()
     await $.command.register({ name: 'agt-info', description: 'Settings in effect, routing, ledger, squads, or a route dry-run: routing | ledger | squads | route <role>', argumentHint: '[routing|ledger|squads|route <role> [size=…] [risk=…] [depth=…]]', immediate: true })
     await $.command.register({ name: 'agt-highlight', description: 'Highlight replies: on (/agt only) · all · off. Saved as display.highlight in profile.json; goes away in v4', argumentHint: '[on|all|off]', immediate: true })
+    await $.command.register({ name: 'agt-clean', description: 'Tidy after runs: close finished orphan agt-* panes, drop stale tab files, remove merged agt/* worktrees and branches. dry = list only · all = also close this session\'s unread panes', argumentHint: '[dry|all]', immediate: true })
     await $.command.register({ name: 'agt-focus', description: 'Agent flags above the prompt (a REVISE, a FAIL, a blocked pane): on · off. Saved as display.focus in profile.json; goes away in v4', argumentHint: '[on|off]', immediate: true })
     if (transport !== 'none') {
       // One look now: a lead restarted mid-run sees its leftover panes. It reaps only those whose answer
       // was written after this look; an older one is flagged "not harvested" and left to the person.
       await pollNow($, transport)
       if (panes.length) ensurePolling($)
+      // A lead that died skipped its SessionEnd sweep: close its finished workers now.
+      if (panes.length && !selfName && !worker) void cleanWorkspace($, { auto: true, panesOnly: true }).catch(() => {})
       // The lead opens and closes its workers through the mod; a worker pane gets no fan-out of its own.
       if (!selfName && !worker) {
         await $.tool.register(SPAWN_TOOL)
@@ -1082,6 +1190,13 @@ export function register(on) {
     harvested.add(c.pane.id)
     await pollNow($, t)
     return { result: 'Closed ' + c.pane.name + '.' }
+  })
+
+  on('command.run', { command: 'agt-clean' }, async ($, e) => {
+    const a = parseCleanArgs(e.args)
+    if (a.error) return { text: a.error }
+    if (selfName || worker) return { text: 'agt clean runs in the lead session, not in a worker pane.' }
+    return { text: cleanText(await cleanWorkspace($, a), a) }
   })
 
   on('command.run', { command: 'agt-focus' }, async ($, e) => {
@@ -1292,6 +1407,7 @@ export function register(on) {
   // A main-loop turn began (a subagent's run raises none). A worker's first one plays hello.
   on('turn.start', async ($, e, next) => {
     leadTurn = true
+    if (e.agentId === undefined) lastAnswer = null
     if (worker) {
       const now = await $.clock.now()
       if (!mascot.greeted) {
@@ -1315,6 +1431,12 @@ export function register(on) {
   on('turn.complete', async ($, e, next) => {
     const a = e.agentId ? live.get(e.agentId) : undefined
     if (!e.agentId) leadTurn = false
+    if (!e.agentId && e.reason === 'answer' && typeof e.answer === 'string') {
+      lastAnswer = { text: e.answer, ms: e.durationMs, id: null }
+      if (highlightOn && (agtTurn || highlightAll)) $.ui.invalidate('ui.render')
+      // A run's ✓/✗ card ends it: tidy what it leaves behind (finished orphans, merged worktrees).
+      if (agtTurn && !selfName && !worker && /^[✓✗]/.test(e.answer.trimStart())) void cleanWorkspace($, { auto: true }).catch(() => {})
+    }
     if (!e.agentId && worker && mascot.working) {
       const now = await $.clock.now()
       mascot.working = false
@@ -1429,10 +1551,12 @@ export function register(on) {
   // decision is memoised per message id so a reply does not restyle when a later turn changes.
   on('ui.render', { component: 'AssistantMessage' }, async ($, e, next) => {
     if (!litFor(litMemo, e.requestId, { on: highlightOn, agtTurn: agtTurn || highlightAll })) return next(e)
-    const h = highlightFor(hlMemo, e.requestId, e.props?.text)
-    if (!h) return next(e)
+    const final = e.surface === 'terminal' && !e.props?.isSummary ? answerPanel(e.requestId, e.props?.text) : null
+    const h = final ? null : highlightFor(hlMemo, e.requestId, e.props?.text)
+    if (!final && !h) return next(e)
     const els = $.ui.resolve(e)
     if (!els.Markdown) return next(e)
+    if (final) return answerBox(els, final)
     const body = h.body !== null ? els.Markdown({ text: h.body, dimColor: true }) : await next(e)
     return els.Box({ flexDirection: 'column', children: h.card.length ? [cardBox(els, h.card), body] : [body] })
   })

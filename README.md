@@ -57,6 +57,7 @@ Skip it for one-file edits, typos, renames and questions: a plain prompt is chea
 | `/agt --fable "task"` | The top model tier on judgment roles for one run |
 | `/agt-info [routing\|ledger\|squads\|route <role>]` | Settings in effect, last run's routing and ledger, active squads · or one view: routing decisions, tokens per role, the squad rescan · or a dry-run of what a role would route to, escalation rungs included |
 | `/agt-spawn "task" [--model …]` | One extra routed Claude pane (Herdr or tmux); it closes itself once its answer is saved |
+| `/agt-clean [dry\|all]` | Tidy the workspace: close finished agt panes no live session owns, drop stale tab files, remove merged and clean `agt/*` worktrees and branches · `dry` lists only · `all` also closes this session's unread panes. It also runs on its own when a run ends and at session start |
 | `/agt-tell <worker> <message>` | Message a worker pane over the wire |
 | `/agt-deck [auto\|off]` | A side pane with the run's cast, routing timeline, wire log and token bars · open it on every `/agt` · stop |
 | `/agentille-project` · `/agentille-claude-md` | Seed a repo's CLAUDE.md · tune an existing one |
@@ -77,7 +78,7 @@ The switches that used to be commands live in a `display` block of `~/.agentille
 
 - `deck`: `auto` opens the deck on every `/agt`, `off` only when you type `/agt-deck`.
 - `focus`: agent flags (a REVISE, a FAIL, a blocked pane) above the prompt.
-- `highlight`: `on` lights `/agt` replies, `all` every long reply, `off` none.
+- `highlight`: `on` lights `/agt` replies, `all` every long reply, `off` none. The answer that ends a lit turn draws in a framed panel: its time, a ✓/⚑/→ strip, then the body with paths, versions and refs lit; narration before it stays dim.
 
 `/agt-routing`, `/agt-ledger` and `/agt-squads` were removed in v3.14.0: use `/agt-info routing|ledger|squads`. `/agt-focus` and `/agt-highlight` still work and write this block.
 

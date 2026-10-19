@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'claude-code/testing'
-import { cleanText, herdrOrphans, orphanPlan, parseCleanArgs, parseWorktrees, staleTabs, tmuxOrphans, worktreePlan } from '../../hooks/clean.js'
+import { cleanText, herdrOrphans, orphanPlan, parseWorktrees, staleTabs, tmuxOrphans, worktreePlan } from '../../hooks/clean.js'
 
 const agent = (pane_id: string, tab_id: string, name: string | null, agent_status = 'idle') => ({ pane_id, tab_id, name, agent_status })
 
@@ -79,17 +79,10 @@ describe('clean: worktrees', () => {
   })
 })
 
-describe('clean: args and text', () => {
-  test('parses dry, all, nothing, and rejects the rest', async () => {
-    expect(parseCleanArgs('')).toEqual({ dry: false, all: false })
-    expect(parseCleanArgs(' DRY ')).toEqual({ dry: true, all: false })
-    expect(parseCleanArgs('all')).toEqual({ dry: false, all: true })
-    expect(parseCleanArgs('everything').error).toContain('Usage')
-  })
-
+describe('clean: text', () => {
   test('one line of what went, one of what stayed', async () => {
     expect(cleanText({})).toBe('agt clean · workspace already clean')
     expect(cleanText({ closed: ['a', 'b'], branches: ['agt/a'], removed: ['agt/a'], tabs: 1 })).toBe('agt clean · 2 panes closed · 1 worktree removed · 1 branch deleted · 1 stale tab file dropped')
-    expect(cleanText({ closed: ['a'], keep: [{ what: 'agt/c', why: 'not merged' }] }, { dry: true })).toBe('agt clean (dry) · would: 1 pane closed\nkept: agt/c (not merged)')
+    expect(cleanText({ closed: ['a'], keep: [{ what: 'agt/c', why: 'not merged' }] })).toBe('agt clean · 1 pane closed\nkept: agt/c (not merged)')
   })
 })

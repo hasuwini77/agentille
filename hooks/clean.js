@@ -8,19 +8,10 @@
 // Nothing that may hold the only copy of work goes: a working or blocked pane, an unmerged
 // branch, a checkout with changes. Those are listed as kept, with the reason.
 
-export const CLEAN_USAGE = 'Usage: /agt-clean [dry|all]'
 export const AGT_BRANCH = 'agt/'
 
 const FINISHED = new Set(['idle', 'done', 'dead'])
 const isAgt = (name) => typeof name === 'string' && name.startsWith('agt-')
-
-export function parseCleanArgs(args) {
-  const a = String(args ?? '').trim().toLowerCase()
-  if (!a) return { dry: false, all: false }
-  if (a === 'dry') return { dry: true, all: false }
-  if (a === 'all') return { dry: false, all: true }
-  return { error: CLEAN_USAGE }
-}
 
 // Herdr's agent list → the agt-* panes in no live lead's tab. A lead is any agent pane that is not
 // agt-*; it owns its own tab and the run tabs it recorded (tabsOf(pane id) → tab ids).
@@ -105,15 +96,15 @@ export function worktreePlan(trees, merged, dirty, branches = []) {
 
 const plural = (n, one, many = one + 's') => n + ' ' + (n === 1 ? one : many)
 
-// The cleaner's report: one line of what went, one of what stayed. Dry runs say "would".
-export function cleanText({ closed = [], tabs = 0, removed = [], branches = [], keep = [] }, { dry = false } = {}) {
+// The cleaner's report: one line of what went, one of what stayed.
+export function cleanText({ closed = [], tabs = 0, removed = [], branches = [], keep = [] }) {
   const did = [
     closed.length && plural(closed.length, 'pane') + ' closed',
     removed.length && plural(removed.length, 'worktree') + ' removed',
     branches.length && plural(branches.length, 'branch', 'branches') + ' deleted',
     tabs && plural(tabs, 'stale tab file') + ' dropped',
   ].filter(Boolean)
-  const head = did.length ? (dry ? 'agt clean (dry) · would: ' : 'agt clean · ') + did.join(' · ') : 'agt clean · workspace already clean'
+  const head = did.length ? 'agt clean · ' + did.join(' · ') : 'agt clean · workspace already clean'
   if (!keep.length) return head
   return head + '\nkept: ' + keep.slice(0, 6).map((k) => k.what + ' (' + k.why + ')').join(' · ') + (keep.length > 6 ? ' · +' + (keep.length - 6) + ' more' : '')
 }

@@ -5,7 +5,7 @@
 //                 Skipped for a final card (an answer opening with ✓ or ✗): it would repeat it.
 //   lightTokens — wrap paths, versions, refs and numbers in backticks so the dim body
 //                 shows them lit. Code, links and fences are never touched.
-//   panel       — the turn's final answer, framed: a head, the essentials, the body lit at full
+//   panel       — the turn's final answer, between two rules: a head, the essentials, the body lit at full
 //                 brightness. Narration between tool calls stays dim, so the eye lands on the answer.
 
 import { words } from './focus.js'
@@ -244,10 +244,12 @@ export const ANSWER_STYLE = [
 
 // A typed prompt that asks for text to paste as is: "no formatting", "remove the formatting", "plain
 // text", "raw text", "copy-paste", "paste-ready" or a leading "raw:". Its answer skips the panel and the
-// answer style, draws as the engine does and goes on the clipboard: copying out of a framed panel
-// brings the border and the indent along.
+// answer style, draws as the engine does and goes on the clipboard: copying out of the panel brings
+// its rules and the markdown along. Only the prompt's own ask counts: the whole prompt when it is
+// short, else its first or last sentence when that one is short (a pasted draft, then "make this plain
+// text"). A long prompt that only talks about formatting or copy-paste is not an ask for paste text.
+const RAW_LEAD = /^\s*raw\s*[:—-]/i
 const RAW = [
-  /^\s*raw\s*[:—-]/i,
   /\b(?:no|without|remove|strip|drop)\s+(?:the\s+|all\s+|any\s+)?(?:markdown|formatting)\b/i,
   /\bunformatted\b/i,
   /\bplain[- ]text\b/i,
@@ -255,7 +257,18 @@ const RAW = [
   /\bcopy[- ]?paste(?:able)?\b/i,
   /\bpaste[- ]ready\b/i,
 ]
-export const isRawPrompt = (text) => RAW.some((re) => re.test(String(text ?? '')))
+export const RAW_PROMPT_WORDS = 25
+export const RAW_ASK_WORDS = 20
+const asks = (s) => RAW.some((re) => re.test(s))
+const sentences = (line) => line.split(/(?<=[.!?:])\s+/).filter((s) => s.trim())
+
+export function isRawPrompt(text) {
+  const t = String(text ?? '')
+  if (RAW_LEAD.test(t)) return true
+  if (words(t) <= RAW_PROMPT_WORDS) return asks(t)
+  const lines = t.split('\n').filter((l) => l.trim())
+  return [sentences(lines[0])[0], sentences(lines.at(-1)).at(-1)].some((s) => words(s) <= RAW_ASK_WORDS && asks(s))
+}
 
 // Sent beside a raw prompt in place of the answer style.
 export const RAW_STYLE = [
@@ -315,7 +328,7 @@ function headline(main) {
 }
 
 // The final answer's panel. tone colours the frame (fail · ok · move · flag · plain); head is the
-// answer's own first line (or "answer"); time is the turn's; card is the essentials strip, kept only for
+// answer's own first line, or null when it does not read as a headline; time is the turn's; card is the essentials strip, kept only for
 // an unshaped long answer; body is lit; move is the user's steps; idle says "nothing needed from you"
 // for a shaped answer that has no move.
 export function panel(text, { ms, shaped = false } = {}) {
@@ -328,7 +341,7 @@ export function panel(text, { ms, shaped = false } = {}) {
   const tone = lead.startsWith('✗') ? 'fail' : move ? 'move' : lead.startsWith('✓') ? 'ok' : card.some((c) => c.kind === 'flag') ? 'flag' : 'plain'
   return {
     tone,
-    head: head ?? 'answer',
+    head,
     time: typeof ms === 'number' && ms > 0 ? clock(ms) : null,
     card,
     body: rest ? (lit.length <= LIT_MAX ? lit : rest) : null,

@@ -234,10 +234,10 @@ describe('highlight: panel', () => {
     expect(panel('✓ tagged v2.6.0').card).toEqual([])
     expect(panel('Short answer.', { ms: 3000 })).toEqual({ tone: 'plain', head: 'Short answer.', time: '3s', card: [], body: null, move: null, idle: false })
     expect(panel('## Done\n- a\n- b', { ms: 64_000 })).toMatchObject({ head: 'Done', time: '1m 04s', body: '- a\n- b' })
-    expect(panel('- a list first\n- b').head).toBe('answer')
+    expect(panel('- a list first\n- b').head).toBeNull()
     const long = 'The build failed on hooks/live.js. ' + Array.from({ length: 40 }, (_, i) => 'w' + i).join(' ')
     expect(panel(long).tone).toBe('flag')
-    expect(panel(long).head).toBe('answer') // a first line past 120 characters is no headline
+    expect(panel(long).head).toBeNull() // a first line past 120 characters is no headline
   })
 
   test('a "Your move:" block becomes numbered steps, cut from the body', async () => {
@@ -259,6 +259,22 @@ describe('highlight: raw prompts and body parts', () => {
       expect(isRawPrompt(s)).toBe(true)
     for (const s of ['the raw SQL query is slow', 'I copy-pasted the error', 'explain the formatting in prettier', 'format the date', 'why is CI red?', ''])
       expect(isRawPrompt(s)).toBe(false)
+  })
+
+  test('a long prompt counts only when its first or last sentence is a short ask', async () => {
+    const draft = 'Hi team, the release went out this morning. ' + Array.from({ length: 40 }, (_, i) => 'w' + i).join(' ') + '. Thanks, everyone.'
+    expect(isRawPrompt(draft + '\n\nCan you make this plain text?')).toBe(true)
+    expect(isRawPrompt(draft + ' Can you make it plain text?')).toBe(true)
+    expect(isRawPrompt('Make this plain text:\n\n' + draft)).toBe(true)
+    expect(isRawPrompt('write a short bio for the site, no formatting')).toBe(true)
+    // A short complaint with the words is still read as an ask: its answer only skips the panel.
+    expect(isRawPrompt('copy-paste out of the panel drags the border, fix it')).toBe(true)
+    // One long run-on sentence about the feature, the words in its middle: a topic, not an ask.
+    const talk = 'I would like the answer panel in our tool to look more like another CLI I tried because there I can select '
+      + 'the text and paste it without formatting and right now every time I copy paste something into a doc or a chat the '
+      + 'border follows me which is annoying so can we make the output cleaner and fix both the plugin and the renderer ok?'
+    expect(isRawPrompt(talk)).toBe(false)
+    expect(isRawPrompt(draft + ' The old panel brings the border along when you copy-paste out of it. ' + draft)).toBe(false)
   })
 
   test('top-level bullet runs become items; prose, nested lines and fences stay markdown', async () => {
@@ -424,7 +440,7 @@ describe('highlight: in the mod', () => {
     const answer = 'CI fails on a stale lockfile.\n- npm ci rejects it\n\nYour move:\n1. run `npm install`\n2. push'
     await $.turn.complete({ answer, durationMs: 4000, isAborted: false, turnId: 't1', reason: 'answer' } as never)
     let ui = await mount($, 'y1', answer)
-    expect(await ui.find({ type: 'Text', text: /^── your move ─/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /^── your move $/ })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: /▶ your move/ })).toBeUndefined()
     expect(await ui.find({ type: 'Text', text: /^1\.$/ })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: /npm ci rejects it/ })).toBeDefined()

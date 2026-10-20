@@ -932,32 +932,46 @@ const hangRow = (els, mark, width, color, text) => els.Box({ flexDirection: 'row
   els.Box({ flexGrow: 1, flexShrink: 1, children: [els.Text({ children: litText(els, text) })] }),
 ] })
 
-// ╭ ◆ headline · time ╮, the essentials strip (unshaped answers only), the body with its top-level
-// bullets as • rows, then the person's move under an amber "── your move ──" divider, numbered, or
-// one dim line saying nothing is needed from them. One frame: a box nested in it read as a second answer.
+// A rule across the rest of the row: a long run of ─ in a one-row box that clips it, so it reaches the
+// edge without the "…" a truncated Text ends in. The label and the corner never shrink.
+const ruleRow = (els, color, label, corner) => els.Box({ flexDirection: 'row', children: [
+  els.Box({ flexShrink: 0, children: [label] }),
+  els.Box({ flexGrow: 1, flexShrink: 1, height: 1, overflow: 'hidden', children: [els.Text({ color, children: ['─'.repeat(400)] })] }),
+  ...(corner ? [els.Box({ flexShrink: 0, children: [els.Text({ color, children: [corner] })] })] : []),
+] })
+
+// ╭─ ◆ agentille · time ─╮ over the answer, ╰─╯ under it, and nothing beside it: the text sits flush
+// left, so a selection copies no border or indent. Inside: the headline, the essentials strip (unshaped
+// answers only), the body with its top-level bullets as • rows, then the person's move under an amber
+// "── your move ──" divider, numbered, or one dim line saying nothing is needed from them.
 function answerBox(els, p) {
   const { Box, Text, Markdown } = els
   const color = hex(TONE_COLOR[p.tone] ?? ACCENT)
-  const kids = [Text({ children: [Text({ color, children: ['◆ '] }), Text({ color, children: litText(els, p.head) }), ...(p.time ? [Text({ dimColor: true, children: ['  · ' + p.time] })] : [])] })]
-  if (p.card.length) kids.push(Box({ marginTop: 1, children: [cardBox(els, p.card)] }))
+  const kids = [ruleRow(els, color, Text({ children: [
+    Text({ color, children: ['╭─ '] }), Text({ color, children: ['◆ '] }), Text({ color, children: ['agentille'] }),
+    ...(p.time ? [Text({ dimColor: true, children: [' · ' + p.time] })] : []), Text({ color, children: [' '] }),
+  ] }), '╮')]
+  if (p.head) kids.push(Text({ color, children: litText(els, p.head) }))
+  if (p.card.length) kids.push(Box({ marginTop: p.head ? 1 : 0, children: [cardBox(els, p.card)] }))
   for (const part of p.body ? bodyParts(p.body) : []) {
+    const marginTop = kids.length > 1 ? 1 : 0
     kids.push(part.items
-      ? Box({ marginTop: 1, flexDirection: 'column', children: part.items.map((item) => hangRow(els, '•', 2, color, item)) })
-      : Box({ marginTop: 1, children: [Markdown({ text: part.text })] }))
+      ? Box({ marginTop, flexDirection: 'column', children: part.items.map((item) => hangRow(els, '•', 2, color, item)) })
+      : Box({ marginTop, children: [Markdown({ text: part.text })] }))
   }
   if (p.move) {
     const amber = hex(MOVE_COLOR)
     const width = p.move.length > 9 ? 4 : 3
     kids.push(Box({
-      marginTop: 1, flexDirection: 'column',
+      marginTop: kids.length > 1 ? 1 : 0, flexDirection: 'column',
       children: [
-        // Truncated to the panel's width, so the rule always reaches the frame.
-        Text({ color: amber, wrap: 'truncate', children: ['── your move ' + '─'.repeat(240)] }),
+        ruleRow(els, amber, Text({ color: amber, children: ['── your move '] })),
         ...p.move.map((step, i) => hangRow(els, p.move.length > 1 ? i + 1 + '.' : '→', width, amber, step)),
       ],
     }))
-  } else if (p.idle) kids.push(Box({ marginTop: 1, children: [Text({ color: hex(DONE_COLOR), dimColor: true, children: ['✓ nothing needed from you'] })] }))
-  return Box({ flexDirection: 'column', borderStyle: 'round', borderColor: color, paddingX: 1, children: kids })
+  } else if (p.idle) kids.push(Box({ marginTop: kids.length > 1 ? 1 : 0, children: [Text({ color: hex(DONE_COLOR), dimColor: true, children: ['✓ nothing needed from you'] })] }))
+  kids.push(ruleRow(els, color, Text({ color, children: ['╰'] }), '╯'))
+  return Box({ flexDirection: 'column', children: kids })
 }
 
 // The panel for a message id, once it is known to close the newest answer; kept per id after that.

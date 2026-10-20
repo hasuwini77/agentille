@@ -78,7 +78,7 @@ The switches that used to be commands live in a `display` block of `~/.agentille
 
 - `deck`: `auto` opens the deck on every `/agt`, `off` only when you type `/agt-deck`.
 - `focus`: agent flags (a REVISE, a FAIL, a blocked pane) above the prompt.
-- `highlight`: `on` lights `/agt` replies, `all` every reply, `off` none. The answer that ends a lit turn draws in a framed panel: its first line as the headline, the bullets with paths, versions and refs lit, and your steps in a **▶ your move** box (or "✓ nothing needed from you"). Under `all`, each question you type also asks Claude for that shape: a one-line answer, at most 6 short bullets, and numbered steps only when you have something to do.
+- `highlight`: `on` lights `/agt` replies, `all` every reply, `off` none. The answer that ends a lit turn draws in a framed panel: its first line as the headline, the bullets as • rows with paths, versions and refs lit, and your steps numbered under an amber **── your move ──** divider (or "✓ nothing needed from you"). Under `all`, each question you type also asks Claude for that shape: a one-line answer, at most 6 short bullets, and numbered steps only when you have something to do. Ask for text to paste ("no formatting", "plain text", "copy-paste", or start with `raw:`) and the answer skips the panel, comes back as plain text and lands on your clipboard, under any setting.
 
 `/agt-routing`, `/agt-ledger` and `/agt-squads` were removed in v3.14.0: use `/agt-info routing|ledger|squads`. `/agt-focus` and `/agt-highlight` still work and write this block.
 

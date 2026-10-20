@@ -9,7 +9,7 @@ import { ACCENT, DONE_COLOR, FRAME_COLOR, INK, WIRE_COLOR, boardRows, cast, cast
 import { PUBLISH_MS, doneMessage, freshStatus, logWire, parseTellArgs, parseWire, shortName, statusKey, validLead, wakeDue, wakeMessage, wireEnv, workerStatus } from './wire.js'
 import { activeSquads, allPaths, depsOf, explain, injection, squadsText } from './squads.js'
 import { BYE_MS, HELLO_MS, MASCOT_COLOR, MODEL_COLOR, agentMood, caption, frame, modelKey, moodAt, parseWorker } from './mascot.js'
-import { ANSWER_STYLE, MARK, SPAN_COLOR, highlightFor, highlightText, isAnswerBlock, litFor, panel, parseHighlightArgs, spans } from './highlight.js'
+import { ANSWER_STYLE, MARK, RAW_STYLE, SPAN_COLOR, bodyParts, highlightFor, highlightText, isAnswerBlock, isRawPrompt, litFor, panel, parseHighlightArgs, spans } from './highlight.js'
 import { cleanText, herdrOrphans, orphanPlan, parseWorktrees, staleTabs, tmuxOrphans, worktreePlan } from './clean.js'
 import { flagOf, focusText, paneFlags, parseFocusArgs } from './focus.js'
 import { cleanDisplay, hasVoice, highlightFlags, profileJson, resolveDisplay, storedDisplay, withDisplay } from './settings.js'
@@ -78,6 +78,8 @@ const hlMemo = new Map()     // message id → { text, highlight() result }
 const panelMemo = new Map()  // message id → { text, panel() result }: the blocks that closed a main turn's answer
 let lastAnswer = null        // { text, ms, id, shaped } of the newest main-turn answer; its closing block draws as the panel
 let shapedTurn = false       // this turn's prompt carried the answer style (display.highlight: all)
+let rawTurn = false          // this turn's prompt asked for text to paste as is: no panel, answer copied
+const rawIds = new Set()     // message ids that closed a raw answer: they draw as the engine does
 let runningVersion = null    // this module's own agentille version, read from its plugin.json at session start
 let skewToasted = false
 let sessionId = null         // this session's id: workers it opens send their results here
@@ -924,25 +926,34 @@ const MOVE_COLOR = 0xf2a33a
 
 const litText = (els, text, base) => spans(text).map((sp) => (sp.kind === 'plain' ? sp.text : els.Text({ color: SPAN_COLOR[sp.kind], children: [sp.text] })))
 
-// ╭ ◆ headline · time ╮, the essentials strip (unshaped answers only), the bullets, then the person's
-// move in its own amber box, numbered, or one dim line saying nothing is needed from them.
+// A numbered or bulleted row whose wrapped lines stay right of the marker.
+const hangRow = (els, mark, width, color, text) => els.Box({ flexDirection: 'row', children: [
+  els.Box({ width, flexShrink: 0, children: [els.Text({ color, children: [mark] })] }),
+  els.Box({ flexGrow: 1, flexShrink: 1, children: [els.Text({ children: litText(els, text) })] }),
+] })
+
+// ╭ ◆ headline · time ╮, the essentials strip (unshaped answers only), the body with its top-level
+// bullets as • rows, then the person's move under an amber "── your move ──" divider, numbered, or
+// one dim line saying nothing is needed from them. One frame: a box nested in it read as a second answer.
 function answerBox(els, p) {
   const { Box, Text, Markdown } = els
   const color = hex(TONE_COLOR[p.tone] ?? ACCENT)
   const kids = [Text({ children: [Text({ color, children: ['◆ '] }), Text({ color, children: litText(els, p.head) }), ...(p.time ? [Text({ dimColor: true, children: ['  · ' + p.time] })] : [])] })]
   if (p.card.length) kids.push(Box({ marginTop: 1, children: [cardBox(els, p.card)] }))
-  if (p.body) kids.push(Box({ marginTop: 1, children: [Markdown({ text: p.body })] }))
+  for (const part of p.body ? bodyParts(p.body) : []) {
+    kids.push(part.items
+      ? Box({ marginTop: 1, flexDirection: 'column', children: part.items.map((item) => hangRow(els, '•', 2, color, item)) })
+      : Box({ marginTop: 1, children: [Markdown({ text: part.text })] }))
+  }
   if (p.move) {
     const amber = hex(MOVE_COLOR)
+    const width = p.move.length > 9 ? 4 : 3
     kids.push(Box({
-      marginTop: 1, flexDirection: 'column', borderStyle: 'round', borderColor: amber, paddingX: 1,
+      marginTop: 1, flexDirection: 'column',
       children: [
-        Text({ color: amber, children: ['▶ your move'] }),
-        // A hanging indent: a step that wraps stays right of its number.
-        ...p.move.map((step, i) => Box({ flexDirection: 'row', children: [
-          Box({ width: p.move.length > 9 ? 4 : 3, flexShrink: 0, children: [Text({ color: amber, children: [p.move.length > 1 ? i + 1 + '.' : '→'] })] }),
-          Box({ flexGrow: 1, flexShrink: 1, children: [Text({ children: litText(els, step) })] }),
-        ] })),
+        // Truncated to the panel's width, so the rule always reaches the frame.
+        Text({ color: amber, wrap: 'truncate', children: ['── your move ' + '─'.repeat(240)] }),
+        ...p.move.map((step, i) => hangRow(els, p.move.length > 1 ? i + 1 + '.' : '→', width, amber, step)),
       ],
     }))
   } else if (p.idle) kids.push(Box({ marginTop: 1, children: [Text({ color: hex(DONE_COLOR), dimColor: true, children: ['✓ nothing needed from you'] })] }))
@@ -957,6 +968,11 @@ function answerPanel(id, text) {
   if (!hit && !(lastAnswer && (lastAnswer.id === id || (!lastAnswer.id && isAnswerBlock(lastAnswer.text, text))))) return null
   if (lastAnswer && !lastAnswer.id && !hit) lastAnswer.id = id
   const own = lastAnswer?.id === id
+  if (own && lastAnswer.raw) {
+    rawIds.add(id)
+    if (rawIds.size > 200) rawIds.delete(rawIds.values().next().value)
+    return null
+  }
   const p = panel(text, { ms: own ? lastAnswer.ms : undefined, shaped: own ? lastAnswer.shaped : false })
   panelMemo.delete(id)
   panelMemo.set(id, { text, p })
@@ -1422,7 +1438,11 @@ export function register(on) {
     if (agtTurn && deckAuto) void $.ui.open({ id: DECK, title: 'agentille' })
     // Under display.highlight: all, a typed question in the lead session asks for the panel's shape.
     // Never in a worker pane (the lead parses its report) and never for a slash command or an /agt run.
-    shapedTurn = highlightOn && highlightAll && !agtTurn && !selfName && !worker && !String(e.text ?? '').trimStart().startsWith('/')
+    const typed = !agtTurn && !selfName && !worker && !String(e.text ?? '').trimStart().startsWith('/')
+    // Asked for text to paste as is: no panel and no answer style, under any highlight setting.
+    rawTurn = typed && isRawPrompt(e.text)
+    shapedTurn = !rawTurn && typed && highlightOn && highlightAll
+    if (rawTurn) return next({ ...e, context: [...(e.context ?? []), RAW_STYLE] })
     if (shapedTurn) return next({ ...e, context: [...(e.context ?? []), ANSWER_STYLE] })
     return next(e)
   })
@@ -1628,8 +1648,14 @@ export function register(on) {
     const a = e.agentId ? live.get(e.agentId) : undefined
     if (!e.agentId) leadTurn = false
     if (!e.agentId && e.reason === 'answer' && typeof e.answer === 'string') {
-      lastAnswer = { text: e.answer, ms: e.durationMs, id: null, shaped: shapedTurn }
+      lastAnswer = { text: e.answer, ms: e.durationMs, id: null, shaped: shapedTurn, raw: rawTurn }
       if (highlightOn && (agtTurn || highlightAll)) $.ui.invalidate('ui.render')
+      // A raw answer goes on the clipboard once; a later turn the person did not type is not raw.
+      if (rawTurn) {
+        rawTurn = false
+        const r = await $.ui.copy({ text: e.answer.trim() }).catch(() => null)
+        $.ui.toast(r?.isCopied ? 'Copied to the clipboard: paste it as is.' : 'agentille: could not copy the answer (' + (r?.reason ?? 'error') + ')')
+      }
       // A run's ✓/✗ card ends it: tidy what it leaves behind (finished orphans, merged worktrees).
       if (agtTurn && !selfName && !worker && /^[✓✗]/.test(e.answer.trimStart())) void cleanWorkspace($, { auto: true }).catch(() => {})
     }
@@ -1748,6 +1774,7 @@ export function register(on) {
   on('ui.render', { component: 'AssistantMessage' }, async ($, e, next) => {
     if (!litFor(litMemo, e.requestId, { on: highlightOn, agtTurn: agtTurn || highlightAll })) return next(e)
     const final = e.surface === 'terminal' && !e.props?.isSummary ? answerPanel(e.requestId, e.props?.text) : null
+    if (rawIds.has(e.requestId)) return next(e)
     const h = final ? null : highlightFor(hlMemo, e.requestId, e.props?.text)
     if (!final && !h) return next(e)
     const els = $.ui.resolve(e)

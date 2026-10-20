@@ -1,6 +1,6 @@
 import { describe, expect, mock, test } from 'claude-code/testing'
 import { words } from '../../hooks/focus.js'
-import { CARD_MIN_WORDS, LIT_MEMO_MAX, essentials, highlight, highlightFor, highlightText, isAnswerBlock, lightTokens, litFor, panel, parseHighlightArgs, spans, splitMove } from '../../hooks/highlight.js'
+import { CARD_MIN_WORDS, LIT_MEMO_MAX, bodyParts, essentials, highlight, highlightFor, highlightText, isAnswerBlock, isRawPrompt, lightTokens, litFor, panel, parseHighlightArgs, spans, splitMove } from '../../hooks/highlight.js'
 
 const T = '`'
 const FENCE = T + T + T
@@ -252,6 +252,26 @@ describe('highlight: panel', () => {
   })
 })
 
+describe('highlight: raw prompts and body parts', () => {
+  test('a prompt asking for paste-ready text is raw', async () => {
+    for (const s of ['remove the formatting can you?', 'no formatting please', 'raw: an email to the team', 'give me a copy-paste version',
+      'in plain text', 'paste-ready, thanks', 'write it without markdown', 'the raw text only', 'Unformatted, please'])
+      expect(isRawPrompt(s)).toBe(true)
+    for (const s of ['the raw SQL query is slow', 'I copy-pasted the error', 'explain the formatting in prettier', 'format the date', 'why is CI red?', ''])
+      expect(isRawPrompt(s)).toBe(false)
+  })
+
+  test('top-level bullet runs become items; prose, nested lines and fences stay markdown', async () => {
+    expect(bodyParts('Intro line.\n- **a** one\n- b two\n\nOutro.')).toEqual([
+      { text: 'Intro line.' }, { items: ['a one', 'b two'] }, { text: 'Outro.' },
+    ])
+    expect(bodyParts('* x\n+ y')).toEqual([{ items: ['x', 'y'] }])
+    expect(bodyParts('```\n- not a bullet\n```')).toEqual([{ text: '```\n- not a bullet\n```' }])
+    expect(bodyParts('---\n  - nested')).toEqual([{ text: '---\n  - nested' }])
+    expect(bodyParts('')).toEqual([])
+  })
+})
+
 describe('highlight: in the mod', () => {
   const REPLY = 'Next: tag v2.6.0. The change is in hooks/live.js and it is green. ' + Array.from({ length: 40 }, (_, i) => 'w' + i).join(' ')
   const SHORT = Array.from({ length: 30 }, (_, i) => 'w' + i).join(' ')
@@ -404,10 +424,11 @@ describe('highlight: in the mod', () => {
     const answer = 'CI fails on a stale lockfile.\n- npm ci rejects it\n\nYour move:\n1. run `npm install`\n2. push'
     await $.turn.complete({ answer, durationMs: 4000, isAborted: false, turnId: 't1', reason: 'answer' } as never)
     let ui = await mount($, 'y1', answer)
-    expect(await ui.find({ type: 'Text', text: /▶ your move/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /^── your move ─/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /▶ your move/ })).toBeUndefined()
     expect(await ui.find({ type: 'Text', text: /^1\.$/ })).toBeDefined()
-    const md: any = await ui.find({ type: 'Markdown' })
-    expect(md.props.text).not.toContain('Your move')
+    expect(await ui.find({ type: 'Text', text: /npm ci rejects it/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /Your move/ })).toBeUndefined()
     await ui.unmount()
 
     await say($, 'and the tests?')
@@ -421,6 +442,66 @@ describe('highlight: in the mod', () => {
     expect(sent.at(-1).context ?? []).toEqual([])
     await say($, '/agt-clean')
     expect(sent.at(-1).context ?? []).toEqual([])
+  })
+
+  test('a raw prompt gets the raw style, no panel, and its answer on the clipboard once', async ($, on) => {
+    fakeHome(on)
+    setup(on)
+    const sent = submitted
+    const copies: any[] = [], toasts: string[] = []
+    on('ui.copy', async ($: any, e: any) => { copies.push(e.text); return { value: { isCopied: true } } })
+    on('ui.toast', async ($: any, e: any) => { toasts.push(e.text); return { value: undefined } })
+    on('turn.complete', async ($: any, e: any) => ({ text: e.answer }))
+    await start($)
+    await $.command.run({ command: 'agt-highlight', args: 'all' })
+    await say($, 'remove the formatting can you?')
+    const ctx = sent.at(-1).context?.join('\n') ?? ''
+    expect(ctx).toContain('[agentille raw]')
+    expect(ctx).not.toContain('Your move:')
+    const answer = 'Hey, the fix is one statement in the SQL editor. ' + Array.from({ length: 40 }, (_, i) => 'w' + i).join(' ')
+    await $.turn.complete({ answer: answer + '\n', durationMs: 3000, isAborted: false, turnId: 't1', reason: 'answer' } as never)
+    expect(copies).toEqual([answer])
+    expect(toasts.at(-1)).toContain('Copied')
+    const ui = await mount($, 'r1', answer)
+    expect(await ui.find({ type: 'Text', text: /^◆ $/ })).toBeUndefined()
+    expect(await ui.find({ type: 'Markdown' })).toBeUndefined()
+    await ui.unmount()
+    // A turn the person did not type (a task notification) is not raw: nothing is copied again.
+    await say($, 'task finished', { kind: 'task-notification' })
+    await $.turn.complete({ answer: 'Background job done.', durationMs: 10, isAborted: false, turnId: 't2', reason: 'answer' } as never)
+    expect(copies.length).toBe(1)
+  })
+
+  test('a raw prompt works under highlight on too, and a failed copy says why', async ($, on) => {
+    setup(on)
+    const sent = submitted
+    const toasts: string[] = []
+    on('ui.copy', async () => ({ value: { isCopied: false, reason: 'no-clipboard' } }))
+    on('ui.toast', async ($: any, e: any) => { toasts.push(e.text); return { value: undefined } })
+    on('turn.complete', async ($: any, e: any) => ({ text: e.answer }))
+    await say($, 'raw: a caption for the launch')
+    expect(sent.at(-1).context?.join('\n')).toContain('[agentille raw]')
+    await $.turn.complete({ answer: 'Launch day.', durationMs: 10, isAborted: false, turnId: 't1', reason: 'answer' } as never)
+    expect(toasts.at(-1)).toContain('no-clipboard')
+    // Slash commands and /agt runs are never raw.
+    await say($, '/agt raw: build it')
+    expect(sent.at(-1).context ?? []).toEqual([])
+  })
+
+  test('the panel draws top-level bullets as • rows', async ($, on) => {
+    fakeHome(on)
+    setup(on)
+    on('turn.complete', async ($: any, e: any) => ({ text: e.answer }))
+    await start($)
+    await $.command.run({ command: 'agt-highlight', args: 'all' })
+    await say($, 'status?')
+    const answer = 'All green.\n- 464 pass\n- hooks/live.js clean'
+    await $.turn.complete({ answer, durationMs: 2000, isAborted: false, turnId: 't1', reason: 'answer' } as never)
+    const ui = await mount($, 'b1', answer)
+    expect(await ui.find({ type: 'Text', text: /^•$/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /hooks\/live\.js/ })).toBeDefined()
+    expect(await ui.find({ type: 'Markdown' })).toBeUndefined()
+    await ui.unmount()
   })
 
   test('with highlight on (the default) no style is sent', async ($, on) => {

@@ -242,6 +242,27 @@ export const ANSWER_STYLE = [
   '- Code, tables and headings only when they carry the answer itself.',
 ].join('\n')
 
+// A typed prompt that asks for text to paste as is: "no formatting", "remove the formatting", "plain
+// text", "raw text", "copy-paste", "paste-ready" or a leading "raw:". Its answer skips the panel and the
+// answer style, draws as the engine does and goes on the clipboard: copying out of a framed panel
+// brings the border and the indent along.
+const RAW = [
+  /^\s*raw\s*[:—-]/i,
+  /\b(?:no|without|remove|strip|drop)\s+(?:the\s+|all\s+|any\s+)?(?:markdown|formatting)\b/i,
+  /\bunformatted\b/i,
+  /\bplain[- ]text\b/i,
+  /\braw\s+(?:text|output|version|copy)\b/i,
+  /\bcopy[- ]?paste(?:able)?\b/i,
+  /\bpaste[- ]ready\b/i,
+]
+export const isRawPrompt = (text) => RAW.some((re) => re.test(String(text ?? '')))
+
+// Sent beside a raw prompt in place of the answer style.
+export const RAW_STYLE = [
+  '[agentille raw] The person wants text to paste as is, and your final answer is copied to their clipboard.',
+  '- Reply with only that text: no markdown (no headings, bullets, bold or code fences), no preamble, no closing line.',
+].join('\n')
+
 // A move block opens on a line naming the user's turn ("Your move:", "Action needed:", "You do:").
 const MOVE = /^\s*(?:#{1,6}\s*)?(?:[*_]{1,2})?\s*(?:▶\s*)?(?:your move|action needed|you do|on your end|to do on your side)\b(?:[*_]{1,2})?\s*[:—-]?\s*(?:[*_]{1,2})?\s*(.*)$/i
 const STEP = /^\s*(?:[-*+]|\d+[.)])\s+/
@@ -259,6 +280,26 @@ export function splitMove(text) {
   const steps = [inline, ...lines.slice(at + 1, stop)].map((l) => l.replace(STEP, '').replace(/\*\*|__/g, '').trim()).filter(Boolean)
   const main = [...lines.slice(0, at), ...lines.slice(stop)].join('\n').replace(/\s+$/, '')
   return { main, move: steps.length ? steps : null }
+}
+
+// The panel's body → parts: each run of top-level bullet lines ("- ", "* ", "+ ") becomes { items },
+// drawn as • rows with a hanging indent; everything else stays { text } for the markdown renderer.
+// Fenced lines are never bullets. Bold markers are dropped from items, as from move steps.
+export function bodyParts(text) {
+  const lines = String(text ?? '').split('\n')
+  const fenced = fenceMask(lines)
+  const parts = []
+  lines.forEach((line, i) => {
+    const m = !fenced[i] && /^[-*+]\s+(\S.*)$/.exec(line)
+    const last = parts[parts.length - 1]
+    if (m) {
+      const item = m[1].replace(/\*\*|__/g, '').trim()
+      if (last?.items) last.items.push(item)
+      else parts.push({ items: [item] })
+    } else if (last?.lines) last.lines.push(line)
+    else parts.push({ lines: [line] })
+  })
+  return parts.map((p) => (p.items ? p : { text: p.lines.join('\n').trim() })).filter((p) => p.items || p.text)
 }
 
 // The first line becomes the panel's headline when it reads as one: short, not code, a table or a list.

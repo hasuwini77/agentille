@@ -2,6 +2,31 @@
 
 All notable changes to agentille are documented here.
 
+## [3.20.0] — 2026-10-20
+
+### Changed
+
+- **Copy-clean answer panel.** The panel that ends a lit turn (and the
+  `/agt` final card, which draws through it) is now a labelled top rule,
+  `╭─ ◆ agentille · time ─╮`, the answer flush left, and a bottom rule,
+  `╰─╯`. No side border and no padding, so selecting the answer copies no
+  `│` or indent. The headline is the body's first line, in the tone colour.
+  The rules and the **── your move ──** divider reach the edge with no `…`.
+
+### Fixed
+
+- **Raw false positives.** A long prompt that talked about formatting or
+  copy-paste as a topic was read as an ask for paste text: its answer lost
+  the panel and landed on the clipboard. The trigger words now count only
+  in a short prompt (25 words or fewer) or in the short first or last
+  sentence of a long one, which still catches a pasted draft followed by
+  "make this plain text".
+
+### Rationale
+
+- A frame drawn beside the text travels with every copy. Rules above and
+  below keep the answer marked without touching its lines.
+
 ## [3.19.0] — 2026-10-20
 
 ### Added

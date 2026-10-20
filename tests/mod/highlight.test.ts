@@ -234,10 +234,10 @@ describe('highlight: panel', () => {
     expect(panel('✓ tagged v2.6.0').card).toEqual([])
     expect(panel('Short answer.', { ms: 3000 })).toEqual({ tone: 'plain', head: 'Short answer.', time: '3s', card: [], body: null, move: null, idle: false })
     expect(panel('## Done\n- a\n- b', { ms: 64_000 })).toMatchObject({ head: 'Done', time: '1m 04s', body: '- a\n- b' })
-    expect(panel('- a list first\n- b').head).toBe('answer')
+    expect(panel('- a list first\n- b').head).toBeNull()
     const long = 'The build failed on hooks/live.js. ' + Array.from({ length: 40 }, (_, i) => 'w' + i).join(' ')
     expect(panel(long).tone).toBe('flag')
-    expect(panel(long).head).toBe('answer') // a first line past 120 characters is no headline
+    expect(panel(long).head).toBeNull() // a first line past 120 characters is no headline
   })
 
   test('a "Your move:" block becomes numbered steps, cut from the body', async () => {
@@ -424,7 +424,7 @@ describe('highlight: in the mod', () => {
     const answer = 'CI fails on a stale lockfile.\n- npm ci rejects it\n\nYour move:\n1. run `npm install`\n2. push'
     await $.turn.complete({ answer, durationMs: 4000, isAborted: false, turnId: 't1', reason: 'answer' } as never)
     let ui = await mount($, 'y1', answer)
-    expect(await ui.find({ type: 'Text', text: /^── your move ─/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /^── your move $/ })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: /▶ your move/ })).toBeUndefined()
     expect(await ui.find({ type: 'Text', text: /^1\.$/ })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: /npm ci rejects it/ })).toBeDefined()

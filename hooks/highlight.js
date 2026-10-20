@@ -315,7 +315,7 @@ function headline(main) {
 }
 
 // The final answer's panel. tone colours the frame (fail · ok · move · flag · plain); head is the
-// answer's own first line (or "answer"); time is the turn's; card is the essentials strip, kept only for
+// answer's own first line, or null when it does not read as a headline; time is the turn's; card is the essentials strip, kept only for
 // an unshaped long answer; body is lit; move is the user's steps; idle says "nothing needed from you"
 // for a shaped answer that has no move.
 export function panel(text, { ms, shaped = false } = {}) {
@@ -328,7 +328,7 @@ export function panel(text, { ms, shaped = false } = {}) {
   const tone = lead.startsWith('✗') ? 'fail' : move ? 'move' : lead.startsWith('✓') ? 'ok' : card.some((c) => c.kind === 'flag') ? 'flag' : 'plain'
   return {
     tone,
-    head: head ?? 'answer',
+    head,
     time: typeof ms === 'number' && ms > 0 ? clock(ms) : null,
     card,
     body: rest ? (lit.length <= LIT_MAX ? lit : rest) : null,

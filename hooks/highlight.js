@@ -245,9 +245,11 @@ export const ANSWER_STYLE = [
 // A typed prompt that asks for text to paste as is: "no formatting", "remove the formatting", "plain
 // text", "raw text", "copy-paste", "paste-ready" or a leading "raw:". Its answer skips the panel and the
 // answer style, draws as the engine does and goes on the clipboard: copying out of a framed panel
-// brings the border and the indent along.
+// brings the border and the indent along. Only the prompt's own ask counts: the whole prompt when it is
+// short, else its first or last sentence when that one is short (a pasted draft, then "make this plain
+// text"). A long prompt that only talks about formatting or copy-paste is not an ask for paste text.
+const RAW_LEAD = /^\s*raw\s*[:—-]/i
 const RAW = [
-  /^\s*raw\s*[:—-]/i,
   /\b(?:no|without|remove|strip|drop)\s+(?:the\s+|all\s+|any\s+)?(?:markdown|formatting)\b/i,
   /\bunformatted\b/i,
   /\bplain[- ]text\b/i,
@@ -255,7 +257,18 @@ const RAW = [
   /\bcopy[- ]?paste(?:able)?\b/i,
   /\bpaste[- ]ready\b/i,
 ]
-export const isRawPrompt = (text) => RAW.some((re) => re.test(String(text ?? '')))
+export const RAW_PROMPT_WORDS = 25
+export const RAW_ASK_WORDS = 20
+const asks = (s) => RAW.some((re) => re.test(s))
+const sentences = (line) => line.split(/(?<=[.!?:])\s+/).filter((s) => s.trim())
+
+export function isRawPrompt(text) {
+  const t = String(text ?? '')
+  if (RAW_LEAD.test(t)) return true
+  if (words(t) <= RAW_PROMPT_WORDS) return asks(t)
+  const lines = t.split('\n').filter((l) => l.trim())
+  return [sentences(lines[0])[0], sentences(lines.at(-1)).at(-1)].some((s) => words(s) <= RAW_ASK_WORDS && asks(s))
+}
 
 // Sent beside a raw prompt in place of the answer style.
 export const RAW_STYLE = [

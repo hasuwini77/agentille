@@ -261,6 +261,22 @@ describe('highlight: raw prompts and body parts', () => {
       expect(isRawPrompt(s)).toBe(false)
   })
 
+  test('a long prompt counts only when its first or last sentence is a short ask', async () => {
+    const draft = 'Hi team, the release went out this morning. ' + Array.from({ length: 40 }, (_, i) => 'w' + i).join(' ') + '. Thanks, everyone.'
+    expect(isRawPrompt(draft + '\n\nCan you make this plain text?')).toBe(true)
+    expect(isRawPrompt(draft + ' Can you make it plain text?')).toBe(true)
+    expect(isRawPrompt('Make this plain text:\n\n' + draft)).toBe(true)
+    expect(isRawPrompt('write a short bio for the site, no formatting')).toBe(true)
+    // A short complaint with the words is still read as an ask: its answer only skips the panel.
+    expect(isRawPrompt('copy-paste out of the panel drags the border, fix it')).toBe(true)
+    // One long run-on sentence about the feature, the words in its middle: a topic, not an ask.
+    const talk = 'I would like the answer panel in our tool to look more like another CLI I tried because there I can select '
+      + 'the text and paste it without formatting and right now every time I copy paste something into a doc or a chat the '
+      + 'border follows me which is annoying so can we make the output cleaner and fix both the plugin and the renderer ok?'
+    expect(isRawPrompt(talk)).toBe(false)
+    expect(isRawPrompt(draft + ' The old panel brings the border along when you copy-paste out of it. ' + draft)).toBe(false)
+  })
+
   test('top-level bullet runs become items; prose, nested lines and fences stay markdown', async () => {
     expect(bodyParts('Intro line.\n- **a** one\n- b two\n\nOutro.')).toEqual([
       { text: 'Intro line.' }, { items: ['a one', 'b two'] }, { text: 'Outro.' },

@@ -2,6 +2,29 @@
 
 All notable changes to agentille are documented here.
 
+## [3.19.0] — 2026-10-20
+
+### Added
+
+- **Raw answers.** A typed prompt that asks for text to paste ("no
+  formatting", "remove the formatting", "plain text", "raw text",
+  "copy-paste", "paste-ready", or a leading `raw:`) skips the answer style
+  and the panel. Claude is asked for paste-ready text only, the answer draws
+  as plain text, and it is copied to the clipboard with a toast. Works under
+  any `highlight` setting; slash commands and `/agt` runs are never raw.
+
+### Changed
+
+- **One flat answer panel.** Top-level bullets draw as • rows with a
+  hanging indent, and the move block is an amber `── your move ──` divider
+  with numbered steps inside the panel instead of a second box nested in it.
+
+### Rationale
+
+Copying text out of the framed panel brought the border and indent along,
+so a message meant for pasting needed hand cleanup. The nested move box
+read as a second answer; a divider keeps one frame per answer.
+
 ## [3.18.0] — 2026-10-19
 
 ### Added

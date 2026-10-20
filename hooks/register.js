@@ -9,7 +9,7 @@ import { ACCENT, DONE_COLOR, FRAME_COLOR, INK, WIRE_COLOR, boardRows, cast, cast
 import { PUBLISH_MS, doneMessage, freshStatus, logWire, parseTellArgs, parseWire, shortName, statusKey, validLead, wakeDue, wakeMessage, wireEnv, workerStatus } from './wire.js'
 import { activeSquads, allPaths, depsOf, explain, injection, squadsText } from './squads.js'
 import { BYE_MS, HELLO_MS, MASCOT_COLOR, MODEL_COLOR, agentMood, caption, frame, modelKey, moodAt, parseWorker } from './mascot.js'
-import { ANSWER_STYLE, MARK, RAW_STYLE, SPAN_COLOR, highlightFor, highlightText, isAnswerBlock, isRawPrompt, litFor, panel, parseHighlightArgs, spans } from './highlight.js'
+import { ANSWER_STYLE, MARK, RAW_STYLE, SPAN_COLOR, bodyParts, highlightFor, highlightText, isAnswerBlock, isRawPrompt, litFor, panel, parseHighlightArgs, spans } from './highlight.js'
 import { cleanText, herdrOrphans, orphanPlan, parseWorktrees, staleTabs, tmuxOrphans, worktreePlan } from './clean.js'
 import { flagOf, focusText, paneFlags, parseFocusArgs } from './focus.js'
 import { cleanDisplay, hasVoice, highlightFlags, profileJson, resolveDisplay, storedDisplay, withDisplay } from './settings.js'
@@ -926,25 +926,34 @@ const MOVE_COLOR = 0xf2a33a
 
 const litText = (els, text, base) => spans(text).map((sp) => (sp.kind === 'plain' ? sp.text : els.Text({ color: SPAN_COLOR[sp.kind], children: [sp.text] })))
 
-// ╭ ◆ headline · time ╮, the essentials strip (unshaped answers only), the bullets, then the person's
-// move in its own amber box, numbered, or one dim line saying nothing is needed from them.
+// A numbered or bulleted row whose wrapped lines stay right of the marker.
+const hangRow = (els, mark, width, color, text) => els.Box({ flexDirection: 'row', children: [
+  els.Box({ width, flexShrink: 0, children: [els.Text({ color, children: [mark] })] }),
+  els.Box({ flexGrow: 1, flexShrink: 1, children: [els.Text({ children: litText(els, text) })] }),
+] })
+
+// ╭ ◆ headline · time ╮, the essentials strip (unshaped answers only), the body with its top-level
+// bullets as • rows, then the person's move under an amber "── your move ──" divider, numbered, or
+// one dim line saying nothing is needed from them. One frame: a box nested in it read as a second answer.
 function answerBox(els, p) {
   const { Box, Text, Markdown } = els
   const color = hex(TONE_COLOR[p.tone] ?? ACCENT)
   const kids = [Text({ children: [Text({ color, children: ['◆ '] }), Text({ color, children: litText(els, p.head) }), ...(p.time ? [Text({ dimColor: true, children: ['  · ' + p.time] })] : [])] })]
   if (p.card.length) kids.push(Box({ marginTop: 1, children: [cardBox(els, p.card)] }))
-  if (p.body) kids.push(Box({ marginTop: 1, children: [Markdown({ text: p.body })] }))
+  for (const part of p.body ? bodyParts(p.body) : []) {
+    kids.push(part.items
+      ? Box({ marginTop: 1, flexDirection: 'column', children: part.items.map((item) => hangRow(els, '•', 2, color, item)) })
+      : Box({ marginTop: 1, children: [Markdown({ text: part.text })] }))
+  }
   if (p.move) {
     const amber = hex(MOVE_COLOR)
+    const width = p.move.length > 9 ? 4 : 3
     kids.push(Box({
-      marginTop: 1, flexDirection: 'column', borderStyle: 'round', borderColor: amber, paddingX: 1,
+      marginTop: 1, flexDirection: 'column',
       children: [
-        Text({ color: amber, children: ['▶ your move'] }),
-        // A hanging indent: a step that wraps stays right of its number.
-        ...p.move.map((step, i) => Box({ flexDirection: 'row', children: [
-          Box({ width: p.move.length > 9 ? 4 : 3, flexShrink: 0, children: [Text({ color: amber, children: [p.move.length > 1 ? i + 1 + '.' : '→'] })] }),
-          Box({ flexGrow: 1, flexShrink: 1, children: [Text({ children: litText(els, step) })] }),
-        ] })),
+        // Truncated to the panel's width, so the rule always reaches the frame.
+        Text({ color: amber, wrap: 'truncate', children: ['── your move ' + '─'.repeat(240)] }),
+        ...p.move.map((step, i) => hangRow(els, p.move.length > 1 ? i + 1 + '.' : '→', width, amber, step)),
       ],
     }))
   } else if (p.idle) kids.push(Box({ marginTop: 1, children: [Text({ color: hex(DONE_COLOR), dimColor: true, children: ['✓ nothing needed from you'] })] }))

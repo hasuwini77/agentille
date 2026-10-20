@@ -282,6 +282,26 @@ export function splitMove(text) {
   return { main, move: steps.length ? steps : null }
 }
 
+// The panel's body → parts: each run of top-level bullet lines ("- ", "* ", "+ ") becomes { items },
+// drawn as • rows with a hanging indent; everything else stays { text } for the markdown renderer.
+// Fenced lines are never bullets. Bold markers are dropped from items, as from move steps.
+export function bodyParts(text) {
+  const lines = String(text ?? '').split('\n')
+  const fenced = fenceMask(lines)
+  const parts = []
+  lines.forEach((line, i) => {
+    const m = !fenced[i] && /^[-*+]\s+(\S.*)$/.exec(line)
+    const last = parts[parts.length - 1]
+    if (m) {
+      const item = m[1].replace(/\*\*|__/g, '').trim()
+      if (last?.items) last.items.push(item)
+      else parts.push({ items: [item] })
+    } else if (last?.lines) last.lines.push(line)
+    else parts.push({ lines: [line] })
+  })
+  return parts.map((p) => (p.items ? p : { text: p.lines.join('\n').trim() })).filter((p) => p.items || p.text)
+}
+
 // The first line becomes the panel's headline when it reads as one: short, not code, a table or a list.
 function headline(main) {
   const lines = main.split('\n')

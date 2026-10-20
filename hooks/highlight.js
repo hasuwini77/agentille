@@ -5,7 +5,7 @@
 //                 Skipped for a final card (an answer opening with ✓ or ✗): it would repeat it.
 //   lightTokens — wrap paths, versions, refs and numbers in backticks so the dim body
 //                 shows them lit. Code, links and fences are never touched.
-//   panel       — the turn's final answer, framed: a head, the essentials, the body lit at full
+//   panel       — the turn's final answer, between two rules: a head, the essentials, the body lit at full
 //                 brightness. Narration between tool calls stays dim, so the eye lands on the answer.
 
 import { words } from './focus.js'
@@ -244,8 +244,8 @@ export const ANSWER_STYLE = [
 
 // A typed prompt that asks for text to paste as is: "no formatting", "remove the formatting", "plain
 // text", "raw text", "copy-paste", "paste-ready" or a leading "raw:". Its answer skips the panel and the
-// answer style, draws as the engine does and goes on the clipboard: copying out of a framed panel
-// brings the border and the indent along. Only the prompt's own ask counts: the whole prompt when it is
+// answer style, draws as the engine does and goes on the clipboard: copying out of the panel brings
+// its rules and the markdown along. Only the prompt's own ask counts: the whole prompt when it is
 // short, else its first or last sentence when that one is short (a pasted draft, then "make this plain
 // text"). A long prompt that only talks about formatting or copy-paste is not an ask for paste text.
 const RAW_LEAD = /^\s*raw\s*[:—-]/i

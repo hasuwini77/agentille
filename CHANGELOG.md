@@ -2,6 +2,21 @@
 
 All notable changes to agentille are documented here.
 
+## [3.21.0] — 2026-10-23
+
+### Added
+
+- **`/storm`.** Decides what `/agt` should build next. Two Haiku scouts map
+  the repo, eight Sonnet lenses research users, competitors, revenue, cheap
+  wins, activation, distribution, platform capability and quality in one
+  parallel message, a judge scores 10–15 candidates, a Sonnet adversary
+  red-teams the top 8, and the auto-pick keeps 2–5 that fit one heavy run.
+  The spec is committed to `docs/storm/<date>.md` with acceptance criteria
+  per pick; past storms are the exclusion list. A fresh session opens beside
+  you and types `/agt heavy …` (`open_sessions`); without Herdr or tmux the
+  line is printed to paste. Flags: `quick`, `N`, `"focus"`, `--ask`,
+  `--no-build`, `--next`.
+
 ## [3.20.0] — 2026-10-20
 
 ### Changed

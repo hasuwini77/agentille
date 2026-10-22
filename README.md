@@ -59,6 +59,7 @@ Skip it for one-file edits, typos, renames and questions: a plain prompt is chea
 | `/agt-spawn "task" [--model …]` | One extra routed Claude pane (Herdr or tmux); it closes itself once its answer is saved |
 | `/agt-clean` | Tidy up now: close finished agt panes, remove merged and clean `agt/*` worktrees and branches. Anything still working, unmerged or with changes stays. It also runs on its own when a run ends and at session start |
 | `/agt-tell <worker> <message>` | Message a worker pane over the wire |
+| `/storm [quick] [N] ["focus"] [--ask\|--no-build\|--next]` | Decide what to build next: 11 research agents on your repo and its market, 10–15 scored candidates, the best 2–5 picked and specced in `docs/storm/<date>.md`, then a fresh session beside you that types `/agt heavy` |
 | `/agt-deck [auto\|off]` | A side pane with the run's cast, routing timeline, wire log and token bars · open it on every `/agt` · stop |
 | `/agentille-project` · `/agentille-claude-md` | Seed a repo's CLAUDE.md · tune an existing one |
 
@@ -81,6 +82,18 @@ The switches that used to be commands live in a `display` block of `~/.agentille
 - `highlight`: `on` lights `/agt` replies, `all` every reply, `off` none. The answer that ends a lit turn draws between two rules (`╭─ ◆ agentille · time ─╮` above, `╰─╯` below) with nothing beside the text, so a selection copies no border or indent: its first line as the headline, the bullets as • rows with paths, versions and refs lit, and your steps numbered under an amber **── your move ──** divider (or "✓ nothing needed from you"). Under `all`, each question you type also asks Claude for that shape: a one-line answer, at most 6 short bullets, and numbered steps only when you have something to do. Ask for text to paste ("no formatting", "plain text", "copy-paste", or start with `raw:`, in a short prompt or in the short first or last sentence of a long one) and the answer skips the panel, comes back as plain text and lands on your clipboard, under any setting.
 
 `/agt-routing`, `/agt-ledger` and `/agt-squads` were removed in v3.14.0: use `/agt-info routing|ledger|squads`. `/agt-focus` and `/agt-highlight` still work and write this block.
+
+## Storm
+
+`/agt` builds what you tell it. `/storm` tells it what to build.
+
+```
+/storm
+```
+
+Two Haiku scouts map the code (what exists, what is half-built). Eight Sonnet lenses research in parallel: user complaints, competitors, what people pay for, cheap wins in the code, activation loops, distribution hooks, new platform capability, quality users notice. A judge merges and scores them (`2·user + 2·value + fit − effort − risk`), an adversary red-teams the top 8, and the auto-pick keeps 2–5 that fit one heavy run. The spec lands in `docs/storm/<date>.md` with acceptance criteria per pick, committed. Then a fresh Claude session opens beside you and types `/agt heavy "Build the picks in docs/storm/<date>.md …"`. Without Herdr or tmux it prints that line to paste.
+
+Past storm docs are the exclusion list: a feature shipped or dropped once is never proposed again. `/storm 3` forces three picks, `/storm "onboarding"` biases every lens, `--ask` pauses once at the shortlist, `--no-build` stops at the doc, `--next` queues the picks for `/agt next` instead, `quick` runs four lenses and hands off at medium.
 
 ## Sessions
 

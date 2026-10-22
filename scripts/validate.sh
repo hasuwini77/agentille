@@ -156,7 +156,7 @@ while IFS=$'\t' read -r file section; do
   [ -n "$file" ] || continue
   target=""
   section=${section//\\/}
-  for cand in "skills/agt/$file" "skills/$file" "agents/$file" "$file"; do
+  for cand in "skills/agt/$file" skills/*/"$file" "skills/$file" "agents/$file" "$file"; do
     [ -f "$cand" ] && { target="$cand"; break; }
   done
   if [ -z "$target" ]; then

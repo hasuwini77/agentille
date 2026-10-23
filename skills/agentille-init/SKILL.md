@@ -1,6 +1,6 @@
 ---
 name: agentille-init
-description: Optional setup for agentille. Asks up to 5 skippable questions (name/role, delivery style, tone, when to ask first, never-do list) and merges the answers into ~/.agentille/profile.json so agents sound like you. /agt works without it.
+description: Optional setup for agentille. Asks up to 5 skippable questions (name/role, delivery style, tone, when to ask first, never-do list) and merges the answers into ~/.agentille/profile.json so agents sound like you. /agt works without it. Use only when the user types /agentille-init or asks to set up their agentille voice profile.
 ---
 
 # agentille-init — optional voice profile

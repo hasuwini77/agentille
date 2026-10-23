@@ -1,5 +1,5 @@
 import { describe, expect, mock, test } from 'claude-code/testing'
-import { flagOf, focusText, mergeFlags, paneFlags, parseFocusArgs, words } from '../../hooks/focus.js'
+import { flagKey, flagOf, focusText, mergeFlags, paneFlags, parseFocusArgs, words } from '../../hooks/focus.js'
 
 const LONG = Array.from({ length: 200 }, (_, i) => 'word' + i).join(' ')
 
@@ -61,6 +61,17 @@ describe('focus: flags from agent results', () => {
     expect(mergeFlags(f, 'executor|', null, TTL + 1, TTL)).toEqual([])
   })
 
+  test('a re-plan clears the plan-reviewer\'s REVISE flag; other roles keep their own key', async () => {
+    const TTL = 30 * 60_000
+    expect(flagKey('planner', undefined)).toBe('plan|')
+    expect(flagKey('plan-reviewer', '')).toBe('plan|')
+    expect(flagKey('code-reviewer', 'api')).toBe('code-reviewer|api')
+    let f = mergeFlags([], flagKey('plan-reviewer'), 'plan-reviewer asked for a revised plan', 0, TTL)
+    f = mergeFlags(f, flagKey('executor', 'api'), 'executor: verification failed', 1, TTL)
+    f = mergeFlags(f, flagKey('planner'), null, 2, TTL) // the planner answered again: the ask is met
+    expect(f.map((x) => x.text)).toEqual(['executor: verification failed'])
+  })
+
   test('two slices with the same flag text each keep their own until their own PASS', async () => {
     const TTL = 30 * 60_000, T = 'code-reviewer: CONCERNS — fix before ship'
     let f = mergeFlags([], 'code-reviewer|a', T, 0, TTL)
@@ -108,6 +119,20 @@ describe('focus: in the mod', () => {
     expect(toasts).toContain('agt ⚑ code-reviewer: FAIL — blocks ship')
     const ui = await band($)
     expect(await ui.find({ type: 'Text', text: /⚑ code-reviewer: FAIL/ })).toBeDefined()
+    await ui.unmount()
+  })
+
+  test('the run\'s final card takes every flag down', async ($, on) => {
+    setup(on)
+    await $.prompt.submit({ text: '/agt "ship it"', origin: { kind: 'composer' } } as never)
+    await $.agent.spawn({ prompt: '[agt run=f2 size=small mode=review]\nreview', subagentType: 'agentille:agentille-code-reviewer', model: 'sonnet' })
+    await complete($, 'VERDICT: CONCERNS\nP1: unused import', 'r1')
+    let ui = await band($)
+    expect(await ui.find({ type: 'Text', text: /⚑ code-reviewer: CONCERNS/ })).toBeDefined()
+    await ui.unmount()
+    await complete($, '✓ shipped · low · 2 files · PR #3 ready · 4m\nverify: npm test → 12 passed\nNext: merge PR #3')
+    ui = await band($)
+    expect(await ui.find({ type: 'Text', text: /⚑ code-reviewer/ })).toBeUndefined()
     await ui.unmount()
   })
 

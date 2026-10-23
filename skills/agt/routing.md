@@ -13,7 +13,7 @@ First match wins; no model call.
 4. **research** — "compare", "options for", "which library", "X or Y", "look into"
 5. **design** — UI, UX, design, looks, feels, polish, styling, responsive, animation, hover, spacing, typography, color, layout, Tailwind, CSS
 6. **review** — "review", "audit", "check the", "feedback on"
-7. **refactor** — "refactor", "rename", "move", "extract", "split", "consolidate", "deduplicate"
+7. **refactor** — "refactor", "rename", "move", "extract", "split", "consolidate", "deduplicate" (whole words: "move" never matches "remove")
 8. **feature** — default
 
 Multipliers: **hasUI** (UI/UX/styling/component/page/screen, or a `.tsx/.css/.scss` file named) adds the design-reviewer, and the ui-prototyper on `design`/`feature`. **hasMulti** ("and", "also", "plus" joining verbs, or ≥3 deliverables) adds the planner.
@@ -83,7 +83,7 @@ Evidence is observed by the mod, not claimed by the lead.
 
 - **Plan:** 1st REVISE → next planner runs opus · max. 2nd REVISE → next planner is a Fable candidate.
 - **Fix (per piece):** attempt 2 → executor effort high; attempt ≥3 → max. Rounds are counted per `piece=`, so one piece in fix rounds never raises another's effort. A `mode=diagnose` planner after ≥3 fixes → Fable candidate.
-- **Fable gate** (all must pass, else opus · max with the reason logged): candidate · `profile.routing.autoFable` not false · fewer than `maxFablePerRun` (default 1) Fable spawns this run · weekly plan usage below `fableWeeklyCeiling` (default 60%).
+- **Fable gate** (all must pass, else opus · max with the reason logged): candidate · `profile.routing.autoFable` is `true` (default `false`: Fable costs about twice Opus, so the ladder is opt-in) · fewer than `maxFablePerRun` (default 1) Fable spawns this run · weekly plan usage below `fableWeeklyCeiling` (default 60%).
 
 ### Advisor
 

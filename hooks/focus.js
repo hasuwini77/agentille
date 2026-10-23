@@ -34,7 +34,15 @@ export function flagOf(role, answer) {
   return null
 }
 
-// A routed answer replaces the flag its agent left earlier (key = role + piece): a PASS after a
+// The key a routed answer's flag lives under. Planning is one conversation: the planner and the
+// plan-reviewer share a key, so a re-plan clears "asked for a revised plan" even when the lead
+// goes on without a third review. Everything else is keyed by role and slice.
+export function flagKey(role, piece) {
+  const r = role === 'planner' || role === 'plan-reviewer' ? 'plan' : role
+  return r + '|' + (piece ?? '')
+}
+
+// A routed answer replaces the flag its agent left earlier (key = flagKey): a PASS after a
 // CONCERNS clears it, and a slice's reviewer never clears another slice's. Flags past `ttl` fall off.
 export function mergeFlags(flags, key, text, now, ttl) {
   const kept = (flags ?? []).filter((f) => now - f.at < ttl && f.key !== key)

@@ -51,7 +51,7 @@ Acceptance criteria are what `/agt`'s planner turns into its own ACCEPTANCE list
 ## agt task line
 
 ```
-/agt heavy "Build the <k> picks in docs/storm/<date>.md, one slice per pick, in this order: 1) <title> 2) <title> 3) <title>. Scope and acceptance criteria are in the doc under each pick; do not widen them. Merge each slice on green."
+/agt heavy "Build the <k> picks in docs/storm/<date>.md, one slice per pick, in this order: 1) <title> 2) <title> 3) <title>. Scope and acceptance criteria are in the doc under each pick; do not widen them. Integrate per the repo's integration setting (default: one PR per slice, nothing merged)."
 ```
 
 `quick` → `/agt medium "…"`. The line goes into `open_sessions` → `tasks[0]` verbatim, and is printed under the final card as the paste fallback.

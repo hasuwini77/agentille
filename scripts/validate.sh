@@ -286,10 +286,15 @@ else
 fi
 
 # ── 6c. The mod: Claude Code's own validator + its tests ────────────────────
-# Skipped (WARN) where the claude CLI is absent, e.g. CI runners without it.
+# WARN where the claude CLI is absent on a developer machine; in CI (CI=true) its absence is a
+# FAIL, so the 500 mod tests can never be skipped silently on the runner.
 hdr "Mod (hooks/register.js)"
 if ! command -v claude >/dev/null 2>&1; then
-  warn "claude CLI not found — run 'claude plugin validate' and 'claude plugin test .' locally"
+  if [ "${CI:-}" = "true" ]; then
+    fail "claude CLI not found in CI — the workflow must install @anthropic-ai/claude-code before this step"
+  else
+    warn "claude CLI not found — run 'claude plugin validate' and 'claude plugin test .' locally"
+  fi
 else
   if claude plugin validate .claude-plugin/plugin.json 2>&1 | grep -q '✘'; then
     fail "claude plugin validate reports errors"
@@ -300,17 +305,27 @@ else
   if [ "$trc" = 0 ]; then pass "claude plugin test: $(printf '%s\n' "$tout" | grep -oE '[0-9]+ pass' | tail -1)"; else fail "claude plugin test failed"; fi
 fi
 
+# ── 6d. Hook scripts: deterministic shell tests (fake HOME, file:// fixtures) ─
+hdr "Hook scripts"
+for t in tests/hooks/test-*.sh; do
+  [ -e "$t" ] || { warn "no tests/hooks/test-*.sh found"; break; }
+  tout=$(bash "$t" 2>&1); trc=$?
+  if [ "$trc" = 0 ]; then pass "$t: $(printf '%s\n' "$tout" | tail -1)"; else fail "$t failed:"; printf '%s\n' "$tout" | tail -12 | sed 's/^/    /'; fi
+done
+
 # ── 7. PII / privacy scan (public repo — hard fail) ──────────────────────────
 # Pattern-based only: this script is public, so it must NOT hardcode the
 # private names it guards against. Categorical leaks (paths, emails) are
 # caught here; human review covers names (see CLAUDE.md "Privacy & OSS hygiene").
 hdr "Privacy scan (tracked files)"
-SCAN_FILES=$(git ls-files 2>/dev/null | grep -vE '^(scripts/validate\.sh|\.github/)')
+# git grep: the same on GNU and BSD userlands (an earlier xargs -d form failed silently on macOS and
+# reported PASS over a planted leak). A grep error is a FAIL, never a silent pass.
 leakhit=0
 scan() { # $1 = regex, $2 = label
-  local hits
-  hits=$(printf '%s\n' "$SCAN_FILES" | xargs -d '\n' grep -nE "$1" 2>/dev/null)
-  if [ -n "$hits" ]; then fail "possible $2 leak:"; printf '%s\n' "$hits" | sed 's/^/    /'; leakhit=1; fi
+  local hits rc
+  hits=$(git grep -nE -- "$1" -- . ':!scripts/validate.sh' ':!.github/' ':!tests/' 2>&1); rc=$?
+  if [ "$rc" = 0 ]; then fail "possible $2 leak:"; printf '%s\n' "$hits" | sed 's/^/    /'; leakhit=1
+  elif [ "$rc" != 1 ]; then fail "privacy scan could not run ($2): $hits"; leakhit=1; fi
 }
 scan '/home/[a-z]'                                            "absolute home path (/home/...)"
 scan '/Users/[A-Za-z]'                                        "absolute home path (/Users/...)"

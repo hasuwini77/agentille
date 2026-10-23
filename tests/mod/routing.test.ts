@@ -1,5 +1,5 @@
 import { describe, expect, mock, test } from 'claude-code/testing'
-import { decide, formationOf, ladderFixes, parseHeader, roleOf, verdictOf } from '../../hooks/routing.js'
+import { DEFAULTS, decide, formationOf, ladderFixes, parseHeader, roleOf, verdictOf } from '../../hooks/routing.js'
 
 const fresh = () => ({ revise: 0, fixes: 0, fable: 0 })
 const S = { autoFable: true, maxFablePerRun: 1, fableWeeklyCeiling: 60 }
@@ -86,6 +86,14 @@ describe('Fable is rare', () => {
     expect(decide({ role: 'planner', run: hard, settings: S, weeklyPct: 59.9 }).model).toBe('fable')
   })
 
+  test('Fable is opt-in: the shipped defaults never reach it, only autoFable: true does', async () => {
+    const hard = { ...fresh(), revise: 2 }
+    expect(DEFAULTS.autoFable).toBe(false)
+    expect(decide({ role: 'planner', run: hard, settings: DEFAULTS })).toMatchObject({ model: 'opus', effort: 'max', reason: expect.stringContaining('autoFable off') })
+    expect(decide({ role: 'planner', run: hard, settings: { ...DEFAULTS, autoFable: 'yes' } }).model).toBe('opus')
+    expect(decide({ role: 'planner', run: hard, settings: { ...DEFAULTS, autoFable: true } }).model).toBe('fable')
+  })
+
   test('risk alone never reaches Fable', async () => {
     expect(decide({ role: 'security-reviewer', hdr: { risk: 'auth', size: 'large' }, run: fresh(), settings: S }).model).toBe('opus')
   })
@@ -134,7 +142,7 @@ describe('workflow agents: runs, toast, deny', () => {
   const wf = (run: string | null, role = 'code-reviewer', index = 1) => ({ prompt: run ? hdr(run) : 'review', subagentType: 'agentille:agentille-' + role, workflow: { runId: 'wf_1', agentIndex: index } }) as never
   const band = ($: any) => $.ui.mount({ plugin: 'agentille', surface: 'terminal', component: 'AbovePrompt', props: { hasSurvey: false, isWorking: true, maxRows: 10, bodyColumns: 100 } as never })
   // `herdr`: the rows `herdr agent list` shows to a lead inside herdr; left out, there is no pane transport.
-  const setup = (on: any, model = 'claude-sonnet-5', herdr: any[] | null = null) => {
+  const setup = (on: any, model = 'claude-sonnet-5', herdr: any[] | null = null, profile: object | null = null) => {
     const toasts: string[] = []
     const writes: Record<string, string> = {}
     let n = 0
@@ -145,7 +153,7 @@ describe('workflow agents: runs, toast, deny', () => {
     }
     on('session.start', async ($: any, e: any) => ({ cwd: e.cwd }))
     on('command.register', async () => ({ value: undefined }))
-    on('fs.read', async () => ({ deny: 'no profile' }))
+    on('fs.read', async ($: any, e: any) => profile && e.path.endsWith('/.agentille/profile.json') ? { value: JSON.stringify(profile) } : { deny: 'no profile' })
     on('fs.write', async ($: any, e: any) => { writes[e.path] = e.text; return { value: undefined } })
     on('store.get', async () => ({ value: null }))
     on('ui.render', async () => ({ type: 'engine', ref: 0 }) as never)
@@ -238,7 +246,7 @@ describe('workflow agents: runs, toast, deny', () => {
   })
 
   test('a headerless workflow agent is judged against the band run\'s table pick, not ad hoc', async ($, on) => {
-    const { toasts } = setup(on, 'claude-fable-5')
+    const { toasts } = setup(on, 'claude-fable-5', null, { routing: { autoFable: true } }) // Fable is opt-in
     await $.session.start({ cwd: '/w', surface: null, isInteractive: false })
     for (const id of ['w0', 'w1']) { // two REVISEs: runF's planner is a Fable pick
       await $.agent.spawn({ prompt: hdr('runF'), subagentType: 'agentille:agentille-plan-reviewer' } as never)

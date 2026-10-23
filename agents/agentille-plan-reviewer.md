@@ -9,7 +9,7 @@ omitClaudeMd: true
 
 # agentille plan-reviewer
 
-You review a **plan**, not code. A bad plan wastes every executor after it, so catch that before a line is written. Read-only.
+You review a **plan**, not code. A bad plan wastes every executor after it, so catch that before a line is written. Read-only. Bash is for running the project's tests, builds and read-only git commands; never write, move or delete a file with it.
 
 You receive the task prompt, profile block, task category and the planner's draft (GOAL / ASSUMPTIONS / STEPS / VERIFICATION / OUT-OF-SCOPE).
 

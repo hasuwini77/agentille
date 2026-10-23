@@ -4,7 +4,7 @@ agentille is a **public, MIT-licensed Claude Code plugin** — the `/agt` orches
 
 ## What lives where
 
-- `skills/agt/` — the orchestrator skill: `SKILL.md` (contract, mode table, dispatch header, hard rules), `routing.md` (category, roster, model + effort, escalation), `display.md` (mid-run lines, final card, report.md), `panes-mode.md`, `workflow-mode.md`, `formations.md`, `squads.md`.
+- `skills/agt/` — the orchestrator skill: `SKILL.md` (contract, level table, dispatch header, hard rules), `routing.md` (category, roster, model + effort, escalation), `display.md` (mid-run lines, final card, report.md), `panes-mode.md`, `workflow-mode.md`, `formations.md`, `squads.md`.
 - `skills/agentille-init/`, `skills/agentille-project/`, `skills/agentille-claude-md/` — optional setup skills (voice profile, per-repo CLAUDE.md, CLAUDE.md tune-up). `/agt` runs without any of them.
 - `agents/agentille-*.md` — the eleven worker agent definitions (planner, plan-reviewer, ui-prototyper, executor, adversary, and six reviewers: code, design, security, payments, perf, seo).
 - `.claude-plugin/` — `plugin.json` (version, bumped on every release), `marketplace.json` (listing metadata — no version field, do not version-bump it), `squads.json` (squad detection).
@@ -14,16 +14,16 @@ agentille is a **public, MIT-licensed Claude Code plugin** — the `/agt` orches
 
 The plugin's "code" is **markdown prompt definitions** plus a small JavaScript mod, not a compiled program.
 
-## How /agt picks a mode
+## How /agt picks a level
 
-Auto-detection is the **default**: the first matching row of `skills/agt/SKILL.md` → "Modes" wins, and anything unmatched goes to a one-call Haiku classify (`routing.md` → "Stage 2 classify"). Panes open only when ≥2 disjoint slices can build at once. The resolved mode + a one-clause reason is always printed on the recon line.
+Auto-detection is the **default**: the first matching row of `skills/agt/SKILL.md` → "Levels" wins, and anything unmatched goes to a one-call Haiku classify (`routing.md` → "Stage 2 classify"). Panes open only when ≥2 disjoint slices can build at once. The resolved level + a one-clause reason is always printed on the recon line.
 
 | What to type | Outcome |
 |---|---|
-| `/agt "task"` (no flags) | Auto-decides: solo (small one-sentence task, no architectural verb or risk words), subagent (sequential or single slice), panes inside Herdr or tmux for ≥2 disjoint slices (else a workflow, else subagent waves), or Stage 2 classify |
+| `/agt "task"` (no flags) | Auto-decides: low · solo (small one-sentence task, no architectural verb or risk words), low or medium · subagent (sequential or single slice, or 2–3 small disjoint slices), heavy · panes inside Herdr or tmux for ≥2 disjoint slices (else a workflow, else subagent waves), or Stage 2 classify |
 | `/agt "review …"` / `/agt "debug …"` | Subagent reviewers in parallel / the executor's debug loop |
-| `/agt --mode panes\|subagent\|solo "task"` | **Force** a mode for one run |
-| `/agt --team …` / `--mode team` | Removed in v3.0: prints one notice and resolves as if no flag was typed |
+| `/agt low\|medium\|heavy "task"` | **Force** a level for one run |
+| `/agt --mode panes\|subagent\|solo` · `--team` | Legacy: `--mode` maps to heavy/medium/low and is never suggested; `--team` was removed in v3.0 and prints one notice |
 
 ## Conventions
 

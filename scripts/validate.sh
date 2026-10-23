@@ -308,7 +308,10 @@ fi
 
 # ── 6d. Hook scripts: deterministic shell tests (fake HOME, file:// fixtures) ─
 hdr "Hook scripts"
+# tests/hooks/test-validate-gate.sh runs this script with a fake claude; it sets this so the inner
+# run does not run the hook tests again. Nothing else should set it.
 for t in tests/hooks/test-*.sh; do
+  [ -n "${AGENTILLE_VALIDATE_SKIP_HOOK_TESTS:-}" ] && { warn "hook tests skipped (AGENTILLE_VALIDATE_SKIP_HOOK_TESTS set: inner run of test-validate-gate.sh)"; break; }
   [ -e "$t" ] || { warn "no tests/hooks/test-*.sh found"; break; }
   tout=$(bash "$t" 2>&1); trc=$?
   if [ "$trc" = 0 ]; then pass "$t: $(printf '%s\n' "$tout" | tail -1)"; else fail "$t failed:"; printf '%s\n' "$tout" | tail -12 | sed 's/^/    /'; fi

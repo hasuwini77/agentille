@@ -83,3 +83,15 @@ export const S = {
   listAt: 0,
   listBusy: false,
 }
+
+// What the modules wired last in register(on) read: live state through getters, since most of
+// it is reassigned.
+export const ctx = {
+  live: S.live,
+  get run() { return S.lastRun },
+  get tick() { return S.tick },
+  get panes() { return S.panes },
+  get routes() { return S.paneRoutes },
+  get isLead() { return !S.worker && !S.selfName },
+  onTick: [], // (io, ctx, now) callbacks the redraw ticker calls each period; a module adds its own while registering
+}

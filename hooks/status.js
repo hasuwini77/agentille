@@ -15,7 +15,7 @@ export function statusText({ run, subs, panes, done, tok, usd, ctxPct, lastLeftA
   return text
 }
 
-// Module state: the hook checker takes `$` only into top-level functions, so none of this nests.
+// Module state, kept flat.
 const NOT_SHOWN = Symbol('not shown')
 const st = {
   usd: null,
@@ -26,8 +26,7 @@ const st = {
 }
 
 // What a refresh does with the host, as `io`: pin a line, wait, read the clock. The ticker's callbacks
-// are handed the same three by register.js, since the hook checker follows `$` itself only into
-// top-level functions of the file it is in.
+// are handed the same three by ticker.js, so a refresh runs the same way from either side.
 function ioOf($) {
   return { status: (text) => $.ui.status(text), after: (ms, fn) => $.clock.after(ms, fn), now: () => $.clock.now() }
 }

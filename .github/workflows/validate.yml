@@ -3,9 +3,12 @@ name: validate
 # Two jobs on every push to main and every PR:
 #   structural — scripts/validate.sh: version drift, agent refs, role parity, doc cross-refs,
 #                hook scripts (tests/hooks), mod import, PII scan. With the claude CLI
-#                installed it also runs `claude plugin validate` and the 500 mod tests
+#                installed it also runs `claude plugin validate` and the mod tests
 #                (`claude plugin test .`), and validate.sh FAILS in CI when the CLI is missing,
 #                so those tests can never be skipped silently on the runner.
+# The CLI is pinned: the mod tests run against the harness of one known Claude Code version, so a
+# CLI release cannot turn main red on its own. Bump the pin on purpose (and run the suite locally
+# on that version first); the README's minimum (2.1.294) is a floor, this is the tested version.
 # The dispatch-decision evals (evals/, `claude plugin eval`) stay local: each run is a real
 # claude session on a credential. See .claude/CLAUDE.md.
 
@@ -23,7 +26,7 @@ jobs:
         with:
           node-version: 22
       - name: Install the Claude Code CLI (plugin validate + mod test harness, no credential needed)
-        run: npm install -g @anthropic-ai/claude-code
+        run: npm install -g @anthropic-ai/claude-code@2.1.309  # pinned: see the header comment
       - name: Structural validator, hook tests, mod tests
         env:
           CI: "true"

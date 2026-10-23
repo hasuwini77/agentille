@@ -11,7 +11,7 @@ import { activeSquads, allPaths, depsOf, explain, injection, squadsText } from '
 import { BYE_MS, HELLO_MS, MASCOT_COLOR, MODEL_COLOR, agentMood, caption, frame, modelKey, moodAt, parseWorker } from './mascot.js'
 import { ANSWER_STYLE, MARK, RAW_STYLE, SPAN_COLOR, bodyParts, highlightFor, highlightText, isAnswerBlock, isRawPrompt, litFor, panel, parseHighlightArgs, spans } from './highlight.js'
 import { cleanText, herdrOrphans, orphanPlan, parseWorktrees, staleTabs, tmuxOrphans, worktreePlan } from './clean.js'
-import { flagOf, focusText, paneFlags, parseFocusArgs } from './focus.js'
+import { flagOf, focusText, mergeFlags, paneFlags, parseFocusArgs } from './focus.js'
 import { cleanDisplay, hasVoice, highlightFlags, profileJson, resolveDisplay, storedDisplay, withDisplay } from './settings.js'
 import { ledgerSummary, overviewText, parseInfoArgs, routeText, routingSummary, squadsSummary } from './info.js'
 import {
@@ -67,7 +67,7 @@ let pollTimer = null         // pane polling: runs only while panes may exist
 let quietPolls = 0
 let tickTimer = null         // redraw ticker: runs only while something works
 let focusOn = true           // agent flags show above the prompt
-let flags = []               // [{ text, at }] from agent results this run
+let flags = []               // [{ text, key, at }] from agent results this run
 let agtTurn = false          // this turn is part of an /agt run
 let leadTurn = false         // a main-loop turn is running: its idle panes are waiting for review
 const mascot = { greeted: false, hiUntil: 0, byeUntil: 0, working: false, start: 0, ms: null } // worker band, in $.clock.now() ms
@@ -887,12 +887,9 @@ function ensureTicker($) {
   })
 }
 
-function addFlag($, text) {
-  if (!text) return
-  const now = Date.now()
-  flags = flags.filter((f) => now - f.at < FLAG_TTL_MS && f.text !== text)
-  flags.push({ text, at: now })
-  $.ui.toast('agt ⚑ ' + text)
+function addFlag($, key, text) {
+  flags = mergeFlags(flags, key, text, Date.now(), FLAG_TTL_MS)
+  if (text) $.ui.toast('agt ⚑ ' + text)
 }
 
 function focusLines(now) {
@@ -1692,7 +1689,7 @@ export function register(on) {
     }
     if (a) {
       a.tool = null
-      if (a.routed) addFlag($, flagOf(a.role, e.answer))
+      if (a.routed) addFlag($, a.role + '|' + (a.piece ?? ''), flagOf(a.role, e.answer))
       a.verdict = verdictChip(a.role, e.answer)
       if (a.routed && a.run !== 'adhoc') logWire(wireLog, { from: party(a.role, a.piece), to: 'lead', kind: 'done', summary: answerLine(a.role, e.answer), at: Date.now(), via: 'sub' })
       if (a.role === 'plan-reviewer' && verdictOf(e.answer) === 'REVISE') runState(fileRunOf(a)).revise += 1

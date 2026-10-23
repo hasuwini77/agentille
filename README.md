@@ -25,7 +25,7 @@ Open: ~/.agentille/state/run-a1b2/report.md
 Next: gh pr merge 12 --merge
 ```
 
-Everything else (plan, findings, each agent's full report) is in that `report.md`. A plain prompt never starts `/agt`: the skill runs only when you type it, and nothing is injected into your prompts. A one-sentence task with no risk words (the typo, the rename) runs solo: no agents, no card, no extra tokens.
+Everything else (plan, findings, each agent's full report) is in that `report.md`. A plain prompt never starts `/agt`: the skill runs only when you type it. The mod adds text to a prompt in exactly two cases, both under `display.highlight` (see Options): a short ask for paste-ready text gets a one-line "answer in plain text" note, and under `all` every typed question gets the answer-shape note. `highlight: off` adds nothing to any prompt. A one-sentence task with no risk words (the typo, the rename) runs solo: no agents, no card, no extra tokens.
 
 Make it sound like you (optional, 1 minute): `/agentille-init`. Powered by [Systown AI Lab](https://systown.ai).
 
@@ -80,7 +80,7 @@ Everything lives in `~/.agentille/profile.json`. Every key is optional; a missin
 
 - `deck`: `auto` opens the deck on every `/agt`, `off` only when you type `/agt-deck`.
 - `focus`: agent flags (a REVISE, a FAIL, a blocked pane) above the prompt.
-- `highlight`: `on` lights `/agt` replies, `all` every reply, `off` none. The answer that ends a lit turn draws between two rules (`╭─ ◆ agentille · time ─╮` above, `╰─╯` below) with nothing beside the text, so a selection copies no border or indent: its first line as the headline, the bullets as • rows with paths, versions and refs lit, and your steps numbered under an amber **── your move ──** divider (or "✓ nothing needed from you"). Under `all`, each question you type also asks Claude for that shape: a one-line answer, at most 6 short bullets, and numbered steps only when you have something to do. Ask for text to paste ("no formatting", "plain text", "copy-paste", or start with `raw:`, in a short prompt or in the short first or last sentence of a long one) and the answer skips the panel, comes back as plain text and lands on your clipboard, under any setting.
+- `highlight`: `on` lights `/agt` replies, `all` every reply, `off` none. The answer that ends a lit turn draws between two rules (`╭─ ◆ agentille · time ─╮` above, `╰─╯` below) with nothing beside the text, so a selection copies no border or indent: its first line as the headline, the bullets as • rows with paths, versions and refs lit, and your steps numbered under an amber **── your move ──** divider (or "✓ nothing needed from you"). Under `all`, each question you type also asks Claude for that shape: a one-line answer, at most 6 short bullets, and numbered steps only when you have something to do. Ask for text to paste ("no formatting", "plain text", "copy-paste", or start with `raw:`, in a short prompt or in the short first or last sentence of a long one) and the answer skips the panel, comes back as plain text and lands on your clipboard, under `on` or `all`. `off` adds nothing to any prompt and copies nothing.
 
 `/agt-routing`, `/agt-ledger` and `/agt-squads` were removed in v3.14.0: use `/agt-info routing|ledger|squads`. `/agt-focus` and `/agt-highlight` still work and write this block.
 

@@ -360,7 +360,7 @@ export function parseHighlightArgs(args) {
 }
 
 export function highlightText(on, all = false) {
-  if (!on) return 'Highlight: off — replies draw as usual. /agt-highlight on turns it back on.'
+  if (!on) return 'Highlight: off — replies draw as usual, and nothing is added to your prompts: no answer style, no raw style, no clipboard copy. /agt-highlight on turns it back on.'
   if (all) return 'Highlight: all — every long reply is lit, and each answer comes short and framed: a headline, bullets, and a ▶ your move box when you have something to do.'
   return 'Highlight: on — /agt replies get an essentials card and a dim body with paths, versions, refs and numbers lit, and the final answer is framed. /agt-highlight all shapes every answer.'
 }

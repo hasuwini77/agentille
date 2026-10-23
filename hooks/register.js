@@ -1191,7 +1191,7 @@ export function register(on) {
     }
     applyDisplay()
     await $.command.register({ name: 'agt-info', description: 'Settings in effect, routing, ledger, squads, or a route dry-run: routing | ledger | squads | route <role>', argumentHint: '[routing|ledger|squads|route <role> [size=…] [risk=…] [depth=…]]', immediate: true })
-    await $.command.register({ name: 'agt-highlight', description: 'Highlight replies: on (/agt only) · all · off. Saved as display.highlight in profile.json; goes away in v4', argumentHint: '[on|all|off]', immediate: true })
+    await $.command.register({ name: 'agt-highlight', description: 'Highlight replies: on (/agt replies lit; a paste-ready ask gets a plain-text note) · all (every typed question gets the answer shape) · off (nothing added to any prompt). Saved as display.highlight in profile.json; goes away in v4', argumentHint: '[on|all|off]', immediate: true })
     await $.command.register({ name: 'agt-clean', description: 'Tidy up now: close finished agt panes, remove merged agt/* worktrees and branches. Anything still working or unmerged stays', immediate: true })
     await $.command.register({ name: 'agt-focus', description: 'Agent flags above the prompt (a REVISE, a FAIL, a blocked pane): on · off. Saved as display.focus in profile.json; goes away in v4', argumentHint: '[on|off]', immediate: true })
     if (transport !== 'none') {
@@ -1474,8 +1474,9 @@ export function register(on) {
     // Under display.highlight: all, a typed question in the lead session asks for the panel's shape.
     // Never in a worker pane (the lead parses its report) and never for a slash command or an /agt run.
     const typed = !agtTurn && !selfName && !worker && !String(e.text ?? '').trimStart().startsWith('/')
-    // Asked for text to paste as is: no panel and no answer style, under any highlight setting.
-    rawTurn = typed && isRawPrompt(e.text)
+    // Asked for text to paste as is: no panel and no answer style. Under display.highlight: off nothing is
+    // added to any prompt and nothing is copied, so the raw style needs highlight on or all.
+    rawTurn = typed && highlightOn && isRawPrompt(e.text)
     shapedTurn = !rawTurn && typed && highlightOn && highlightAll
     if (rawTurn) return next({ ...e, context: [...(e.context ?? []), RAW_STYLE] })
     if (shapedTurn) return next({ ...e, context: [...(e.context ?? []), ANSWER_STYLE] })

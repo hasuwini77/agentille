@@ -488,6 +488,26 @@ describe('highlight: in the mod', () => {
     expect(copies.length).toBe(1)
   })
 
+  test('under highlight off a raw prompt gets no context and nothing is copied', async ($, on) => {
+    fakeHome(on)
+    setup(on)
+    const sent = submitted
+    const copies: any[] = []
+    on('ui.copy', async ($: any, e: any) => { copies.push(e.text); return { value: { isCopied: true } } })
+    on('ui.toast', async () => ({ value: undefined }))
+    on('turn.complete', async ($: any, e: any) => ({ text: e.answer }))
+    await start($)
+    expect((await $.command.run({ command: 'agt-highlight', args: 'off' })).text).toContain('nothing is added to your prompts')
+    await say($, 'raw: a caption for the launch')
+    expect(sent.at(-1).context ?? []).toEqual([])
+    await $.turn.complete({ answer: 'Launch day.', durationMs: 10, isAborted: false, turnId: 't1', reason: 'answer' } as never)
+    expect(copies).toEqual([])
+    // Back on: the same ask is raw again.
+    await $.command.run({ command: 'agt-highlight', args: 'on' })
+    await say($, 'raw: a caption for the launch')
+    expect(sent.at(-1).context?.join('\n')).toContain('[agentille raw]')
+  })
+
   test('a raw prompt works under highlight on too, and a failed copy says why', async ($, on) => {
     setup(on)
     const sent = submitted

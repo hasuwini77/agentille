@@ -1,6 +1,6 @@
 ---
 name: agt
-description: Personal AI coding orchestrator and software factory. One command, `/agt <task>`, detects the level (low, medium, heavy) and runs the cheapest crew that does the job well (planner, executors, reviewers, each on the right model), merges on green or escalates, closes every pane it opened, and ends on one short card. `/agt next` builds the next backlog item. Activates ONLY when the user types `/agt`; model invocation is disabled.
+description: Personal AI coding orchestrator and software factory. One command, `/agt <task>`, detects the level (low, medium, heavy) and runs the cheapest crew that does the job well (planner, executors, reviewers, each on the right model), opens one reviewed PR per slice (merges on green only with `integration: auto`) or escalates, closes every pane it opened, and ends on one short card. `/agt next` builds the next backlog item. Activates ONLY when the user types `/agt`; model invocation is disabled.
 argument-hint: [low|medium|heavy|next] "<task>"
 disable-model-invocation: true
 ---

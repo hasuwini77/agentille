@@ -2,6 +2,61 @@
 
 All notable changes to agentille are documented here.
 
+## [Unreleased]
+
+Fixes and clean-up on top of 3.23.0, no version bump (fixes batch into the
+next minor, `docs/releasing.md`).
+
+### Changed (behaviour)
+
+- **Pane tools exist only once you typed for them.** `spawn_pane` and
+  `close_pane` are registered on a turn where you typed `/agt`,
+  `open_sessions` (with `close_pane`) on a turn whose typed prompt asked
+  for sessions, panes or terminals. A plain session has none of them; a
+  registered tool still checks that proof when called.
+- **`display.highlight` defaults to `off`.** Nothing is added to any
+  prompt and nothing is copied until you turn it on (`/agt-highlight on`).
+- **A typed `/agt-clean` also drops run folders** under
+  `~/.agentille/state` untouched for 14 days. The automatic clean-up at
+  run end and session start never does.
+
+### Fixed
+
+- Routing: `/storm` counts as a session ask; a prompt that merely names a
+  "sessions file" does not.
+- A shell session's task is passed verbatim, `--fable` is stripped from a
+  session's first prompt, and a worker pane proves Fable from its first
+  typed prompt once, not from any later text.
+- A role's stale done file is removed before its pane respawns, so a
+  resumed worker is not harvested on the previous run's answer.
+- `scripts/validate.sh` fails on a non-zero exit of
+  `claude plugin validate` instead of reading its output alone.
+- Executor and adversary log paths use `${TMPDIR:-/tmp}`.
+- Docs said the same thing three ways: `push` is defined once
+  (`factory.md` → "Integrate") as "push each slice branch, no PR, no
+  merge", and `pr` without `gh` behaves as `push`; the executor's `auto`
+  means the lead decides, the executor never merges; "piece" became
+  "slice" everywhere but the header key; the recon line's second slot is
+  named `transport`; the solo debug loop stops after three misses like
+  the executor; the code-reviewer defines P0–P3; the lead starts the dev
+  server in the slice's worktree and passes the URL to the
+  design-reviewer.
+- README: what the mod does before you type (band, daily update check,
+  session-start pane reap, lazy tool registration), the real default
+  model per role (plan- and code-reviewer on Sonnet), `/agt-clean`'s run
+  prune, `/agt next` stopping on the first escalation, the two package
+  registry calls, and a list of what ships beside `/agt`.
+- `.claude/CLAUDE.md`: the module map matches the split mod; the version
+  rule matches `docs/releasing.md`.
+
+### Changed (internal)
+
+- `hooks/register.js` holds the hook handlers only (530 lines); the
+  session's state lives in `hooks/state.js` and the work in
+  `dispatch.js`, `spawn.js`, `sessions.js`, `reaper.js`, `ticker.js`,
+  `worker.js`, `display.js`, `render.js` and `profile.js`. No behaviour
+  change; 522 mod tests.
+
 ## [3.23.0] — 2026-10-23
 
 The second panel run (same ten prompts, at v3.22.0) scored agentille 48/80

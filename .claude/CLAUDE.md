@@ -34,7 +34,7 @@ Auto-detection is the **default**: the first matching row of `skills/agt/SKILL.m
 
 ## Release recipe
 
-Features and fixes ship through a pull request, never a direct push to `main`.
+Features and fixes ship through a pull request, never a direct push to `main`. Cadence and what each bump promises: `docs/releasing.md` (one tag a day at most, fixes batch into the next minor, removals only in a major after a deprecation).
 
 1. On the feature branch, bump `version` in `.claude-plugin/plugin.json` (breaking → major, feature → minor, fix → patch). `marketplace.json` has no version field — do not touch it.
 2. Add a dated `## [x.y.z] — YYYY-MM-DD` section to `CHANGELOG.md`.

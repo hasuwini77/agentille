@@ -135,6 +135,10 @@ Ask in a plain prompt: "open three sessions", "open a codex session", "open two 
 
 No profile file is needed. macOS and Linux; the shell hooks are bash.
 
+## Releases
+
+One tag a day at most, fixes batched into the next minor, nothing removed outside a major that deprecated it first. What each version number promises and how to pin one: `docs/releasing.md`.
+
 ## What it touches
 
 Nothing runs until you type `/agt`, `/storm` or ask for a session. When you do:

@@ -18,6 +18,15 @@ First match wins; no model call.
 
 Multipliers: **hasUI** (UI/UX/styling/component/page/screen, or a `.tsx/.css/.scss` file named) adds the design-reviewer, and the ui-prototyper on `design`/`feature`. **hasMulti** ("and", "also", "plus" joining verbs, or ≥3 deliverables) adds the planner.
 
+## Risk words
+
+`risk=` in the header and the "no auth/money/data words" test in `SKILL.md` → "Levels" match what the change does, not what the screen is called. First match wins:
+
+- **auth** — session, token, JWT, cookie, OAuth, password hashing or reset, 2FA, CSRF, permission, role check, middleware guard, API key, secret
+- **money** — payment, checkout, price, subscription, invoice, refund, webhook, billing, Stripe
+- **data** — migration, schema, drop, truncate, backfill, production data, PII export
+- **none** — a screen named after one of those with no logic behind it: a login, sign-in or checkout form, page, button, copy or styling change that calls an existing endpoint and stores nothing. It runs solo or low like any other UI change, with the code-reviewer; the security-reviewer joins only when the diff turns out to touch a guard, a token or a secret, and the gauntlet never runs for it.
+
 ## Stage 2 classify
 
 Only when the level table falls through. One inline Haiku call, never the planner. Send the task, ask for ONLY `{"level": "low|medium|heavy", "roster": ["agentille:agentille-…"], "reasoning": "<one sentence>"}`. `heavy` = panes in Herdr/tmux, else workflow, else subagent waves; `medium` = parallel executor subagents; `low` = one executor (or solo when the roster is empty). Use its roster as is. Malformed JSON → `low` plus a one-line note; never crash. If the level hinges on a question, ask it in the clarify round; the provisional level is `low`.

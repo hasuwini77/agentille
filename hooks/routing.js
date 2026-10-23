@@ -32,7 +32,8 @@ export function formationOf(hdr) {
   return hdr && FORMATIONS.has(hdr.formation) ? hdr.formation : null
 }
 
-export const DEFAULTS = { autoFable: true, maxFablePerRun: 1, fableWeeklyCeiling: 60, advisorOnOpus: true }
+// autoFable is opt-in: Fable costs about twice Opus, so the ladder may only reach it when profile.routing.autoFable is true.
+export const DEFAULTS = { autoFable: false, maxFablePerRun: 1, fableWeeklyCeiling: 60, advisorOnOpus: true }
 
 export function roleOf(subagentType) {
   if (typeof subagentType !== 'string' || !subagentType.startsWith(ROLE_PREFIX)) return null
@@ -105,7 +106,7 @@ export function decide({ role, hdr = {}, run = { revise: 0, fixes: 0, fable: 0 }
   if (!candidate) return { model, effort, reason: reasons.join(', ') || 'table', fable: false }
 
   const block =
-    settings.autoFable === false ? 'autoFable off' :
+    settings.autoFable !== true ? 'autoFable off' :
     run.fable >= settings.maxFablePerRun ? 'Fable cap ' + settings.maxFablePerRun + '/run reached' :
     (weeklyPct != null && weeklyPct >= settings.fableWeeklyCeiling) ? 'weekly ' + weeklyPct + '% ≥ ' + settings.fableWeeklyCeiling + '%' :
     null

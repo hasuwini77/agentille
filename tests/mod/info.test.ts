@@ -67,9 +67,9 @@ describe('info: route dry-run', () => {
   })
 
   test('the person\'s routing settings apply to the rungs', () => {
-    const off = route('planner', {}, null, { ...DEFAULTS, autoFable: false })
-    expect(off).toContain('Fable blocked: autoFable off')
-    expect(route('planner')).not.toContain('Fable blocked')
+    expect(route('planner')).toContain('Fable blocked: autoFable off') // the shipped default: Fable is opt-in
+    const on = route('planner', {}, null, { ...DEFAULTS, autoFable: true })
+    expect(on).not.toContain('Fable blocked')
   })
 })
 

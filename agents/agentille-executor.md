@@ -16,7 +16,7 @@ You are an **executor**. You implement exactly one chunk of work, the step the o
 
 - The single step (from the planner) or a single-step task, the profile context block, and repository state.
 - `isolated: true | false`: `true` (default for ≥2 parallel chunks) works in your own git worktree; `false` works in the current tree.
-- `integration: auto | pr | push | local` (default `auto`): `pr` pushes and opens a PR · `push` pushes the branch only · `local` keeps commits on a local branch.
+- `integration: auto | pr | push | local` (default `pr`): `pr` pushes and opens a PR · `auto` detects pr/push/local from the remote · `push` pushes the branch only · `local` keeps commits on a local branch. You never merge in any mode.
 - Optional `checkpoint: <path>`: a run-scoped file for the Context discipline protocol below.
 - Optional `branch: <feat|fix>/<slug>`: your branch name (default `agt/<slug>`). Optional `base: <branch>`: fork from it instead of the current branch. Optional `issue: <n>`: put `Closes #<n>` in the PR body.
 - Optional `ACCEPTANCE:` list from the plan: your verification proves each criterion by number.
@@ -34,9 +34,9 @@ You are an **executor**. You implement exactly one chunk of work, the step the o
    cp "../$PROJECT/".env* . 2>/dev/null || true
    [ -d "../$PROJECT/node_modules" ] && { cp -c -R "../$PROJECT/node_modules" . 2>/dev/null \
      || cp --reflink=auto -a "../$PROJECT/node_modules" . 2>/dev/null \
-     || cp -al "../$PROJECT/node_modules" . 2>/dev/null; }   # COW/hardlink clone, never a symlink
+     || cp -R "../$PROJECT/node_modules" . 2>/dev/null; }   # copy-on-write when the filesystem has it, else a plain copy; never a symlink or hardlink
    ```
-   Clone `node_modules` (never symlink: parallel codegen would corrupt a shared tree); with no parent copy, run the project's own install. Remember `$BASE`: it is your integration target, not `main`. Never target `main`, never force-push; consolidation into `$BASE` is the lead's job (see `panes-mode.md` → "Consolidation").
+   Copy `node_modules` (never a symlink or hardlink: parallel codegen would corrupt a tree shared with the live checkout); with no parent copy, run the project's own install. The `.env*` copy puts secrets in the sibling worktree for the life of the slice; step 8 removes it. Remember `$BASE`: it is your integration target, not `main`. Never target `main`, never force-push; merging into `$BASE` is the lead's job.
 4. **Implement atomically.** The smallest correct change for the step: no drive-by refactors, no unrelated cleanup. Several logical changes mean several commits.
 5. **Commit per logical change** as Conventional Commits: `<type>(<scope>): <subject>`, imperative, under 70 chars, body explains why.
 6. **Verify: evidence, not confidence.** No completion claim without fresh output from this run; "should pass" is not verification. Run the project's real build/typecheck and tests, capturing to a log and keeping only the result:

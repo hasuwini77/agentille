@@ -2,6 +2,56 @@
 
 All notable changes to agentille are documented here.
 
+## [3.23.0] — 2026-10-23
+
+The second panel run (same ten prompts, at v3.22.0) scored agentille 48/80
+against superpowers' 54 and held it at security 5, coherence 5, maintenance
+4 and ergonomics 6. This release answers the charges that were structural
+rather than defaults: the mod now proves what the person typed, a login
+form is not auth, highlight off really adds nothing, and the release
+cadence is written down.
+
+### Changed (behaviour)
+
+- **The mod keeps what you typed as the proof.** A dispatch header is the
+  model's own text, so `fable=forced` on its own no longer buys Fable:
+  it holds only in a session where your `/agt` line carried `--fable`.
+  Otherwise the header is rewritten to `fable=auto` (on the subagent
+  prompt and on a pane worker's task alike), the ladder applies, and one
+  `⚑` toast per run says so. `spawn_pane` refuses in a session where
+  nobody typed `/agt`, and `open_sessions` runs only on a turn whose
+  typed prompt asked for sessions, panes or terminals. A task
+  notification, plugin or peer message is never that proof.
+- **`display.highlight: off` adds nothing to any prompt.** The raw
+  "answer in plain text" note and the clipboard copy now need `on` or
+  `all`; the README says exactly which two cases add text and when.
+- **"login" is not an auth word.** `routing.md` → "Risk words" matches
+  what a change does (sessions, tokens, guards, payments, migrations).
+  A login, sign-in or checkout form, page, button or styling change with
+  no such logic is `risk=none`: it runs solo or low with the
+  code-reviewer, never the gauntlet.
+- **A solo bug follows the executor's loop**: reproduce with the real
+  command, one hypothesis, the smallest change, re-run; two misses stop
+  and name the assumption that may be wrong.
+
+### Fixed
+
+- The `/agt` skill description still said "merges on green"; it now says
+  it opens one reviewed PR per slice and merges only with
+  `integration: auto`, matching the 3.22.0 default.
+
+### Added
+
+- `docs/releasing.md`: one tag a day at most, fixes batch into the next
+  minor, patch only for a regression in the newest minor, removals only
+  in a major after a deprecation in a minor, one major per quarter, and
+  how to pin a version. Linked from the README and the release recipe.
+- Tests: `tests/mod/proof.test.ts` (Fable proof on subagent dispatch),
+  spawn/open denials and header demotion in `panes.test.ts`, the
+  highlight-off raw case, and pure helpers in `routing.test.ts`
+  (`typedFable`, `proveHeader`, `demoteHeaderText`, `asksSessions`).
+  514 mod tests.
+
 ## [3.22.0] — 2026-10-23
 
 Safer defaults, tests that run, docs that disclose. An independent ten-reviewer

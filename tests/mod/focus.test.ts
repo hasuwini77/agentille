@@ -61,6 +61,15 @@ describe('focus: flags from agent results', () => {
     expect(mergeFlags(f, 'executor|', null, TTL + 1, TTL)).toEqual([])
   })
 
+  test('two slices with the same flag text each keep their own until their own PASS', async () => {
+    const TTL = 30 * 60_000, T = 'code-reviewer: CONCERNS — fix before ship'
+    let f = mergeFlags([], 'code-reviewer|a', T, 0, TTL)
+    f = mergeFlags(f, 'code-reviewer|b', T, 1, TTL)
+    expect(f.map((x) => x.key)).toEqual(['code-reviewer|a', 'code-reviewer|b'])
+    f = mergeFlags(f, 'code-reviewer|b', null, 2, TTL)
+    expect(f.map((x) => x.key)).toEqual(['code-reviewer|a'])
+  })
+
   test('a blocked pane waits on the person', async () => {
     expect(paneFlags([{ name: 'agt-r1-exec-1', state: 'blocked' }, { name: 'agt-r1-exec-2', state: 'working' }])).toEqual(['agt-r1-exec-1 is waiting on you'])
     expect(paneFlags([{ name: 'agt-r1-exec-1', state: 'done' }, { name: 'agt-r1-exec-2', state: 'done' }], new Set(['agt-r1-exec-2']))).toEqual(['agt-r1-exec-2 done, not harvested'])

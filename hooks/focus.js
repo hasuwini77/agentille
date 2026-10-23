@@ -37,7 +37,7 @@ export function flagOf(role, answer) {
 // A routed answer replaces the flag its agent left earlier (key = role + piece): a PASS after a
 // CONCERNS clears it, and a slice's reviewer never clears another slice's. Flags past `ttl` fall off.
 export function mergeFlags(flags, key, text, now, ttl) {
-  const kept = (flags ?? []).filter((f) => now - f.at < ttl && f.key !== key && f.text !== text)
+  const kept = (flags ?? []).filter((f) => now - f.at < ttl && f.key !== key)
   return text ? [...kept, { text, key, at: now }] : kept
 }
 

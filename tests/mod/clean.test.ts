@@ -84,5 +84,6 @@ describe('clean: text', () => {
     expect(cleanText({})).toBe('agt clean · workspace already clean')
     expect(cleanText({ closed: ['a', 'b'], branches: ['agt/a'], removed: ['agt/a'], tabs: 1 })).toBe('agt clean · 2 panes closed · 1 worktree removed · 1 branch deleted · 1 stale tab file dropped')
     expect(cleanText({ closed: ['a'], keep: [{ what: 'agt/c', why: 'not merged' }] })).toBe('agt clean · 1 pane closed\nkept: agt/c (not merged)')
+    expect(cleanText({ runs: 3 })).toBe('agt clean · 3 old run folders dropped')
   })
 })

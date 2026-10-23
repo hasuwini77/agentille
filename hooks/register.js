@@ -499,7 +499,7 @@ async function pruneTabs($, workspace) {
 // Git (not on `panes` alone): agt/* worktrees merged and clean are removed, merged agt/* branches deleted.
 // Clean means done/idle/dead panes, merged branches and clean checkouts only; the rest is reported, never touched.
 async function cleanWorkspace($, { all = false, auto = false, panesOnly = false } = {}) {
-  const r = { closed: [], tabs: 0, removed: [], branches: [], keep: [] }
+  const r = { closed: [], tabs: 0, removed: [], branches: [], runs: 0, keep: [] }
   const run = (argv) => $.process.run(argv, PROBE).catch(() => null)
   if (transport === 'herdr') {
     const res = await run(['herdr', 'agent', 'list'])
@@ -541,9 +541,28 @@ async function cleanWorkspace($, { all = false, auto = false, panesOnly = false 
   }
   if (!all) for (const p of panes) if (strandedNow.has(p.id)) r.keep.push({ what: p.name, why: 'answer not read · /agt-clean closes it' })
   if (!panesOnly) await cleanGit($, run, r)
+  if (all && !panesOnly) await pruneRuns($, run, r)
   if (r.closed.length) $.ui.invalidate('ui.render')
   if (auto && (r.closed.length || r.removed.length || r.branches.length)) $.ui.toast(cleanText({ ...r, keep: [] }))
   return r
+}
+
+// A typed /agt-clean also drops run folders under ~/.agentille/state nobody has touched for RUN_TTL_MS: not the run
+// in progress, none this session logged to, and none with a live agent or pane. The name is checked before the path
+// is built, so only run-<id> folders of this layout can go.
+const RUN_TTL_MS = 14 * 24 * 60 * 60_000
+async function pruneRuns($, run, r) {
+  if (!home) return
+  const dir = home + '/.agentille/state'
+  const keep = new Set([lastRun, ...runs.keys(), ...panes.map((p) => splitName(p.name)?.run), ...[...live.values()].map((a) => a.run)])
+  for (const e of await $.fs.list(dir).catch(() => [])) {
+    if (e.kind !== 'dir' || !e.name.startsWith('run-')) continue
+    const id = e.name.slice(4)
+    if (!SAFE_RUN.test(id) || id === 'adhoc' || keep.has(id)) continue
+    const st = await $.fs.stat(dir + '/run-' + id).catch(() => null)
+    if (typeof st?.mtimeMs !== 'number' || Date.now() - st.mtimeMs < RUN_TTL_MS) continue
+    if ((await run(['rm', '-rf', dir + '/run-' + id]))?.exitCode === 0) r.runs += 1
+  }
 }
 
 async function cleanGit($, run, r) {
@@ -1194,7 +1213,7 @@ export function register(on) {
     applyDisplay()
     await $.command.register({ name: 'agt-info', description: 'Settings in effect, routing, ledger, squads, or a route dry-run: routing | ledger | squads | route <role>', argumentHint: '[routing|ledger|squads|route <role> [size=…] [risk=…] [depth=…]]', immediate: true })
     await $.command.register({ name: 'agt-highlight', description: 'Highlight replies: on (/agt replies lit; a paste-ready ask gets a plain-text note) · all (every typed question gets the answer shape) · off (nothing added to any prompt). Saved as display.highlight in profile.json; goes away in v4', argumentHint: '[on|all|off]', immediate: true })
-    await $.command.register({ name: 'agt-clean', description: 'Tidy up now: close finished agt panes, remove merged agt/* worktrees and branches. Anything still working or unmerged stays', immediate: true })
+    await $.command.register({ name: 'agt-clean', description: 'Tidy up now: close finished agt panes, remove merged agt/* worktrees and branches, drop run folders untouched for 14 days. Anything still working or unmerged stays', immediate: true })
     await $.command.register({ name: 'agt-focus', description: 'Agent flags above the prompt (a REVISE, a FAIL, a blocked pane): on · off. Saved as display.focus in profile.json; goes away in v4', argumentHint: '[on|off]', immediate: true })
     if (transport !== 'none') {
       // One look now: a lead restarted mid-run sees its leftover panes. It reaps only those whose answer
@@ -1328,6 +1347,10 @@ export function register(on) {
     opened = opened.filter((o) => panes.some((p) => p.id === o.id))
     const lead = t === 'tmux' ? await $.env.get('TMUX_PANE') : await $.env.get('HERDR_PANE_ID')
     const plan = placePlan({ transport: t, layout: a.layout, run: a.run, lead, opened, live: panes })
+    // A respawned role (a fix round, a retry) must not inherit the earlier pane's done file: the SessionEnd sweep
+    // and the tmux poll would read the new worker as finished and close it mid-slice.
+    const stale = doneFile(home, a.run, a.role)
+    if (stale) await $.process.run(['rm', '-f', stale], PROBE).catch(() => {})
     let id
     let tab
     try {

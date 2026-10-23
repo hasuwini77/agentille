@@ -97,12 +97,13 @@ export function worktreePlan(trees, merged, dirty, branches = []) {
 const plural = (n, one, many = one + 's') => n + ' ' + (n === 1 ? one : many)
 
 // The cleaner's report: one line of what went, one of what stayed.
-export function cleanText({ closed = [], tabs = 0, removed = [], branches = [], keep = [] }) {
+export function cleanText({ closed = [], tabs = 0, removed = [], branches = [], runs = 0, keep = [] }) {
   const did = [
     closed.length && plural(closed.length, 'pane') + ' closed',
     removed.length && plural(removed.length, 'worktree') + ' removed',
     branches.length && plural(branches.length, 'branch', 'branches') + ' deleted',
     tabs && plural(tabs, 'stale tab file') + ' dropped',
+    runs && plural(runs, 'old run folder') + ' dropped',
   ].filter(Boolean)
   const head = did.length ? 'agt clean · ' + did.join(' · ') : 'agt clean · workspace already clean'
   if (!keep.length) return head

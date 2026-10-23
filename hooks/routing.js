@@ -54,6 +54,35 @@ export function parseHeader(prompt) {
   return h
 }
 
+// Proof that the person typed `--fable` on the /agt line. The dispatch header is written by the
+// model, so `fable=forced` on its own proves nothing; the mod keeps what the typed prompt said.
+export function typedFable(text) {
+  return /(^|\s)--fable(?=\s|$)/.test(String(text ?? ''))
+}
+
+// A header's `fable=forced` holds only with that proof; without it the ladder applies (`fable=auto`)
+// and the caller says so once. `demoted` is true when the header was rewritten.
+export function proveHeader(hdr, { fableTyped = false } = {}) {
+  if (!hdr || hdr.fable !== 'forced' || fableTyped) return { hdr, demoted: false }
+  return { hdr: { ...hdr, fable: 'auto' }, demoted: true }
+}
+
+// The same rewrite on a prompt's first line, so a worker pane never inherits an unproven `fable=forced`.
+export function demoteHeaderText(text) {
+  const t = String(text ?? '')
+  const nl = t.indexOf('\n')
+  const first = nl < 0 ? t : t.slice(0, nl)
+  if (!/^\s*\[agt\s[^\]]*\]/.test(first)) return t
+  return first.replace(/\bfable=forced\b/, 'fable=auto') + (nl < 0 ? '' : t.slice(nl))
+}
+
+// A typed prompt that asks for sessions of the person's own ("open three sessions", "start 2 codex
+// panes", "give me a shell"): the only turn in which open_sessions may run.
+const SESSION_ASK = /\b(open|start|spawn|launch|fire up|give me|get me|bring up)\b[^.\n]{0,40}?\b(sessions?|panes?|terminals?|claudes?|codex(?:es)?|shells?|windows?)\b/i
+export function asksSessions(text) {
+  return SESSION_ASK.test(String(text ?? ''))
+}
+
 // A plan-reviewer's verdict, or null. Its `VERDICT: APPROVE|REVISE` line (markdown emphasis tolerated)
 // decides; only without one does the first stray verdict word, so "nothing to REVISE" cannot flip it.
 export function verdictOf(answer) {

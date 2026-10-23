@@ -1,5 +1,5 @@
 import { describe, expect, mock, test } from 'claude-code/testing'
-import { DEFAULTS, decide, formationOf, ladderFixes, parseHeader, roleOf, verdictOf } from '../../hooks/routing.js'
+import { DEFAULTS, asksSessions, decide, demoteHeaderText, formationOf, ladderFixes, parseHeader, proveHeader, roleOf, typedFable, verdictOf } from '../../hooks/routing.js'
 
 const fresh = () => ({ revise: 0, fixes: 0, fable: 0 })
 const S = { autoFable: true, maxFablePerRun: 1, fableWeeklyCeiling: 60 }
@@ -257,5 +257,47 @@ describe('workflow agents: runs, toast, deny', () => {
     const routing = (await $.command.run({ command: 'agt-info', args: 'routing' })).text
     expect(routing).toContain('planner → claude-fable-5')
     expect(routing).not.toContain('table says')
+  })
+})
+
+describe('typed proof', () => {
+  test('--fable counts only as a typed flag', async () => {
+    expect(typedFable('/agt --fable ship the auth refactor')).toBe(true)
+    expect(typedFable('/agt ship it --fable')).toBe(true)
+    expect(typedFable('/agt ship the --fableish thing')).toBe(false)
+    expect(typedFable('[agt run=a1 fable=forced]')).toBe(false)
+    expect(typedFable(null)).toBe(false)
+  })
+
+  test('fable=forced holds only with a typed --fable', async () => {
+    const hdr = { run: 'a1', fable: 'forced' }
+    expect(proveHeader(hdr, { fableTyped: true })).toEqual({ hdr, demoted: false })
+    expect(proveHeader(hdr, { fableTyped: false })).toEqual({ hdr: { run: 'a1', fable: 'auto' }, demoted: true })
+    expect(proveHeader({ run: 'a1', fable: 'auto' })).toEqual({ hdr: { run: 'a1', fable: 'auto' }, demoted: false })
+    expect(proveHeader(null)).toEqual({ hdr: null, demoted: false })
+  })
+
+  test('a demoted header never reaches the ladder as forced', async () => {
+    const d = decide({ role: 'planner', hdr: proveHeader({ fable: 'forced' }).hdr, run: fresh(), settings: { ...S, autoFable: false } })
+    expect(d.model).toBe('opus')
+    expect(d.fable).toBe(false)
+  })
+
+  test('rewrites fable=forced on the prompt first line only', async () => {
+    expect(demoteHeaderText('[agt run=a1 fable=forced]\nBuild fable=forced now')).toBe('[agt run=a1 fable=forced]\nBuild fable=forced now'.replace('fable=forced]', 'fable=auto]'))
+    expect(demoteHeaderText('[agt run=a1 fable=forced piece=x]')).toBe('[agt run=a1 fable=auto piece=x]')
+    expect(demoteHeaderText('no header\nfable=forced')).toBe('no header\nfable=forced')
+    expect(demoteHeaderText(undefined)).toBe('')
+  })
+
+  test('open_sessions needs a typed ask for sessions', async () => {
+    expect(asksSessions('open three sessions')).toBe(true)
+    expect(asksSessions('Start 2 codex panes in the api folder')).toBe(true)
+    expect(asksSessions('give me a shell')).toBe(true)
+    expect(asksSessions('fire up two Claudes on main')).toBe(true)
+    expect(asksSessions('open the sessions file and fix the bug')).toBe(true)
+    expect(asksSessions('fix the login form')).toBe(false)
+    expect(asksSessions('the session cookie expires too early')).toBe(false)
+    expect(asksSessions('')).toBe(false)
   })
 })

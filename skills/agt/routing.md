@@ -91,4 +91,4 @@ Claude Code's advisor tool (`/advisor`, `advisorModel`) is the user's setting: e
 
 ### `--fable`
 
-`fable=forced` in the header: planner, ui-prototyper, design-, security- and payments-reviewer, and a large code-/plan-reviewer run Fable; the executor never does. It bypasses the gate (the user chose it). If the `fable` alias does not resolve, re-dispatch that role once on `opus`; never retry-loop. `fable` appears only in dispatch-time model parameters, never in agent frontmatter.
+`fable=forced` in the header: planner, ui-prototyper, design-, security- and payments-reviewer, and a large code-/plan-reviewer run Fable; the executor never does. It bypasses the gate (the user chose it), and the mod checks that choice: `fable=forced` holds only in a session where the person's typed `/agt` line carried `--fable`; otherwise the mod rewrites the header to `fable=auto`, the ladder applies, and one `⚑` toast says so. If the `fable` alias does not resolve, re-dispatch that role once on `opus`; never retry-loop. `fable` appears only in dispatch-time model parameters, never in agent frontmatter.

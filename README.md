@@ -76,7 +76,7 @@ Everything lives in `~/.agentille/profile.json`. Every key is optional; a missin
 ```
 
 - `integration`: what a finished slice becomes. `pr` (default) pushes a branch and opens a PR per slice; `auto` merges each PR on green with a merge commit, deletes the branch and pushes a version tag; `push` pushes the branch only; `local` merges locally and pushes nothing. A repo's `.agentille/config.json` `{"integration": "auto"}` overrides the profile for that repo; a repo CLAUDE.md or AGENTS.md saying `no-mistakes` forces `pr`, `local-only` forces `local`. In every mode a diff that touches auth, payments, deploy, migrations, dependencies or a business assumption stops at the PR and the card says `⚑ escalated`.
-- `routing.autoFable`: `true` lets the escalation ladder reach Fable (about twice the cost of Opus) after two plan REVISEs or three failed fixes, at most `maxFablePerRun` times and only under `fableWeeklyCeiling` percent of your weekly plan. Default `false`: Fable only when you type `--fable`.
+- `routing.autoFable`: `true` lets the escalation ladder reach Fable (about twice the cost of Opus) after two plan REVISEs or three failed fixes, at most `maxFablePerRun` times and only under `fableWeeklyCeiling` percent of your weekly plan. Default `false`: Fable only when you type `--fable`. The mod holds the model to that: a dispatch header claiming `fable=forced` in a session where you did not type `--fable` is rewritten to `fable=auto`, with a toast.
 
 - `deck`: `auto` opens the deck on every `/agt`, `off` only when you type `/agt-deck`.
 - `focus`: agent flags (a REVISE, a FAIL, a blocked pane) above the prompt.
@@ -144,7 +144,7 @@ Nothing runs until you type `/agt`, `/storm` or ask for a session. When you do:
 - **Beside your repo:** each parallel executor works in a sibling worktree `../<project>-<slug>` with your `.env*` files copied in and `node_modules` copied (never linked). The worktree is removed once its commits are pushed; `/agt-clean` removes merged ones.
 - **In your home:** `~/.agentille/state/run-<id>/` (plan, checkpoints, every agent's report, `report.md`), `~/.agentille/profile.json` when you save a setting, and `~/.agentille/.update-check.json`.
 - **Network:** once a day at session start the hook fetches this repo's `plugin.json` from GitHub to compare versions (3 s timeout, nothing sent). `AGENTILLE_UPDATE_CHECK=0` turns it off. Research agents (`/storm`) read the web; nothing else does.
-- **Panes:** a worker pane opened in the repo you are already in answers Claude's "trust this folder?" prompt for you; any other folder must be opened by hand once. Worker panes close when harvested; your own sessions close only when idle (Herdr) or when you close them (tmux).
+- **Panes:** the mod registers `spawn_pane` and `open_sessions` in every lead session, but each one refuses unless you typed for it: `spawn_pane` needs a typed `/agt` in this session, `open_sessions` a typed ask for sessions, panes or terminals on that same turn. A worker pane opened in the repo you are already in answers Claude's "trust this folder?" prompt for you; any other folder must be opened by hand once. Worker panes close when harvested; your own sessions close only when idle (Herdr) or when you close them (tmux).
 - **Models and cost:** every non-solo run costs more than a plain prompt. Planners and judgment reviewers run on Opus, executors on Sonnet, scouts on Haiku. Fable never, unless `--fable` or `routing.autoFable: true`.
 
 ## Glossary

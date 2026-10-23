@@ -709,6 +709,7 @@ describe('pane tools: in the mod', () => {
     on('fs.stat', async ($: any, e: any) => (e.path.startsWith('/work/') ? { value: { kind: 'dir', size: 0, mtimeMs: 0, isLink: false } } : { deny: 'ENOENT' }))
     on('store.get', async () => ({ value: undefined }))
     on('ui.panes', async () => ({ value: [] }))
+    on('prompt.submit', async ($: any, e: any) => ({ text: e.text }))
     on('agent.spawn', async ($: any, e: any) => ({ model: e.model ?? 'sonnet', agentId: 'ag' + seen.length }))
     on('process.run', async ($: any, e: any) => {
       seen.push(e.argv)
@@ -721,8 +722,40 @@ describe('pane tools: in the mod', () => {
   }
   const TMUX = { TMUX: '/tmp/tmux-1/default,1,0', TMUX_PANE: '%1', SHELL: '/bin/zsh', HOME: '/h' }
   const EXEC = { agent: 'executor', header: '[agt run=k7f2ab size=small mode=build]' }
-  const spawn = ($: any, input: Record<string, unknown>) => $.tool.call({ tool: 'mcp__agentille__spawn_pane', ...input })
+  // Every spawn follows a typed /agt: the tool is denied until the person typed one (`typed` sends that prompt).
+  const typed = ($: any, text = '/agt ship it') => $.prompt.submit({ text, origin: { kind: 'composer' } } as never)
+  const spawn = async ($: any, input: Record<string, unknown>) => { await typed($); return $.tool.call({ tool: 'mcp__agentille__spawn_pane', ...input }) }
   const close = ($: any, name: string) => $.tool.call({ tool: 'mcp__agentille__close_pane', name })
+
+  test('spawn_pane is denied until /agt was typed in this session', async ($, on) => {
+    const { seen } = setup(on, TMUX, { 'tmux split-window': { stdout: '%9\n' } })
+    const r = await $.tool.call({ tool: 'mcp__agentille__spawn_pane', run: 'k7f2ab', role: 'exec-1', task: 'build the filter', ...EXEC })
+    expect(r.deny).toContain('only in a session where /agt was typed')
+    expect(seen.some((a) => a[1] === 'split-window')).toBe(false)
+    // A task notification or peer turn is not the person typing.
+    await $.prompt.submit({ text: '/agt ship it', origin: { kind: 'notification' } } as never)
+    expect((await $.tool.call({ tool: 'mcp__agentille__spawn_pane', run: 'k7f2ab', role: 'exec-1', task: 'build the filter', ...EXEC })).deny).toContain('/agt was typed')
+    await typed($)
+    expect((await $.tool.call({ tool: 'mcp__agentille__spawn_pane', run: 'k7f2ab', role: 'exec-1', task: 'build the filter', ...EXEC })).result).toContain('Opened agt-k7f2ab-exec-1')
+  })
+
+  test('fable=forced without a typed --fable is dropped from the worker task, once per run', async ($, on) => {
+    const toasts: string[] = []
+    const { seen } = setup(on, TMUX, { 'tmux split-window': { stdout: '%9\n' } })
+    on('ui.toast', async ($: any, e: any) => { toasts.push(e.text ?? String(e)); return { value: undefined } })
+    const hdr = '[agt run=k7f2ab size=small mode=build fable=forced]'
+    await spawn($, { run: 'k7f2ab', role: 'exec-1', task: hdr + '\nbuild the filter', agent: 'executor', header: hdr })
+    let split = seen.filter((a) => a[1] === 'split-window').at(-1)!
+    expect(split.at(-1)).toBe('[agt run=k7f2ab size=small mode=build fable=auto]\nbuild the filter')
+    expect(toasts.filter((t) => t.includes('fable=forced dropped'))).toHaveLength(1)
+    await spawn($, { run: 'k7f2ab', role: 'exec-2', task: hdr + '\nbuild the sort', agent: 'executor', header: hdr })
+    expect(toasts.filter((t) => t.includes('fable=forced dropped'))).toHaveLength(1)
+    // Typed --fable: the header holds as written.
+    await typed($, '/agt --fable ship it')
+    await $.tool.call({ tool: 'mcp__agentille__spawn_pane', run: 'k7f2ab', role: 'exec-3', task: hdr + '\nbuild the paging', agent: 'executor', header: hdr })
+    split = seen.filter((a) => a[1] === 'split-window').at(-1)!
+    expect(split.at(-1)).toBe(hdr + '\nbuild the paging')
+  })
 
   test('a lead with a transport registers both tools; no transport registers none', async ($, on) => {
     const a = setup(on, TMUX, { 'tmux list-panes': { stdout: ['%1', '', 'claude', '0', '@1'].join(T) + '\n' } })
@@ -898,6 +931,7 @@ describe('herdr reaper', () => {
     on('session.cwd', async () => ({ value: '/work/repo' }))
     on('command.register', async () => ({ value: undefined }))
     on('tool.register', async () => ({ value: undefined }))
+    on('prompt.submit', async ($: any, e: any) => ({ text: e.text }))
     on('ui.toast', async ($: any, e: any) => { toasts.push(e.text); return { value: undefined } })
     on('fs.read', async () => ({ deny: 'no profile' }))
     on('fs.exists', async () => ({ value: false }))
@@ -932,7 +966,10 @@ describe('herdr reaper', () => {
   const begin = ($: any) => $.turn.start({ text: 'go', turnId: 't1' })
   const end = ($: any) => $.turn.complete({ answer: 'ok', durationMs: 10, isAborted: false, turnId: 't1', reason: 'answer' })
   // A role can be respawned (a fix, a retry): the second pane of agt-r9-executor is a new worker.
-  const respawn = ($: any) => $.tool.call({ tool: 'mcp__agentille__spawn_pane', run: 'r9', role: 'executor', task: 'redo the filter, tests first', agent: 'executor', header: '[agt run=r9 size=small mode=build]' })
+  const respawn = async ($: any) => {
+    await $.prompt.submit({ text: '/agt ship it', origin: { kind: 'composer' } } as never)
+    return $.tool.call({ tool: 'mcp__agentille__spawn_pane', run: 'r9', role: 'executor', task: 'redo the filter, tests first', agent: 'executor', header: '[agt run=r9 size=small mode=build]' })
+  }
   const finish = (l: any, id: string) => { l.agents.find((a: any) => a.pane_id === id).agent_status = 'done' }
   const flagged = (l: any) => l.toasts.filter((t: string) => t.includes('agt-r9-executor done, not harvested')).length
 
@@ -1481,6 +1518,7 @@ describe('sessions: in the mod', () => {
     on('fs.stat', async ($: any, e: any) => (e.path.startsWith('/work/') ? { value: { kind: 'dir', size: 0, mtimeMs: 0, isLink: false } } : { deny: 'ENOENT' }))
     on('store.get', async () => ({ value: undefined }))
     on('ui.panes', async () => ({ value: [] }))
+    on('prompt.submit', async ($: any, e: any) => ({ text: e.text }))
     on('process.run', async ($: any, e: any) => {
       seen.push(e.argv)
       const key = Object.keys(table).find((k) => e.argv.join(' ').startsWith(k))
@@ -1494,8 +1532,24 @@ describe('sessions: in the mod', () => {
   const TMUX = { TMUX: '/tmp/tmux-1/default,1,0', TMUX_PANE: '%1', SHELL: '/bin/zsh', HOME: '/h' }
   let next = 4
   const herdrSplit = () => ({ stdout: JSON.stringify({ result: { pane: { pane_id: 'w1:p' + ++next, terminal_id: 'term_' + next } } }) })
-  const open = ($: any, input: Record<string, unknown>) => $.tool.call({ tool: 'mcp__agentille__open_sessions', ...input })
+  // Sessions open only on the turn the person typed the ask: `open` types one first.
+  const asked = ($: any, text = 'open three sessions') => $.prompt.submit({ text, origin: { kind: 'composer' } } as never)
+  const open = async ($: any, input: Record<string, unknown>) => { await asked($); return $.tool.call({ tool: 'mcp__agentille__open_sessions', ...input }) }
   const close = ($: any, name: string) => $.tool.call({ tool: 'mcp__agentille__close_pane', name })
+
+  test('open_sessions is denied unless the newest typed prompt asked for sessions', async ($, on) => {
+    next = 4
+    const { seen } = setup(on, HERDR, { 'herdr pane split': herdrSplit })
+    expect((await $.tool.call({ tool: 'mcp__agentille__open_sessions', count: 2 })).deny).toContain('typed a request for sessions')
+    await asked($, 'fix the login form')
+    expect((await $.tool.call({ tool: 'mcp__agentille__open_sessions', count: 2 })).deny).toContain('typed a request for sessions')
+    expect(seen.some((a) => a.slice(0, 3).join(' ') === 'herdr pane split')).toBe(false)
+    await asked($, 'start 2 codex panes here')
+    expect((await $.tool.call({ tool: 'mcp__agentille__open_sessions', count: 2 })).result).toMatch(/^Opened s-/)
+    // The ask does not carry over to the next typed prompt.
+    await asked($, 'now fix the login form')
+    expect((await $.tool.call({ tool: 'mcp__agentille__open_sessions', count: 1 })).deny).toContain('typed a request for sessions')
+  })
 
   test('a lead with a transport registers open_sessions next to the pane tools', async ($, on) => {
     const a = setup(on, TMUX, { 'tmux list-panes': { stdout: ['%1', '', 'claude', '0', '@1'].join('\t') + '\n' } })
@@ -1656,8 +1710,10 @@ describe('sessions: the idle sweep', () => {
       }
       return { value: { exitCode: 0, stdout: '', stderr: '' } }
     })
+    on('prompt.submit', async ($: any, e: any) => ({ text: e.text }))
     const clock = mock.clock(on, { now: 1_000_000 })
     await $.session.start({ cwd: '/work/repo', surface: null, isInteractive: false })
+    await $.prompt.submit({ text: 'open a session', origin: { kind: 'composer' } } as never)
     const r = await $.tool.call({ tool: 'mcp__agentille__open_sessions', count: 1 } as never)
     const name = r.result.match(/s-[a-z0-9]{6}-1/)[0]
     expect(writes['/h/.agentille/state/lead-w1-p1.sessions']).toBe(name + '\n')
@@ -1731,8 +1787,10 @@ describe('sessions: an agent that left', () => {
       }
       return { value: { exitCode: 0, stdout: '', stderr: '' } }
     })
+    on('prompt.submit', async ($: any, e: any) => ({ text: e.text }))
     const clock = mock.clock(on, { now: 1_000_000 })
     await $.session.start({ cwd: '/work/repo', surface: null, isInteractive: false })
+    await $.prompt.submit({ text: 'open a session', origin: { kind: 'composer' } } as never)
     const name = (await $.tool.call({ tool: 'mcp__agentille__open_sessions', count: 1 } as never)).result.match(/s-[a-z0-9]{6}-1/)[0]
     listed = false
     for (let t = 0; t < SESSION_IDLE_MS + 30_000; t += 5000) await clock.advance(5000)

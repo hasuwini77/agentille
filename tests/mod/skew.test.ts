@@ -53,6 +53,7 @@ describe('skew: in the mod', () => {
     on('fs.stat', async ($: any, e: any) => (e.path.startsWith('/work/') ? { value: { kind: 'dir', size: 0, mtimeMs: 0, isLink: false } } : { deny: 'ENOENT' }))
     on('store.get', async () => ({ value: undefined }))
     on('ui.panes', async () => ({ value: [] }))
+    on('prompt.submit', async ($: any, e: any) => ({ text: e.text }))
     on('process.run', async ($: any, e: any) => {
       seen.push(e.argv)
       return { value: { exitCode: 0, stdout: e.argv[1] === 'split-window' ? '%9\n' : e.argv[1] === 'list-panes' ? ['%1', '', 'claude', '0', '@1'].join('\t') + '\n' : '', stderr: '' } }
@@ -61,7 +62,10 @@ describe('skew: in the mod', () => {
     await $.session.start({ cwd: '/work/repo', surface: null, isInteractive: false })
     return { toasts, seen, siblings, lookups }
   }
-  const spawn = ($: any) => $.tool.call({ tool: 'mcp__agentille__spawn_pane', run: 'k7f2ab', role: 'exec-1', task: 'build one', agent: 'executor', header: '[agt run=k7f2ab size=small mode=build]' })
+  const spawn = async ($: any) => {
+    await $.prompt.submit({ text: '/agt ship it', origin: { kind: 'composer' } } as never)
+    return $.tool.call({ tool: 'mcp__agentille__spawn_pane', run: 'k7f2ab', role: 'exec-1', task: 'build one', agent: 'executor', header: '[agt run=k7f2ab size=small mode=build]' })
+  }
   const MSG = 'agentille v3.6.0 is installed but this session runs v3.5.1 — restart Claude Code before opening panes'
 
   test('a newer installed version: one toast at start, and spawn_pane refuses and opens nothing', async ($, on) => {

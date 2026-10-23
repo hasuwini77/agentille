@@ -3,7 +3,7 @@
 // routing.js / live.js / board.js / wire.js / squads.js / mascot.js / focus.js; this file
 // observes events, applies decisions, and draws.
 
-import { DEFAULTS, decide, formationOf, ladderFixes, parseHeader, roleOf, verdictOf } from './routing.js'
+import { DEFAULTS, asksSessions, decide, demoteHeaderText, formationOf, ladderFixes, parseHeader, proveHeader, roleOf, typedFable, verdictOf } from './routing.js'
 import { addUsage, elapsed, endRoute, finish, isAgtPrompt, ledger, ledgerText, newAgent, paneAgents, panesLeft, reapPlan, short, stage, waving } from './live.js'
 import { ACCENT, DONE_COLOR, FRAME_COLOR, INK, WIRE_COLOR, boardRows, cast, castColumns, chip, colorOf, header, hex, leadLine, routingLines, runPhases, swarm, tokenBars, toolLabel, wireLines, wireRow } from './board.js'
 import { PUBLISH_MS, doneMessage, freshStatus, logWire, parseTellArgs, parseWire, shortName, statusKey, validLead, wakeDue, wakeMessage, wireEnv, workerStatus } from './wire.js'
@@ -69,6 +69,10 @@ let tickTimer = null         // redraw ticker: runs only while something works
 let focusOn = true           // agent flags show above the prompt
 let flags = []               // [{ text, key, at }] from agent results this run
 let agtTurn = false          // this turn is part of an /agt run
+let agtTyped = false         // the person typed /agt in this session: only then may the lead open worker panes
+let fableTyped = false       // ... and typed --fable on it: only then does a header's fable=forced hold
+let sessionsAsked = false    // the newest typed prompt asked for sessions of the person's own (open_sessions)
+const demotedToasted = new Set() // run ids told once that fable=forced was dropped for want of a typed --fable
 let leadTurn = false         // a main-loop turn is running: its idle panes are waiting for review
 const mascot = { greeted: false, hiUntil: 0, byeUntil: 0, working: false, start: 0, ms: null } // worker band, in $.clock.now() ms
 let highlightOn = true       // /agt replies get an essentials card and lit tokens
@@ -120,6 +124,13 @@ function heard(a, e) {
   if (e.workflow) a.workflow = e.workflow.runId || true
   a.heard = Date.now()
   return a
+}
+
+// Once per run: the model wrote fable=forced, nobody typed --fable, so the ladder applies.
+function demoteToast($, run) {
+  if (demotedToasted.has(run)) return
+  demotedToasted.add(run)
+  $.ui.toast('agt ⚑ fable=forced dropped: --fable was not typed, the ladder applies')
 }
 
 function runState(id) {
@@ -1180,7 +1191,7 @@ export function register(on) {
     }
     applyDisplay()
     await $.command.register({ name: 'agt-info', description: 'Settings in effect, routing, ledger, squads, or a route dry-run: routing | ledger | squads | route <role>', argumentHint: '[routing|ledger|squads|route <role> [size=…] [risk=…] [depth=…]]', immediate: true })
-    await $.command.register({ name: 'agt-highlight', description: 'Highlight replies: on (/agt only) · all · off. Saved as display.highlight in profile.json; goes away in v4', argumentHint: '[on|all|off]', immediate: true })
+    await $.command.register({ name: 'agt-highlight', description: 'Highlight replies: on (/agt replies lit; a paste-ready ask gets a plain-text note) · all (every typed question gets the answer shape) · off (nothing added to any prompt). Saved as display.highlight in profile.json; goes away in v4', argumentHint: '[on|all|off]', immediate: true })
     await $.command.register({ name: 'agt-clean', description: 'Tidy up now: close finished agt panes, remove merged agt/* worktrees and branches. Anything still working or unmerged stays', immediate: true })
     await $.command.register({ name: 'agt-focus', description: 'Agent flags above the prompt (a REVISE, a FAIL, a blocked pane): on · off. Saved as display.focus in profile.json; goes away in v4', argumentHint: '[on|off]', immediate: true })
     if (transport !== 'none') {
@@ -1281,8 +1292,16 @@ export function register(on) {
     }
     const t = await transportOf($)
     if (t === 'none') return { deny: 'No pane transport here: run the slice as a subagent.' }
+    if (!agtTyped) return { deny: 'spawn_pane opens worker panes only in a session where /agt was typed.' }
     const a = spawnToolInput(e, panes)
     if (a.error) return { deny: a.error }
+    const proof = proveHeader(a.hdr, { fableTyped })
+    if (proof.demoted) {
+      a.hdr = proof.hdr
+      a.header = demoteHeaderText(a.header)
+      a.task = demoteHeaderText(a.task)
+      demoteToast($, a.run)
+    }
     const cwd = a.cwd ?? (await $.session.cwd())
     if (a.cwd) {
       const s = await $.fs.stat(cwd).catch(() => null)
@@ -1358,6 +1377,7 @@ export function register(on) {
     }
     const t = await transportOf($)
     if (t === 'none') return { deny: 'No pane transport here: sessions open as panes only inside Herdr or tmux.' }
+    if (!sessionsAsked) return { deny: 'open_sessions runs only on a turn where the person typed a request for sessions, panes or terminals.' }
     const a = sessionsToolInput(e)
     if (a.error) return { deny: a.error }
     if (a.kind === 'codex' && t !== 'herdr') return { deny: 'Codex sessions need Herdr.' }
@@ -1446,12 +1466,17 @@ export function register(on) {
     if (k !== undefined && k !== 'composer' && k !== 'bridge') return next(e)
     agtTurn = isAgtPrompt(e.text)
     if (agtTurn) flags = []   // a new run starts with a clean slate
+    // What the person typed is the only proof the dispatch headers get: a typed /agt unlocks spawn_pane
+    // for the session, --fable on it is what makes fable=forced hold, and only a typed ask opens sessions.
+    if (agtTurn) { agtTyped = true; fableTyped = typedFable(e.text) }
+    sessionsAsked = !agtTurn && !selfName && !worker && asksSessions(e.text)
     if (agtTurn && deckAuto) void $.ui.open({ id: DECK, title: 'agentille' })
     // Under display.highlight: all, a typed question in the lead session asks for the panel's shape.
     // Never in a worker pane (the lead parses its report) and never for a slash command or an /agt run.
     const typed = !agtTurn && !selfName && !worker && !String(e.text ?? '').trimStart().startsWith('/')
-    // Asked for text to paste as is: no panel and no answer style, under any highlight setting.
-    rawTurn = typed && isRawPrompt(e.text)
+    // Asked for text to paste as is: no panel and no answer style. Under display.highlight: off nothing is
+    // added to any prompt and nothing is copied, so the raw style needs highlight on or all.
+    rawTurn = typed && highlightOn && isRawPrompt(e.text)
     shapedTurn = !rawTurn && typed && highlightOn && highlightAll
     if (rawTurn) return next({ ...e, context: [...(e.context ?? []), RAW_STYLE] })
     if (shapedTurn) return next({ ...e, context: [...(e.context ?? []), ANSWER_STYLE] })
@@ -1537,7 +1562,12 @@ export function register(on) {
       return res
     }
 
-    const hdr = parseHeader(e.prompt) ?? {}
+    const proof = proveHeader(parseHeader(e.prompt) ?? {}, { fableTyped: fableTyped || !!worker })
+    const hdr = proof.hdr
+    if (proof.demoted) {
+      e = { ...e, prompt: demoteHeaderText(e.prompt) }
+      demoteToast($, SAFE_RUN.test(hdr.run ?? '') ? hdr.run : lastRun)
+    }
     // A workflow script's agent: the engine ignores a rewrite there (and logs a failure line), so
     // it runs on the model the script chose. Log that model, not the table's, and flag a mismatch.
     if (e.workflow) {

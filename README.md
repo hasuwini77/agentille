@@ -25,7 +25,7 @@ Open: ~/.agentille/state/run-a1b2/report.md
 Next: gh pr merge 12 --merge
 ```
 
-Everything else (plan, findings, each agent's full report) is in that `report.md`. A plain prompt never starts `/agt`: the skill runs only when you type it, and nothing is injected into your prompts. A one-sentence task with no risk words (the typo, the rename) runs solo: no agents, no card, no extra tokens.
+Everything else (plan, findings, each agent's full report) is in that `report.md`. A plain prompt never starts `/agt`: the skill runs only when you type it. The mod adds text to a prompt in exactly two cases, both under `display.highlight` (see Options): a short ask for paste-ready text gets a one-line "answer in plain text" note, and under `all` every typed question gets the answer-shape note. `highlight: off` adds nothing to any prompt. A one-sentence task with no risk words (the typo, the rename) runs solo: no agents, no card, no extra tokens.
 
 Make it sound like you (optional, 1 minute): `/agentille-init`. Powered by [Systown AI Lab](https://systown.ai).
 
@@ -76,11 +76,11 @@ Everything lives in `~/.agentille/profile.json`. Every key is optional; a missin
 ```
 
 - `integration`: what a finished slice becomes. `pr` (default) pushes a branch and opens a PR per slice; `auto` merges each PR on green with a merge commit, deletes the branch and pushes a version tag; `push` pushes the branch only; `local` merges locally and pushes nothing. A repo's `.agentille/config.json` `{"integration": "auto"}` overrides the profile for that repo; a repo CLAUDE.md or AGENTS.md saying `no-mistakes` forces `pr`, `local-only` forces `local`. In every mode a diff that touches auth, payments, deploy, migrations, dependencies or a business assumption stops at the PR and the card says `⚑ escalated`.
-- `routing.autoFable`: `true` lets the escalation ladder reach Fable (about twice the cost of Opus) after two plan REVISEs or three failed fixes, at most `maxFablePerRun` times and only under `fableWeeklyCeiling` percent of your weekly plan. Default `false`: Fable only when you type `--fable`.
+- `routing.autoFable`: `true` lets the escalation ladder reach Fable (about twice the cost of Opus) after two plan REVISEs or three failed fixes, at most `maxFablePerRun` times and only under `fableWeeklyCeiling` percent of your weekly plan. Default `false`: Fable only when you type `--fable`. The mod holds the model to that: a dispatch header claiming `fable=forced` in a session where you did not type `--fable` is rewritten to `fable=auto`, with a toast.
 
 - `deck`: `auto` opens the deck on every `/agt`, `off` only when you type `/agt-deck`.
 - `focus`: agent flags (a REVISE, a FAIL, a blocked pane) above the prompt.
-- `highlight`: `on` lights `/agt` replies, `all` every reply, `off` none. The answer that ends a lit turn draws between two rules (`╭─ ◆ agentille · time ─╮` above, `╰─╯` below) with nothing beside the text, so a selection copies no border or indent: its first line as the headline, the bullets as • rows with paths, versions and refs lit, and your steps numbered under an amber **── your move ──** divider (or "✓ nothing needed from you"). Under `all`, each question you type also asks Claude for that shape: a one-line answer, at most 6 short bullets, and numbered steps only when you have something to do. Ask for text to paste ("no formatting", "plain text", "copy-paste", or start with `raw:`, in a short prompt or in the short first or last sentence of a long one) and the answer skips the panel, comes back as plain text and lands on your clipboard, under any setting.
+- `highlight`: `on` lights `/agt` replies, `all` every reply, `off` none. The answer that ends a lit turn draws between two rules (`╭─ ◆ agentille · time ─╮` above, `╰─╯` below) with nothing beside the text, so a selection copies no border or indent: its first line as the headline, the bullets as • rows with paths, versions and refs lit, and your steps numbered under an amber **── your move ──** divider (or "✓ nothing needed from you"). Under `all`, each question you type also asks Claude for that shape: a one-line answer, at most 6 short bullets, and numbered steps only when you have something to do. Ask for text to paste ("no formatting", "plain text", "copy-paste", or start with `raw:`, in a short prompt or in the short first or last sentence of a long one) and the answer skips the panel, comes back as plain text and lands on your clipboard, under `on` or `all`. `off` adds nothing to any prompt and copies nothing.
 
 `/agt-routing`, `/agt-ledger` and `/agt-squads` were removed in v3.14.0: use `/agt-info routing|ledger|squads`. `/agt-focus` and `/agt-highlight` still work and write this block.
 
@@ -135,6 +135,10 @@ Ask in a plain prompt: "open three sessions", "open a codex session", "open two 
 
 No profile file is needed. macOS and Linux; the shell hooks are bash.
 
+## Releases
+
+One tag a day at most, fixes batched into the next minor, nothing removed outside a major that deprecated it first. What each version number promises and how to pin one: `docs/releasing.md`.
+
 ## What it touches
 
 Nothing runs until you type `/agt`, `/storm` or ask for a session. When you do:
@@ -144,7 +148,7 @@ Nothing runs until you type `/agt`, `/storm` or ask for a session. When you do:
 - **Beside your repo:** each parallel executor works in a sibling worktree `../<project>-<slug>` with your `.env*` files copied in and `node_modules` copied (never linked). The worktree is removed once its commits are pushed; `/agt-clean` removes merged ones.
 - **In your home:** `~/.agentille/state/run-<id>/` (plan, checkpoints, every agent's report, `report.md`), `~/.agentille/profile.json` when you save a setting, and `~/.agentille/.update-check.json`.
 - **Network:** once a day at session start the hook fetches this repo's `plugin.json` from GitHub to compare versions (3 s timeout, nothing sent). `AGENTILLE_UPDATE_CHECK=0` turns it off. Research agents (`/storm`) read the web; nothing else does.
-- **Panes:** a worker pane opened in the repo you are already in answers Claude's "trust this folder?" prompt for you; any other folder must be opened by hand once. Worker panes close when harvested; your own sessions close only when idle (Herdr) or when you close them (tmux).
+- **Panes:** the mod registers `spawn_pane` and `open_sessions` in every lead session, but each one refuses unless you typed for it: `spawn_pane` needs a typed `/agt` in this session, `open_sessions` a typed ask for sessions, panes or terminals on that same turn. A worker pane opened in the repo you are already in answers Claude's "trust this folder?" prompt for you; any other folder must be opened by hand once. Worker panes close when harvested; your own sessions close only when idle (Herdr) or when you close them (tmux).
 - **Models and cost:** every non-solo run costs more than a plain prompt. Planners and judgment reviewers run on Opus, executors on Sonnet, scouts on Haiku. Fable never, unless `--fable` or `routing.autoFable: true`.
 
 ## Glossary

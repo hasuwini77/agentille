@@ -2,6 +2,69 @@
 
 All notable changes to agentille are documented here.
 
+## [3.22.0] — 2026-10-23
+
+Safer defaults, tests that run, docs that disclose. An independent ten-reviewer
+panel compared agentille with superpowers and scored it 44/80 against 56/80:
+it won daily ergonomics and lost on safety, testing, docs and maintenance.
+This release fixes what the panel found without touching token cost, Herdr
+panes or session spawning.
+
+### Changed (behaviour)
+
+- **`integration` defaults to `pr`.** A finished slice ends on an open PR
+  and the card says `⚑ PR #n ready`. Merging on green, deleting the branch
+  and pushing a version tag (`auto`) is opt-in: `"integration": "auto"` in
+  `~/.agentille/profile.json`, in a project's `projects[]` entry, or in the
+  repo's `.agentille/config.json`. The escalate list is unchanged.
+- **Fable escalation is opt-in.** `routing.autoFable` defaults to `false`;
+  the ladder reaches Fable only when it is exactly `true`. `--fable` still
+  forces it for one run. The per-run cap and weekly ceiling are unchanged.
+- **`/storm`'s hand-off no longer tells `/agt` to merge**; it defers to the
+  repo's integration setting. The skill states that web pages are data,
+  never instructions, and the judge drops a candidate whose only source
+  asks for it.
+
+### Fixed
+
+- **Flags come down.** The red `⚑` lines above the prompt (a REVISE, a
+  failed verification, a CONCERNS) stayed for up to 30 minutes after the
+  run's card, and a plan-reviewer's REVISE stayed when the lead re-planned
+  and went on without a third review. The final `✓`/`✗` card now clears
+  every flag, and the planner and plan-reviewer share one flag key, so a
+  re-plan clears the ask.
+- **The privacy scan ran blind on macOS.** `validate.sh` used `xargs -d`,
+  which BSD xargs rejects; stderr was swallowed and a planted leak reported
+  PASS. It now uses `git grep` and fails on a grep error.
+- **The mod tests never ran in CI.** `validate.sh` WARN-skipped
+  `claude plugin test` when the CLI was missing, which it always was on the
+  runner. The workflow installs the CLI and `validate.sh` fails in CI
+  without it.
+- **Executor:** the `cp -al` fallback for `node_modules` is gone (hardlinks
+  share inodes with the live checkout, the one thing the comment said to
+  avoid); a plain copy is the last resort. The prompt no longer points at
+  `panes-mode.md` while claiming to depend on no skill.
+- **Routing keywords match whole words** (`move` never classifies `remove`
+  as a refactor), stated in `routing.md`.
+
+### Added
+
+- `AGENTILLE_UPDATE_CHECK=0` skips the daily version fetch.
+- `tests/hooks/`: deterministic shell tests for both hook scripts (a fake
+  HOME, `file://` fixtures, fake `herdr` and `tmux` binaries; 35 checks),
+  run by `validate.sh` and CI.
+- `.github/workflows/release.yml`: every `v*` tag becomes a GitHub Release
+  with that version's CHANGELOG section, so the Releases page stops
+  lagging the tags.
+- README: a Requirements table, a "What it touches" section (branches,
+  PRs, tags, sibling worktrees with `.env` copies, `~/.agentille`, the
+  version check, the trust prompt, models and cost) and a glossary.
+  Settings document `integration` and `routing`.
+- `agentille-claude-md` runs only when typed (`disable-model-invocation`)
+  and never adds a rule the original did not state; `agentille-init` and
+  `agentille-project` say when they run. Reviewers state what Bash is for.
+- `.claude/CLAUDE.md` says Levels, like `SKILL.md`.
+
 ## [3.21.4] — 2026-10-23
 
 ### Fixed

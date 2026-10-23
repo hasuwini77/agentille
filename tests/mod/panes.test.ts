@@ -767,21 +767,31 @@ describe('pane tools: in the mod', () => {
     expect(rm).toBeLessThan(split)
   })
 
-  test('a lead with a transport registers both tools; no transport registers none', async ($, on) => {
+  test('the pane tools exist only once /agt is typed: none at start, spawn_pane and close_pane on the typed /agt, once', async ($, on) => {
     const a = setup(on, TMUX, { 'tmux list-panes': { stdout: ['%1', '', 'claude', '0', '@1'].join(T) + '\n' } })
     await $.session.start({ cwd: '/work/repo', surface: null, isInteractive: false })
-    expect(a.tools).toEqual(['spawn_pane', 'close_pane', 'open_sessions'])
+    expect(a.tools).toEqual([])
+    await $.prompt.submit({ text: 'fix the login form', origin: { kind: 'composer' } } as never)
+    expect(a.tools).toEqual([])
+    await $.prompt.submit({ text: '/agt ship it', origin: { kind: 'notification' } } as never)
+    expect(a.tools).toEqual([])
+    await typed($)
+    expect(a.tools).toEqual(['spawn_pane', 'close_pane'])
+    await typed($, '/agt ship the rest')
+    expect(a.tools).toEqual(['spawn_pane', 'close_pane'])
   })
 
-  test('no transport: none registered', async ($, on) => {
+  test('no transport: a typed /agt registers none', async ($, on) => {
     const a = setup(on, {})
     await $.session.start({ cwd: '/work/repo', surface: null, isInteractive: false })
+    await typed($)
     expect(a.tools).toEqual([])
   })
 
-  test('a worker pane registers no tools', async ($, on) => {
+  test('a worker pane registers no tools, typed /agt or not', async ($, on) => {
     const a = setup(on, TMUX, { 'tmux list-panes': { stdout: ['%1', 'agt-k7f2ab-exec-1', 'claude', '0', '@1'].join(T) + '\n' } })
     await $.session.start({ cwd: '/work/repo', surface: null, isInteractive: false })
+    await typed($)
     expect(a.tools).toEqual([])
   })
 
@@ -1571,10 +1581,16 @@ describe('sessions: in the mod', () => {
     expect((await $.tool.call({ tool: 'mcp__agentille__open_sessions', count: 1 })).deny).toContain('typed a request for sessions')
   })
 
-  test('a lead with a transport registers open_sessions next to the pane tools', async ($, on) => {
+  test('open_sessions is registered on the typed ask, with close_pane once; a later /agt adds spawn_pane only', async ($, on) => {
     const a = setup(on, TMUX, { 'tmux list-panes': { stdout: ['%1', '', 'claude', '0', '@1'].join('\t') + '\n' } })
     await $.session.start({ cwd: '/work/repo', surface: null, isInteractive: false })
-    expect(a.tools).toEqual(['spawn_pane', 'close_pane', 'open_sessions'])
+    expect(a.tools).toEqual([])
+    await asked($, 'open two sessions')
+    expect(a.tools).toEqual(['open_sessions', 'close_pane'])
+    await asked($, 'open another session')
+    expect(a.tools).toEqual(['open_sessions', 'close_pane'])
+    await asked($, '/agt ship it')
+    expect(a.tools).toEqual(['open_sessions', 'close_pane', 'spawn_pane'])
   })
 
   test('herdr: three sessions stack right of the lead, then down, with no worker env and no prompt', async ($, on) => {

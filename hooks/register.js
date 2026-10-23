@@ -57,7 +57,9 @@ let worker = null            // { agent, model, effort } from AGENTILLE_WORKER: 
 let selfTab = null           // herdr: the lead's own tab, where its workers split
 let selfWorkspace = null     // herdr: the lead's workspace, where a run tab opens
 const ownedTabs = new Set()  // herdr: run tabs this session created; its panes are reaped, closed and swept like the lead's tab's
-let paneTools = false        // spawn_pane / close_pane registered for this lead
+let paneTools = false        // spawn_pane (and close_pane) registered: a typed /agt arrived in this lead session
+let sessionTools = false     // open_sessions (and close_pane) registered: a typed ask for sessions arrived
+let closeTool = false        // close_pane registered, by whichever of the two came first
 let squads = []              // active squads for this repo
 let squadBlock = ''
 let squadRows = []           // every squad scored, for /agt-info squads; null when squads.json is unreadable
@@ -1181,6 +1183,27 @@ async function completeReport($, path) {
   }
 }
 
+// The pane tools exist only once the person typed for them, so a plain session carries no spawn_pane or
+// open_sessions in its tool list: a typed /agt registers spawn_pane, a typed ask for sessions registers
+// open_sessions, and close_pane comes with whichever came first. A worker pane gets no fan-out of its own,
+// and a host without a pane transport gets none. A tool registered while a prompt is submitted is in that
+// turn's list.
+async function ensureTools($, which) {
+  if (selfName || worker) return
+  if ((which === 'panes' ? paneTools : sessionTools) || (await transportOf($)) === 'none') return
+  try {
+    await $.tool.register(which === 'panes' ? SPAWN_TOOL : OPEN_SESSIONS_TOOL)
+    if (!closeTool) {
+      await $.tool.register(CLOSE_TOOL)
+      closeTool = true
+    }
+    if (which === 'panes') paneTools = true
+    else sessionTools = true
+  } catch {
+    // an older host without $.tool.register: /agt runs its heavy level as subagent waves
+  }
+}
+
 export function register(on) {
   on('session.start', async ($, e, next) => {
     await loadProfile($)
@@ -1222,13 +1245,6 @@ export function register(on) {
       if (panes.length) ensurePolling($)
       // A lead that died skipped its SessionEnd sweep: close its finished workers now.
       if (panes.length && !selfName && !worker) void cleanWorkspace($, { auto: true, panesOnly: true }).catch(() => {})
-      // The lead opens and closes its workers through the mod; a worker pane gets no fan-out of its own.
-      if (!selfName && !worker) {
-        await $.tool.register(SPAWN_TOOL)
-        await $.tool.register(CLOSE_TOOL)
-        await $.tool.register(OPEN_SESSIONS_TOOL)
-        paneTools = true
-      }
     }
     if (working()) ensureTicker($)
     if (wireName) await publish($, true)
@@ -1495,9 +1511,11 @@ export function register(on) {
     // What the person typed is the only proof the dispatch headers get: a typed /agt unlocks spawn_pane
     // for the session, --fable on it is what makes fable=forced hold, and only a typed ask opens sessions.
     if (agtTurn) { agtTyped = true; fableTyped = typedFable(e.text) }
+    if (agtTurn) await ensureTools($, 'panes')
     // A worker's proof is its first prompt: the lead already rewrote fable=forced there when nobody typed --fable.
     if (worker && !workerProved) { workerProved = true; fableTyped = parseHeader(e.text)?.fable === 'forced' || typedFable(e.text) }
     sessionsAsked = !agtTurn && !selfName && !worker && asksSessions(e.text)
+    if (sessionsAsked) await ensureTools($, 'sessions')
     if (agtTurn && deckAuto) void $.ui.open({ id: DECK, title: 'agentille' })
     // Under display.highlight: all, a typed question in the lead session asks for the panel's shape.
     // Never in a worker pane (the lead parses its report) and never for a slash command or an /agt run.

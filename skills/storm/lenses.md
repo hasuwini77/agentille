@@ -49,6 +49,6 @@ touches: <paths or areas, ≤5>
 why-not: <the strongest reason to skip it, one line>
 ```
 
-Scale: `user` = how many current users feel it (0 none, 3 most). `value` on the brief's `valueAxis` (0 none, 3 directly). `fit` = how much the codebase already supports it (0 new subsystem, 3 wiring only). `effort`: S ≤ one executor slice under 2 h, M a half-day slice, L a full-day slice or two slices. `risk`: 0 none, 1 needs a key, a migration or a platform review, 2 needs money or an approval Edwin does not have.
+Scale: `user` = how many current users feel it (0 none, 3 most). `value` on the brief's `valueAxis` (0 none, 3 directly). `fit` = how much the codebase already supports it (0 new subsystem, 3 wiring only). `effort`: S ≤ one executor slice under 2 h, M a half-day slice, L a full-day slice or two slices. `risk`: 0 none, 1 needs a key, a migration or a platform review, 2 needs money or an approval the user does not have.
 
 Budget: ≤12 tool calls, ≤40 lines of output. Research only: never edit a file. Skip anything on the exclusion list and anything the inventory scout already found built.

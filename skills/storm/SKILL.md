@@ -32,7 +32,7 @@ Run dir: `~/.agentille/state/storm-<id>/` (`<id>` = 6 lowercase alphanumerics). 
 
 Read what exists, nothing more: `README*`, `CLAUDE.md`, `docs/{STATUS,ROADMAP,HANDOFF,MASTER_PROMPT}*`, the manifest (`package.json`, `Package.swift`, `*.xcodeproj`, `CMakeLists.txt`, `pyproject.toml`…), `git log --oneline -30`, a depth-2 tree, and every past `docs/storm/*.md`. From past storms collect **shipped** (picks of past storms that `git log` shows merged) and **dropped** (their "Dropped" sections): both go on the exclusion list.
 
-Write `brief.md` (≤60 lines): what the product is, who uses it, how it makes or saves money (`valueAxis`: `revenue` for a product, `retention` for a game, `time-saved` for a tool), stack, size, what shipped recently, exclusion list, focus. Read `~/.agentille/profile.json` → `neverDo`; it goes verbatim into every dispatch.
+Write `brief.md` (≤60 lines): what the product is, who uses it, how it makes or saves money (`valueAxis`: `revenue` for a product, `retention` for a game, `time-saved` for a tool), stack, size, what shipped recently, exclusion list, focus. Read `~/.agentille/profile.json` when it exists → `name`, `role`, `neverDo`; they go verbatim into every dispatch. No file → no profile prefix.
 
 ### 1. Scouts (2 × Haiku `Explore`, one message, background)
 
@@ -51,7 +51,7 @@ Merge the lens outputs: fold near-duplicates into the strongest version and keep
 
 ### 4. Adversary (1 × Sonnet `general-purpose`, foreground; skipped by `quick`)
 
-Send the top 8 with the brief. For each it returns `KEEP | SHRINK <new scope> | DROP <one-line reason>`: nobody asked for it, the code already does it, too big for one slice, needs money or an approval Edwin does not have. Apply the verdicts, re-rank.
+Send the top 8 with the brief. For each it returns `KEEP | SHRINK <new scope> | DROP <one-line reason>`: nobody asked for it, the code already does it, too big for one slice, needs money or an approval the user does not have. Apply the verdicts, re-rank.
 
 ### 5. Pick
 
@@ -66,7 +66,7 @@ Write `docs/storm/<YYYY-MM-DD>.md` from `handoff.md` → "Storm doc": picks with
 Never build in this session's main thread. First detect agentille: it is present when `mcp__agentille__open_sessions` is among your tools or `~/.claude/plugins/cache/*/agentille/` exists.
 
 1. Compose the task (`handoff.md` → "agt task line").
-2. `--next` (agentille only) → append `- [ ] <pick title> (spec: docs/storm/<date>.md §<n>)` per pick to `.agentille/backlog.md` (gitignore it on first creation) and print `/agt next`.
+2. `--next` (agentille only; without it, say so and stop at the doc as `--no-build`) → append `- [ ] <pick title> (spec: docs/storm/<date>.md §<n>)` per pick to `.agentille/backlog.md` (gitignore it on first creation) and print `/agt next`.
 3. **With agentille:** call `mcp__agentille__open_sessions` with `kind: "claude"`, `count: 1`, `cwd: <project root>`, `tasks: ["/agt heavy \"<task>\""]` (`quick` → `medium`). It opens beside this pane, unfocused, and owns its own `/agt` run. If the tool errors (no Herdr, no tmux), print the line to paste. Print it anyway under the card as the fallback: a prompt sent to a pane still drawing its startup screen can be swallowed.
 4. **Without agentille:** `handoff.md` → "Plain build". With `$TMUX` set, open a detached window running `claude "<plain build prompt>"` in the project root. Otherwise build here with built-in subagents: one `general-purpose` Sonnet executor per pick in its own worktree, at most 3 at once, one reviewer per finished pick, one PR (or branch) per pick, never merged by the skill.
 
@@ -74,20 +74,20 @@ Then the final card (`handoff.md` → "Final card"). That card is the only end-o
 
 ## Dispatch header
 
-Every research dispatch starts with one line, then the profile prefix when `neverDo` is set:
+Every research dispatch starts with one line, then the profile prefix when profile.json gave any field:
 
 `[storm run=<id> role=<scout|lens|adversary> lens=<slug> valueAxis=<revenue|retention|time-saved> focus=<text|none>]`
 
 ```
-User: Edwin (senior frontend dev, solo, goal: micro-SaaS income). Avoid: <neverDo, verbatim>.
+User: <name>, <role> (from profile.json, each omitted when absent). Avoid: <neverDo, verbatim>.
 ```
 
 ## Hard rules
 
-- **Research only here.** No research agent writes code. The storm session's main thread never builds; a plain build (no agentille) runs through executor subagents and leaves PRs, never merges. Haiku scouts, Sonnet researches and judges, Fable only if Edwin typed `--fable` on the `/agt` line later.
+- **Research only here.** No research agent writes code. The storm session's main thread never builds; a plain build (no agentille) runs through executor subagents and leaves PRs, never merges. Haiku scouts, Sonnet researches and judges, Fable only if the user typed `--fable` on the `/agt` line later.
 - **Evidence or it does not exist.** A candidate with no URL or `file:line` is dropped at the judge.
 - **Never re-propose** what a past storm shipped or dropped, or what the inventory scout found already built.
 - **One message per fan-out, one wait.** Scouts in one message; all lenses in one message; the adversary alone in the foreground.
 - **No popups, no dashboards.** Progress is the TodoWrite spine and the two cards; detail lives in the run dir and the storm doc.
 - **Honor `neverDo`** verbatim in every dispatch.
-- **Nothing idle survives.** Stop every background subagent once its output is merged. The hand-off session is Edwin's, not yours: never close it.
+- **Nothing idle survives.** Stop every background subagent once its output is merged. The hand-off session is the user's, not yours: never close it.

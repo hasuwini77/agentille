@@ -323,6 +323,8 @@ describe('highlight: in the mod', () => {
 
   test('a typed /agt reply gets the card and a dim body with its tokens lit', async ($, on) => {
     setup(on)
+    fakeHome(on, { '/u/.agentille/profile.json': '{"display":{"highlight":"on"}}' })
+    await start($)
     await say($, '/agt tag the release')
     const ui = await mount($, 'm1')
     expect(await ui.find({ type: 'Text', text: /→ / })).toBeDefined()
@@ -334,6 +336,8 @@ describe('highlight: in the mod', () => {
 
   test('a final card in a typed /agt reply is lit but gets no essentials card', async ($, on) => {
     setup(on)
+    fakeHome(on, { '/u/.agentille/profile.json': '{"display":{"highlight":"on"}}' })
+    await start($)
     await say($, '/agt tag the release')
     const ui = await mount($, 'f1', '✓ tagged v2.6.0  ·  2 files  ·  PR #75  ·  3m\nOpen: ~/.agentille/state/run-ab12cd/report.md\nNext: restart Claude')
     expect(await ui.find({ type: 'Text', text: /→ / })).toBeUndefined()
@@ -394,7 +398,9 @@ describe('highlight: in the mod', () => {
 
   test('the block closing a main turn\'s answer draws as the framed panel, at full brightness', async ($, on) => {
     setup(on)
+    fakeHome(on, { '/u/.agentille/profile.json': '{"display":{"highlight":"on"}}' })
     on('turn.complete', async ($: any, e: any) => ({ text: e.answer }))
+    await start($)
     await say($, '/agt tag the release')
     let ui = await mount($, 'z0')
     expect(await ui.find({ type: 'Text', text: /^◆ $/ })).toBeUndefined()
@@ -510,11 +516,13 @@ describe('highlight: in the mod', () => {
 
   test('a raw prompt works under highlight on too, and a failed copy says why', async ($, on) => {
     setup(on)
+    fakeHome(on, { '/u/.agentille/profile.json': '{"display":{"highlight":"on"}}' })
     const sent = submitted
     const toasts: string[] = []
     on('ui.copy', async () => ({ value: { isCopied: false, reason: 'no-clipboard' } }))
     on('ui.toast', async ($: any, e: any) => { toasts.push(e.text); return { value: undefined } })
     on('turn.complete', async ($: any, e: any) => ({ text: e.answer }))
+    await start($)
     await say($, 'raw: a caption for the launch')
     expect(sent.at(-1).context?.join('\n')).toContain('[agentille raw]')
     await $.turn.complete({ answer: 'Launch day.', durationMs: 10, isAborted: false, turnId: 't1', reason: 'answer' } as never)
@@ -568,6 +576,8 @@ describe('highlight: in the mod', () => {
 
   test('a task notification does not end the /agt turn', async ($, on) => {
     setup(on)
+    fakeHome(on, { '/u/.agentille/profile.json': '{"display":{"highlight":"on"}}' })
+    await start($)
     await say($, '/agt build it')
     await say($, 'task finished', { kind: 'task-notification' })
     const ui = await mount($, 'm9')

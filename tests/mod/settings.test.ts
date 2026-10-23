@@ -10,7 +10,7 @@ describe('settings: display parsing', () => {
 
   test('profile beats store, store beats default, per key', () => {
     const r = resolveDisplay({ deck: 'auto' }, { deck: 'off', focus: false })
-    expect(r.values).toEqual({ deck: 'auto', focus: false, highlight: 'on' })
+    expect(r.values).toEqual({ deck: 'auto', focus: false, highlight: 'off' })
     expect(r.from).toEqual({ deck: 'profile', focus: 'store', highlight: 'default' })
   })
 
@@ -72,7 +72,7 @@ describe('settings: writing the profile', () => {
     const t = displayText(resolveDisplay({ deck: 'auto' }, { focus: false }))
     expect(t).toMatch(/deck\s+auto\s+profile/)
     expect(t).toMatch(/focus\s+false\s+store/)
-    expect(t).toMatch(/highlight\s+on\s+default/)
+    expect(t).toMatch(/highlight\s+off\s+default/)
   })
 })
 
@@ -99,10 +99,10 @@ describe('settings: in the mod', () => {
   const focus = async ($: any) => (await $.command.run({ command: 'agt-focus' })).text.split('\n')[0]
   const highlight = async ($: any) => (await $.command.run({ command: 'agt-highlight' })).text.split(' ')[1]
 
-  test('no profile and an empty store: the old defaults', async ($, on) => {
+  test('no profile and an empty store: the defaults, highlight off', async ($, on) => {
     await boot($, on, null)
     expect(await focus($)).toContain('focus: on')
-    expect(await highlight($)).toBe('on')
+    expect(await highlight($)).toBe('off')
   })
 
   test('the old store values still apply when the profile has no display block', async ($, on) => {
@@ -120,7 +120,7 @@ describe('settings: in the mod', () => {
   test('junk in the profile falls through to the store and the defaults', async ($, on) => {
     await boot($, on, '{"display":{"focus":"never","highlight":9}}', { 'focus:mode': 'off' })
     expect(await focus($)).toContain('focus: off')
-    expect(await highlight($)).toBe('on')
+    expect(await highlight($)).toBe('off')
   })
 
   test('a profile that is not JSON, or has display as a string, changes nothing', async ($, on) => {

@@ -4,7 +4,7 @@
 // Precedence per key: profile.display → the $.store value an old /agt-focus, /agt-highlight or
 // /agt-deck left behind → the default. Junk in any of them reads as "not set".
 
-export const DISPLAY_DEFAULTS = { deck: 'off', focus: true, highlight: 'on' }
+export const DISPLAY_DEFAULTS = { deck: 'off', focus: true, highlight: 'off' }
 export const DISPLAY_KEYS = Object.keys(DISPLAY_DEFAULTS)
 
 const VALID = {

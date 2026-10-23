@@ -77,7 +77,7 @@ let workerProved = false     // worker: its first typed prompt decided whether f
 const demotedToasted = new Set() // run ids told once that fable=forced was dropped for want of a typed --fable
 let leadTurn = false         // a main-loop turn is running: its idle panes are waiting for review
 const mascot = { greeted: false, hiUntil: 0, byeUntil: 0, working: false, start: 0, ms: null } // worker band, in $.clock.now() ms
-let highlightOn = true       // /agt replies get an essentials card and lit tokens
+let highlightOn = false      // /agt replies get an essentials card and lit tokens (display.highlight: on | all)
 let highlightAll = false     // …and so does every other long reply (/agt-highlight all)
 const litMemo = new Map()    // message id → was it an /agt turn when first drawn
 const hlMemo = new Map()     // message id → { text, highlight() result }

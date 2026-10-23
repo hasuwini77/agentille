@@ -25,9 +25,16 @@ Open: ~/.agentille/state/run-a1b2/report.md
 Next: gh pr merge 12 --merge
 ```
 
-Everything else (plan, findings, each agent's full report) is in that `report.md`. A plain prompt never starts `/agt`: the skill runs only when you type it. The mod adds text to a prompt in exactly two cases, both under `display.highlight` (see Options): a short ask for paste-ready text gets a one-line "answer in plain text" note, and under `all` every typed question gets the answer-shape note. `highlight: off` adds nothing to any prompt. A one-sentence task with no risk words (the typo, the rename) runs solo: no agents, no card, no extra tokens.
+Everything else (plan, findings, each agent's full report) is in that `report.md`. A plain prompt never starts `/agt`: the skill runs only when you type it. The mod adds text to a prompt in exactly two cases, both under `display.highlight` (see Options): a short ask for paste-ready text gets a one-line "answer in plain text" note, and under `all` every typed question gets the answer-shape note. `highlight: off` adds nothing to any prompt. A one-sentence task with no risk words (the typo, the rename) runs solo: no agents, no card.
 
 Make it sound like you (optional, 1 minute): `/agentille-init`. Powered by [Systown AI Lab](https://systown.ai).
+
+What else ships beside `/agt`, each covered below:
+
+- `/storm`: research what to build next, then hand the picks to `/agt heavy`.
+- Sessions: "open two sessions" opens real Claude, Codex or shell panes beside yours.
+- The mod: the live dispatch band, model routing, the wire between panes, the deck (`/agt-deck`), reply highlighting and a small mascot in worker panes.
+- Setup skills: `/agentille-init` (your voice), `/agentille-project` and `/agentille-claude-md` (a repo's CLAUDE.md).
 
 ## When to use it
 
@@ -53,11 +60,11 @@ Skip it for one-file edits, typos, renames and questions: a plain prompt is chea
 |---|---|
 | `/agt "task"` | The level is detected: low (solo or one builder), medium (2–3 builders in parallel as subagents) or heavy (one Herdr/tmux pane per part) |
 | `/agt low\|medium\|heavy "task"` | Force the level for one run |
-| `/agt next ["task"]` | Build the next item in `.agentille/backlog.md`, integrate it (PR by default) or escalate, then keep going · with a task: queue it |
+| `/agt next ["task"]` | Build the next item in `.agentille/backlog.md` and integrate it (PR by default) or escalate; after a merged item it takes the next one, and stops on the first escalation · with a task: queue it |
 | `/agt --fable "task"` | The top model tier on judgment roles for one run |
 | `/agt-info [routing\|ledger\|squads\|route <role>]` | Settings in effect, last run's routing and ledger, active squads · or one view: routing decisions, tokens per role, the squad rescan · or a dry-run of what a role would route to, escalation rungs included |
 | `/agt-spawn "task" [--model …]` | One extra routed Claude pane (Herdr or tmux); it closes itself once its answer is saved |
-| `/agt-clean` | Tidy up now: close finished agt panes, remove merged and clean `agt/*` worktrees and branches. Anything still working, unmerged or with changes stays. It also runs on its own when a run ends and at session start |
+| `/agt-clean` | Tidy up now: close finished agt panes, remove merged and clean `agt/*` worktrees and branches, drop run folders untouched for 14 days. Anything still working, unmerged or with changes stays. When a run ends the pane and worktree part runs on its own; at session start only finished panes a dead lead left behind are closed |
 | `/agt-tell <worker> <message>` | Message a worker pane over the wire |
 | `/storm [quick] [N] ["focus"] [--ask\|--no-build\|--next]` | Decide what to build next: 11 research agents on your repo and its market, 10–15 scored candidates, the best 2–5 picked and specced in `docs/storm/<date>.md`, then a fresh session beside you that types `/agt heavy` |
 | `/agt-deck [auto\|off]` | A side pane with the run's cast, routing timeline, wire log and token bars · open it on every `/agt` · stop |
@@ -71,7 +78,7 @@ Everything lives in `~/.agentille/profile.json`. Every key is optional; a missin
 {
   "integration": "pr",
   "routing": { "autoFable": false, "maxFablePerRun": 1, "fableWeeklyCeiling": 60 },
-  "display": { "deck": "off", "focus": true, "highlight": "on" }
+  "display": { "deck": "off", "focus": true, "highlight": "off" }
 }
 ```
 
@@ -80,7 +87,7 @@ Everything lives in `~/.agentille/profile.json`. Every key is optional; a missin
 
 - `deck`: `auto` opens the deck on every `/agt`, `off` only when you type `/agt-deck`.
 - `focus`: agent flags (a REVISE, a FAIL, a blocked pane) above the prompt.
-- `highlight`: `on` lights `/agt` replies, `all` every reply, `off` none. The answer that ends a lit turn draws between two rules (`╭─ ◆ agentille · time ─╮` above, `╰─╯` below) with nothing beside the text, so a selection copies no border or indent: its first line as the headline, the bullets as • rows with paths, versions and refs lit, and your steps numbered under an amber **── your move ──** divider (or "✓ nothing needed from you"). Under `all`, each question you type also asks Claude for that shape: a one-line answer, at most 6 short bullets, and numbered steps only when you have something to do. Ask for text to paste ("no formatting", "plain text", "copy-paste", or start with `raw:`, in a short prompt or in the short first or last sentence of a long one) and the answer skips the panel, comes back as plain text and lands on your clipboard, under `on` or `all`. `off` adds nothing to any prompt and copies nothing.
+- `highlight` (default `off`): `on` lights `/agt` replies, `all` every reply, `off` none. The answer that ends a lit turn draws between two rules (`╭─ ◆ agentille · time ─╮` above, `╰─╯` below) with nothing beside the text, so a selection copies no border or indent: its first line as the headline, the bullets as • rows with paths, versions and refs lit, and your steps numbered under an amber **── your move ──** divider (or "✓ nothing needed from you"). Under `all`, each question you type also asks Claude for that shape: a one-line answer, at most 6 short bullets, and numbered steps only when you have something to do. Ask for text to paste ("no formatting", "plain text", "copy-paste", or start with `raw:`, in a short prompt or in the short first or last sentence of a long one) and the answer skips the panel, comes back as plain text and lands on your clipboard, under `on` or `all`. `off` adds nothing to any prompt and copies nothing.
 
 `/agt-routing`, `/agt-ledger` and `/agt-squads` were removed in v3.14.0: use `/agt-info routing|ledger|squads`. `/agt-focus` and `/agt-highlight` still work and write this block.
 
@@ -116,7 +123,7 @@ Ask in a plain prompt: "open three sessions", "open a codex session", "open two 
 - **The wire**: pane workers report to your session when they finish, so it wakes on its own; their live status reaches your band through a shared store.
 - **Best with Herdr**: workers are labeled in Herdr's sidebar and a row's `↗` jumps to its pane. A run with 3+ pane workers gets its own tab, so your tab stays whole. Ask for Codex in the task ("codex builds the API slice") and that slice runs as a Codex pane on your own Codex config. tmux works with the same band; without a multiplexer you get the subagent tree.
 - **Fewer stuck runs**: shared files (lockfiles, schema, shared types, registries) land first in one contract step before slices split; a builder that stops early is resumed once; cheap Haiku scouts map unfamiliar code before the planner.
-- **Routing**: planners and judgment reviewers on Opus, the executor on Sonnet (never Haiku), effort set per role by the bundled mod. Fable only after observed failures at Opus max, or when you type `--fable`.
+- **Routing**: the planner, ui-prototyper and the design, security and payments reviewers on Opus; the executor, adversary, plan-reviewer and code-reviewer on Sonnet, the last two moving to Opus for a large or risky slice; Haiku only classifies and scouts (never writes). Effort is set per role by the bundled mod (`skills/agt/routing.md`). Fable only after observed failures at Opus max, or when you type `--fable`.
 - **Review is a gate**: P0/P1 findings get fixed before the card says ✓.
 - **Squads**: in a saas, ecommerce, content or immersive repo, payments, SEO and performance specialists join the review when the diff touches their area.
 
@@ -141,15 +148,15 @@ One tag a day at most, fixes batched into the next minor, nothing removed outsid
 
 ## What it touches
 
-Nothing runs until you type `/agt`, `/storm` or ask for a session. When you do:
+Before you type anything the mod does four small things: it draws its band above the prompt and, under `display.highlight: on` or `all`, lights replies; once a day at session start it checks this repo for a newer version (see Network); at session start it closes finished `agt-*` panes a dead lead left behind; and it registers its pane tools only on a turn where you typed for them (see Panes). Everything else waits for a typed `/agt`, `/storm` or a session ask. When you do:
 
 - **Your repo:** a branch per slice (`feat/<slug>`, `fix/<slug>`, or `agt/<slug>` off a feature branch), atomic commits, one PR per slice, and with `auto` a merge commit plus a version tag. `/agt next` and `/storm --next` keep `.agentille/backlog.md` (gitignored on first use). `/storm` commits `docs/storm/<date>.md`.
 - **On GitHub:** with `gh`, one issue per slice and one PR per slice; with `auto`, merged PRs and pushed tags.
 - **Beside your repo:** each parallel executor works in a sibling worktree `../<project>-<slug>` with your `.env*` files copied in and `node_modules` copied (never linked). The worktree is removed once its commits are pushed; `/agt-clean` removes merged ones.
 - **In your home:** `~/.agentille/state/run-<id>/` (plan, checkpoints, every agent's report, `report.md`), `~/.agentille/profile.json` when you save a setting, and `~/.agentille/.update-check.json`.
-- **Network:** once a day at session start the hook fetches this repo's `plugin.json` from GitHub to compare versions (3 s timeout, nothing sent). `AGENTILLE_UPDATE_CHECK=0` turns it off. Research agents (`/storm`) read the web; nothing else does.
-- **Panes:** the mod registers `spawn_pane` and `open_sessions` in every lead session, but each one refuses unless you typed for it: `spawn_pane` needs a typed `/agt` in this session, `open_sessions` a typed ask for sessions, panes or terminals on that same turn. A worker pane opened in the repo you are already in answers Claude's "trust this folder?" prompt for you; any other folder must be opened by hand once. Worker panes close when harvested; your own sessions close only when idle (Herdr) or when you close them (tmux).
-- **Models and cost:** every non-solo run costs more than a plain prompt. Planners and judgment reviewers run on Opus, executors on Sonnet, scouts on Haiku. Fable never, unless `--fable` or `routing.autoFable: true`.
+- **Network:** once a day at session start the hook fetches this repo's `plugin.json` from GitHub to compare versions (3 s timeout, nothing sent). `AGENTILLE_UPDATE_CHECK=0` turns it off. Research agents (`/storm`) read the web. An executor whose worktree has no `node_modules` to copy runs the project's own install, and the security reviewer runs `npm audit`; both reach the package registry. Nothing else goes out.
+- **Panes:** a plain session has no pane tools. The mod registers `spawn_pane` and `close_pane` on a turn where you typed `/agt`, and `open_sessions` (with `close_pane`) on a turn whose typed prompt asked for sessions, panes or terminals; each tool still checks that proof when called, so a task notification, plugin or peer message never opens a pane. A worker pane opened in the repo you are already in answers Claude's "trust this folder?" prompt for you; any other folder must be opened by hand once. Worker panes close when harvested; your own sessions close only when idle (Herdr) or when you close them (tmux).
+- **Models and cost:** every non-solo run costs more than a plain prompt. Opus for the planner and the design, security and payments reviewers; Sonnet for the executor, adversary, plan- and code-reviewer (Opus when the slice is large or risky); Haiku for scouts. Fable never, unless `--fable` or `routing.autoFable: true`.
 
 ## Glossary
 

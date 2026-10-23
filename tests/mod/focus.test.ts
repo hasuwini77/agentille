@@ -1,5 +1,5 @@
 import { describe, expect, mock, test } from 'claude-code/testing'
-import { flagOf, focusText, paneFlags, parseFocusArgs, words } from '../../hooks/focus.js'
+import { flagOf, focusText, mergeFlags, paneFlags, parseFocusArgs, words } from '../../hooks/focus.js'
 
 const LONG = Array.from({ length: 200 }, (_, i) => 'word' + i).join(' ')
 
@@ -49,6 +49,16 @@ describe('focus: flags from agent results', () => {
     expect(flagOf('executor', 'VERIFICATION:\n- grep: found nothing (exit 1)\n- npm test: exit=1\n')).toBe('executor: verification failed')
     expect(flagOf('executor', 'VERIFICATION:\n- curl: expected 200, got 401, exit 1\n')).toBe('executor: verification failed')
     expect(flagOf('executor', 'VERIFICATION:\n- tsc: exit 0\nNOTES:\nCONTEXT exec-1 | high | checkpoint x')).toBe('executor handed off at its context limit')
+  })
+
+  test('a PASS from the same reviewer clears its CONCERNS; other slices keep theirs', async () => {
+    const TTL = 30 * 60_000
+    let f = mergeFlags([], 'code-reviewer|', 'code-reviewer: CONCERNS — fix before ship', 0, TTL)
+    f = mergeFlags(f, 'code-reviewer|b', 'code-reviewer: FAIL — blocks ship', 1, TTL)
+    expect(f.map((x) => x.text)).toEqual(['code-reviewer: CONCERNS — fix before ship', 'code-reviewer: FAIL — blocks ship'])
+    f = mergeFlags(f, 'code-reviewer|', null, 2, TTL)
+    expect(f.map((x) => x.text)).toEqual(['code-reviewer: FAIL — blocks ship'])
+    expect(mergeFlags(f, 'executor|', null, TTL + 1, TTL)).toEqual([])
   })
 
   test('a blocked pane waits on the person', async () => {

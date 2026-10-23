@@ -2,6 +2,16 @@
 
 All notable changes to agentille are documented here.
 
+## [3.21.3] — 2026-10-23
+
+### Fixed
+
+- **A fixed review no longer looks stuck.** A reviewer's `⚑ CONCERNS — fix
+  before ship` flag stayed up for 30 minutes after the same reviewer answered
+  PASS. Flags are now keyed by role and slice, and each routed answer
+  replaces its own older flag, so the PASS clears it. Another slice's flag
+  stays.
+
 ## [3.21.2] — 2026-10-23
 
 ### Fixed

@@ -781,6 +781,28 @@ describe('pane tools: in the mod', () => {
     expect(a.tools).toEqual(['spawn_pane', 'close_pane'])
   })
 
+  test('an older Claude Code: one toast at start, and a typed /agt registers no pane tools', async ($, on) => {
+    const toasts: string[] = []
+    const a = setup(on, TMUX, { 'tmux list-panes': { stdout: ['%1', '', 'claude', '0', '@1'].join(T) + '\n' } })
+    on('ui.toast', async ($: any, e: any) => { toasts.push(e.text ?? String(e)); return { value: undefined } })
+    on('session.version', async () => ({ value: { version: '2.1.200', base: '2.1.200' } }))
+    await $.session.start({ cwd: '/work/repo', surface: null, isInteractive: false })
+    expect(toasts.filter((t) => t.includes('Claude Code v2.1.200 is older'))).toHaveLength(1)
+    await typed($)
+    expect(a.tools).toEqual([])
+  })
+
+  test('a current Claude Code: no toast, tools on the typed /agt', async ($, on) => {
+    const toasts: string[] = []
+    const a = setup(on, TMUX, { 'tmux list-panes': { stdout: ['%1', '', 'claude', '0', '@1'].join(T) + '\n' } })
+    on('ui.toast', async ($: any, e: any) => { toasts.push(e.text ?? String(e)); return { value: undefined } })
+    on('session.version', async () => ({ value: { version: '2.1.309', base: '2.1.309' } }))
+    await $.session.start({ cwd: '/work/repo', surface: null, isInteractive: false })
+    expect(toasts.filter((t) => t.includes('is older'))).toHaveLength(0)
+    await typed($)
+    expect(a.tools).toEqual(['spawn_pane', 'close_pane'])
+  })
+
   test('no transport: a typed /agt registers none', async ($, on) => {
     const a = setup(on, {})
     await $.session.start({ cwd: '/work/repo', surface: null, isInteractive: false })

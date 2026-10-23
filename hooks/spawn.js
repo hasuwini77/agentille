@@ -168,7 +168,7 @@ export async function openPane($, t, o) {
 // and a host without a pane transport gets none. A tool registered while a prompt is submitted is in that
 // turn's list.
 export async function ensureTools($, which) {
-  if (S.selfName || S.worker) return
+  if (S.selfName || S.worker || S.hostOld) return
   if ((which === 'panes' ? S.paneTools : S.sessionTools) || (await transportOf($)) === 'none') return
   try {
     await $.tool.register(which === 'panes' ? SPAWN_TOOL : OPEN_SESSIONS_TOOL)

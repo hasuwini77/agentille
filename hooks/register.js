@@ -21,7 +21,7 @@ import { cardBox, answerBox, switchboard, deck } from './render.js'
 import { formationOf, parseHeader, typedFable, proveHeader, demoteHeaderText, asksSessions, verdictOf, ladderFixes, decide } from './routing.js'
 import { registerRows } from './rows.js'
 import { saveSessions, closeSession, openSession } from './sessions.js'
-import { skewMessage } from './skew.js'
+import { hostMessage, hostTooOld, hostVersionOf, skewMessage } from './skew.js'
 import { detectTransport, transportOf, openPane, ensureTools } from './spawn.js'
 import { registerStatus } from './status.js'
 import { refreshAgents, working, ensurePolling, ensureTicker } from './ticker.js'
@@ -42,6 +42,12 @@ export function register(on) {
     if (skew) {
       S.skewToasted = true
       $.ui.toast('agt ⚑ ' + skewMessage(skew, S.runningVersion))
+    }
+    // The host's own version: too old for the mod's pane tools → one toast, and ensureTools registers none.
+    S.hostVersion = hostVersionOf(await Promise.resolve().then(() => $.session.version()).catch(() => null))
+    if (S.hostVersion && hostTooOld(S.hostVersion)) {
+      S.hostOld = true
+      $.ui.toast('agt ⚑ ' + hostMessage(S.hostVersion))
     }
     S.transport = await detectTransport($)
     S.worker = parseWorker(await $.env.get('AGENTILLE_WORKER'))

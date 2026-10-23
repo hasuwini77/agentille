@@ -67,6 +67,8 @@ export const S = {
   rawTurn: false,  // this turn's prompt asked for text to paste as is: no panel, answer copied
   rawIds: new Set(),  // message ids that closed a raw answer: they draw as the engine does
   runningVersion: null,  // this module's own agentille version, read from its plugin.json at session start
+  hostVersion: null,  // Claude Code's version from $.session.version(), null when unknown
+  hostOld: false,  // the host is older than skew.js MIN_HOST: pane tools are never registered
   skewToasted: false,
   sessionId: null,  // this session's id: workers it opens send their results here
   leadModel: null,  // the main loop's model, for the tree's root

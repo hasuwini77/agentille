@@ -77,10 +77,16 @@ export function demoteHeaderText(text) {
 }
 
 // A typed prompt that asks for sessions of the person's own ("open three sessions", "start 2 codex
-// panes", "give me a shell"): the only turn in which open_sessions may run.
-const SESSION_ASK = /\b(open|start|spawn|launch|fire up|give me|get me|bring up)\b[^.\n]{0,40}?\b(sessions?|panes?|terminals?|claudes?|codex(?:es)?|shells?|windows?)\b/i
+// panes", "give me a shell"), or a typed /storm (its hand-off opens one): the only turns in which
+// open_sessions may run. The noun must stand alone: "open the sessions file", "start the shell
+// script" and "spawn the pane handler" name a thing to edit, not a pane to open.
+const SESSION_NOUN = '(sessions?|panes?|terminals?|claudes?|codex(?:es)?|shells?)'
+const NOT_A_PANE = '(?!\\s+(?:file|script|config|cookie|build|table|folder|handler|store|id|token|state|list)s?\\b|\\.\\w)'
+const SESSION_ASK = new RegExp('\\b(open|start|spawn|launch|fire up|give me|get me|bring up)\\b[^.\\n]{0,40}?\\b' + SESSION_NOUN + '\\b' + NOT_A_PANE, 'i')
+const STORM_TYPED = /^\s*\/(agentille:)?storm\b/
 export function asksSessions(text) {
-  return SESSION_ASK.test(String(text ?? ''))
+  const t = String(text ?? '')
+  return STORM_TYPED.test(t) || SESSION_ASK.test(t)
 }
 
 // A plan-reviewer's verdict, or null. Its `VERDICT: APPROVE|REVISE` line (markdown emphasis tolerated)

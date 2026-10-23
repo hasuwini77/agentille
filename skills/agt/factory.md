@@ -46,8 +46,9 @@ Otherwise **merge**.
 `$BASE` is the branch the run started on. Mode, by precedence: repo `.agentille/config.json` `{"integration": …}` → profile `projects[].integration` → profile top-level `integration` → **`pr`**. A repo CLAUDE.md/AGENTS.md saying `no-mistakes` means `pr`; `local-only` means `local`. `auto` (merge and tag with no human step) is never the default: the user turns it on per repo or in the profile.
 
 - **auto, `$BASE` is main/master, GitHub remote + `gh`:** before the first dispatch, `gh issue create` per slice. Each executor gets `branch: feat/<slug>` (`fix/<slug>` for a bugfix) and `issue: <n>`, pushes, and opens a PR into `$BASE` with `Closes #<n>`. After the gate, merge the PRs one at a time in dependency order: `gh pr merge <n> --merge --delete-branch` (never squash). After the last merge, if the repo already has `vX.Y.Z` tags, tag main (feature → minor, fix → patch) and push the tag.
-- **auto, `$BASE` is a feature branch:** executors work on throwaway `agt/<slug>` branches; the lead merges each into `$BASE` with `git merge --no-ff`, deletes `agt/<slug>` (never pushed), then pushes `$BASE`.
-- **pr** (default): as auto on main, but stop after the PRs: `⚑ PR #n ready`. On a feature branch: as auto, but push each `agt/<slug>` branch and open a PR into `$BASE` instead of merging.
-- **push:** push `$BASE` only. **local:** merge into `$BASE` locally, push nothing.
+- **auto, `$BASE` is a feature branch:** executors get `integration: local` and work on throwaway `agt/<slug>` branches; the lead merges each into `$BASE` with `git merge --no-ff`, deletes `agt/<slug>` (never pushed), then pushes `$BASE`.
+- **pr** (default): as auto on main, but stop after the PRs: `⚑ PR #n ready`. On a feature branch: as auto, but push each `agt/<slug>` branch and open a PR into `$BASE` instead of merging. Without `gh`, `pr` behaves as `push` and the card says so.
+- **push:** push each slice branch (`feat/<slug>`, `fix/<slug>`, or `agt/<slug>` off a feature branch), no PR, no merge; the card lists the branches. This is the one definition of `push`; the README and the executor repeat it.
+- **local:** merge each slice into `$BASE` locally, push nothing.
 
 Before each merge, check ownership: `git diff --name-only $BASE...<branch>` stays inside the slice's files from the CONTEXT-PACK; a stray file blocks the merge until it is reverted or explained. A later slice that trails `$BASE` merges `$BASE` first and re-verifies.

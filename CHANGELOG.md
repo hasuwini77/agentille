@@ -2,6 +2,16 @@
 
 All notable changes to agentille are documented here.
 
+## [3.21.1] — 2026-10-23
+
+### Fixed
+
+- **`/storm` without agentille.** The hand-off printed an `/agt heavy` line
+  nobody could run. Now it detects agentille; without it, a live tmux gets a
+  window running `claude` with a self-contained build prompt, and otherwise
+  the storm session builds with built-in Sonnet subagents: one worktree and
+  one PR per pick, one reviewer pass, never merged by the skill.
+
 ## [3.21.0] — 2026-10-23
 
 ### Added

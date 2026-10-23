@@ -3,7 +3,7 @@
   "name": "agentille",
   "displayName": "agentille",
   "version": "3.21.4",
-  "description": "One command for Claude Code: /agt plans, builds and reviews with the right model per step, steps aside on small tasks, and ends on one short card. Zero setup.",
+  "description": "One command for Claude Code: /agt plans, builds and reviews with the right model per step, steps aside on small tasks, and ends on one short card. No profile or config needed.",
   "author": {
     "name": "Systown AI Lab",
     "url": "https://systown.ai"

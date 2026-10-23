@@ -2,11 +2,12 @@
 name: agentille-claude-md
 description: Tune a CLAUDE.md to be lean and high-signal. Applies a fixed "less is more" rubric and proposes a shorter rewrite with a per-line cut-list. Non-destructive: shows a diff, backs up the original, writes only on explicit approval. Defaults to ~/.claude/CLAUDE.md; pass a path for a project file. Use when the user says "tune / slim / improve my CLAUDE.md" or types /agentille-claude-md.
 argument-hint: [path-to-CLAUDE.md]
+disable-model-invocation: true
 ---
 
 # agentille-claude-md — CLAUDE.md tune-up
 
-Opinionated trim, never a silent overwrite. Runs locally: reads one file, writes that file plus a `.bak`, sends nothing anywhere. Never auto-trigger.
+Opinionated trim, never a silent overwrite. Runs locally: reads one file, writes that file plus a `.bak`, sends nothing anywhere. Runs only when typed (`disable-model-invocation`).
 
 ## Steps
 
@@ -22,11 +23,12 @@ Opinionated trim, never a silent overwrite. Runs locally: reads one file, writes
 - Always back up first; never overwrite a `.bak` unasked.
 - Never create a file; if the target is absent, stop.
 - Never anonymize or strip the user's name, role, stack or genuine constraints.
+- Never add a rule the original did not state: a rewrite merges and shortens, it does not invent.
 
 ## Example (generic)
 
 Before (4 lines): `I am a developer and would like you to be concise.` / `Use TypeScript for this Vite app.` / `Be helpful and write good clean code.` / `Use TypeScript.`
 
-After (2 lines): `- Developer; be concise.` / `- TypeScript only; no any.`
+After (2 lines): `- Developer; be concise.` / `- TypeScript.`
 
 Cut-list: "Vite app" → `inferable`; "Be helpful…" → `vague`; "Use TypeScript." → `duplicate`.

@@ -296,8 +296,9 @@ if ! command -v claude >/dev/null 2>&1; then
     warn "claude CLI not found — run 'claude plugin validate' and 'claude plugin test .' locally"
   fi
 else
-  if claude plugin validate .claude-plugin/plugin.json 2>&1 | grep -q '✘'; then
-    fail "claude plugin validate reports errors"
+  vout=$(claude plugin validate .claude-plugin/plugin.json 2>&1); vrc=$?
+  if [ "$vrc" != 0 ] || printf '%s\n' "$vout" | grep -q '✘'; then
+    fail "claude plugin validate failed (exit $vrc):"; printf '%s\n' "$vout" | grep -E '✘|rror' | head -5 | sed 's/^/    /'
   else
     pass "claude plugin validate passes"
   fi

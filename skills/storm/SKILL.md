@@ -63,12 +63,12 @@ Write `docs/storm/<YYYY-MM-DD>.md` from `handoff.md` → "Storm doc": picks with
 
 ### 7. Hand-off
 
-Never build in this session. The build belongs to `/agt`, which only runs when typed, so start a fresh session that types it:
+Never build in this session's main thread. First detect agentille: it is present when `mcp__agentille__open_sessions` is among your tools or `~/.claude/plugins/cache/*/agentille/` exists.
 
-1. Compose the task (`handoff.md` → "agt task line"): one heavy run, one slice per pick, acceptance criteria by reference to the doc.
-2. `--next` → append `- [ ] <pick title> (spec: docs/storm/<date>.md §<n>)` per pick to `.agentille/backlog.md` (gitignore it on first creation) and print `/agt next`.
-3. Otherwise call `mcp__agentille__open_sessions` with `kind: "claude"`, `count: 1`, `cwd: <project root>`, `tasks: ["/agt heavy \"<task>\""]` (`quick` → `medium`). It opens beside this pane, unfocused, and owns its own `/agt` run.
-4. If the tool errors or is missing (no Herdr, no tmux), print the exact line to paste. Print it anyway under the card as the fallback: a prompt sent to a pane still drawing its startup screen can be swallowed.
+1. Compose the task (`handoff.md` → "agt task line").
+2. `--next` (agentille only) → append `- [ ] <pick title> (spec: docs/storm/<date>.md §<n>)` per pick to `.agentille/backlog.md` (gitignore it on first creation) and print `/agt next`.
+3. **With agentille:** call `mcp__agentille__open_sessions` with `kind: "claude"`, `count: 1`, `cwd: <project root>`, `tasks: ["/agt heavy \"<task>\""]` (`quick` → `medium`). It opens beside this pane, unfocused, and owns its own `/agt` run. If the tool errors (no Herdr, no tmux), print the line to paste. Print it anyway under the card as the fallback: a prompt sent to a pane still drawing its startup screen can be swallowed.
+4. **Without agentille:** `handoff.md` → "Plain build". With `$TMUX` set, open a detached window running `claude "<plain build prompt>"` in the project root. Otherwise build here with built-in subagents: one `general-purpose` Sonnet executor per pick in its own worktree, at most 3 at once, one reviewer per finished pick, one PR (or branch) per pick, never merged by the skill.
 
 Then the final card (`handoff.md` → "Final card"). That card is the only end-of-run output.
 
@@ -84,7 +84,7 @@ User: Edwin (senior frontend dev, solo, goal: micro-SaaS income). Avoid: <neverD
 
 ## Hard rules
 
-- **Research only here.** No agent of this run writes code; the storm session never builds. Haiku scouts, Sonnet researches and judges, Fable only if Edwin typed `--fable` on the `/agt` line later.
+- **Research only here.** No research agent writes code. The storm session's main thread never builds; a plain build (no agentille) runs through executor subagents and leaves PRs, never merges. Haiku scouts, Sonnet researches and judges, Fable only if Edwin typed `--fable` on the `/agt` line later.
 - **Evidence or it does not exist.** A candidate with no URL or `file:line` is dropped at the judge.
 - **Never re-propose** what a past storm shipped or dropped, or what the inventory scout found already built.
 - **One message per fan-out, one wait.** Scouts in one message; all lenses in one message; the adversary alone in the foreground.

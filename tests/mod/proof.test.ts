@@ -49,3 +49,47 @@ describe('typed proof: in the mod', () => {
     expect(spawned.map((e) => e.model)).toEqual(['fable', 'opus'])
   })
 })
+
+// A worker pane's proof is the first prompt it is typed: the lead already rewrote fable=forced there when
+// nobody typed --fable, so a header that still says it is the lead's proof carried over.
+describe('typed proof: in a worker pane', () => {
+  const setup = (on: any) => {
+    const spawned: any[] = []
+    on('env.get', async ($: any, e: any) => ({ value: ({ AGENTILLE_WORKER: 'executor:sonnet:medium', HOME: '/h' } as any)[e.name] }))
+    on('session.start', async ($: any, e: any) => ({ cwd: e.cwd }))
+    on('command.register', async () => ({ value: undefined }))
+    on('store.get', async () => ({ value: undefined }))
+    on('store.set', async () => ({ value: undefined }))
+    on('ui.panes', async () => ({ value: [] }))
+    on('ui.toast', async () => ({ value: undefined }))
+    on('ui.render', async () => ({ type: 'engine', ref: 0 }) as never)
+    on('prompt.submit', async ($: any, e: any) => ({ text: e.text }))
+    on('fs.read', async () => ({ deny: 'no profile' }))
+    on('fs.write', async () => ({ value: undefined }))
+    on('agent.spawn', async ($: any, e: any) => { spawned.push(e); return { model: e.model ?? 'sonnet', agentId: 'w' + spawned.length } })
+    mock.clock(on, { now: 1_000_000 })
+    return spawned
+  }
+  const HDR = '[agt run=pf2 size=large mode=build fable=forced]'
+  const review = ($: any) => $.agent.spawn({ prompt: HDR + '\nreview it', subagentType: 'agentille:agentille-security-reviewer', model: 'opus' })
+
+  test('a first prompt whose header says fable=forced is the lead\'s proof: the header holds', async ($, on) => {
+    const spawned = setup(on)
+    await $.session.start({ cwd: '/work/repo', surface: null, isInteractive: false })
+    await $.prompt.submit({ text: HDR + '\nbuild the filter', origin: { kind: 'composer' } } as never)
+    await review($)
+    expect(spawned[0].model).toBe('fable')
+    expect(spawned[0].prompt.split('\n')[0]).toBe(HDR)
+  })
+
+  test('a first prompt without it: a later fable=forced is dropped, and the first prompt decides once', async ($, on) => {
+    const spawned = setup(on)
+    await $.session.start({ cwd: '/work/repo', surface: null, isInteractive: false })
+    await $.prompt.submit({ text: '[agt run=pf2 size=large mode=build fable=auto]\nbuild the filter', origin: { kind: 'composer' } } as never)
+    await review($)
+    await $.prompt.submit({ text: HDR + '\nfix it', origin: { kind: 'composer' } } as never)
+    await review($)
+    expect(spawned.map((e) => e.model)).toEqual(['opus', 'opus'])
+    expect(spawned[1].prompt.split('\n')[0]).toBe('[agt run=pf2 size=large mode=build fable=auto]')
+  })
+})

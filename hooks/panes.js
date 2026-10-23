@@ -469,9 +469,16 @@ export const OPEN_SESSIONS_TOOL = {
   },
 }
 
+// `--fable` out of a first prompt, so a session cannot be handed the flag the person never typed.
+export function stripFable(text) {
+  return String(text ?? '').replace(/(^|\s)--fable(?=\s|$)/g, '$1').replace(/\s{2,}/g, ' ').trim()
+}
+
 // open_sessions input → { count, tasks, kind, model, cwd, layout } or { error }. `tasks` has one entry per
-// session, null where none was given.
-export function sessionsToolInput(input) {
+// session, null where none was given. `typed` is the person's own prompt: a shell command runs only when it
+// appears in it verbatim, and `--fable` rides into a Claude or Codex session only when `fableTyped` says the
+// person typed it.
+export function sessionsToolInput(input, { typed = '', fableTyped = false } = {}) {
   const i = input ?? {}
   const str = (v) => (typeof v === 'string' ? v.trim() : '')
   const given = i.tasks === undefined ? [] : i.tasks
@@ -488,7 +495,11 @@ export function sessionsToolInput(input) {
   if (model !== null && kind !== 'claude') return { error: 'model applies to Claude sessions only.' }
   if (!LAYOUTS.includes(layout)) return { error: 'layout must be one of ' + LAYOUTS.join(', ') + '.' }
   if (cwd !== null && (!cwd.startsWith('/') || cwd.includes('\0'))) return { error: 'cwd must be an absolute path.' }
-  const tasks = Array.from({ length: count }, (_, n) => str(given[n]) || null)
+  let tasks = Array.from({ length: count }, (_, n) => str(given[n]) || null)
+  if (kind === 'shell') {
+    const bad = tasks.find((t) => t && !String(typed ?? '').includes(t))
+    if (bad) return { error: 'A shell command runs only as the person typed it: "' + bad.slice(0, 60) + '" is not in their prompt.' }
+  } else if (!fableTyped) tasks = tasks.map((t) => (t ? stripFable(t) || null : t))
   if (kind === 'claude' && tasks.some((t) => t && BARE_WORD.test(t))) return { error: 'A one-word task would run as a claude subcommand. Say more.' }
   return { count, tasks, kind, model, cwd, layout }
 }

@@ -72,6 +72,8 @@ let agtTurn = false          // this turn is part of an /agt run
 let agtTyped = false         // the person typed /agt in this session: only then may the lead open worker panes
 let fableTyped = false       // ... and typed --fable on it: only then does a header's fable=forced hold
 let sessionsAsked = false    // the newest typed prompt asked for sessions of the person's own (open_sessions)
+let lastTyped = ''           // the newest typed prompt: a shell session runs only a command that appears in it
+let workerProved = false     // worker: its first typed prompt decided whether fable=forced holds here
 const demotedToasted = new Set() // run ids told once that fable=forced was dropped for want of a typed --fable
 let leadTurn = false         // a main-loop turn is running: its idle panes are waiting for review
 const mascot = { greeted: false, hiUntil: 0, byeUntil: 0, working: false, start: 0, ms: null } // worker band, in $.clock.now() ms
@@ -1464,11 +1466,14 @@ export function register(on) {
   on('prompt.submit', async ($, e, next) => {
     const k = e.origin?.kind
     if (k !== undefined && k !== 'composer' && k !== 'bridge') return next(e)
+    lastTyped = String(e.text ?? '')
     agtTurn = isAgtPrompt(e.text)
     if (agtTurn) flags = []   // a new run starts with a clean slate
     // What the person typed is the only proof the dispatch headers get: a typed /agt unlocks spawn_pane
     // for the session, --fable on it is what makes fable=forced hold, and only a typed ask opens sessions.
     if (agtTurn) { agtTyped = true; fableTyped = typedFable(e.text) }
+    // A worker's proof is its first prompt: the lead already rewrote fable=forced there when nobody typed --fable.
+    if (worker && !workerProved) { workerProved = true; fableTyped = parseHeader(e.text)?.fable === 'forced' || typedFable(e.text) }
     sessionsAsked = !agtTurn && !selfName && !worker && asksSessions(e.text)
     if (agtTurn && deckAuto) void $.ui.open({ id: DECK, title: 'agentille' })
     // Under display.highlight: all, a typed question in the lead session asks for the panel's shape.
@@ -1562,7 +1567,7 @@ export function register(on) {
       return res
     }
 
-    const proof = proveHeader(parseHeader(e.prompt) ?? {}, { fableTyped: fableTyped || !!worker })
+    const proof = proveHeader(parseHeader(e.prompt) ?? {}, { fableTyped })
     const hdr = proof.hdr
     if (proof.demoted) {
       e = { ...e, prompt: demoteHeaderText(e.prompt) }

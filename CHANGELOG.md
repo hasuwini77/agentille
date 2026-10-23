@@ -2,6 +2,15 @@
 
 All notable changes to agentille are documented here.
 
+## [3.21.4] — 2026-10-23
+
+### Fixed
+
+- **Two slices, one flag text.** When two slices' reviewers both said
+  CONCERNS, the second flag replaced the first, and the second slice's PASS
+  then cleared both. Each slice now keeps its own flag until its own PASS;
+  identical lines are drawn once.
+
 ## [3.21.3] — 2026-10-23
 
 ### Fixed

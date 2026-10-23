@@ -47,6 +47,7 @@ Only when the level table falls through. One inline Haiku call, never the planne
 - The ui-prototyper runs **before** the executor; pass its Blueprint into the executor prompt as the design contract.
 - Skip the plan-reviewer on `thinkingDepth=quick` and for a ≤3-step fully sequential plan.
 - Design-reviewer viewports: the ones the user names, else `profile.viewports`, else desktop + mobile.
+- Design-reviewer URL: before its dispatch, start the project's dev server in the slice's worktree on a free port (`PORT=<free> <dev command> > ~/.agentille/state/run-<id>/dev-<slice>.log 2>&1 &`), wait for a 2xx, pass `url: http://localhost:<port>`, and stop that server once its verdict is harvested. The reviewer never starts one itself.
 - Debug: each fix attempt is a `mode=fix` executor dispatch. After 3 failed fixes, dispatch the planner with `mode=diagnose` (read-only root cause), then a fresh executor implements it.
 - Squads add payments / SEO / perf reviewers to the review step when the diff touches their domain (`squads.md`). Formations reshape the workers (`formations.md`).
 - Every reviewer column ticked for a piece runs **at once**: one message, parallel background calls (`SKILL.md` → "The contract" step 8).

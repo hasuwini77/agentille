@@ -33,3 +33,19 @@ export function cacheDirOf(root) {
 }
 
 export const skewMessage = (installed, running) => 'agentille v' + installed + ' is installed but this session runs v' + running + ' — restart Claude Code before opening panes'
+
+// The oldest Claude Code the mod needs: the README's Requirements row carries the same number
+// (tests/hooks/test-min-version.sh keeps them equal). Below it the mod still draws and routes, but
+// its pane tools stay off: /agt runs its heavy level as subagent waves.
+export const MIN_HOST = '2.1.294'
+
+// The x.y.z Claude Code reported through $.session.version() (a string, or an object with a `version`
+// field), or null when the call failed or the shape is unknown. Unknown is never "too old".
+export function hostVersionOf(v) {
+  const s = typeof v === 'string' ? v : v?.version
+  return parseVersion(s) ? String(s).trim() : null
+}
+
+export const hostTooOld = (v) => compareVersions(v, MIN_HOST) < 0
+
+export const hostMessage = (v) => 'Claude Code v' + v + ' is older than the v' + MIN_HOST + ' agentille needs — pane tools stay off until you update it'

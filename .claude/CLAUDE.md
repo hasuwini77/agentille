@@ -4,15 +4,20 @@ agentille is a **public, MIT-licensed Claude Code plugin** — the `/agt` orches
 
 ## What lives where
 
-- `skills/agt/` — the orchestrator skill: `SKILL.md` (contract, level table, dispatch header, hard rules), `routing.md` (category, roster, model + effort, escalation), `display.md` (mid-run lines, final card, report.md), `panes-mode.md`, `workflow-mode.md`, `formations.md`, `squads.md`.
+- `skills/agt/` — the orchestrator skill: `SKILL.md` (contract, level table, dispatch header, hard rules), `routing.md` (category, roster, model + effort, escalation), `factory.md` (`/agt next`, fix rounds, gate, integrate), `display.md` (mid-run lines, final card, report.md), `panes-mode.md`, `workflow-mode.md`, `formations.md`, `squads.md`.
+- `skills/storm/` — `/storm`: research lenses, scoring and the hand-off to `/agt heavy`.
 - `skills/agentille-init/`, `skills/agentille-project/`, `skills/agentille-claude-md/` — optional setup skills (voice profile, per-repo CLAUDE.md, CLAUDE.md tune-up). `/agt` runs without any of them.
 - `agents/agentille-*.md` — the eleven worker agent definitions (planner, plan-reviewer, ui-prototyper, executor, adversary, and six reviewers: code, design, security, payments, perf, seo).
 - `.claude-plugin/` — `plugin.json` (version, bumped on every release), `marketplace.json` (listing metadata — no version field, do not version-bump it), `squads.json` (squad detection).
-- `hooks/` — `hooks.json` (hook declarations + the mod module), `register.js` (the mod entry: live band, routing, pane tools, raw agent reports), the modules it imports (`autocomplete.js`, `board.js`, `clean.js`, `drawing.js`, `focus.js`, `highlight.js`, `links.js`, `live.js`, `mascot.js`, `panes.js`, `routing.js`, `rows.js`, `skew.js`, `squads.js`, `status.js`, `tree.js`, `wire.js`), `agentille-sweep.sh` (SessionEnd pane sweep) and `agentille-update-check.sh` (version check, cached in `~/.agentille/.update-check.json`).
-- `tests/mod/` — the mod's tests (`claude plugin test .`).
+- `hooks/` — `hooks.json` (hook declarations + the mod module) and the mod, about 4.7k lines over 30 modules:
+  - `register.js` — the entry: the hook handlers only, each a few lines that call into a module. `state.js` holds the session's one state record.
+  - What a run does: `dispatch.js` (per-run counters, routing log, ledger, raw reports), `routing.js` (the model + effort TABLE and the Fable guard), `spawn.js` (pane transport, opening a worker pane, lazy tool registration), `sessions.js` (the person's own panes), `reaper.js` (pane polling, harvest, close, `/agt-clean`), `worker.js` + `wire.js` (the wire between panes), `ticker.js` (timers), `squads.js`, `skew.js` (installed-version drift), `profile.js` (session load).
+  - What you see: `render.js` (switchboard, deck, answer frame, mascot band), `display.js` + `settings.js` (deck/focus/highlight settings), `drawing.js`, `tree.js`, `rows.js`, `board.js`, `live.js`, `status.js`, `focus.js`, `highlight.js`, `links.js`, `mascot.js`, `autocomplete.js`, `info.js` (`/agt-info`), `clean.js` (the `/agt-clean` text), `panes.js` (pane tool input parsing).
+  - Shell: `agentille-sweep.sh` (SessionEnd pane sweep) and `agentille-update-check.sh` (version check, cached in `~/.agentille/.update-check.json`).
+- `tests/mod/` — the mod's tests (`claude plugin test .`). `tests/hooks/` — shell tests for the two hook scripts and the validator, run by `scripts/validate.sh`.
 - `evals/` — the dispatch-decision eval suite (`evals/<case>/case.yaml`): four cases that score /agt's mode, roster, model and formation choices. Run results land in `evals/results/` (gitignored: transcripts hold absolute paths).
 
-The plugin's "code" is **markdown prompt definitions** plus a small JavaScript mod, not a compiled program.
+The plugin's "code" is **markdown prompt definitions** (about 20 skill and agent files) plus the JavaScript mod in `hooks/`, not a compiled program.
 
 ## How /agt picks a level
 
@@ -23,20 +28,20 @@ Auto-detection is the **default**: the first matching row of `skills/agt/SKILL.m
 | `/agt "task"` (no flags) | Auto-decides: low · solo (small one-sentence task, no architectural verb or risk words), low or medium · subagent (sequential or single slice, or 2–3 small disjoint slices), heavy · panes inside Herdr or tmux for ≥2 disjoint slices (else a workflow, else subagent waves), or Stage 2 classify |
 | `/agt "review …"` / `/agt "debug …"` | Subagent reviewers in parallel / the executor's debug loop |
 | `/agt low\|medium\|heavy "task"` | **Force** a level for one run |
-| `/agt --mode panes\|subagent\|solo` · `--team` | Legacy: `--mode` maps to heavy/medium/low and is never suggested; `--team` was removed in v3.0 and prints one notice |
+| `/agt --mode panes\|subagent\|solo` · `--team` | Deprecated: `--mode` maps to heavy/medium/low, is never suggested and goes away in v4; `--team` was removed in v3.0 and prints one notice |
 
 ## Conventions
 
 - **Commits:** Conventional Commits (`feat:`, `fix:`, `perf:`, `docs:`, `chore:` …), imperative subject ≤ 70 chars, body explains *why*.
 - **Changelog:** record every notable change in `CHANGELOG.md` (`## [x.y.z] — YYYY-MM-DD`, with `### Added/Changed/Fixed/Rationale`). Do **not** add a `PROGRESS.md`.
-- **Versioning:** bump `.claude-plugin/plugin.json` — feature → minor, fix → patch.
+- **Versioning:** bump `.claude-plugin/plugin.json` — feature → minor; fixes batch into the next minor, and a patch is only for a regression in the newest minor (`docs/releasing.md`). A `fix:` commit on `main` is not a release.
 - **Verification has three layers.** *Behavioral* — `AGENTILLE_RAW_URL=file:///dev/null claude plugin eval . --runs 3 --ablation none --no-publish --max-cost-usd 5 --threshold 0.66`, run from a shell with no `HERDR_*` / `TMUX*` variables (unset them, or run outside Herdr and tmux): the case schema only accepts `EVAL_*` env keys, so pane-transport and update-check isolation must come from your shell. It scores mode, roster and model routing on 4 prompts. Local and manual only, never in CI: every run is a full claude child on your own credential. Cost: 4 cases × 3 runs = $1.81 (measured at v3.8.0; it varies with model and prompt length). `--no-publish` is mandatory, because the report otherwise publishes to claude.ai. `--ablation none`, because a no-plugin arm has no /agt. The first run asks to trust the folder. Run it before releasing a change to `skills/agt/` or `hooks/routing.js`. *Mod* — `claude plugin test .`. *Structural* — run `bash scripts/validate.sh` before every push (a `pre-push` hook and CI both run it). It is a linter, not a behavioral test: it checks version consistency (plugin.json ↔ CHANGELOG), that `marketplace.json` stays unversioned, that every `agentille:agentille-*` reference resolves to an agent file, that `squads.json` parses and every role it adds has an agent file, that agent roles, the `routing.js` TABLE and `routing.md` rows are the same set, that every `hooks.json` module exists, that `hooks/register.js` imports cleanly under node 22.7+ (WARN where node is missing or older), that doc `→ "Section"` cross-refs point at real headings, that the hook script exists, and scans tracked files for PII (paths, emails). Install the local hook once: `ln -sf ../../scripts/hooks/pre-push .git/hooks/pre-push`.
 
 ## Release recipe
 
 Features and fixes ship through a pull request, never a direct push to `main`. Cadence and what each bump promises: `docs/releasing.md` (one tag a day at most, fixes batch into the next minor, removals only in a major after a deprecation).
 
-1. On the feature branch, bump `version` in `.claude-plugin/plugin.json` (breaking → major, feature → minor, fix → patch). `marketplace.json` has no version field — do not touch it.
+1. On the feature branch, bump `version` in `.claude-plugin/plugin.json` (breaking → major, feature or batched fixes → minor, a regression in the newest minor → patch). `marketplace.json` has no version field — do not touch it. Fixes that ship without a version bump go under `## [Unreleased]` in `CHANGELOG.md` and fold into the next minor's section.
 2. Add a dated `## [x.y.z] — YYYY-MM-DD` section to `CHANGELOG.md`.
 3. Run `bash scripts/validate.sh`, `claude plugin validate . --strict` and `claude plugin test .` (the `pre-push` hook and CI run the validator too). When `skills/agt/` or routing changed, also run the eval suite (see Conventions → Verification) and report its score.
 4. Commit `chore: release vx.y.z`, push, and open a PR (`gh pr create`, body with `Closes #N`).

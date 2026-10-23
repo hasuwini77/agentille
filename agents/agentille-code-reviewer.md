@@ -36,7 +36,7 @@ FINDINGS:
 - P0|P1|P2|P3 <file:line> — <what + concrete fix>
 ```
 
-Gate: P0/P1 block; P2/P3 advisory. PASS = no P0/P1 · CONCERNS = P1s, no P0 · FAIL = any P0. Do not list what passed.
+P0 = the diff misses the goal, breaks a build or test, or ships an exploitable hole · P1 = a bug or contract break to fix before ship · P2 = a follow-up worth a ticket · P3 = a nit or style point. Gate: P0/P1 block; P2/P3 advisory. PASS = no P0/P1 · CONCERNS = P1s, no P0 · FAIL = any P0. Do not list what passed.
 
 ## Rules
 

@@ -134,7 +134,7 @@ describe('info: in the mod', () => {
     const t = await info($)
     expect(t).toMatch(/deck\s+auto\s+profile/)
     expect(t).toMatch(/focus\s+false\s+store/)
-    expect(t).toMatch(/highlight\s+on\s+default/)
+    expect(t).toMatch(/highlight\s+off\s+default/)
     expect(t).toContain('squads: saas')
     expect(t).toContain('routing: no dispatches yet')
     expect(t).toContain('ledger: no agents in this run yet')

@@ -296,8 +296,9 @@ if ! command -v claude >/dev/null 2>&1; then
     warn "claude CLI not found — run 'claude plugin validate' and 'claude plugin test .' locally"
   fi
 else
-  if claude plugin validate .claude-plugin/plugin.json 2>&1 | grep -q '✘'; then
-    fail "claude plugin validate reports errors"
+  vout=$(claude plugin validate .claude-plugin/plugin.json 2>&1); vrc=$?
+  if [ "$vrc" != 0 ] || printf '%s\n' "$vout" | grep -q '✘'; then
+    fail "claude plugin validate failed (exit $vrc):"; printf '%s\n' "$vout" | grep -E '✘|rror' | head -5 | sed 's/^/    /'
   else
     pass "claude plugin validate passes"
   fi
@@ -307,7 +308,10 @@ fi
 
 # ── 6d. Hook scripts: deterministic shell tests (fake HOME, file:// fixtures) ─
 hdr "Hook scripts"
+# tests/hooks/test-validate-gate.sh runs this script with a fake claude; it sets this so the inner
+# run does not run the hook tests again. Nothing else should set it.
 for t in tests/hooks/test-*.sh; do
+  [ -n "${AGENTILLE_VALIDATE_SKIP_HOOK_TESTS:-}" ] && { warn "hook tests skipped (AGENTILLE_VALIDATE_SKIP_HOOK_TESTS set: inner run of test-validate-gate.sh)"; break; }
   [ -e "$t" ] || { warn "no tests/hooks/test-*.sh found"; break; }
   tout=$(bash "$t" 2>&1); trc=$?
   if [ "$trc" = 0 ]; then pass "$t: $(printf '%s\n' "$tout" | tail -1)"; else fail "$t failed:"; printf '%s\n' "$tout" | tail -12 | sed 's/^/    /'; fi

@@ -1,5 +1,5 @@
 import { describe, expect, mock, test } from 'claude-code/testing'
-import { cacheDirOf, compareVersions, newerInstalled, parseVersion, skewMessage } from '../../hooks/skew.js'
+import { cacheDirOf, compareVersions, hostMessage, hostTooOld, hostVersionOf, MIN_HOST, newerInstalled, parseVersion, skewMessage } from '../../hooks/skew.js'
 
 describe('skew: versions', () => {
   test('only x.y.z parses, and compares numerically', () => {
@@ -119,5 +119,26 @@ describe('skew: in the mod', () => {
     const { toasts } = await boot($, on, { version: null, siblings: ['9.9.9'] })
     expect((await spawn($)).result).toMatch(/^Opened agt-k7f2ab-exec-1/)
     expect(toasts.filter((t) => t.includes('is installed'))).toEqual([])
+  })
+})
+
+describe('skew: the host version', () => {
+  test('a string or a { version } object parses; anything else is unknown', () => {
+    expect(hostVersionOf('2.1.309')).toBe('2.1.309')
+    expect(hostVersionOf({ version: '2.1.294', base: '2.1.294' })).toBe('2.1.294')
+    expect(hostVersionOf({ base: '2.1.294' })).toBe(null)
+    expect(hostVersionOf(null)).toBe(null)
+    expect(hostVersionOf('dev')).toBe(null)
+  })
+
+  test('older than MIN_HOST is too old; equal, newer and unknown are not', () => {
+    expect(MIN_HOST).toMatch(/^\d+\.\d+\.\d+$/)
+    expect(hostTooOld('2.1.200')).toBe(true)
+    expect(hostTooOld(MIN_HOST)).toBe(false)
+    expect(hostTooOld('2.1.309')).toBe(false)
+    expect(hostTooOld(null)).toBe(false)
+    expect(hostMessage('2.1.200')).toContain('v2.1.200')
+    expect(hostMessage('2.1.200')).toContain('v' + MIN_HOST)
+    expect(hostMessage('2.1.200')).toContain('pane tools stay off')
   })
 })

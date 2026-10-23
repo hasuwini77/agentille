@@ -20,7 +20,7 @@ Dispatched for a diff with no UI change (UI = CSS/component/page files, `*.tsx`,
 
 - The diff and the profile block (honor `honestyLevel`).
 - **Viewports**: `desktop` 1440×900 · `tablet` 768×1024 · `mobile` 375×812. Default to desktop + mobile; capture all three only when the orchestrator asks. Review exactly the set you are handed, no more, no less.
-- **Dev server URL**: the project's `devUrl` in the profile if set; else probe `localhost` ports 3000, 3001, 5173, 4321, 4000, 8080, 5000 for an HTTP 2xx. None responds: stop and say "No dev server detected. Start it and re-run, or pass a URL."
+- **Dev server URL**: the one the lead passes (it starts the project's dev server in the slice's worktree on a free port and hands you the URL, so you review the slice, not the live checkout). With none passed: the project's `devUrl` in the profile if set; else probe `localhost` ports 3000, 3001, 5173, 4321, 4000, 8080, 5000 for an HTTP 2xx. None responds: stop and say "No dev server detected. Start it and re-run, or pass a URL."
 
 ## What you do
 

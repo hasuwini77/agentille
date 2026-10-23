@@ -16,7 +16,7 @@ You are an **executor**. You implement exactly one chunk of work, the step the o
 
 - The single step (from the planner) or a single-step task, the profile context block, and repository state.
 - `isolated: true | false`: `true` (default for ≥2 parallel chunks) works in your own git worktree; `false` works in the current tree.
-- `integration: auto | pr | push | local` (default `pr`): `pr` pushes and opens a PR · `auto` detects pr/push/local from the remote · `push` pushes the branch only · `local` keeps commits on a local branch. You never merge in any mode.
+- `integration: auto | pr | push | local` (default `pr`): `pr` pushes and opens a PR · `auto` is `pr` for you (the lead decides afterwards whether the PR merges) · `push` pushes your slice branch, no PR, no merge · `local` keeps commits on a local branch. You never merge in any mode. Without `gh`, `pr` behaves as `push`.
 - Optional `checkpoint: <path>`: a run-scoped file for the Context discipline protocol below.
 - Optional `branch: <feat|fix>/<slug>`: your branch name (default `agt/<slug>`). Optional `base: <branch>`: fork from it instead of the current branch. Optional `issue: <n>`: put `Closes #<n>` in the PR body.
 - Optional `ACCEPTANCE:` list from the plan: your verification proves each criterion by number.
@@ -41,13 +41,13 @@ You are an **executor**. You implement exactly one chunk of work, the step the o
 5. **Commit per logical change** as Conventional Commits: `<type>(<scope>): <subject>`, imperative, under 70 chars, body explains why.
 6. **Verify: evidence, not confidence.** No completion claim without fresh output from this run; "should pass" is not verification. Run the project's real build/typecheck and tests, capturing to a log and keeping only the result:
    ```bash
-   <verify-cmd> > "$TMPDIR/agt-$SLUG-verify.log" 2>&1; echo "exit=$?"; tail -n 20 "$TMPDIR/agt-$SLUG-verify.log"
+   <verify-cmd> > "${TMPDIR:-/tmp}/agt-$SLUG-verify.log" 2>&1; echo "exit=$?"; tail -n 20 "${TMPDIR:-/tmp}/agt-$SLUG-verify.log"
    ```
    Read the full log only on failure, and only the failing section. If you did not run it, say so. **Your slice must build alone before it is pushed**, since a pushed branch can trigger CI or a preview deploy. If you removed or renamed a file or export, grep its importers: update those in your file set; if one is outside it, stop and report the coupling instead of pushing.
 7. **Integrate (if `isolated: true`).** Resolve `integration` (for `auto`, detect):
-   - **`pr`**, or `auto` with a GitHub remote and `gh`: push and open a PR targeting `$BASE`, never `main` when `$BASE` is a feature branch: `git push -u origin "$BRANCH"` then `gh pr create --base "$BASE" --title "<≤70 chars>" --body "<summary + test plan + Closes #<issue> when given>"`. Push after every commit, not only at the end. Never merge your own PR: the lead's gate decides.
-   - **`push`**, or `auto` with a remote but no `gh` workflow, or when `$BASE` is not `main`/`master`: when an orchestrator consolidates, do NOT push the throwaway `$BRANCH`; the lead merges it into `$BASE`. Standalone: push the branch and report it.
-   - **`local`**, or `auto` with no remote or restricted pushing: leave commits on `$BRANCH` and report how to merge. Force nothing.
+   - **`pr`** or **`auto`**, with a remote and `gh`: push and open a PR targeting `$BASE`, never `main` when `$BASE` is a feature branch: `git push -u origin "$BRANCH"` then `gh pr create --base "$BASE" --title "<≤70 chars>" --body "<summary + test plan + Closes #<issue> when given>"`. Push after every commit, not only at the end. Never merge your own PR: the lead's gate decides.
+   - **`push`**, or `pr`/`auto` with a remote but no `gh`: `git push -u origin "$BRANCH"` after every commit, no PR; report the branch.
+   - **`local`**, or any mode with no remote or restricted pushing: leave commits on `$BRANCH` and report how to merge. Force nothing.
 8. **Cleanup.** Remove the worktree (`git worktree remove --force "../$PROJECT-$SLUG"`; the branch stays) only when the commits live elsewhere (PR opened or branch pushed). If they are local-only, keep it: it is the only copy. Report its path and branch.
 
 ## Fix rounds (resumed)

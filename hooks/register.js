@@ -11,7 +11,7 @@ import { activeSquads, allPaths, depsOf, explain, injection, squadsText } from '
 import { BYE_MS, HELLO_MS, MASCOT_COLOR, MODEL_COLOR, agentMood, caption, frame, modelKey, moodAt, parseWorker } from './mascot.js'
 import { ANSWER_STYLE, MARK, RAW_STYLE, SPAN_COLOR, bodyParts, highlightFor, highlightText, isAnswerBlock, isRawPrompt, litFor, panel, parseHighlightArgs, spans } from './highlight.js'
 import { cleanText, herdrOrphans, orphanPlan, parseWorktrees, staleTabs, tmuxOrphans, worktreePlan } from './clean.js'
-import { flagOf, focusText, mergeFlags, paneFlags, parseFocusArgs } from './focus.js'
+import { flagKey, flagOf, focusText, mergeFlags, paneFlags, parseFocusArgs } from './focus.js'
 import { cleanDisplay, hasVoice, highlightFlags, profileJson, resolveDisplay, storedDisplay, withDisplay } from './settings.js'
 import { ledgerSummary, overviewText, parseInfoArgs, routeText, routingSummary, squadsSummary } from './info.js'
 import {
@@ -1667,8 +1667,12 @@ export function register(on) {
         const r = await $.ui.copy({ text: e.answer.trim() }).catch(() => null)
         $.ui.toast(r?.isCopied ? 'Copied to the clipboard: paste it as is.' : 'agentille: could not copy the answer (' + (r?.reason ?? 'error') + ')')
       }
-      // A run's ✓/✗ card ends it: tidy what it leaves behind (finished orphans, merged worktrees).
-      if (agtTurn && !selfName && !worker && /^[✓✗]/.test(e.answer.trimStart())) void cleanWorkspace($, { auto: true }).catch(() => {})
+      // A run's ✓/✗ card ends it: its own ⚑ lines carry what is left, so the band's flags come down,
+      // and what the run leaves behind is tidied (finished orphans, merged worktrees).
+      if (agtTurn && !selfName && !worker && /^[✓✗]/.test(e.answer.trimStart())) {
+        flags = []
+        void cleanWorkspace($, { auto: true }).catch(() => {})
+      }
     }
     if (!e.agentId && worker && mascot.working) {
       const now = await $.clock.now()
@@ -1689,7 +1693,7 @@ export function register(on) {
     }
     if (a) {
       a.tool = null
-      if (a.routed) addFlag($, a.role + '|' + (a.piece ?? ''), flagOf(a.role, e.answer))
+      if (a.routed) addFlag($, flagKey(a.role, a.piece), flagOf(a.role, e.answer))
       a.verdict = verdictChip(a.role, e.answer)
       if (a.routed && a.run !== 'adhoc') logWire(wireLog, { from: party(a.role, a.piece), to: 'lead', kind: 'done', summary: answerLine(a.role, e.answer), at: Date.now(), via: 'sub' })
       if (a.role === 'plan-reviewer' && verdictOf(e.answer) === 'REVISE') runState(fileRunOf(a)).revise += 1

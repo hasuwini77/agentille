@@ -32,7 +32,7 @@ Touches: <paths>
 
 ### 2. …
 
-## Runner-ups (queue one with `/agt next "<title>"`)
+## Runner-ups (with agentille, queue one with `/agt next "<title>"`)
 
 | # | title | score | effort | why not now |
 |---|---|---|---|---|
@@ -90,7 +90,7 @@ storm <id> · <project> · <agents> agents · <n> candidates → <k> picks
  2. …
 doc: docs/storm/<date>.md (committed <sha>)
 build: session opened → /agt heavy running beside you  |  paste the line below  |  queued <k> in .agentille/backlog.md → /agt next  |  tmux window → plain build running  |  plain build here → <k> PRs open, none merged  |  skipped (--no-build)
-⚑ <one line per real problem: a lens that returned nothing, a risk-2 runner-up that needs Edwin>
+⚑ <one line per real problem: a lens that returned nothing, a risk-2 runner-up that needs the user>
 ```
 
 Then, when an agentille build was requested, the paste fallback on its own line:

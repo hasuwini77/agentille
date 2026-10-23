@@ -21,7 +21,7 @@ For each of the top 8 the adversary answers one of:
 
 - `KEEP` — the case holds.
 - `SHRINK <scope>` — the outcome is right, the scope is too big; the new scope must fit one executor slice. Re-score with the smaller effort.
-- `DROP <reason>` — nobody asked (evidence is thin or one-off), the code already does it, it needs money or an approval Edwin lacks, or it conflicts with `neverDo`.
+- `DROP <reason>` — nobody asked (evidence is thin or one-off), the code already does it, it needs money or an approval the user lacks, or it conflicts with `neverDo`.
 
 The judge applies verdicts literally and re-ranks. Dropped cards go to the doc's "Dropped" section so the next storm skips them.
 
@@ -32,7 +32,7 @@ Without `N`:
 1. Take candidates with `score ≥ max(top − 2, 6)` in rank order.
 2. Keep adding while total effort points ≤ 8 (S 1, M 2, L 3) and count ≤ 5.
 3. Fewer than 2 → take the top 2 anyway.
-4. `risk 2` never auto-picks: it goes to runner-ups with "needs Edwin".
+4. `risk 2` never auto-picks: it goes to runner-ups with "needs the user".
 
 So a strong field gives 3–5 small picks; a field of two big winners gives 2. `quick` caps at 3.
 

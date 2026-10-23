@@ -28,4 +28,4 @@ To stay on one version: `claude plugin install agentille@hasuwini77-agentille --
 
 ## History note
 
-Before v3.23.0 (2026-10-23) releases were cut per fix: 43 tags in the previous 90 days, v2.0.0 and v3.0.0 one day apart, and commands removed in a minor (3.14.0). This page is the correction; a reviewer counting tags after that date should see the cadence above.
+This policy starts at v3.23.0 (2026-10-23). Before it, releases were cut per fix: 96 tags in all, 44 in the 90 days before that date, up to eleven on one day, v2.0.0 and v3.0.0 one day apart, and three commands removed in a minor (3.14.0). The tag history up to v3.23.0 describes that habit, not this page; judge the cadence from the tags after it. The first test is the fixes merged after v3.23.0 on the same day: they sit under `## [Unreleased]` in the CHANGELOG with no tag.

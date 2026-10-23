@@ -894,7 +894,7 @@ function addFlag($, key, text) {
 
 function focusLines(now) {
   if (!focusOn) return []
-  const fresh = flags.filter((f) => now - f.at < FLAG_TTL_MS).map((f) => f.text)
+  const fresh = [...new Set(flags.filter((f) => now - f.at < FLAG_TTL_MS).map((f) => f.text))]
   return [...fresh, ...paneFlags(panes, strandedNow)].slice(0, 5)
 }
 

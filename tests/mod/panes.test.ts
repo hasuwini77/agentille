@@ -757,6 +757,16 @@ describe('pane tools: in the mod', () => {
     expect(split.at(-1)).toBe(hdr + '\nbuild the paging')
   })
 
+  test('a respawned role\'s stale done file goes before its pane opens', async ($, on) => {
+    const { seen } = setup(on, TMUX, { 'tmux split-window': { stdout: '%9\n' }, 'tmux list-panes': { stdout: ['%1', '', 'claude', '0', '@1'].join(T) + '\n' } })
+    await $.session.start({ cwd: '/work/repo', surface: null, isInteractive: false })
+    await spawn($, { run: 'k7f2ab', role: 'exec-1', task: 'build the filter', ...EXEC })
+    const rm = seen.findIndex((a) => a[0] === 'rm' && a[1] === '-f' && a[2] === '/h/.agentille/state/run-k7f2ab/done-exec-1')
+    const split = seen.findIndex((a) => a[1] === 'split-window')
+    expect(rm).toBeGreaterThan(-1)
+    expect(rm).toBeLessThan(split)
+  })
+
   test('a lead with a transport registers both tools; no transport registers none', async ($, on) => {
     const a = setup(on, TMUX, { 'tmux list-panes': { stdout: ['%1', '', 'claude', '0', '@1'].join(T) + '\n' } })
     await $.session.start({ cwd: '/work/repo', surface: null, isInteractive: false })

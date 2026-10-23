@@ -1380,7 +1380,7 @@ export function register(on) {
     const t = await transportOf($)
     if (t === 'none') return { deny: 'No pane transport here: sessions open as panes only inside Herdr or tmux.' }
     if (!sessionsAsked) return { deny: 'open_sessions runs only on a turn where the person typed a request for sessions, panes or terminals.' }
-    const a = sessionsToolInput(e)
+    const a = sessionsToolInput(e, { typed: lastTyped, fableTyped: typedFable(lastTyped) })
     if (a.error) return { deny: a.error }
     if (a.kind === 'codex' && t !== 'herdr') return { deny: 'Codex sessions need Herdr.' }
     const cwd = a.cwd ?? (await $.session.cwd())

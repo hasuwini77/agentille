@@ -2,6 +2,15 @@
 
 All notable changes to agentille are documented here.
 
+## [3.21.2] — 2026-10-23
+
+### Fixed
+
+- **`/storm` is user-neutral.** The research prefix no longer hardcodes one
+  user; it reads `name`, `role` and `neverDo` from `profile.json` when it
+  exists. `--next` without agentille stops at the doc. The skill is mirrored
+  standalone at `hasuwini77/storm-skill`.
+
 ## [3.21.1] — 2026-10-23
 
 ### Fixed

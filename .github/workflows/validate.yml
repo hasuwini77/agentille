@@ -1,11 +1,13 @@
 name: validate
 
-# Structural lint for the agentille plugin — version drift, a versioned
-# marketplace.json, broken agent-namespace refs, dangling doc cross-refs,
-# a missing hook script, role drift between agents/routing, a mod that fails
-# to import under node, and PII leaks. NOT a behavioral test of /agt's
-# dispatch (scored by the local eval suite in evals/: `claude plugin eval`,
-# see .claude/CLAUDE.md). See also scripts/validate.sh.
+# Two jobs on every push to main and every PR:
+#   structural — scripts/validate.sh: version drift, agent refs, role parity, doc cross-refs,
+#                hook scripts (tests/hooks), mod import, PII scan. With the claude CLI
+#                installed it also runs `claude plugin validate` and the 500 mod tests
+#                (`claude plugin test .`), and validate.sh FAILS in CI when the CLI is missing,
+#                so those tests can never be skipped silently on the runner.
+# The dispatch-decision evals (evals/, `claude plugin eval`) stay local: each run is a real
+# claude session on a credential. See .claude/CLAUDE.md.
 
 on:
   push:
@@ -17,9 +19,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      # jq is preinstalled on ubuntu-latest runners; no setup needed.
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - name: Run structural validator
+      - name: Install the Claude Code CLI (plugin validate + mod test harness, no credential needed)
+        run: npm install -g @anthropic-ai/claude-code
+      - name: Structural validator, hook tests, mod tests
+        env:
+          CI: "true"
         run: bash scripts/validate.sh

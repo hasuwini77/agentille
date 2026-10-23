@@ -803,6 +803,21 @@ describe('pane tools: in the mod', () => {
     expect(a.tools).toEqual(['spawn_pane', 'close_pane'])
   })
 
+  test('herdr: a trust prompt in another repo is refused and the half-made pane closed', async ($, on) => {
+    const trust = ' Do you trust the files in this folder?\n\n /work/other\n\n ❯ 1. Yes, proceed\n   2. No, exit'
+    const { seen } = setup(on, { HERDR_ENV: '1', HERDR_PANE_ID: 'w1:p1', HOME: '/h' }, {
+      'herdr pane split': { stdout: JSON.stringify({ result: { pane: { pane_id: 'w1:p5' } } }) },
+      'herdr agent start': { exitCode: 1, stderr: 'agent_not_ready' },
+      'herdr agent read': { stdout: trust },
+      'git -C /work/other': { stdout: '/work/other/.git\n' },
+      'git -C /work/repo': { stdout: '/work/repo/.git\n' },
+    })
+    const r = await spawn($, { run: 'k7f2ab', role: 'exec-1', task: 'build the filter', cwd: '/work/other', ...EXEC })
+    expect(String(r.text ?? r.error ?? JSON.stringify(r))).toContain('needs a one-time trust')
+    expect(seen.some((a) => a[0] === 'herdr' && a[1] === 'agent' && a[2] === 'keys')).toBe(false)
+    expect(seen[seen.length - 1]).toEqual(['herdr', 'pane', 'close', 'w1:p5'])
+  })
+
   test('no transport: a typed /agt registers none', async ($, on) => {
     const a = setup(on, {})
     await $.session.start({ cwd: '/work/repo', surface: null, isInteractive: false })

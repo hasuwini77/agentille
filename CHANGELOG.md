@@ -19,6 +19,10 @@ next minor, `docs/releasing.md`).
 - **A typed `/agt-clean` also drops run folders** under
   `~/.agentille/state` untouched for 14 days. The automatic clean-up at
   run end and session start never does.
+- **An older Claude Code gets one toast and no pane tools.** At session
+  start the mod reads the host's version; below 2.1.294 (the README's
+  minimum, `hooks/skew.js` `MIN_HOST`) it says so once and `/agt` runs its
+  heavy level as subagent waves. An unknown version is never "too old".
 
 ### Fixed
 
@@ -48,6 +52,19 @@ next minor, `docs/releasing.md`).
   registry calls, and a list of what ships beside `/agt`.
 - `.claude/CLAUDE.md`: the module map matches the split mod; the version
   rule matches `docs/releasing.md`.
+
+### Added
+
+- Tests: `tests/hooks/test-validate-gate.sh` (a failing `claude plugin
+  validate` or `claude plugin test` fails `scripts/validate.sh`),
+  `tests/hooks/test-skill-text.sh` (every skill and agent file under
+  20 KB, the verdict tokens the lead parses exist, one word for a slice),
+  `tests/hooks/test-min-version.sh` (`MIN_HOST` equals the README), the
+  host-version check and a Herdr trust prompt refused outside the lead's
+  repo in `tests/mod/`. 527 mod tests.
+- CI: `validate.yml` pins the Claude Code CLI (2.1.309) so a CLI release
+  cannot turn `main` red by itself; `release.yml` runs the validator and
+  checks the tag against `plugin.json` before it creates a Release.
 
 ### Changed (internal)
 

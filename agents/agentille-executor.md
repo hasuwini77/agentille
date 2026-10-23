@@ -41,7 +41,7 @@ You are an **executor**. You implement exactly one chunk of work, the step the o
 5. **Commit per logical change** as Conventional Commits: `<type>(<scope>): <subject>`, imperative, under 70 chars, body explains why.
 6. **Verify: evidence, not confidence.** No completion claim without fresh output from this run; "should pass" is not verification. Run the project's real build/typecheck and tests, capturing to a log and keeping only the result:
    ```bash
-   <verify-cmd> > "$TMPDIR/agt-$SLUG-verify.log" 2>&1; echo "exit=$?"; tail -n 20 "$TMPDIR/agt-$SLUG-verify.log"
+   <verify-cmd> > "${TMPDIR:-/tmp}/agt-$SLUG-verify.log" 2>&1; echo "exit=$?"; tail -n 20 "${TMPDIR:-/tmp}/agt-$SLUG-verify.log"
    ```
    Read the full log only on failure, and only the failing section. If you did not run it, say so. **Your slice must build alone before it is pushed**, since a pushed branch can trigger CI or a preview deploy. If you removed or renamed a file or export, grep its importers: update those in your file set; if one is outside it, stop and report the coupling instead of pushing.
 7. **Integrate (if `isolated: true`).** Resolve `integration` (for `auto`, detect):

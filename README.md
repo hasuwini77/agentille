@@ -154,7 +154,7 @@ Nothing runs until you type `/agt`, `/storm` or ask for a session. When you do:
 ## Glossary
 
 - **Level:** how big the crew is. low (solo or one builder), medium (parallel subagents), heavy (panes).
-- **Slice / piece:** one file-disjoint part of the task, built by one executor on its own branch.
+- **Slice:** one file-disjoint part of the task, built by one executor on its own branch. The dispatch header carries its slug as `piece=`.
 - **Executor, planner, reviewers, adversary:** the agent roles in `agents/`. Reviewers read and run tests; they never edit. The adversary writes tests that try to break a slice.
 - **Pane / worker:** a real Claude (or Codex) session in a Herdr or tmux pane, named `agt-<run>-<role>`, doing one slice. **Session:** a pane that is yours, opened with "open two sessions".
 - **The mod:** the JavaScript in `hooks/` that Claude Code loads beside the skill. It draws the band, routes models, carries the wire, opens and closes panes. The skill works without it.

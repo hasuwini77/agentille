@@ -17,16 +17,16 @@ The executor already holds the slice in context; a fresh one would re-read the r
 
 - **Subagent executor:** keep its agent id. Send the P0/P1 `FIX:` lines with `SendMessage`, starting with the `[agt … mode=fix …]` header: "fix these in the same worktree, commit, re-verify, reply in your output format". Fallback when the agent is gone: a fresh `mode=fix` executor seeded with its checkpoint, branch and the findings.
 - **Pane executor:** its pane closed on harvest. Open a fresh pane executor with the branch, its answer file path and the findings.
-- At most 2 fix rounds per piece; still blocking → `⚑` on the card, branch kept.
+- At most 2 fix rounds per slice; still blocking → `⚑` on the card, branch kept.
 
 ## Early stop — resume once
 
-An executor stopped early when its handoff has no `VERIFICATION:` block, or ends on a question, or its pane went `done` mid-slice. `CONTEXT …` is not an early stop (a successor takes over, `SKILL.md` → "Hard rules"), and `BLOCKED: <need>` is not resumed: it goes on the card as `⚑ <piece> blocked: <need>`.
+An executor stopped early when its handoff has no `VERIFICATION:` block, or ends on a question, or its pane went `done` mid-slice. `CONTEXT …` is not an early stop (a successor takes over, `SKILL.md` → "Hard rules"), and `BLOCKED: <need>` is not resumed: it goes on the card as `⚑ <slice> blocked: <need>`.
 
-- Resume once per piece. Its header says `mode=build`, never `mode=fix`: a resume is not a fix round and does not count toward the 2 or the escalation ladder.
+- Resume once per slice. Its header says `mode=build`, never `mode=fix`: a resume is not a fix round and does not count toward the 2 or the escalation ladder.
 - **Subagent executor:** `SendMessage` to the same agent id: "RESUME: finish the slice from your checkpoint and `git log $BASE..HEAD`, keep landed commits, reply in your output format."
 - **Pane executor:** `close_pane`, then `spawn_pane` the same role and cwd with the slice, `RESUME:`, the checkpoint path and the answer file path (the same path as a pane fix round).
-- A second early stop → `⚑ <piece> stopped early twice`, branch kept.
+- A second early stop → `⚑ <slice> stopped early twice`, branch kept.
 
 ## Gate — merge or escalate
 

@@ -5,6 +5,9 @@
 # Discard stdin (Claude Code passes JSON on stdin)
 cat >/dev/null 2>&1 || true
 
+# Opt out: AGENTILLE_UPDATE_CHECK=0 skips the daily fetch entirely (no cache, no network).
+[[ "${AGENTILLE_UPDATE_CHECK:-1}" == "0" ]] && exit 0
+
 ROOT="${CLAUDE_PLUGIN_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 RAW_URL="${AGENTILLE_RAW_URL:-https://raw.githubusercontent.com/hasuwini77/agentille/main/.claude-plugin/plugin.json}"
 CACHE_DIR="$HOME/.agentille"

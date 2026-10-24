@@ -21,11 +21,9 @@
 //
 // and the gates read them through spawnAllowed, sessionsAllowed, fableProof and runHeld.
 
-import { isLead, Session } from './session.js'
+import { isLead, Session, ctx } from './session.js'
 import { Display } from './display.js'
 import { Profile } from './profile.js'
-import { Runs } from './dispatch.js'
-import { Panes } from './reaper.js'
 import { makeStore } from './store.js'
 import { SAFE_RUN } from './panes.js'
 import * as P from './panerec.js'
@@ -180,9 +178,9 @@ export const flight = Object.freeze({
   get agtTypedSince() { return my.agtTypedSince },
   get agtBirth() { return my.agtBirth },
   get agtRun() { return my.agtRun },
-  get panes() { return Panes.panes },
-  get lastRun() { return Runs.lastRun },
-  get live() { return Runs.live },
+  get panes() { return ctx.panes },
+  get lastRun() { return ctx.run },
+  get live() { return ctx.live },
 })
 
 // The run's in-flight test on the right clocks: agents by Date.now(), the typed /agt and the panes' rest by the

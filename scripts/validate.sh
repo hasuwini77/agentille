@@ -524,7 +524,8 @@ if [ -n "$seeded" ]; then fail "store.js seed() is for tests only; called in: $(
 else pass "no hooks module writes a store through store.js seed()"; fi
 
 # state.js is an index only the reading modules import. Nothing it imports may reach it again, directly or through
-# another hooks module: an owner imports session.js and the owners it reads from, so state.js stays out of every cycle.
+# another hooks module: an owner imports session.js, and reads a peer owner's view through ctx (session.js) or reaches
+# its transition through bus.js, so state.js stays out of every cycle.
 if ! command -v python3 >/dev/null 2>&1; then
   skip_or_fail "stores: python3 not found, state.js cycle check skipped"
 else
@@ -560,6 +561,29 @@ PY
     case "$line" in PASS*) pass "stores: ${line#PASS }";; FAIL*) fail "stores: ${line#FAIL }";; esac
   done <<< "$cyc_out"
   printf '%s\n' "$cyc_out" | grep -qE '^(PASS|FAIL)' || fail "stores: the state.js cycle check produced no result"
+fi
+
+# No import cycle among hooks/*.js at all (scripts/import-graph.mjs, Tarjan's components). An owner that needs a peer
+# at call time reads its view through ctx or reaches its transition through bus.js, a leaf like session.js, instead of
+# importing it. A cycle allowed on purpose goes in import_cycles_ok as its sorted members joined by ',' (none now).
+import_cycles_ok=''
+if ! command -v node >/dev/null 2>&1; then
+  skip_or_fail "imports: node not found, hooks/ import cycle check skipped"
+else
+  graph_out=$(node scripts/import-graph.mjs --dir hooks --check "$import_cycles_ok" 2>&1); grc=$?
+  if [ "$grc" = 0 ] && printf '%s\n' "$graph_out" | grep -q '^NONE '; then
+    pass "imports: no import cycle among hooks/*.js ($(printf '%s\n' "$graph_out" | sed -n 's/^NONE \([0-9]*\) modules.*/\1/p') modules)"
+  elif [ "$grc" = 0 ]; then
+    pass "imports: only the allowed import cycles among hooks/*.js: $(printf '%s\n' "$graph_out" | sed -n 's/^ALLOWED //p' | paste -sd ';' -)"
+  else
+    fail "imports: an import cycle among hooks/*.js (read the peer through ctx, or its transition through bus.js):"
+    printf '%s\n' "$graph_out" | grep -E '^(CYCLE|PATH) ' | sed 's/^/    /'
+    printf '%s\n' "$graph_out" | grep -qE '^(CYCLE|PATH) ' || printf '%s\n' "$graph_out" | head -4 | sed 's/^/    /'
+  fi
+  bus_deps=$(node scripts/import-graph.mjs --dir hooks --graph 2>/dev/null | sed -n 's/^bus\.js: *//p')
+  if [ ! -f hooks/bus.js ]; then fail "imports: hooks/bus.js is missing"
+  elif [ -n "$bus_deps" ]; then fail "imports: hooks/bus.js must import nothing (it imports: $bus_deps)"
+  else pass "imports: hooks/bus.js is a leaf"; fi
 fi
 
 # The guard's imports run one way: guard.js > guard-policy.js > guard-lex.js > guard-steps.js. No guard module

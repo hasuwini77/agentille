@@ -1,9 +1,8 @@
 // agentille run bookkeeping: per-run counters, the routing log and ledger under ~/.agentille/state/run-<id>/,
 // each subagent's raw report, and the Agents section the mod adds to a finished report.md.
 
-import { Session, ctxSource, isLead } from './session.js'
+import { Session, ctx, ctxSource, isLead } from './session.js'
 import { Profile } from './profile.js'
-import { Panes } from './reaper.js'
 import { makeStore } from './store.js'
 import { reportRun, reportTail } from './drawing.js'
 import { sliceOf, party, taskLine } from './links.js'
@@ -11,7 +10,7 @@ import { newAgent, short, ledger, ledgerText, addUsage, finish, endRoute } from 
 import { SAFE_RUN, splitName } from './panes.js'
 import { formationOf, roleOf, parseHeader, proveHeader, demoteHeaderText, ladderFixes, decide, executorsWorking, executorCapFlag, executorCapDeny, estimateRunUsd, leadUsd, maxRunUsdOf, usd } from './routing.js'
 import { addFlag } from './display.js'
-import { noteWire } from './worker.js'
+import { emit } from './bus.js'
 import { Proofs, agtTurnFromDispatch } from './proofs.js'
 import { adopt, applyStatus, quietWorkflows } from './tree.js'
 
@@ -351,7 +350,7 @@ export async function dispatchAgent($, e, next) {
     // Its files and counters follow the header: a headerless agent files under 'adhoc' (which writes
     // nothing), so the run in progress keeps only its own routing log and ledger.
     const fileRun = named ?? 'adhoc'
-    const busy = [...my.live.values()].some((a) => a.run === my.lastRun && a.state === 'working') || Panes.panes.some((p) => splitName(p.name)?.run === my.lastRun && p.state === 'working')
+    const busy = [...my.live.values()].some((a) => a.run === my.lastRun && a.state === 'working') || ctx.panes.some((p) => splitName(p.name)?.run === my.lastRun && p.state === 'working')
     if (named && (my.lastRun === 'adhoc' || !busy)) my.lastRun = named
     agtTurnFromDispatch()
     // The table pick and the spend follow the run in progress (its REVISEs, its agents); `fileRun` is only where the
@@ -426,7 +425,7 @@ export async function dispatchAgent($, e, next) {
     const slice = sliceOf(hdr)
     settle() // from here the live map counts it
     if (res.agentId) my.live.set(res.agentId, { ...newAgent({ id: res.agentId, role, routed: true, model: res.model, effort: d.effort, reason: d.reason, run: runId, now: Date.now(), parentId: e.parentAgentId ?? null }), slice })
-    if (runId !== 'adhoc') noteWire({ from: 'lead', to: party(role, slice), kind: 'task', summary: taskLine(e.prompt) || role, at: Date.now(), via: 'sub' })
+    if (runId !== 'adhoc') emit('wire.note', { from: 'lead', to: party(role, slice), kind: 'task', summary: taskLine(e.prompt) || role, at: Date.now(), via: 'sub' })
     const rec = { at: new Date().toISOString(), role, model: res.model, effort: d.effort, reason: d.reason, asked: e.model ?? null, agentId: res.agentId ?? null, ...(d.capped && { capped: true }), ...(d.pastCeiling && { pastCeiling: true }) }
     await logDecision($, runId, rec)
     await markRun($, runId)

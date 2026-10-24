@@ -4,7 +4,7 @@ agentille is a **public, MIT-licensed Claude Code plugin** — the `/agt` orches
 
 ## What lives where
 
-- `skills/agt/` — the orchestrator skill: `SKILL.md` (contract, level table, dispatch header, hard rules), `routing.md` (category, roster, model + effort, escalation), `factory.md` (`/agt next`, fix rounds, gate, integrate), `display.md` (mid-run lines, final card, report.md), `panes-mode.md`, `workflow-mode.md`, `formations.md`, `squads.md`, `no-mod.md` (what the lead does by hand when the mod is off: squad scoring, the drawing list, the transport check, the spawn commands).
+- `skills/agt/` — the orchestrator skill: `SKILL.md` (contract, level table, dispatch header, hard rules), `routing.md` (category, roster, model + effort, escalation), `factory.md` (`/agt next`, fix rounds, gate, integrate), `display.md` (mid-run lines, final card, report.md), `transport-panes.md`, `transport-workflow.md`, `formations.md`, `squads.md`, `no-mod.md` (what the lead does by hand when the mod is off: squad scoring, the drawing list, the transport check, the spawn commands).
 - `skills/storm/` — `/storm`: research lenses, scoring and the hand-off to `/agt heavy`.
 - `skills/agentille-init/`, `skills/agentille-project/`, `skills/agentille-claude-md/` — optional setup skills (voice profile, per-repo CLAUDE.md, CLAUDE.md tune-up). `/agt` runs without any of them.
 - `agents/agentille-*.md` — the eleven worker agent definitions (planner, plan-reviewer, ui-prototyper, executor, adversary, and six reviewers: code, design, security, payments, perf, seo).

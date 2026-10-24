@@ -390,6 +390,17 @@ function parsePush(args) {
   return p
 }
 
+// A configured push refspec (`[+]<src>:<dst>`, or `<ref>` for same-name) whose destination reaches the base
+// branch or a tag: why it is refused, or null. A wildcard into refs/heads reaches the base too.
+function refspecHitsBase(rs, bases) {
+  const r = String(rs).replace(/^\+/, '').trim()
+  const d = (r.includes(':') ? r.slice(r.indexOf(':') + 1) : r).trim()
+  if (/^refs\/tags\//.test(d) || (/tags/.test(d) && d.includes('*'))) return 'of a tag (a configured push refspec)'
+  if (d === '*' || d === 'refs/heads/*' || (d.endsWith('/*') && /heads/.test(d))) return 'to every branch including the base (a configured push refspec)'
+  const name = d.replace(/^refs\/heads\//, '')
+  return bases.has(name) ? 'to the base branch ' + name + ' (a configured push refspec)' : null
+}
+
 // `$(git branch --show-current)` and its kin name the branch checked out: the same as HEAD.
 const CURRENT_SUB = /^\$\(git (branch --show-current|rev-parse --abbrev-ref HEAD|symbolic-ref (--short -q|-q --short|--short) HEAD|name-rev --name-only HEAD)\)$/
 
@@ -397,7 +408,7 @@ const CURRENT_SUB = /^\$\(git (branch --show-current|rev-parse --abbrev-ref HEAD
 // bare `git push` goes, or null) and bases (the default branch, main and master). Returns why it is refused.
 // A push after a step that moves HEAD on the same line (p.headMoved) reads HEAD as unknown: the branch read
 // before the line ran is not the one the push sees.
-export function judgePush(p, { current = null, pushDst = null, bases = new Set(['main', 'master']) } = {}) {
+export function judgePush(p, { current = null, pushDst = null, bases = new Set(['main', 'master']), refspecs = [], pushDefault = null } = {}) {
   if (p.dry) return null
   if (p.bulk) return 'git push ' + p.bulk
   if (p.force) return 'git push --force'
@@ -413,7 +424,15 @@ export function judgePush(p, { current = null, pushDst = null, bases = new Set([
     if (OWN_BRANCH.test(name) || name === cur) return null
     return 'git push ' + name + ' (not a branch of this run)'
   }
-  if (!p.specs.length) return dst(pushDst || cur)
+  if (!p.specs.length) {
+    // A bare push follows the remote's configured push refspecs, or push.default when none is set.
+    if (pushDefault === 'matching') return 'git push (push.default = matching reaches the base branch)'
+    for (const rs of refspecs) {
+      const why = refspecHitsBase(rs, bases)
+      if (why) return 'git push ' + why
+    }
+    return dst(pushDst || cur)
+  }
   for (const raw of p.specs) {
     const spec = CURRENT_SUB.test(raw) ? 'HEAD' : raw
     if (spec.startsWith('+')) return 'git push --force'
@@ -564,6 +583,37 @@ function movesHead(g) {
   if (g.sub === 'symbolic-ref' || g.sub === 'update-ref') return pos[0] === 'HEAD' && (pos.length > 1 || a.includes('--stdin'))
   if (g.sub === 'rebase') return pos.length > 1
   return false
+}
+
+// A git command that rewrites a branch's history in place: merge and reset --hard/--merge/--keep update the branch
+// checked out (curBranch, tracked along the line, or null to read HEAD); rebase <upstream> <branch> rewrites the
+// named branch; branch -f/-M writes the branch it names. Returns that branch (or null to read HEAD), or undefined
+// when the subcommand is not one of these. guardLine judges a base-branch rewrite below auto.
+function localWrite(g, curBranch) {
+  const pos = g.args.filter((x) => !x.startsWith('-'))
+  const settled = (x) => x && !/[$`]/.test(x)
+  if (g.sub === 'merge') return g.args.some((x) => /^--(abort|continue|quit|skip)$/.test(x)) ? undefined : curBranch
+  if (g.sub === 'rebase') {
+    if (g.args.some((x) => /^--(abort|continue|quit|skip|edit-todo|show-current-patch)$/.test(x))) return undefined
+    return pos.length > 1 ? (settled(pos[1]) ? pos[1] : null) : curBranch
+  }
+  if (g.sub === 'reset' && g.args.some((x) => x === '--hard' || x === '--merge' || x === '--keep')) return curBranch
+  if (g.sub === 'branch') {
+    // -f/-B force-write pos[0]; -m/-M rename, the new name being the last positional.
+    if (g.args.some((x) => x === '--force' || /^-[a-zA-Z]*[fB]/.test(x))) return settled(pos[0]) ? pos[0] : null
+    if (g.args.some((x) => x === '--move' || /^-[a-zA-Z]*[mM]/.test(x))) return pos.length ? (settled(pos[pos.length - 1]) ? pos[pos.length - 1] : null) : undefined
+  }
+  return undefined
+}
+
+// The branch a `git checkout`/`switch` on the line leaves checked out (so a later merge/reset here is judged
+// against it): its first positional, null when a variable names it, undefined when it moves no branch.
+function checkoutTarget(g) {
+  if (g.sub !== 'checkout' && g.sub !== 'switch') return undefined
+  if (g.args.includes('--')) return undefined // checkout -- <paths>: restores files, no branch change
+  const name = g.args.filter((x) => !x.startsWith('-'))[0]
+  if (name === undefined) return undefined
+  return /[$`]/.test(name) ? null : name
 }
 
 // `git update-ref <ref> <value>` / `git symbolic-ref <ref> <target>`: the ref it writes (or deletes), when that is a
@@ -734,6 +784,7 @@ export function commandSteps(line, cwd = null) {
   let moved = false // a step before this one switched branches, in any dir
   let edited = false // a step before this one changed a remote or its config: a later push's target is unknown
   let ghEdited = false // … or gh's default repo: a later gh call's target is unknown
+  let curBranch = null // the branch a checkout/switch on the line left behind: what a later merge/reset writes
   for (const c of commands(line)) {
     const w = c.words
     const p = base(w[0])
@@ -787,7 +838,12 @@ export function commandSteps(line, cwd = null) {
       const ref = refWrite(g)
       if (ref) out.push({ kind: 'ref', what: 'git ' + g.sub + ' ' + ref, dir, slug: null, ref })
       if (g.sub === 'push') out.push({ kind: 'push', what: 'git push', dir, slug: null, push: { ...parsePush(g.args), headMoved: moved, remoteEdited: edited || retarget } })
+      // A merge, reset --hard, rebase or branch -f/-M onto the base branch, judged where it runs.
+      const lw = localWrite(g, curBranch)
+      if (lw !== undefined) out.push({ kind: 'local', what: 'git ' + g.sub, dir, slug: null, branch: lw })
       if (movesHead(g)) moved = true
+      const co = checkoutTarget(g)
+      if (co !== undefined) curBranch = co
       if ((g.sub === 'remote' && ['add', 'set-url', 'rename', 'remove', 'rm'].includes(g.args[0])) || (g.sub === 'config' && g.args.some((x) => REMOTE_CFG.test(x)))) edited = true
     }
   }
@@ -804,6 +860,15 @@ export function judgeRef(ref, { current = null, bases = new Set(['main', 'master
   return bases.has(name) ? 'a write to the base branch ' + name : null
 }
 
+// A local history rewrite below auto (git merge/reset --hard/rebase/branch -f): refused when the branch it writes
+// is the base. `branch` is that branch, or null to read the branch checked out. Returns why it is refused, or null.
+export function judgeLocal(branch, { current = null, bases = new Set(['main', 'master']) } = {}) {
+  const raw = branch ?? current
+  if (!raw || /[$`]/.test(raw)) return null // an unreadable or absent branch: the push, if any, is judged on its own
+  const name = raw.replace(/^refs\/heads\//, '')
+  return bases.has(name) ? 'a history rewrite on the base branch ' + name : null
+}
+
 // The first refusal a line earns, with what is known of its repo given (tests, and a line read alone):
 // current branch, base, mode. Merges and tags need `auto`; pushes are judged; `local` refuses pushes and PRs.
 export function integrationIn(line, { cwd = null, current = null, pushDst = null, base: b = null, mode = 'pr' } = {}) {
@@ -812,6 +877,11 @@ export function integrationIn(line, { cwd = null, current = null, pushDst = null
     if (c.kind === 'step') return c.what
     if (c.kind === 'ref') {
       const why = judgeRef(c.ref, { current, bases: new Set(['main', 'master', b].filter(Boolean)) })
+      if (why) return why
+      continue
+    }
+    if (c.kind === 'local') {
+      const why = judgeLocal(c.branch, { current, bases: new Set(['main', 'master', b].filter(Boolean)) })
       if (why) return why
       continue
     }
@@ -1108,13 +1178,20 @@ async function pushInfo($, c, cwd, cache) {
   const bases = await basesOf($, at, remote)
   const current = dir ? (await gitOut($, dir, 'symbolic-ref', '--short', '-q', 'HEAD')) || null : null
   let pushDst = null
+  let refspecs = []
+  let pushDefault = null
+  if (at && !c.push.specs.length && !c.push.bulk) {
+    // A bare push follows the remote's configured push refspecs, or push.default when none is set.
+    refspecs = (await gitOut($, at, 'config', '--get-all', 'remote.' + remote + '.push')).split('\n').filter(Boolean)
+    pushDefault = (await gitOut($, at, 'config', 'push.default')) || null
+  }
   if (current && !c.push.specs.length) {
     const to = await gitOut($, dir, 'rev-parse', '--abbrev-ref', '@{push}')
     const names = (await localRepo($, dir, cache)).remotes.map((x) => x.name).sort((x, y) => y.length - x.length)
     const r = names.find((n) => to.startsWith(n + '/'))
     if (to && r) pushDst = to.slice(r.length + 1)
   }
-  return { current, pushDst, bases }
+  return { current, pushDst, bases, refspecs, pushDefault }
 }
 
 // A line → the deny text, or null. A line the reader cannot parse falls back to the plain words.
@@ -1144,6 +1221,12 @@ export async function guardLine($, line, cwd) {
     if (c.kind === 'ref') {
       const current = c.dir ? (await gitOut($, c.dir, 'symbolic-ref', '--short', '-q', 'HEAD')) || null : null
       const why = judgeRef(c.ref, { current, bases: await basesOf($, c.dir) })
+      if (why) return DENY_INTEGRATION + ' Refused: ' + why + '.'
+      continue
+    }
+    if (c.kind === 'local') {
+      const current = c.branch ? null : c.dir ? (await gitOut($, c.dir, 'symbolic-ref', '--short', '-q', 'HEAD')) || null : null
+      const why = judgeLocal(c.branch, { current, bases: await basesOf($, c.dir) })
       if (why) return DENY_INTEGRATION + ' Refused: ' + why + '.'
       continue
     }

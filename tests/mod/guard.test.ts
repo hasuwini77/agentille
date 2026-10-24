@@ -98,11 +98,7 @@ describe('guard: which commands integrate', () => {
 
   test('a branch switch earlier on the line makes HEAD unreadable for a later push; a written-out name still goes', async () => {
     for (const line of [
-      'git checkout main && git merge --ff-only agt/x && git push origin HEAD',
-      'git switch main && git merge --ff-only agt/x && git push -u origin HEAD',
       'git checkout -q main; git push',
-      'git branch -m main && git push origin HEAD',
-      'git branch -M agt/x main; git push origin @',
       'git reset --hard main && git push origin HEAD',
       'git symbolic-ref HEAD refs/heads/main && git push origin HEAD',
       'git -C ../app checkout main && cd ../app && git push origin "$(git branch --show-current)"',
@@ -114,6 +110,26 @@ describe('guard: which commands integrate', () => {
       'git checkout -- README.md && git push origin HEAD',
       'git push origin HEAD && git checkout main',
       'git rebase main && git push origin HEAD',
+    ]) expect([line, integrationIn(line, onSlice)]).toEqual([line, null])
+  })
+
+  test('a local merge, reset --hard, rebase or branch -f/-M onto the base branch is caught below auto', async () => {
+    for (const line of [
+      'git checkout main && git merge --ff-only agt/x && git push origin HEAD',
+      'git switch main && git merge --ff-only agt/x && git push -u origin HEAD',
+      'git checkout main && git reset --hard agt/x',
+      'git checkout main && git rebase agt/x',
+      'git branch -m main',
+      'git branch -M agt/x main',
+      'git branch -f master agt/x',
+      'git rebase upstream master',
+    ]) expect([line, integrationIn(line, onSlice)]).toEqual([line, expect.stringContaining('base branch')])
+    // Merging or rewriting the slice branch itself is fine; so is a merge with no branch switch on agt/x.
+    for (const line of [
+      'git merge --no-ff agt/feature',
+      'git rebase main',
+      'git checkout -b agt/y && git merge agt/x',
+      'git branch -f agt/y main',
     ]) expect([line, integrationIn(line, onSlice)]).toEqual([line, null])
   })
 
@@ -510,7 +526,7 @@ describe('guard: integration in the mod', () => {
     expect((await bash($, 'cd /work/repo-x && git push -u origin HEAD')).result).toBe('ok')
     expect((await bash($, 'git -C /work/repo-x push')).result).toBe('ok')
     expect((await bash($, 'git push -u origin agt/x')).result).toBe('ok')
-    const main = await bash($, 'git merge --no-ff agt/x && git push origin main')
+    const main = await bash($, 'git push origin agt/x:main')
     expect(main.deny).toContain(DENY_PUSH)
     expect(main.deny).toContain('git push to main')
     expect((await bash($, 'git push')).deny).toContain('git push to main')

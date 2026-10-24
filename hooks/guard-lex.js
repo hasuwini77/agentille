@@ -1,0 +1,819 @@
+// agentille guard — the shell lexer. Reads a Bash line the way the shell would: words, quotes, `$( )`,
+// backticks, heredocs/here-strings, wrappers (env, timeout, xargs, sudo, …), `bash -c`/`eval`, and the
+// variables set on the line; then turns a line into the simple commands it runs and each command into an
+// integration candidate (commandSteps/codeStep). Policy (guard-policy.js) judges those candidates.
+import { Profile } from './state.js'
+import { ghStep, httpStep } from './guard-policy.js'
+
+
+// The trust root and the repo's own git state: a write to any of these below auto is refused, because a run could
+// use it to lift its own ceiling (rewrite ~/.agentille/profile.json), run code (a git hook) or publish (a ref).
+// `raw` is the path as the line wrote it (so `~`, `$HOME`, a relative `.git/config` are seen); `abs` its resolved
+// form. Returns a short label for the deny message, or null.
+export function protectedPath(raw, abs) {
+  const r = String(raw ?? '')
+  const a = String(abs ?? '')
+  if (/\$\{?GIT_DIR\}?/.test(r)) return '$GIT_DIR'
+  if (/^~\/\.agentille(\/|$)/.test(r)) return '~/.agentille'
+  if (/^(\$HOME|\$\{HOME\})\/\.agentille(\/|$)/.test(r)) return '~/.agentille'
+  if (Profile.home && (a === Profile.home + '/.agentille' || a.startsWith(Profile.home + '/.agentille/'))) return '~/.agentille'
+  const git = (s) =>
+    /(^|\/)\.git\/config$/.test(s) ? '.git/config'
+    : /(^|\/)\.git\/hooks(\/|$)/.test(s) ? '.git/hooks'
+    : /(^|\/)\.git\/info(\/|$)/.test(s) ? '.git/info'
+    : /(^|\/)\.git\/refs(\/|$)/.test(s) ? '.git/refs'
+    : /(^|\/)\.git\/packed-refs$/.test(s) ? '.git/packed-refs'
+    : /(^|\/)\.git$/.test(s) ? 'the worktree .git file'
+    : null
+  return git(a) ?? git(r)
+}
+
+
+// git config keys a run may not set below auto: aliases (rename a step past the reader), the hooks path (run code),
+// a remote's push URL or refspec, URL rewriting, receive.* — anything that changes where or how a push lands.
+const PROTECT_CFG = /^(alias\.|core\.hookspath$|remote\..*\.(push|pushurl)$|url\..*\.(push)?insteadof$|receive\.)/i
+
+
+// Whether a `git config …` writes a value (as opposed to reading or unsetting one): a `set` verb, `--add`/
+// `--replace-all`, or a bare `key value`.
+function gitConfigSets(args) {
+  const pos = args.filter((x) => !x.startsWith('-'))
+  if (args.some((x) => /^(--get|--get-all|--get-regexp|--get-urlmatch|--list|-l|--get-color|--get-colorbool|--unset|--unset-all)$/.test(x))) return false
+  if (['get', 'get-all', 'get-regexp', 'get-urlmatch', 'list', 'unset', 'unset-all'].includes(pos[0])) return false
+  if (args.some((x) => x === '--add' || x === '--replace-all')) return true
+  return pos[0] === 'set' ? pos.length >= 3 : pos.length >= 2
+}
+
+
+// Commands that write a file given as an argument → the paths they write (for the protected-path check). Each
+// resolves against the command's dir in commandSteps.
+function writeTargets(words) {
+  const p = base(words[0])
+  const pos = []
+  const out = []
+  if (p === 'tee') {
+    for (let i = 1; i < words.length; i++) {
+      const w = words[i]
+      if (w.startsWith('-')) { if (w === '--output-error') i++; continue }
+      out.push(w)
+    }
+    return out
+  }
+  if (p === 'dd') {
+    for (const w of words) { const m = /^of=(.+)/.exec(w); if (m) out.push(m[1]) }
+    return out
+  }
+  if (p === 'truncate') {
+    for (let i = 1; i < words.length; i++) {
+      const w = words[i]
+      if (w === '-s' || w === '--size' || w === '-r' || w === '--reference') { i++; continue }
+      if (!w.startsWith('-')) out.push(w)
+    }
+    return out
+  }
+  if (p === 'cp' || p === 'mv' || p === 'install' || p === 'ln') {
+    let t = null
+    for (let i = 1; i < words.length; i++) {
+      const w = words[i]
+      if (w === '-t' || w === '--target-directory') { t = words[++i]; continue }
+      if (/^--target-directory=/.test(w)) { t = w.split('=').slice(1).join('='); continue }
+      if (['-m', '--mode', '-S', '--suffix', '-o', '-g', '-Z', '--context'].includes(w)) { i++; continue }
+      if (!w.startsWith('-')) pos.push(w)
+    }
+    if (t) out.push(t)
+    else if (pos.length >= 2) out.push(pos[pos.length - 1]) // the destination / link name
+    return out
+  }
+  if (p === 'sed' || p === 'perl') {
+    const inPlace = words.some((w, n) => n > 0 && (w === '--in-place' || /^--in-place=/.test(w) || (/^-[a-zA-Z]*i/.test(w) && !w.startsWith('--'))))
+    if (!inPlace) return out
+    const scriptGiven = words.some((w) => ['-e', '-E', '--expression', '-f', '--file'].includes(w) || /^-[a-zA-Z]*[eEf]/.test(w))
+    for (let i = 1; i < words.length; i++) {
+      const w = words[i]
+      if (['-e', '-E', '--expression', '-f', '--file'].includes(w)) { i++; continue }
+      if (!w.startsWith('-')) pos.push(w)
+    }
+    // Without -e/-f the first positional is the script; the rest are the files edited in place.
+    return scriptGiven ? pos : pos.slice(1)
+  }
+  return out
+}
+
+
+// ── the command line ─────────────────────────────────────────────────────────
+// A shell line → its simple commands in the order they run: { words, stdin }. && || ; | & and newlines
+// split; `$( )`, backticks and `<( )` are commands of their own and leave a `$(…)` word behind; a heredoc or
+// here-string body becomes the command's stdin (so a PR body is text, never commands); redirections drop.
+function lex(s, at = 0, closer = null, depth = 0) {
+  const cmds = []
+  let cmd = { words: [], stdin: null, redirects: [], piped: false }
+  let tok = null
+  let target = null // what the next word is: 'drop' (an input redirection's file), 'redir' (an output file), 'stdin', 'heredoc' or 'heredoc-'
+  const pending = [] // heredocs whose body starts after the next newline
+  let parens = 0 // subshells opened inside a $( ): their ) is not the closer
+  const word = () => {
+    if (tok === null) return
+    if (target === 'stdin') cmd.stdin = tok
+    else if (target === 'heredoc' || target === 'heredoc-') pending.push({ cmd, delim: tok, strip: target === 'heredoc-' })
+    else if (target === 'redir') cmd.redirects.push(tok)
+    else if (target !== 'drop') cmd.words.push(tok)
+    target = null
+    tok = null
+  }
+  const cut = () => {
+    word()
+    if (cmd.words.length || cmd.stdin !== null) cmds.push(cmd)
+    cmd = { words: [], stdin: null, redirects: [], piped: false }
+  }
+  const nested = (j, close) => {
+    const r = depth < 4 ? lex(s, j, close, depth + 1) : { cmds: [], end: s.length }
+    cmds.push(...r.cmds)
+    tok = (tok ?? '') + '$(' + r.cmds.map((c) => c.words.join(' ')).join('; ') + ')'
+    return r.end
+  }
+  const backtick = (j) => {
+    let k = j + 1
+    while (k < s.length && s[k] !== '`') k += s[k] === '\\' ? 2 : 1
+    const inner = s.slice(j + 1, k).replace(/\\`/g, '`')
+    const r = depth < 4 ? lex(inner, 0, null, depth + 1) : { cmds: [] }
+    cmds.push(...r.cmds)
+    tok = (tok ?? '') + '$(' + r.cmds.map((c) => c.words.join(' ')).join('; ') + ')'
+    return Math.min(k, s.length)
+  }
+  const bodies = (i) => {
+    // i is the newline that ends the line the heredocs were opened on; returns the last index consumed.
+    let pos = i + 1
+    for (const h of pending) {
+      const lines = []
+      for (;;) {
+        if (pos >= s.length) break
+        const nl = s.indexOf('\n', pos)
+        const line = s.slice(pos, nl < 0 ? s.length : nl)
+        pos = nl < 0 ? s.length : nl + 1
+        if ((h.strip ? line.replace(/^\t+/, '') : line) === h.delim) break
+        lines.push(line)
+      }
+      h.cmd.stdin = lines.join('\n')
+    }
+    pending.length = 0
+    return pos - 1
+  }
+  let i = at
+  for (; i < s.length; i++) {
+    const c = s[i]
+    if (c === "'" || (c === '$' && s[i + 1] === "'")) {
+      if (c === '$') i++
+      const j = s.indexOf("'", i + 1)
+      tok = (tok ?? '') + s.slice(i + 1, j < 0 ? s.length : j)
+      i = j < 0 ? s.length : j
+    } else if (c === '"') {
+      tok = tok ?? ''
+      let j = i + 1
+      for (; j < s.length && s[j] !== '"'; j++) {
+        if (s[j] === '\\' && j + 1 < s.length) {
+          const n = s[++j]
+          if (n === '\n') continue
+          tok += '$`"\\'.includes(n) ? n : '\\' + n
+        } else if (s[j] === '$' && s[j + 1] === '(' && s[j + 2] !== '(') j = nested(j + 2, ')')
+        else if (s[j] === '`') j = backtick(j)
+        else tok += s[j]
+      }
+      i = j
+    } else if (c === '\\' && i + 1 < s.length) {
+      if (s[i + 1] !== '\n') tok = (tok ?? '') + s[i + 1]
+      i++
+    } else if (c === ' ' || c === '\t' || c === '\r') word()
+    else if (c === '\n') {
+      cut()
+      if (pending.length) i = bodies(i)
+    } else if (c === '#' && tok === null) {
+      while (i + 1 < s.length && s[i + 1] !== '\n') i++
+    } else if (c === ')' && closer === ')' && parens === 0) {
+      cut()
+      return { cmds, end: i }
+    } else if (c === '$' && s[i + 1] === '(' && s[i + 2] === '(') {
+      // arithmetic: text, never a command
+      let d = 0
+      let j = i + 1
+      for (; j < s.length; j++) {
+        if (s[j] === '(') d++
+        else if (s[j] === ')' && --d === 0) break
+      }
+      tok = (tok ?? '') + s.slice(i, j + 1)
+      i = j
+    } else if (c === '$' && s[i + 1] === '(') i = nested(i + 2, ')')
+    else if (c === '`') i = backtick(i)
+    else if ((c === '<' || c === '>') && s[i + 1] === '(') {
+      word()
+      i = nested(i + 2, ')')
+    } else if (c === '<' || c === '>' || (c === '&' && s[i + 1] === '>')) {
+      if (tok !== null && /^\d+$/.test(tok)) tok = null // the fd in 2>
+      else word()
+      if (c === '<' && s.startsWith('<<<', i)) {
+        target = 'stdin'
+        i += 2
+      } else if (c === '<' && s[i + 1] === '<') {
+        target = s[i + 2] === '-' ? 'heredoc-' : 'heredoc'
+        i += s[i + 2] === '-' ? 2 : 1
+      } else {
+        const out = c === '>' || c === '&' // '>' / '>>' / '&>' write a file; '<' is a read
+        while ('<>&|'.includes(s[i + 1] ?? '') && s[i + 1] !== undefined) i++
+        target = out ? 'redir' : 'drop'
+      }
+    } else if ('\n;&|()'.includes(c)) {
+      if (c === '(' && closer) parens++
+      else if (c === ')' && parens) parens--
+      const pipe = c === '|' && s[i + 1] !== '|' // `|` / `|&` feed the next command; `||` does not
+      if (c === '|' && (s[i + 1] === '|' || s[i + 1] === '&')) i++
+      cut()
+      if (pipe) cmd.piped = true
+    } else tok = (tok ?? '') + c
+  }
+  cut()
+  return { cmds, end: i }
+}
+
+
+export const base = (w) => String(w ?? '').split('/').pop()
+
+export const ASSIGN = /^([A-Za-z_][A-Za-z0-9_]*)=(.*)$/s
+
+const expand = (w, vars) => w.replace(/\$\{([A-Za-z_][A-Za-z0-9_]*)\}|\$([A-Za-z_][A-Za-z0-9_]*)/g, (m, a, b) => vars.get(a ?? b) ?? m)
+
+
+// Wrappers in front of the real program, and their options that take a value. `timeout` also takes a duration.
+// An object entry says more: `c`, its options whose value is a shell line it runs (flock -c, script -c); `skip`,
+// the positionals before the program (flock's lock file, script's log file, ssh's host); `line`, that it runs the
+// rest as one shell line (watch, ssh). `par`: GNU parallel, whose `:::` arguments complete the command.
+const WRAP = {
+  command: [], builtin: [], exec: ['-a'], nohup: [], time: ['-f', '--format', '-o', '--output'],
+  sudo: ['-u', '-g', '-h', '-p', '-C', '-D', '-r', '-t', '-U', '-T', '-R', '--user', '--group', '--host', '--prompt', '--chdir', '--role', '--type', '--other-user', '--command-timeout', '--close-from'],
+  env: ['-u', '--unset', '-C', '--chdir', '-S', '--split-string'],
+  nice: ['-n', '--adjustment'],
+  timeout: ['-s', '--signal', '-k', '--kill-after'],
+  xargs: ['-I', '-L', '-l', '-n', '-P', '-s', '-d', '-E', '-e', '-a', '--arg-file', '--delimiter', '--max-args', '--max-procs', '--max-lines', '--max-chars', '--eof', '--replace', '--process-slot-var'],
+  caffeinate: ['-t', '-w'], stdbuf: ['-i', '-o', '-e', '--input', '--output', '--error'], arch: ['-arch', '-d', '-e'],
+  coproc: [], doas: ['-u', '-C'], setsid: [], unbuffer: [], chronic: [], nocorrect: [], noglob: [], xcrun: ['--sdk', '--toolchain'],
+  ionice: ['-c', '-n', '-p', '--class', '--classdata'],
+  script: { opts: ['-t', '-T', '-O', '-I', '-B', '-E', '-o', '--timing', '--log-out', '--log-in', '--log-io', '--log-timing', '--echo', '--output-limit'], c: ['-c', '--command'], skip: 1 },
+  flock: { opts: ['-w', '--wait', '--timeout', '-E', '--conflict-exit-code'], c: ['-c', '--command'], skip: 1 },
+  watch: { opts: ['-n', '--interval', '-q', '--equexit'], line: true },
+  ssh: { opts: ['-b', '-c', '-D', '-E', '-e', '-F', '-I', '-i', '-J', '-L', '-l', '-m', '-O', '-o', '-p', '-Q', '-R', '-S', '-W', '-w', '-B'], skip: 1, line: true },
+  parallel: { opts: ['-j', '--jobs', '-S', '--sshlogin', '--sshloginfile', '-a', '--arg-file', '-d', '--delimiter', '-I', '--replace', '-n', '--max-args', '-N', '--colsep', '-C', '--tmpdir', '--results', '--timeout', '--delay', '--retries', '--joblog', '-E', '--eof'], par: true },
+}
+
+const KEYWORDS = new Set(['then', 'do', 'else', 'elif', 'if', 'while', 'until', '!', '{', '}'])
+
+
+// words → { words, dir, inner, env }: the program's own words, a directory a wrapper moved to (env -C, sudo -D),
+// a line a wrapper runs as a shell line (env -S), and the variables set in front of it (GH_REPO=… gh, env K=V).
+function unwrap(words) {
+  let i = 0
+  let dir = null
+  let inner = null
+  let viaXargs = false
+  const env = new Map()
+  while (i < words.length) {
+    const w = words[i]
+    const p = base(w)
+    if (ASSIGN.test(w) || KEYWORDS.has(w)) {
+      const m = ASSIGN.exec(w)
+      if (m) env.set(m[1], m[2])
+      i++
+      continue
+    }
+    const spec = Object.hasOwn(WRAP, p) ? WRAP[p] : null
+    if (!spec) break
+    if (p === 'xargs') viaXargs = true // the stripped program reads its own arguments from stdin
+    const opts = Array.isArray(spec) ? spec : spec.opts
+    i++
+    if (p === 'command' && /^-[a-zA-Z]*[vV]/.test(words[i] ?? '')) return { words: [], dir, inner, env } // a lookup, not a run
+    if (p === 'coproc' && /^[A-Za-z_]\w*$/.test(words[i] ?? '') && words[i + 1] === '{') i++ // coproc NAME { … }
+    while (i < words.length && words[i].startsWith('-') && words[i] !== '-') {
+      const o = words[i]
+      if (o === '--') {
+        i++
+        break
+      }
+      const [k, v] = o.startsWith('--') && o.includes('=') ? [o.slice(0, o.indexOf('=')), o.slice(o.indexOf('=') + 1)] : [o, undefined]
+      const takes = opts.includes(k)
+      // A cluster of one-letter flags (env -iC /w, sudo -nu bob): the first letter that takes a value ends it,
+      // its value the rest of the word or the next one.
+      const at = !takes && /^-[a-zA-Z]/.test(o) && !o.startsWith('--') ? [...o.slice(1)].findIndex((ch) => opts.includes('-' + ch)) + 1 : 0
+      const rest = at > 0 ? o.slice(at + 1) : ''
+      const val = takes ? (v ?? words[i + 1]) : at > 0 ? rest || words[i + 1] : undefined
+      const flag = takes ? k : at > 0 ? '-' + o[at] : o.slice(0, 2)
+      if (at > 0 && !rest) i++
+      if ((flag === '-C' || flag === '--chdir') && (p === 'env' || p === 'sudo')) dir = val ?? null
+      if (flag === '-D' && p === 'sudo') dir = val ?? null
+      if ((flag === '-S' || flag === '--split-string') && p === 'env') inner = val ?? null
+      if (spec.c?.includes(k)) return { words: [], dir, inner: v ?? words[i + 1] ?? '', env }
+      if (/^-[a-zA-Z]{2,}$/.test(o) && spec.c?.some((f) => f.length === 2 && o.endsWith(f[1]))) return { words: [], dir, inner: words[i + 1] ?? '', env } // -qc '…'
+      i += takes && v === undefined ? 2 : 1
+    }
+    if (p === 'timeout' && i < words.length) i++ // the duration
+    if (spec.skip) i += spec.skip
+    if (spec.c?.includes(words[i])) return { words: [], dir, inner: words[i + 1] ?? '', env } // flock <file> -c '…'
+    if (spec.line) return { words: [], dir, inner: words.slice(i).join(' '), env }
+    if (spec.par) return { ...parallelRun(words.slice(i)), dir, env, viaXargs }
+  }
+  return { words: words.slice(i), dir, inner, env, viaXargs }
+}
+
+
+// GNU parallel's command and its `:::` arguments → the shell lines it runs (one per argument; with no command,
+// each argument is a line of its own). With no `:::` the command reads its arguments from stdin, as xargs does.
+function parallelRun(words) {
+  const k = words.findIndex((w) => /^:::+\+?$/.test(w))
+  if (k < 0) return { words, inner: null }
+  const cmd = words.slice(0, k).join(' ')
+  const args = words.slice(k + 1).filter((w) => !/^:::+\+?$/.test(w))
+  const lines = args.map((a) => (!cmd ? a : cmd.includes('{}') ? cmd.split('{}').join(a) : cmd + ' ' + a))
+  return { words: [], inner: lines.join('\n') }
+}
+
+
+// A shell that runs a line it is handed: `bash -c '…'`, `eval …`, or a heredoc/here-string fed to a shell.
+export const SHELLS = ['bash', 'sh', 'zsh', 'dash', 'ksh', 'fish']
+
+function innerLine(words, stdin) {
+  const p = base(words[0])
+  if (SHELLS.includes(p)) {
+    const k = words.findIndex((w, n) => n > 0 && (/^-[a-z]*c[a-z]*$/.test(w) || w === '--command'))
+    if (k > 0) return words[k + 1] ?? null
+    const long = words.find((w) => w.startsWith('--command='))
+    if (long) return long.slice(10)
+    if (stdin !== null && !words.slice(1).some((w) => !w.startsWith('-'))) return stdin
+    return null
+  }
+  if (p === 'eval') return words.slice(1).join(' ')
+  return null
+}
+
+
+// The simple commands of a line, wrappers stripped and variables set earlier in it expanded:
+// [{ words, dir, env, stdin, redirects, piped, viaXargs }] — env being what the command sees set on this line
+// (earlier assignments and exports, and its own prefix); redirects the output files it writes (`>`/`>>`/`tee`-like
+// are read from the words); piped whether a `|` feeds it; viaXargs whether xargs appends its arguments from stdin.
+export function commands(line, depth = 0, vars = new Map()) {
+  const out = []
+  for (const c of lex(String(line ?? '')).cmds) {
+    const words = c.words.map((w) => expand(w, vars))
+    const lead = words[0] === 'export' || words[0] === 'local' || words[0] === 'declare' || words[0] === 'readonly' ? 1 : 0
+    if (words.length > lead && words.slice(lead).every((w) => ASSIGN.test(w) || (lead && /^-/.test(w)))) {
+      for (const w of words.slice(lead)) {
+        const m = ASSIGN.exec(w)
+        if (m) vars.set(m[1], m[2])
+      }
+      continue
+    }
+    take(words, c.stdin, (c.redirects ?? []).map((w) => expand(w, vars)), !!c.piped)
+  }
+  // One simple command's words: wrappers stripped, a line it runs read as commands, `find -exec … ;` segments too.
+  function take(words, stdin, redirects = [], piped = false) {
+    const u = unwrap(words)
+    const env = new Map([...vars, ...u.env])
+    const inner = depth < 3 ? (u.inner ?? innerLine(u.words, stdin)) : null
+    if (inner !== null && inner !== undefined) out.push(...commands(inner, depth + 1, base(u.words[0]) === 'eval' ? vars : env))
+    else if (u.words.length) out.push({ words: u.words, dir: u.dir, env, stdin, redirects, piped, viaXargs: u.viaXargs })
+    if (base(u.words[0]) === 'find' && depth < 3) {
+      for (let k = 1; k < u.words.length; k++) {
+        if (!['-exec', '-execdir', '-ok', '-okdir'].includes(u.words[k])) continue
+        const end = u.words.findIndex((x, n) => n > k && (x === ';' || x === '+'))
+        const seg = u.words.slice(k + 1, end < 0 ? u.words.length : end)
+        if (seg.length) take(seg, null)
+        k = end < 0 ? u.words.length : end
+      }
+    }
+  }
+  return out
+}
+
+
+export function splitCommands(line) {
+  return commands(line).map((c) => c.words)
+}
+
+
+// git's own options before the subcommand: -C <dir> is where it runs. `unknown`: a dir it names through a
+// variable, which cannot be read here. `cfg`: the config keys -c / --config-env set for this one call.
+const GIT_VALUE_OPTS = new Set(['-C', '-c', '--git-dir', '--work-tree', '--namespace', '--exec-path', '--config-env', '--super-prefix'])
+
+export function gitCall(words) {
+  if (!['git', 'hub'].includes(base(words[0]))) return null
+  let dir = null
+  let unknown = false
+  const cfg = []
+  let i = 1
+  while (i < words.length && words[i].startsWith('-')) {
+    const w = words[i]
+    const eq = w.indexOf('=')
+    const k = w.startsWith('--') && eq > 0 ? w.slice(0, eq) : w
+    if (GIT_VALUE_OPTS.has(k)) {
+      const v = k === w ? words[i + 1] ?? '' : w.slice(eq + 1)
+      if (k === '-C') dir = dir ? joinPath(dir, v) : v
+      if (k === '--work-tree' || k === '--git-dir') dir = k === '--git-dir' ? v.replace(/\/\.git\/?$/, '') || v : v
+      if ((k === '-C' || k === '--work-tree' || k === '--git-dir') && /[$`~]/.test(v)) unknown = true
+      if (k === '-c' || k === '--config-env') cfg.push(v.split('=')[0].toLowerCase())
+      i += k === w ? 2 : 1
+    } else i++
+  }
+  return i < words.length ? { sub: words[i], args: words.slice(i + 1), dir, unknown, cfg } : null
+}
+
+
+const TAG_LIST = new Set(['-l', '--list', '-n', '--contains', '--no-contains', '--merged', '--no-merged', '--points-at', '--column', '--no-column', '--format', '--sort', '-i', '--ignore-case', '--omit-empty', '--color'])
+
+const TAG_LISTS = new Set(['-l', '--list', '--contains', '--no-contains', '--merged', '--no-merged', '--points-at'])
+
+const TAG_MAKES = /^(-[a-zA-Z]*[asudfmFe]|--(annotate|sign|local-user|delete|force|message|file|edit|cleanup|create-reflog|trailer))/
+
+function tagListing(args) {
+  if (!args.length) return true
+  const flag = (w) => w.split('=')[0]
+  if (args.every((w) => TAG_LIST.has(flag(w)))) return true
+  // -l, --contains and the like put git tag in list mode; its positionals are then patterns or commits.
+  return args.some((w) => TAG_LISTS.has(flag(w)) || /^-n\d*$/.test(w)) && !args.some((w) => TAG_MAKES.test(w) && !TAG_LIST.has(flag(w)))
+}
+
+
+// `git push …` args → what it would push.
+function parsePush(args) {
+  const p = { remote: null, specs: [], force: false, del: false, bulk: null, dry: false, mergeOpt: false }
+  let rest = false
+  let positional = 0
+  const opt = (v) => { if (/merge_when_pipeline_succeeds|auto_merge/i.test(v ?? '')) p.mergeOpt = true }
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i]
+    if (!rest && a === '--') rest = true
+    else if (!rest && a.startsWith('--')) {
+      const eq = a.indexOf('=')
+      const k = eq > 0 ? a.slice(0, eq) : a
+      const v = eq > 0 ? a.slice(eq + 1) : undefined
+      if (k === '--repo') p.remote = v ?? args[++i] ?? null
+      else if (k === '--push-option') opt(v ?? args[++i])
+      else if (k === '--receive-pack' || k === '--exec') { if (v === undefined) i++ }
+      else if (k.startsWith('--force')) p.force = true
+      else if (k === '--delete') p.del = true
+      else if (['--all', '--branches', '--mirror', '--tags', '--follow-tags', '--prune'].includes(k)) p.bulk = k
+      else if (k === '--dry-run') p.dry = true
+    } else if (!rest && /^-[^-]/.test(a)) {
+      for (let j = 1; j < a.length; j++) {
+        if (a[j] === 'f') p.force = true
+        else if (a[j] === 'd') p.del = true
+        else if (a[j] === 'n') p.dry = true
+        else if (a[j] === 'o') {
+          opt(a.slice(j + 1) || args[++i])
+          break
+        }
+      }
+    } else if (positional++ === 0) p.remote = a
+    else p.specs.push(a)
+  }
+  return p
+}
+
+
+function cdTo(here, args) {
+  const a = args.find((x) => !/^-[LPe@]+$/.test(x))
+  if (a === undefined || a === '-' || /[$`~]/.test(a)) return null
+  if (a.startsWith('/')) return joinPath('/', a)
+  return here ? joinPath(here, a) : null
+}
+
+
+// A git step that moves HEAD (or the branch it names): a later push on the same line cannot read HEAD from
+// the repo as it was before the line ran. `git checkout <ref> -- <paths>` restores files and moves nothing.
+const MOVES_BRANCH = /^-[a-zA-Z]*[fmM]|^--(force|move)$/
+
+function movesHead(g) {
+  const a = g.args
+  const pos = a.filter((x) => !x.startsWith('-'))
+  if (g.sub === 'checkout') return !a.includes('--')
+  if (g.sub === 'switch' || g.sub === 'reset' || g.sub === 'bisect') return true
+  if (g.sub === 'branch') return a.some((x) => MOVES_BRANCH.test(x))
+  if (g.sub === 'symbolic-ref' || g.sub === 'update-ref') return pos[0] === 'HEAD' && (pos.length > 1 || a.includes('--stdin'))
+  if (g.sub === 'rebase') return pos.length > 1
+  return false
+}
+
+
+// A git command that rewrites a branch's history in place: merge and reset --hard/--merge/--keep update the branch
+// checked out (curBranch, tracked along the line, or null to read HEAD); rebase <upstream> <branch> rewrites the
+// named branch; branch -f/-M writes the branch it names. Returns that branch (or null to read HEAD), or undefined
+// when the subcommand is not one of these. guardLine judges a base-branch rewrite below auto.
+function localWrite(g, curBranch) {
+  const pos = g.args.filter((x) => !x.startsWith('-'))
+  const settled = (x) => x && !/[$`]/.test(x)
+  if (g.sub === 'merge') return g.args.some((x) => /^--(abort|continue|quit|skip)$/.test(x)) ? undefined : curBranch
+  if (g.sub === 'rebase') {
+    if (g.args.some((x) => /^--(abort|continue|quit|skip|edit-todo|show-current-patch)$/.test(x))) return undefined
+    return pos.length > 1 ? (settled(pos[1]) ? pos[1] : null) : curBranch
+  }
+  if (g.sub === 'reset' && g.args.some((x) => x === '--hard' || x === '--merge' || x === '--keep')) return curBranch
+  if (g.sub === 'branch') {
+    // -f/-B force-write pos[0]; -m/-M rename, the new name being the last positional.
+    if (g.args.some((x) => x === '--force' || /^-[a-zA-Z]*[fB]/.test(x))) return settled(pos[0]) ? pos[0] : null
+    if (g.args.some((x) => x === '--move' || /^-[a-zA-Z]*[mM]/.test(x))) return pos.length ? (settled(pos[pos.length - 1]) ? pos[pos.length - 1] : null) : undefined
+  }
+  return undefined
+}
+
+
+// The branch a `git checkout`/`switch` on the line leaves checked out (so a later merge/reset here is judged
+// against it): its first positional, null when a variable names it, undefined when it moves no branch.
+function checkoutTarget(g) {
+  if (g.sub !== 'checkout' && g.sub !== 'switch') return undefined
+  if (g.args.includes('--')) return undefined // checkout -- <paths>: restores files, no branch change
+  const name = g.args.filter((x) => !x.startsWith('-'))[0]
+  if (name === undefined) return undefined
+  return /[$`]/.test(name) ? null : name
+}
+
+
+// `git update-ref <ref> <value>` / `git symbolic-ref <ref> <target>`: the ref it writes (or deletes), when that is a
+// tag, a branch, HEAD or unreadable (--stdin); null for a read or another ref. guardLine judges a branch against
+// the repo's bases.
+function refWrite(g) {
+  if (g.sub !== 'update-ref' && g.sub !== 'symbolic-ref') return null
+  if (g.sub === 'update-ref' && g.args.includes('--stdin')) return '--stdin'
+  const pos = []
+  for (let i = 0; i < g.args.length; i++) {
+    if (g.args[i] === '-m') i++
+    else if (!g.args[i].startsWith('-')) pos.push(g.args[i])
+  }
+  const del = g.args.some((x) => x === '-d' || x === '--delete')
+  if (!pos.length || (pos.length < 2 && !del)) return null
+  const refs = g.sub === 'symbolic-ref' ? pos.slice(0, 2) : [pos[0]]
+  return refs.find((r) => /^refs\/(tags|heads)\//.test(r) || r === 'HEAD' || /[$`]/.test(r)) ?? null
+}
+
+
+// Config keys that change where a push goes: a remote's URL, its rewriting, a branch's push remote, an include.
+const REMOTE_CFG = /^(remote|url|branch|include|includeif)\./i
+
+// GIT_CONFIG_KEY_<n> and GIT_CONFIG_PARAMETERS set config for one call, as -c does.
+function envCfg(env) {
+  const keys = []
+  for (const [k, v] of env ?? []) {
+    if (/^GIT_CONFIG_KEY_\d+$/.test(k)) keys.push(String(v).toLowerCase())
+    if (k === 'GIT_CONFIG_PARAMETERS') for (const m of String(v).matchAll(/'([^'=]+)'?=/g)) keys.push(m[1].toLowerCase())
+  }
+  return keys
+}
+
+
+// Interpreters and the flags whose value is code they run. python3.N, pypyN, rubyN and perlN map to their base.
+const INTERP = {
+  python: ['-c'], python3: ['-c'], python2: ['-c'], pypy: ['-c'], pypy3: ['-c'],
+  node: ['-e', '--eval', '-p', '--print'], nodejs: ['-e', '--eval', '-p', '--print'], bun: ['-e', '--eval', '-p', '--print'], deno: ['eval'],
+  perl: ['-e', '-E'], ruby: ['-e'], php: ['-r'], lua: ['-e'], Rscript: ['-e'], osascript: ['-e'], expect: ['-c'],
+  awk: [], gawk: [], mawk: [], tclsh: [], swift: [],
+}
+
+const AWK = new Set(['awk', 'gawk', 'mawk'])
+
+// The interpreter a program name resolves to (python3.12 → python3, pypy3 → python3, ruby3.2 → ruby), or null.
+function interpKey(p) {
+  if (Object.hasOwn(INTERP, p)) return p
+  if (/^python\d+(\.\d+)?$/.test(p) || /^pypy\d*$/.test(p)) return 'python3'
+  if (/^ruby\d/.test(p)) return 'ruby'
+  if (/^perl\d/.test(p)) return 'perl'
+  return null
+}
+
+// Code that mentions a tool which can push, merge, tag or release.
+export const MENTIONS_TOOL = /(^|[^\w.-])(git|gh|hub|curl|wget)([^\w.-]|$)|api\.github\.com|\/api\/v3\//
+
+// A call that spawns a process: interpreter code can reach git, gh or curl through one however it is spelled.
+const SPAWN_CALL = /\bsystem\s*\(|\bsubprocess\b|\bos\.system\b|\bos\.exec|\bos\.popen\b|\bexecSync\b|\bexecFileSync\b|\bspawnSync\b|\bchild_process\b|\bpopen\s*\(|\bProcess\s*\(|Runtime\.getRuntime|\bposix_spawn\b|do shell script/i
+
+// The tool name squeezed out of quotes and concatenation, so `'g'+'it'`, `"g" "it"` and `g\it` still read as git.
+const squish = (code) => String(code ?? '').replace(/['"\\+]|\s+/g, '')
+
+// Interpreter code the reader must refuse below auto: it names a tool (even split up) or spawns a process at all,
+// since the run can reach git, gh or curl through that call.
+function riskyCode(code) {
+  const s = String(code ?? '')
+  return MENTIONS_TOOL.test(s) || MENTIONS_TOOL.test(squish(s)) || SPAWN_CALL.test(s)
+}
+
+// Interpreter code that names the trust root or the repo's own git state: it may write them directly.
+const PROTECT_IN_CODE = /\.agentille\/|\.git\/config|\.git\/hooks|\.git\/refs|\.git\/info|packed-refs/
+
+// A script that pushes, merges, tags or releases: per line, git with push/merge/tag/send-pack/update-ref, gh or
+// hub with a merge, release, api or alias, curl or wget at GitHub.
+export const SCRIPT_RISK = /\bgit\b[^\n]*\b(push|merge|tag|send-pack|update-ref)\b|\b(gh|hub)\b[^\n]*\b(merge|release|api|alias)\b|\b(curl|wget)\b[^\n]*github|api\.github\.com/
+
+// A make target's recipe that does: push, merge, tag or release named in it.
+export const MAKE_RISK = /\b(push|merge|tag|release)\b/
+
+// System binaries are programs, not scripts of the run's: never read.
+const SYSTEM_BIN = /^\/(usr|bin|sbin|opt|System|Library|nix)\//
+
+const SHELL_VALUE_OPTS = new Set(['-o', '-O', '--rcfile', '--init-file', '-C', '--init-command'])
+
+// Package managers whose `run <script>` the reader reads from package.json; task runners read from their recipe
+// file; openers it cannot introspect are refused below auto.
+const PKG_FILE = { npm: 'package.json', pnpm: 'package.json', yarn: 'package.json', bun: 'package.json' }
+
+const RUNNER_FILE = { just: 'justfile', task: 'Taskfile.yml', rake: 'Rakefile' }
+
+const OPAQUE_RUNNER = /^(npx|bunx|mise|docker|docker-compose|podman|podman-compose)$/
+
+
+// A package-manager invocation → { script, what } to read, { deny, what } to refuse, or null when it is not a
+// script-running form (install, a builtin, a bare shorthand): those are left alone.
+function pkgScript(p, args) {
+  const pos = args.filter((x) => !x.startsWith('-'))
+  const sub = pos[0]
+  if (sub === 'exec' || sub === 'dlx' || sub === 'x') return { deny: true, what: p + ' ' + sub + ' runs a package the guard cannot read' }
+  if ((sub === 'run' || sub === 'run-script') && pos[1]) return { script: pos[1], what: p + ' run ' + pos[1] }
+  return null
+}
+
+
+// A run of code the reader cannot follow: an interpreter's code string → { kind: 'hidden' } when it reaches a
+// tool or spawns a process; a script file, a sourced file, a package script or a make target → { kind: 'file' }
+// for guardLine to read; an opener it cannot introspect → { kind: 'hidden' }.
+function codeStep(w, here, stdin = null, piped = false) {
+  const p = base(w[0])
+  const at = (f) => (/[$`]/.test(f) ? null : f.startsWith('~/') ? null : f.startsWith('/') ? joinPath('/', f) : here ? joinPath(here, f) : null)
+  const file = (f, what) => ({ kind: 'file', how: 'script', what, path: at(f), dir: here, slug: null })
+  const hidden = (what) => ({ kind: 'hidden', what, dir: here, slug: null })
+  const protect = (what) => ({ kind: 'protected', what, dir: here, slug: null })
+  // Interpreter code → a protected-write deny (it names the trust root or git state), a hidden deny (it reaches
+  // a tool or spawns), or null.
+  const judgeCode = (code, label) => (PROTECT_IN_CODE.test(String(code ?? '')) ? protect('the trust root or repo git state (named in ' + p + ' ' + label + ')') : riskyCode(code) ? hidden(p + ' ' + label + ' runs code that reaches git, gh or curl') : null)
+  const ik = interpKey(p)
+  if (ik) {
+    const flags = INTERP[ik]
+    const k = w.findIndex((x, n) => n > 0 && (flags.includes(x) || flags.some((f) => f.startsWith('-') && f.length === 2 && x.startsWith(f) && x.length > 2 && !x.startsWith('--'))))
+    if (k > 0) {
+      const code = flags.includes(w[k]) ? w[k + 1] ?? '' : w[k].slice(2)
+      return judgeCode(code, flags.includes(w[k]) ? w[k] : w[k].slice(0, 2))
+    }
+    // awk's program is its first positional (a `-f` file is read instead).
+    if (AWK.has(ik)) {
+      const fi = w.findIndex((x, n) => n > 0 && (x === '-f' || x.startsWith('--file')))
+      if (fi > 0) {
+        const f = w[fi].includes('=') ? w[fi].split('=')[1] : w[fi + 1]
+        return f ? file(f, p + ' -f ' + f) : null
+      }
+      const prog = w.slice(1).find((x) => !x.startsWith('-'))
+      return prog ? judgeCode(prog, 'program') : null
+    }
+    // No code flag: the first positional is a script file (a pipe into it is data), else it reads code from stdin.
+    const pos = w.slice(1).filter((x) => !x.startsWith('-') || x === '-')
+    const f = pos.find((x) => x !== '-')
+    if (f && !pos.includes('-')) return /(^|\/)node_modules\//.test(f) ? null : file(f, p + ' ' + f)
+    if (stdin != null && !piped) return judgeCode(stdin, 'stdin')
+    return hidden(p + ' runs code from stdin that the guard cannot read')
+  }
+  if (SHELLS.includes(p)) {
+    const hasS = w.some((x, n) => n > 0 && !x.startsWith('--') && /^-[a-z]*s/.test(x))
+    for (let i = 1; i < w.length; i++) {
+      if (SHELL_VALUE_OPTS.has(w[i])) i++
+      else if (!w[i].startsWith('-') && !w[i].startsWith('+')) return file(w[i], p + ' ' + w[i])
+    }
+    return piped || hasS ? hidden(p + ' runs code from stdin that the guard cannot read') : null
+  }
+  if ((p === 'source' || w[0] === '.') && w[1]) return file(w[1], w[0] + ' ' + w[1])
+  if (Object.hasOwn(PKG_FILE, p)) {
+    const r = pkgScript(p, w.slice(1))
+    if (!r) return null // not a script-running form (install, a builtin): left alone
+    if (r.deny) return hidden(r.what)
+    return { kind: 'file', how: 'pkg', what: r.what, script: r.script, path: here ? joinPath(here, PKG_FILE[p]) : null, dir: here, slug: null }
+  }
+  if (Object.hasOwn(RUNNER_FILE, p)) {
+    const t = w.slice(1).filter((x) => !x.startsWith('-'))
+    return { kind: 'file', how: 'runner', what: p + (t.length ? ' ' + t.join(' ') : ''), path: here ? joinPath(here, RUNNER_FILE[p]) : null, dir: here, slug: null }
+  }
+  if (p === 'cargo' && w[1] === 'make') return hidden('cargo make runs a task the guard cannot read')
+  if (OPAQUE_RUNNER.test(p)) {
+    const sub = w.find((x, n) => n > 0 && !x.startsWith('-'))
+    if (/^(docker|podman)/.test(p) && !['run', 'exec', 'compose', 'start'].includes(sub ?? '')) return null
+    return hidden(p + (sub ? ' ' + sub : '') + ' runs a container or package the guard cannot read')
+  }
+  if (p === 'make' || p === 'gmake') {
+    let dir = here
+    let mf = null
+    const targets = []
+    for (let i = 1; i < w.length; i++) {
+      const a = w[i]
+      const val = () => (a.length > 2 && !a.startsWith('--') ? a.slice(2) : a.includes('=') ? a.slice(a.indexOf('=') + 1) : w[++i] ?? '')
+      if (a === '-C' || a.startsWith('--directory') || /^-C./.test(a)) {
+        const d = val()
+        dir = /[$`~]/.test(d) ? null : d.startsWith('/') ? joinPath('/', d) : dir && joinPath(dir, d)
+      } else if (a === '-f' || a.startsWith('--file') || a.startsWith('--makefile') || /^-f./.test(a)) mf = val()
+      else if (['-I', '-o', '-W', '--include-dir', '--old-file', '--what-if'].includes(a)) i++
+      else if (!a.startsWith('-') && !ASSIGN.test(a)) targets.push(a)
+    }
+    const files = mf ? [mf] : ['GNUmakefile', 'makefile', 'Makefile']
+    const paths = dir ? files.map((f) => (/[$`]/.test(f) ? null : f.startsWith('/') ? joinPath('/', f) : joinPath(dir, f))) : [null]
+    return { kind: 'file', how: 'make', what: 'make' + (targets.length ? ' ' + targets.join(' ') : ''), paths, targets, dir, slug: null }
+  }
+  if (w[0].includes('/') && !SYSTEM_BIN.test(w[0])) return file(w[0], w[0])
+  return null
+}
+
+
+// A line → its integration candidates, each with the dir it runs in (cd, pushd, git -C, env -C followed).
+export function commandSteps(line, cwd = null) {
+  const out = []
+  let here = cwd
+  let moved = false // a step before this one switched branches, in any dir
+  let edited = false // a step before this one changed a remote or its config: a later push's target is unknown
+  let ghEdited = false // … or gh's default repo: a later gh call's target is unknown
+  let curBranch = null // the branch a checkout/switch on the line left behind: what a later merge/reset writes
+  const aliases = new Map() // shell aliases defined earlier on the line (alias g=git): the program word is expanded
+  for (const c of commands(line)) {
+    let w = c.words
+    let p = base(w[0])
+    if (p === 'alias') {
+      for (const a of w.slice(1)) { const m = /^([^=]+)=(.*)$/s.exec(a); if (m && m[2]) aliases.set(m[1], m[2]) }
+      continue
+    }
+    if (aliases.has(p)) { w = [...aliases.get(p).split(/\s+/).filter(Boolean), ...w.slice(1)]; p = base(w[0]) }
+    if (p === 'cd' || p === 'pushd') {
+      here = cdTo(here, w.slice(1))
+      continue
+    }
+    if (p === 'popd') {
+      here = null
+      continue
+    }
+    const at = c.dir ? (/[$`~]/.test(c.dir) ? null : c.dir.startsWith('/') ? joinPath('/', c.dir) : here && joinPath(here, c.dir)) : here
+    // A write into the trust root or the repo's own git state: redirects (`>`/`>>`) and tee/cp/mv/ln/sed -i/… targets.
+    for (const t of [...(c.redirects ?? []), ...writeTargets(w)]) {
+      const abs = t.startsWith('/') ? joinPath('/', t) : !/[$`~]/.test(t) && at ? joinPath(at, t) : null
+      const lbl = protectedPath(t, abs)
+      if (lbl) out.push({ kind: 'protected', what: lbl, dir: at, slug: null })
+    }
+    // A tool whose subcommand and arguments xargs appends from stdin cannot be read: fail closed below auto.
+    if (c.viaXargs && ['git', 'gh', 'hub', 'curl', 'wget'].includes(p)) {
+      out.push({ kind: 'hidden', what: p + ' takes its subcommand or arguments from xargs, which the guard cannot read', dir: at, slug: null })
+      continue
+    }
+    if (p === 'gh' || p === 'hub') {
+      // A subcommand word built by a substitution or an unresolved expansion cannot be read.
+      const sub = w.slice(1).filter((x) => !x.startsWith('-')).slice(0, 2)
+      if (sub.some((x) => /[$`]/.test(x))) { out.push({ kind: 'hidden', what: p + ' runs a subcommand the guard cannot read', dir: at, slug: null }); continue }
+      // hub is gh's elder: the same release and api steps, `pull-request` for a PR, and git's own commands.
+      const k = p === 'hub' && w[1] === 'pull-request' ? { kind: 'pr', what: 'hub pull-request', dir: at, slug: null } : ghStep(w, at, c.env)
+      if (k) out.push({ ...k, gh: true, slugUnknown: ghEdited })
+      if (w.includes('set-default') && w.includes('repo')) ghEdited = true
+      if (w.includes('checkout') && w.includes('pr')) moved = true
+    }
+    if (p === 'curl' || p === 'wget') {
+      const k = httpStep(w, at)
+      if (k) out.push(k)
+    } else if (p !== 'gh' && p !== 'git' && p !== 'hub') {
+      const k = codeStep(w, at, c.stdin, c.piped)
+      if (k) out.push(k)
+    } else if (p !== 'gh') {
+      const g = gitCall(w)
+      if (!g) continue
+      // A subcommand word built by a substitution or an unresolved expansion cannot be read.
+      if (/[$`]/.test(String(g.sub ?? ''))) { out.push({ kind: 'hidden', what: 'git runs a subcommand the guard cannot read', dir: at, slug: null }); continue }
+      // GIT_DIR / GIT_WORK_TREE set on the line name the repo as --git-dir does.
+      const envDir = c.env?.get('GIT_WORK_TREE') || (c.env?.get('GIT_DIR') ?? '').replace(/\/\.git\/?$/, '') || c.env?.get('GIT_DIR') || null
+      const named = g.dir ?? envDir
+      const dir = g.unknown || (named && /[$`~]/.test(named)) ? null : named ? (named.startsWith('/') ? joinPath('/', named) : at && joinPath(at, named)) : at
+      const keys = [...g.cfg, ...envCfg(c.env)]
+      const retarget = keys.some((k) => REMOTE_CFG.test(k))
+      if (g.sub === 'tag' && !tagListing(g.args)) out.push({ kind: 'step', what: 'git tag', dir, slug: null })
+      // An alias or a hooks-path/push-config key set for one call changes a step past this reader.
+      if (keys.some((k) => k.startsWith('alias.'))) out.push({ kind: 'step', what: 'git -c alias.*', dir, slug: null })
+      if (keys.some((k) => PROTECT_CFG.test(k) && !k.startsWith('alias.'))) out.push({ kind: 'protected', what: 'a git config key (core.hooksPath, remote push, URL rewriting or receive.*)', dir, slug: null })
+      // `git config <key> <value>` setting a protected key (the hooks path, a remote's push, URL rewriting, …).
+      if (g.sub === 'config' && gitConfigSets(g.args) && g.args.some((x) => PROTECT_CFG.test(x))) out.push(/^alias\./i.test(g.args.find((x) => PROTECT_CFG.test(x)) ?? '') ? { kind: 'step', what: 'git config alias.*', dir, slug: null } : { kind: 'protected', what: 'a git config key (core.hooksPath, remote push, URL rewriting or receive.*)', dir, slug: null })
+      // Plumbing that writes a remote with no `push` in sight.
+      if (['send-pack', 'http-push'].includes(g.sub) || (g.sub === 'subtree' && g.args[0] === 'push')) out.push({ kind: 'step', what: 'git ' + g.sub, dir, slug: null })
+      const ref = refWrite(g)
+      if (ref) out.push({ kind: 'ref', what: 'git ' + g.sub + ' ' + ref, dir, slug: null, ref })
+      if (g.sub === 'push') out.push({ kind: 'push', what: 'git push', dir, slug: null, push: { ...parsePush(g.args), headMoved: moved, remoteEdited: edited || retarget } })
+      // A merge, reset --hard, rebase or branch -f/-M onto the base branch, judged where it runs.
+      const lw = localWrite(g, curBranch)
+      if (lw !== undefined) out.push({ kind: 'local', what: 'git ' + g.sub, dir, slug: null, branch: lw })
+      if (movesHead(g)) moved = true
+      const co = checkoutTarget(g)
+      if (co !== undefined) curBranch = co
+      if ((g.sub === 'remote' && ['add', 'set-url', 'rename', 'remove', 'rm'].includes(g.args[0])) || (g.sub === 'config' && g.args.some((x) => REMOTE_CFG.test(x)))) edited = true
+    }
+  }
+  return out
+}
+
+
+export function joinPath(dir, p) {
+  const s = String(p ?? '')
+  const parts = (s.startsWith('/') ? s : String(dir ?? '') + '/' + s).split('/')
+  const out = []
+  for (const x of parts) {
+    if (!x || x === '.') continue
+    if (x === '..') out.pop()
+    else out.push(x)
+  }
+  return '/' + out.join('/')
+}

@@ -13,7 +13,8 @@ Automatic on feature and bugfix work with `risk` auth/money/data and a test runn
 
 ## duel — best of two
 
-Only on request ("try two approaches", "best of two"). Needs machine-checkable done-criteria. The planner writes two briefs that differ in strategy; two executors build in separate worktrees with `integration: local`; tests judge first, then one `code-reviewer` answers `WINNER: A|B` and `WHY`. The loser's branch is deleted, never pushed; the winner's executor gets the same `INTEGRATE:` re-dispatch as a cleared gauntlet.
+Only on request ("try two approaches", "best of two"). Needs machine-checkable done-criteria. The planner writes two briefs that differ in strategy; two executors build in separate worktrees with `integration: local`; tests judge first, then one `code-reviewer` answers `WINNER: A|B` and `WHY`.
+The loser's branch is deleted, never pushed; the winner's executor gets the same `INTEGRATE:` re-dispatch as a cleared gauntlet.
 
 ## relay — contract first, then parallel
 

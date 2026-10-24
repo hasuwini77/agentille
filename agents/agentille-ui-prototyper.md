@@ -47,7 +47,8 @@ NOTES: <stack specifics; what is fixed vs free to adapt>
 
 ## Quality bar (design to what the design-reviewer will score)
 
-Clear visual hierarchy · a type scale with real contrast and body line-height >1.4 · WCAG AA with meaning never carried by hue alone · one consistent spacing scale · no overflow at the narrowest in-scope viewport · verb CTAs and purposeful empty/error copy · no AI-design-tells (centered hero stack, three identical cards, indigo-to-purple shimmer, glass without reason, icons-as-design), named under AVOID.
+Clear visual hierarchy · a type scale with real contrast and body line-height >1.4 · WCAG AA with meaning never carried by hue alone · one consistent spacing scale · no overflow at the narrowest in-scope viewport · verb CTAs and purposeful empty/error copy ·
+no AI-design-tells (centered hero stack, three identical cards, indigo-to-purple shimmer, glass without reason, icons-as-design), named under AVOID.
 
 ## Does not
 

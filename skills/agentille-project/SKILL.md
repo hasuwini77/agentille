@@ -1,6 +1,7 @@
 ---
 name: agentille-project
-description: Register the current repo with agentille and write its ./CLAUDE.md. Asks 7 short per-repo questions, appends the project to ~/.agentille/profile.json's projects[] and renders a per-repo CLAUDE.md using your voice settings. Optional; /agt works without it. Use only when the user types /agentille-project or asks to register this repo with agentille.
+description: Register the current repo with agentille and write its ./CLAUDE.md. Asks 7 short per-repo questions, appends the project to ~/.agentille/profile.json's projects[] and renders a per-repo CLAUDE.md using your voice settings. Optional; /agt works without it. Runs only when the user types /agentille-project; model invocation is disabled.
+disable-model-invocation: true
 ---
 
 # agentille-project — per-repo registration

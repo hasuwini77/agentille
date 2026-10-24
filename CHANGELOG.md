@@ -16,6 +16,105 @@ next minor, `docs/releasing.md`).
   `claude plugin test` run now prints its failing lines instead of only
   the exit code.
 
+- **The guard's trust root and the repo's own config are off-limits to a
+  run below `auto`.** A Bash line that writes `~/.agentille/**`,
+  `.git/config`, `.git/hooks/**`, `.git/info/**`, `.git/refs/**` or the
+  worktree's `.git` file, by redirect, `tee`, `cp`, `mv`, `ln`, `sed -i`,
+  `truncate`, `dd`, interpreter code or `git config` of `alias.*`,
+  `core.hooksPath`, a push refspec, a URL rewrite or `receive.*`, is
+  refused, and so are `Write`, `Edit`, `MultiEdit` and `NotebookEdit` on
+  those paths (the mod used to only watch `Write`). The profile's
+  `integration` is read once at the typed `/agt`: a later read can lower
+  the run's mode, never raise it.
+- **Unreadable words and sources fail closed.** Below `auto`, a git, gh,
+  curl, hub or wget word built from `$(…)`, a backtick or a
+  `${X:-…}`-style expansion the guard cannot resolve is refused; so is
+  code piped into a shell or interpreter (`| bash`, `| xargs git`,
+  `python3 -`, `sh -s`), interpreter code that spawns a process or names
+  a tool in pieces (`'g'+'it'`), and awk, tclsh, expect, `python3.N`,
+  pypy, lua, php, Rscript, osascript and swift join the interpreters it
+  reads. Package scripts (`npm|pnpm|yarn|bun run`, `just`, `task`,
+  `rake`) are read from their files and judged; `npx`, `docker`,
+  `podman`, `mise run` and `cargo make` are refused while the run is
+  below `auto`. A local `merge`, `rebase`, `reset --hard`, `branch -f`
+  or `-M` onto the base branch is refused, and a push is judged against
+  the remote's configured push refspecs and `push.default`, not only
+  `@{push}`.
+- **Folder trust follows what a worktree's config runs.** Before
+  auto-accepting "trust this folder" for a worker pane, the mod compares
+  not only the settings, hook scripts, MCP, agents, skills and memory
+  files but what their commands reach: an npm, pnpm, yarn or bun script's
+  text in `package.json`, an `npx`/`dlx`/`bunx` package through the
+  lockfile, a `python -m` module's files, CLAUDE.md `@imports` five hops
+  deep and `.claude/hooks/hooks.json`. A command it cannot follow refuses
+  with the reason, and one toast per session says to trust the folder by
+  hand. (`hooks/trust.js`)
+- **`routing.maxRunUsd` defaults to 15 and counts pane workers.** Herdr
+  and tmux panes report no tokens, so `paneUsd` estimates them from role,
+  routed model and minutes open (a Codex pane counts $0); `spawn_pane`
+  checks the ceiling too. Past the ceiling every Opus role but the
+  executor runs Sonnet, the design-reviewer, ui-prototyper and adversary
+  included, and the toast names the first role demoted. `null` turns the
+  ceiling off. Prices and the formula: `docs/routing-cost.md`.
+- **Solo says where its commit lands.** A solo fix goes on a new
+  `fix/<slug>` branch (`agt/<slug>` off a feature branch) with a PR under
+  `pr`; the current branch only when the person's words name it, never
+  main.
+- **The lead re-enters a run from its files.** After a compaction, a
+  `/clear` or a lost place, the lead re-reads the skill sections it
+  needs, `run-<id>/context-pack.md`, `ledger.json`, `routing.jsonl` and
+  each slice branch's `git log` before the next dispatch, and a slice
+  with a PR or a merge in the base is done. The update check also runs
+  on compaction (its cache makes that free).
+- **`agentille-init` and `agentille-project` run only when typed**
+  (`disable-model-invocation: true`), as their text already said.
+
+### Changed (internals)
+
+- **Session state is eleven stores, each owned by the module that
+  writes it.** The one global record is gone: `hooks/store.js` builds a
+  store per owner (`Session`, `Proofs`, `Runs`, `Spawn`, `Panes`,
+  `Sessions`, `Profile`, `Display`, `Wire`, `Timers`, `Worktrees`) with
+  named transitions for writes and a read view that throws on any
+  assignment from another module; `state.js` is the index. The validator
+  imports every `hooks/*.js` module on its own and fails if a hooks
+  module calls the test-only `seed()`.
+- **The Bash guard is four files.** `hooks/guard-lex.js` (the shell
+  reader), `hooks/guard-policy.js` (modes, pushes, API merges, the deny
+  texts), `hooks/guard-own.js` (worktree ownership) and a slim
+  `hooks/guard.js` (`bashCall`, the edit-tool handlers, re-exports).
+  Colliding helpers got distinct names: `gitOutOrThrow`/`gitOutOrNull`,
+  `sameRemote`/`sameCheckout`, `isLead`/`rowIsLead`. The worker status
+  publish throttle runs on the host clock.
+- **Lean lead prose.** `factory.md`'s integrate ladder is four bullets
+  with the guard mechanics in `docs/guards.md`; `panes-mode.md` keeps
+  what the lead does and points wake timing and harvest rules to
+  `docs/display.md`; the price table moved to `docs/routing-cost.md`;
+  deprecated flags and `piece=` sit in one Deprecated section at the end
+  of `SKILL.md`; every model-facing line is under 400 characters.
+
+### Fixed (docs)
+
+- `docs/guards.md` and the guard's header say what is read and name the
+  exceptions: only Bash and the edit tools are judged, Codex panes run
+  outside the mod, the guard is a seatbelt against a cooperative model's
+  mistakes, not a sandbox.
+- The README no longer calls agentille "one command": one typed command
+  runs the work, a few `/agt-*` commands read or tidy. A "First 15
+  minutes" section follows the quickstart. `/storm` commits its spec on a
+  feature branch and leaves it uncommitted on `main` or a detached HEAD.
+  The plan-reviewer's `quick` cell reads `sonnet · medium`, as the mod
+  routes it.
+
+### Tests
+
+- A skipped hook test (`SKIP:` line, exit 3) is a WARN locally and a
+  FAIL under CI; `tests/hooks/test-tmux-real.sh` drives `spawn_pane` and
+  `close_pane` through a private tmux server (CI installs tmux); a typed
+  `/agt` clearing the previous run's flags has a test; the wire throttle
+  test uses the fake clock; trust, ceiling and store tests added; the
+  real-git guard harness covers each refused spelling above (36 checks).
+
 ### Changed (behaviour)
 
 - **A run tidies only the worktrees and branches it made, and makes them

@@ -1,11 +1,12 @@
 ---
 name: agentille-init
-description: Optional setup for agentille. Asks up to 5 skippable questions (name/role, delivery style, tone, when to ask first, never-do list) and merges the answers into ~/.agentille/profile.json so agents sound like you. /agt works without it. Use only when the user types /agentille-init or asks to set up their agentille voice profile.
+description: Optional setup for agentille. Asks up to 5 skippable questions (name/role, delivery style, tone, when to ask first, never-do list) and merges the answers into ~/.agentille/profile.json so agents sound like you. /agt works without it. Runs only when the user types /agentille-init; model invocation is disabled.
+disable-model-invocation: true
 ---
 
 # agentille-init — optional voice profile
 
-`/agt` runs fine with no profile at all. This skill only makes agents sound like you. Run it when the user asks to set up or update their agentille profile; never auto-trigger.
+`/agt` runs fine with no profile at all. This skill only makes agents sound like you. It runs when the user types `/agentille-init`; never auto-trigger.
 
 ## Steps
 

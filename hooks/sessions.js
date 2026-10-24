@@ -1,17 +1,30 @@
 // agentille sessions: the person's own Herdr or tmux panes opened through open_sessions. No worker env, no
 // agt- name, no wire; a lead lists its Herdr ones so the SessionEnd sweep can close the idle ones.
 
-import { S } from './state.js'
+import { Profile, Session } from './state.js'
+import { makeStore } from './store.js'
 import { PROBE, tmuxEvenArgv, tmuxPaneIdOf, tmuxKillArgv, herdrPaneIdOf, herdrTabOf, herdrPromptArgv, herdrCloseArgv, herdrMetaArgv, herdrSessionSplitArgv, herdrSessionTabArgv, herdrSessionStartArgv, herdrRunArgv, herdrPaneGetArgv, herdrTerminalOf, tmuxSessionSplitArgv, tmuxTitleArgvs, tmuxTypeArgvs, sessionsFile } from './panes.js'
 import { runOk, startAgent } from './spawn.js'
 import { restingSince } from './panerec.js'
+
+// The person's sessions this lead opened: { id, name, kind, tab, terminal }, oldest first. Read through the Sessions
+// view; written only here.
+const { s: my, view } = makeStore('sessions.js', {
+  sessions: [],
+})
+export const Sessions = view
+
+// open_sessions opened one.
+export function addSession(s) {
+  my.sessions.push(s)
+}
 
 // The Herdr agent sessions this lead has open, one name per line, where the SessionEnd sweep reads them. A failed
 // write loses only the sweep's reach, so it never blocks.
 // With none left the old list stays: its names match no agent, and SessionEnd removes the file.
 export async function saveSessions($) {
-  const file = sessionsFile(S.home, await $.env.get('HERDR_PANE_ID'))
-  if (file && S.sessions.length) await $.fs.write(file, S.sessions.filter((s) => s.kind !== 'shell' && s.terminal).map((s) => s.name + '\n').join('')).catch(() => {})
+  const file = sessionsFile(Profile.home, await $.env.get('HERDR_PANE_ID'))
+  if (file && my.sessions.length) await $.fs.write(file, my.sessions.filter((s) => s.kind !== 'shell' && s.terminal).map((s) => s.name + '\n').join('')).catch(() => {})
 }
 
 // Close one session this lead opened → 'closed' | 'gone' | 'failed'. herdr can hand a closed pane's id out again,
@@ -31,7 +44,7 @@ export async function closeSession($, t, s) {
 }
 
 export async function forgetSession($, s) {
-  S.sessions = S.sessions.filter((x) => x !== s)
+  my.sessions = my.sessions.filter((x) => x !== s)
   restingSince.delete(s.name)
   if (s.terminal) await saveSessions($)
 }
@@ -70,7 +83,7 @@ export async function openSession($, t, o) {
   let terminal
   let tab = o.after?.tab ?? null
   if (o.newTab) {
-    const workspace = S.selfWorkspace ?? (await $.env.get('HERDR_WORKSPACE_ID'))
+    const workspace = Session.selfWorkspace ?? (await $.env.get('HERDR_WORKSPACE_ID'))
     if (!workspace) throw new Error('HERDR_WORKSPACE_ID is not set')
     const r = await runOk($, herdrSessionTabArgv({ workspace, cwd: o.cwd, label: 'sessions' }), PROBE)
     const made = herdrTabOf(r.stdout)

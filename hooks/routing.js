@@ -35,13 +35,14 @@ export function formationOf(hdr) {
 }
 
 // autoFable is opt-in: Fable costs about twice Opus, so the ladder may only reach it when profile.routing.autoFable is true.
-// maxRunUsd is off (null) by default: a positive number is the run's cost ceiling in US dollars (see runCeiling below).
-export const DEFAULTS = { autoFable: false, maxFablePerRun: 1, fableWeeklyCeiling: 60, advisorOnOpus: true, maxRunUsd: null }
+// maxRunUsd is the run's cost ceiling in US dollars (see runCeiling below): 15 by default, about two heavy runs' worth
+// of Opus review at list prices; the person's `null` (or anything but a positive number) turns it off.
+export const DEFAULTS = { autoFable: false, maxFablePerRun: 1, fableWeeklyCeiling: 60, advisorOnOpus: true, maxRunUsd: 15 }
 
 // US dollars per million tokens, by model family, at the current generation's first-party API list price (Fable 5.1,
 // Opus 5.5, Sonnet 5.5, Haiku 5.5 up to 100K-token prompts). An estimate, not a bill: a plan subscription is not billed
 // per token, cache writes are priced as plain input (they cost about 1.25×), and pane workers report no tokens to the
-// lead, so a run with panes reads low. A model the mod cannot name is priced as Opus.
+// lead, so they are estimated from their elapsed time (paneUsd). A model the mod cannot name is priced as Opus.
 export const PRICES = {
   fable:  { input: 10, output: 50, cacheRead: 0.25 },
   opus:   { input: 4, output: 20, cacheRead: 0.20 },
@@ -49,15 +50,35 @@ export const PRICES = {
   haiku:  { input: 0.10, output: 0.50, cacheRead: 0.01 },
 }
 
-// The run's estimated spend so far from the live agents' token counts (live.js: `input` holds uncached input plus cache
-// writes, `cacheRead` the cache reads), filed the way the ledger files them.
-export function estimateRunUsd(agents, run) {
+const priced = (model, t) => {
+  const p = PRICES[modelKey(model)] ?? PRICES.opus
+  return ((t.input ?? 0) * p.input + (t.output ?? 0) * p.output + (t.cacheRead ?? 0) * p.cacheRead) / 1_000_000
+}
+
+// A pane worker (Herdr or tmux) reports no tokens to the lead, so its spend is estimated: the tokens a worker of its
+// role uses per minute, priced at the model the table routed it to, times the minutes it has been open (from its
+// route's start to its end, or to `now` while it runs), at most PANE_EST_MAX_MS. A builder (executor, adversary) reads
+// and writes more per minute than a role that judges. A Codex pane runs on the person's own Codex account, not on
+// Claude: it costs nothing here.
+export const PANE_TOKENS_PER_MIN = {
+  build: { input: 10_000, output: 2_500, cacheRead: 80_000 },
+  judge: { input: 8_000, output: 1_500, cacheRead: 60_000 },
+}
+export const PANE_EST_MAX_MS = 60 * 60_000
+export function paneUsd(route, now = Date.now()) {
+  if (!route || route.model === 'codex' || typeof route.start !== 'number') return 0
+  const ms = Math.min(PANE_EST_MAX_MS, Math.max(0, (route.end ?? now) - route.start))
+  const rate = PANE_TOKENS_PER_MIN[route.agent === 'executor' || route.agent === 'adversary' ? 'build' : 'judge']
+  return priced(route.model, rate) * (ms / 60_000)
+}
+
+// The run's estimated spend so far: the live agents' token counts (live.js: `input` holds uncached input plus cache
+// writes, `cacheRead` the cache reads), filed the way the ledger files them, plus each of the run's pane workers by
+// paneUsd. `routes` is the lead's pane routes; `now` is Date.now(), the clock a route's start is read on.
+export function estimateRunUsd(agents, run, routes = [], now = Date.now()) {
   let usd = 0
-  for (const a of agents?.values() ?? []) {
-    if ((a.fileRun ?? a.run) !== run) continue
-    const p = PRICES[modelKey(a.model)] ?? PRICES.opus
-    usd += ((a.input ?? 0) * p.input + (a.output ?? 0) * p.output + (a.cacheRead ?? 0) * p.cacheRead) / 1_000_000
-  }
+  for (const a of agents?.values() ?? []) if ((a.fileRun ?? a.run) === run) usd += priced(a.model, a)
+  for (const r of routes ?? []) if (r.run === run) usd += paneUsd(r, now)
   return usd
 }
 
@@ -66,16 +87,17 @@ export const maxRunUsdOf = (settings) => {
   return typeof v === 'number' && Number.isFinite(v) && v > 0 ? v : null
 }
 
-// Past the ceiling, the roles that judge rather than build drop from Opus (or a ladder Fable) to Sonnet at the same
-// effort. The executor never changes model, and the design-reviewer, ui-prototyper and adversary keep the table.
-const CEILING_ROLES = new Set(['planner', 'plan-reviewer', 'code-reviewer', 'security-reviewer', 'payments-reviewer', 'seo-reviewer', 'perf-reviewer'])
+// Past the ceiling, every role the table or the ladder puts on Opus (or a ladder Fable) drops to Sonnet at the same
+// effort: the planner, every reviewer (the design-reviewer and a duel's code-reviewer judge included), the
+// ui-prototyper and the adversary. The executor never changes model. `from` names the model it would have run.
+export const CEILING_ROLES = new Set(ROLES.filter((r) => r !== 'executor'))
 export const usd = (n) => '$' + (Math.round(n * 100) / 100).toFixed(2)
 function runCeiling(d, role, run, settings) {
   const max = maxRunUsdOf(settings)
   if (max == null || !CEILING_ROLES.has(role) || (d.model !== 'opus' && d.model !== 'fable')) return d
   if (!(typeof run.usd === 'number' && run.usd >= max)) return d
   const why = 'run ~' + usd(run.usd) + ' ≥ maxRunUsd ' + usd(max)
-  return { model: 'sonnet', effort: d.effort, reason: d.reason === 'table' ? why : d.reason + ' · ' + why, fable: false, capped: true }
+  return { model: 'sonnet', effort: d.effort, reason: d.reason === 'table' ? why : d.reason + ' · ' + why, fable: false, capped: true, from: d.model }
 }
 
 export function roleOf(subagentType) {

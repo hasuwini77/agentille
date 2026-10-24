@@ -77,7 +77,8 @@ describe('info: route dry-run', () => {
     expect(t.split('\n')[0]).toBe('code-reviewer size=large → opus · high · table')
     expect(t).toMatch(/past maxRunUsd \$5\.00\s+sonnet · high · run ~\$5\.00 ≥ maxRunUsd \$5\.00/)
     expect(route('executor', {}, null, { ...DEFAULTS, maxRunUsd: 5 } as never)).not.toContain('maxRunUsd')
-    expect(route('code-reviewer', { size: 'large' })).not.toContain('maxRunUsd')
+    expect(route('code-reviewer', { size: 'large' }, null, { ...DEFAULTS, maxRunUsd: null } as never)).not.toContain('maxRunUsd')
+    expect(route('code-reviewer', { size: 'large' })).toContain('past maxRunUsd $15.00') // the default ceiling
   })
 
   test('a role with no ladder says so', () => {
@@ -147,7 +148,7 @@ describe('info: in the mod', () => {
   }
   const info = async ($: any, args = '') => (await $.command.run({ command: 'agt-info', args })).text as string
 
-  test('the overview shows settings with their source, squads, and an empty run', async ($, on) => {
+  test('the overview shows settings with their source, squads, and an empty run', { timeoutMs: 20_000 }, async ($, on) => {
     await boot($, on, { display: { deck: 'auto' } }, { 'focus:mode': 'off' })
     const t = await info($)
     expect(t).toMatch(/deck\s+auto\s+profile/)

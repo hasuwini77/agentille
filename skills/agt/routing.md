@@ -18,7 +18,8 @@ First match wins; no model call.
 
 Multipliers: **hasUI** (UI/UX/styling/component/page/screen, or a `.tsx/.css/.scss` file named) adds the design-reviewer, and the ui-prototyper on `design`/`feature`, past the UI threshold below. **hasMulti** ("and", "also", "plus" joining verbs, or ≥3 deliverables) adds the planner.
 
-**UI threshold** (the cheap tier for small UI work). A `feature` or `bugfix` slice that is `size=small` and `risk=none` and changes one screen gets one executor plus the Sonnet code-reviewer: hasUI adds neither the ui-prototyper nor the design-reviewer. They join when the UI work spans more than one screen (a new page, a flow, a shared component used across screens), when the slice is `size=large`, or when the person asks for a design review or a prototype. The test is per slice, so a `medium` run of small one-screen slices stays on this tier. The `design` category is that ask, so it keeps both at any size, as does a `review` of UI code.
+**UI threshold** (the cheap tier for small UI work). A `feature` or `bugfix` slice that is `size=small` and `risk=none` and changes one screen gets one executor plus the Sonnet code-reviewer: hasUI adds neither the ui-prototyper nor the design-reviewer.
+They join when the UI work spans more than one screen (a new page, a flow, a shared component used across screens), when the slice is `size=large`, or when the person asks for a design review or a prototype. The test is per slice, so a `medium` run of small one-screen slices stays on this tier. The `design` category is that ask, so it keeps both at any size, as does a `review` of UI code.
 
 ## Risk words
 
@@ -31,7 +32,8 @@ Multipliers: **hasUI** (UI/UX/styling/component/page/screen, or a `.tsx/.css/.sc
 
 ## Stage 2 classify
 
-Only when the level table falls through. One inline Haiku call, never the planner. Send the task, ask for ONLY `{"level": "low|medium|heavy", "roster": ["agentille:agentille-…"], "reasoning": "<one sentence>"}`. `heavy` = panes in Herdr/tmux, else workflow, else subagent waves; `medium` = parallel executor subagents; `low` = one executor (or solo when the roster is empty). Use its roster as is. Malformed JSON → `low` plus a one-line note; never crash. If the level hinges on a question, ask it in the clarify round; the provisional level is `low`.
+Only when the level table falls through. One inline Haiku call, never the planner. Send the task, ask for ONLY `{"level": "low|medium|heavy", "roster": ["agentille:agentille-…"], "reasoning": "<one sentence>"}`. `heavy` = panes in Herdr/tmux, else workflow, else subagent waves; `medium` = parallel executor subagents; `low` = one executor (or solo when the roster is empty). Use its roster as is.
+Malformed JSON → `low` plus a one-line note; never crash. If the level hinges on a question, ask it in the clarify round; the provisional level is `low`.
 
 ## Roster
 
@@ -47,9 +49,10 @@ Only when the level table falls through. One inline Haiku call, never the planne
 | review | — | — | — | — | ✓ | if UI code | if auth/money/data |
 
 - The ui-prototyper runs **before** the executor; pass its Blueprint into the executor prompt as the design contract.
-- Skip the plan-reviewer on `thinkingDepth=quick` and for a ≤3-step fully sequential plan.
+- Skip the plan-reviewer on `thinkingDepth=quick` and for a ≤3-step fully sequential plan. Its `quick` cell in "Default routing" is the route a plan-reviewer still dispatched under `quick` gets.
 - Design-reviewer viewports: the ones the user names, else `profile.viewports`, else desktop + mobile.
-- Design-reviewer URL: before its dispatch, start the project's dev server in the slice's worktree (it lives until the gate; re-attach it if it is gone: `factory.md` → "Worktree lifecycle") on a free port (`PORT=<free> <dev command> > ~/.agentille/state/run-<id>/dev-<slice>.log 2>&1 &`), wait for a 2xx, pass `url: http://localhost:<port>`, and stop that server once its verdict is harvested. The reviewer never starts one itself.
+- Design-reviewer URL: before its dispatch, start the project's dev server in the slice's worktree (it lives until the gate; re-attach it if it is gone: `factory.md` → "Worktree lifecycle") on a free port (`PORT=<free> <dev command> > ~/.agentille/state/run-<id>/dev-<slice>.log 2>&1 &`), wait for a 2xx, pass `url: http://localhost:<port>`, and stop that server once its verdict is harvested.
+  The reviewer never starts one itself.
 - Debug: attempts, the limit and the `mode=diagnose` planner after 2 failed attempts are `factory.md` → "Fix rounds".
 - Squads add payments / SEO / perf reviewers to the review step when the diff touches their domain (`squads.md`). Formations reshape the workers (`formations.md`).
 - Every reviewer column ticked for a slice runs **at once**: one message, parallel background calls (`SKILL.md` → "The contract" step 8).
@@ -62,7 +65,7 @@ Model · effort per role. Size, risk and mode come from the dispatch header; the
 | role | default | size=large | risk auth/money | thinkingDepth=quick |
 |---|---|---|---|---|
 | planner | opus · high | opus · xhigh | — | sonnet · medium |
-| plan-reviewer | sonnet · medium | opus · high | — | skipped |
+| plan-reviewer | sonnet · medium | opus · high | — | sonnet · medium |
 | ui-prototyper | opus · high | opus · high | — | sonnet · medium |
 | executor | sonnet · medium | sonnet · high | sonnet · high | sonnet · medium |
 | code-reviewer | sonnet · medium | opus · high | opus · high | sonnet · medium |
@@ -75,7 +78,8 @@ Model · effort per role. Size, risk and mode come from the dispatch header; the
 
 Dispatch with aliases (`fable`/`opus`/`sonnet`/`haiku`), never pinned IDs. A pane worker opened by `spawn_pane` is routed exactly like the subagent of its role (same table, ladder and Fable guard).
 
-**Workflow agents.** A workflow script's `agent()` spawns reach the mod, but their model cannot be rewritten (a hook can only refuse them). The lead passes `agentType: 'agentille:agentille-<role>'`, `model` and `effort` from this table in each `agent()` call. The mod logs the table's pick beside the model that ran, flags a drift (`/agt-info routing`), and shows the agents on the band and under the Workflow call.
+**Workflow agents.** A workflow script's `agent()` spawns reach the mod, but their model cannot be rewritten (a hook can only refuse them). The lead passes `agentType: 'agentille:agentille-<role>'`, `model` and `effort` from this table in each `agent()` call.
+The mod logs the table's pick beside the model that ran, flags a drift (`/agt-info routing`), and shows the agents on the band and under the Workflow call.
 
 ## Review tiering
 
@@ -99,12 +103,18 @@ Evidence is observed by the mod, not claimed by the lead.
 
 ### Cost ceiling
 
-`profile.routing.maxRunUsd` (default `null`, off; any positive number turns it on) caps a run's estimated spend in US dollars. The mod estimates it from the run's agent tokens at API list prices per million tokens (input / output / cache read): Fable 10 / 50 / 0.25, Opus 4 / 20 / 0.20, Sonnet 2 / 10 / 0.20, Haiku 0.10 / 0.50 / 0.01, and a model it cannot name at Opus. It is an estimate, not a bill: a plan subscription is not billed per token, cache writes count as plain input, and pane workers report no tokens to the lead. Once the estimate reaches the ceiling, every later dispatch of the planner, plan-reviewer and code-, security-, payments-, SEO- and perf-reviewer that the table or the ladder puts on Opus (or a ladder Fable) runs Sonnet at the same effort. Its `routing.jsonl` line carries `"capped": true`, and the mod shows one toast and one band `⚑` per run. The executor, design-reviewer, ui-prototyper and adversary keep the table, and a typed `--fable` holds. When the run's log has a `capped` line, the card's `⚑` line says `maxRunUsd reached: later reviews ran Sonnet`.
+`profile.routing.maxRunUsd` (default `15`; `null`, `0` or anything but a positive number turns it off) caps a run's estimated spend in US dollars. Subagents are priced from their tokens at API list prices; a pane worker reports no tokens, so `paneUsd` in `hooks/routing.js` estimates it from its role, routed model and minutes open (a Codex pane counts $0).
+The price table, the pane formula and what the estimate leaves out: `docs/routing-cost.md` at the plugin root.
+
+- **Past the ceiling,** every later dispatch, subagent or pane, of a role the table or the ladder puts on Opus (or a ladder Fable) runs Sonnet at the same effort: the planner, the plan-reviewer, every reviewer (design-reviewer and a duel's judge included), the ui-prototyper and the adversary. Only the executor, which never changes model, and a typed `--fable` keep their route.
+- **The card:** that dispatch's `routing.jsonl` line carries `"capped": true`, and the mod shows one toast and one band `⚑` per run that name the role it demoted first (`code-reviewer opus → sonnet`). When the run's log has a `capped` line, the card's `⚑` line says `maxRunUsd reached: later Opus roles ran Sonnet`.
 
 ### Advisor
 
-Claude Code's advisor tool (`/advisor`, `advisorModel`) is the user's setting: every /agt session inherits it, and agentille never adds one. Subagent mode cannot scope it; it follows the session. With `profile.routing.advisorOnOpus: false`, Opus and Fable pane workers start with `CLAUDE_CODE_DISABLE_ADVISOR_TOOL=1` so a stronger worker is not advised by a same-tier model; Sonnet workers keep theirs. Default `true`.
+Claude Code's advisor tool (`/advisor`, `advisorModel`) is the user's setting: every /agt session inherits it, and agentille never adds one. Subagent mode cannot scope it; it follows the session.
+With `profile.routing.advisorOnOpus: false`, Opus and Fable pane workers start with `CLAUDE_CODE_DISABLE_ADVISOR_TOOL=1` so a stronger worker is not advised by a same-tier model; Sonnet workers keep theirs. Default `true`.
 
 ### `--fable`
 
-`fable=forced` in the header: planner, ui-prototyper, design-, security- and payments-reviewer, and a large code-/plan-reviewer run Fable; the executor never does. It bypasses the gate (the user chose it), and the mod checks that choice: `fable=forced` holds only in a session where the person's typed `/agt` line carried `--fable`; otherwise the mod rewrites the header to `fable=auto`, the ladder applies, and one `⚑` toast says so. If the `fable` alias does not resolve, re-dispatch that role once on `opus`; never retry-loop. `fable` appears only in dispatch-time model parameters, never in agent frontmatter.
+`fable=forced` in the header: planner, ui-prototyper, design-, security- and payments-reviewer, and a large code-/plan-reviewer run Fable; the executor never does. It bypasses the gate (the user chose it), and the mod checks that choice:
+`fable=forced` holds only in a session where the person's typed `/agt` line carried `--fable`; otherwise the mod rewrites the header to `fable=auto`, the ladder applies, and one `⚑` toast says so. If the `fable` alias does not resolve, re-dispatch that role once on `opus`; never retry-loop. `fable` appears only in dispatch-time model parameters, never in agent frontmatter.

@@ -1,6 +1,6 @@
 ---
 name: agt
-description: Multi-agent coding orchestrator and software factory. One command, `/agt <task>`, detects the level (low, medium, heavy) and runs the cheapest crew that does the job well (planner, executors, reviewers, each on the right model), opens one reviewed PR per slice (merges on green only with `integration: auto`) or escalates, closes every pane it opened, and ends on one short card. `/agt next` builds the next backlog item. Activates ONLY when the user types `/agt`; model invocation is disabled.
+description: Multi-agent coding orchestrator. `/agt <task>` detects the level (low, medium, heavy), runs the cheapest crew that does the job (planner, executors, reviewers, each on the right model), opens one reviewed PR per slice (merging on green only with `integration: auto`) or escalates, closes every pane it opened, and ends on one card. `/agt next` builds the next backlog item. Typed only.
 argument-hint: [low|medium|heavy|next] "<task>"
 disable-model-invocation: true
 ---
@@ -28,19 +28,24 @@ The first word may force a level; otherwise detect it. First match wins.
 - **medium**: planner, then up to 3 executor subagents at once (each in its own worktree), then the review fan-out.
 - **heavy**: planner, then one pane per slice through `spawn_pane` (`panes-mode.md`), at most 3 at once like medium; planners and reviewers stay subagents; serial merge. Heavy differs from medium by panes (a real session per slice in its own worktree, the live wire, resume), not by width. A task that asks for Codex workers runs heavy (`panes-mode.md` → "Codex workers").
 - **Risk gate:** auth, money or data work (`routing.md` → "Risk words") never runs solo, and runs the gauntlet when the repo has a test runner (`formations.md`). A screen merely named login or checkout is `risk=none`.
-- `--fable` is the only flag (`routing.md` → "Escalation ladder"). Deprecated, still honored, never suggested, removed in v4: `--mode solo|subagent|panes|herdr` (= low|medium|heavy|heavy), `--plan` (stop after the plan review; "go" resumes it), `--formation <f>` (that formation).
+- `--fable` is the only flag (`routing.md` → "Escalation ladder"). Older flags still work: "Deprecated" at the end.
 
 Print the recon line before anything else: `recon: <level> · <transport> · <one-clause reason>`, where transport is `solo`, `subagent`, `panes` or `workflow` (`display.md` → "Mid-run lines").
 
 ## The contract
 
-1. **Profile.** Read `~/.agentille/profile.json`. Missing or unreadable → defaults (`deliveryStyle: direct`, `tone: peer-to-peer`, `preTaskQuestioning: ambiguous-only`, `thinkingDepth: complex-only`); never stop. With no voice keys (`name`, `role`, `deliveryStyle`, `tone`, `preTaskQuestioning`, `neverDo`) and no `~/.agentille/state/.tip-shown`, print `tip: /agentille-init makes agents sound like you` once and create that marker, unless the mod draws (`display.md`).
+1. **Profile.** Read `~/.agentille/profile.json`. Missing or unreadable → defaults (`deliveryStyle: direct`, `tone: peer-to-peer`, `preTaskQuestioning: ambiguous-only`, `thinkingDepth: complex-only`); never stop.
+   With no voice keys (`name`, `role`, `deliveryStyle`, `tone`, `preTaskQuestioning`, `neverDo`) and no `~/.agentille/state/.tip-shown`, print `tip: /agentille-init makes agents sound like you` once and create that marker, unless the mod draws (`display.md`).
 2. **Level.** Resolve it with "Levels" and print the recon line.
-3. **Solo steps aside.** Do the task yourself: no run dir, no agents, no card. A solo bug follows the executor's loop: reproduce with the real command and quote the failing line, one hypothesis ("X because Y"), the smallest change, re-run. Three misses → stop, name the assumption that may be wrong, and say so; never a fourth blind fix (the executor's own rule, `agents/agentille-executor.md` → "Debugging"; or type `/agt debug` for the full loop).
+3. **Solo steps aside.** Do the task yourself: no run dir, no agents, no card. The fix lands on a new `fix/<slug>` branch (`agt/<slug>` when the current branch is a feature branch), with a PR under `pr` and the rest as `factory.md` → "Integrate" says; on the current branch only when the person's typed words name it, never on main.
+   A solo bug follows the executor's loop: reproduce with the real command and quote the failing line, one hypothesis ("X because Y"), the smallest change, re-run.
+   Three misses → stop, name the assumption that may be wrong, and say so; never a fourth blind fix (the executor's own rule, `agents/agentille-executor.md` → "Debugging"; or type `/agt debug` for the full loop).
 4. **Clarify only when genuinely ambiguous** (never with `preTaskQuestioning: never`; up front with `always`). Explore first; ask at most 3 questions, each with a recommended default.
 5. **Roster, formation, models** → `routing.md`. Start every dispatch with the header below, plus the profile prefix unless every value is a default.
 6. **Run dir.** Create `~/.agentille/state/run-<id>/` and keep it. When a planner ran, write its CONTEXT-PACK to `context-pack.md` there and give each executor only its slice plus `checkpoint: ~/.agentille/state/run-<id>/checkpoint-<name>.md`.
-7. **Scout, plan, then review it.** Scouts are optional, medium and heavy only: when the task names no files and the planner would have to map unfamiliar ground in ≥3 areas, first send ≤3 `Explore` subagents with `model: haiku` as one message of background calls, one question each ("which files wire X?"), each answering in ≤15 lines of paths and facts, and hand the answers to the planner under `SCOUTS:`. The plan carries numbered ACCEPTANCE criteria. REVISE → re-plan → review again; a second REVISE → re-plan once more and send that third plan to the plan-reviewer one last time on Opus: one call, `size=large` in its header (so the mod routes it to Opus) and `model: opus`. APPROVE → build. A third REVISE stops the run before any build, with `✗ plan not approved after 3 reviews` as the card's first line and `⚑ plan not approved: <reason 1> · <reason 2> · <reason 3>` (one clause per REVISE) as its `⚑` line. Never build a plan the last review did not approve.
+7. **Scout, plan, then review it.** Scouts are optional, medium and heavy only: when the task names no files and the planner would have to map unfamiliar ground in ≥3 areas, first send ≤3 `Explore` subagents with `model: haiku` as one message of background calls, one question each ("which files wire X?"), each answering in ≤15 lines of paths and facts,
+   and hand the answers to the planner under `SCOUTS:`. The plan carries numbered ACCEPTANCE criteria. REVISE → re-plan → review again; a second REVISE → re-plan once more and send that third plan to the plan-reviewer one last time on Opus: one call, `size=large` in its header (so the mod routes it to Opus) and `model: opus`. APPROVE → build. A third REVISE stops the run before any build,
+   with `✗ plan not approved after 3 reviews` as the card's first line and `⚑ plan not approved: <reason 1> · <reason 2> · <reason 3>` (one clause per REVISE) as its `⚑` line. Never build a plan the last review did not approve.
 8. **Build, then review**, in dependency order, pipelined: review each finished slice while the others build. Every reviewer a slice needs goes out in ONE message as parallel background `Agent` calls. Fix rounds resume the same executor (`factory.md` → "Fix rounds").
 9. **Gate and integrate.** P0/P1 block. Then the escalate checklist decides merge or ⚑ (`factory.md` → "Gate" and "Integrate"). The profile sets `integration`; a repo can only lower it. The lead removes each slice's worktree once the gate decides (`factory.md` → "Worktree lifecycle").
 10. **Close everything.** Close each `agt-<run>-*` pane the moment its answer is harvested, then confirm the run lists zero panes (`panes-mode.md` → "Harvest, then close"). Stop every background subagent once its handoff is used.
@@ -56,7 +61,7 @@ Every `agentille:agentille-*` dispatch prompt starts with one line:
 - `risk`: `routing.md` → "Risk words" (sessions, tokens, guards → `auth`; payments, webhooks → `money`; migrations → `data`; a form or page with no such logic → `none`).
 - `mode=fix` on every fix round, including a `SendMessage` to the kept executor (a `RESUME:` after an early stop stays `mode=build`); `diagnose` for the read-only root-cause planner.
 - `fable=forced` only when the user typed `--fable`.
-- `slice=<slug>` (lowercase, ≤24 chars) names the slice: its executor, adversary and reviewers share it. Omit it for planning roles and single-slice runs. The mod accepts the older `piece=` too for one release; write `slice=`.
+- `slice=<slug>` (lowercase, ≤24 chars) names the slice: its executor, adversary and reviewers share it. Omit it for planning roles and single-slice runs.
 
 With the mod loaded it routes model + effort from this line. Still pass `model:` every time: the skill must work with mods off.
 
@@ -79,3 +84,12 @@ Ask: <preTaskQuestioning>. Depth: <thinkingDepth>.
 - **Foreground when it gates.** A dispatch whose result feeds the next step runs in the foreground; independent dispatches go out as one message of background calls, then one wait.
 - **Mods off still works.** The mod only adds the band, routing, the wire between panes and the automatic pane cleanup.
 - **Never close a pane you did not open.** The `agt-` prefix is ownership.
+- **Re-enter from the files, not from memory.** After a compaction or a `/clear`, or whenever you cannot name the current slice and its state, re-read before the next dispatch: the sections you need of this file, `routing.md` and `factory.md`, then `run-<id>/context-pack.md`, the mod's `ledger.json` and `routing.jsonl` when present, and `git log $BASE..<branch>` per slice branch still there.
+- **Never re-dispatch a finished slice.** A slice is done when its branch has a PR (`gh pr list --head <branch> --state all`) or is merged into `$BASE` (a deleted branch whose merge is in `git log $BASE` counts). One whose executor report under `run-<id>/agents/` carries `VERIFICATION:` is built: it goes to review, not to a new executor.
+
+## Deprecated
+
+Still honored when typed, never suggested:
+
+- `--mode solo|subagent|panes|herdr` (= low|medium|heavy|heavy), `--plan` (stop after the plan review; "go" resumes it), `--formation <f>` (that formation). All three go away in v4.
+- `piece=` in the dispatch header: the mod still reads it for one release; write `slice=`.

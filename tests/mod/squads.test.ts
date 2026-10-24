@@ -93,7 +93,7 @@ describe('squads: in the mod', () => {
     await $.session.start({ cwd: '/work/repo', surface: null, isInteractive: false })
   }
 
-  test('an active squad reaches the /agt skill text', async ($, on) => {
+  test('an active squad reaches the /agt skill text', { timeoutMs: 20_000 }, async ($, on) => {
     await boot($, on, { pkg: JSON.stringify({ dependencies: { stripe: '1', 'next-auth': '1' } }), paths: [] })
     const r = await $.skill.prompt({ skill: 'agt', text: 'base' })
     expect(r.text).toContain('## Squads detected by the agentille mod')

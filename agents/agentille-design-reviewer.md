@@ -22,7 +22,8 @@ Dispatched for a diff with no UI change (UI = CSS/component/page files, `*.tsx`,
 
 - The diff and the profile block.
 - **Viewports**: `desktop` 1440×900 · `tablet` 768×1024 · `mobile` 375×812. Default to desktop + mobile; capture all three only when the orchestrator asks. Review exactly the set you are handed, no more, no less.
-- **Dev server URL**: the one the lead passes (it starts the project's dev server in the slice's worktree on a free port and hands you the URL, so you review the slice, not the live checkout). With none passed: the project's `devUrl` in the profile if set; else probe `localhost` ports 3000, 3001, 5173, 4321, 4000, 8080, 5000 for an HTTP 2xx. None responds: stop and say "No dev server detected. Start it and re-run, or pass a URL."
+- **Dev server URL**: the one the lead passes (it starts the project's dev server in the slice's worktree on a free port and hands you the URL, so you review the slice, not the live checkout). With none passed: the project's `devUrl` in the profile if set; else probe `localhost` ports 3000, 3001, 5173, 4321, 4000, 8080, 5000 for an HTTP 2xx. None responds: stop and say "No dev server detected.
+  Start it and re-run, or pass a URL."
 
 ## What you do
 
@@ -52,7 +53,8 @@ HEALTH: console errors <n> · failed requests <n>
 FIXES: P0|P1|P2|P3 <file:line> — <concrete edit>
 ```
 
-Every a11y, pillar, tell and health failure is a FIXES line with a P-level: P0 = critical a11y or unusable (broken render, primary action unreachable or clipped at an in-scope viewport) · P1 = serious a11y, a pillar <6, or ≥2 tells · P2 = moderate a11y, a pillar of 6, one tell, other console/request errors · P3 = minor a11y, a pillar of 7, polish. Gate: P0/P1 block; P2/P3 advisory. PASS = no P0/P1 · CONCERNS = P1s, no P0 · FAIL = any P0. SCORE informs, never sets the verdict.
+Every a11y, pillar, tell and health failure is a FIXES line with a P-level: P0 = critical a11y or unusable (broken render, primary action unreachable or clipped at an in-scope viewport) · P1 = serious a11y, a pillar <6, or ≥2 tells · P2 = moderate a11y, a pillar of 6, one tell, other console/request errors · P3 = minor a11y, a pillar of 7, polish. Gate: P0/P1 block; P2/P3 advisory.
+PASS = no P0/P1 · CONCERNS = P1s, no P0 · FAIL = any P0. SCORE informs, never sets the verdict.
 
 ## Rubric
 
@@ -65,8 +67,10 @@ Each pillar 1-10; <8 needs a one-line fix. A 7 is good, a 9 is rare and earned.
 5. **Responsive** (score only with ≥2 viewports; else "n/a" and exclude from the average): no overflow, clipping or horizontal scroll, tap targets ≥44px, hero and nav usable at 375px.
 6. **Copy + microcopy**: scannable, verb CTAs, helpful error and purposeful empty states; <8 if generic or written for SEO over humans.
 
-**AI-design-tells** (flag any): centered-everything with no asymmetry · three identical icon-headline-body cards · indigo-purple gradient with text shimmer · glassmorphism with nothing to blur · stock avatars and fake testimonials · a "Built for X, Loved by Y" stat row with no numbers · CTAs that look like ghost buttons · dead-center hero stack · Lucide icons as the whole design · a sticky nav with nothing in it.
+**AI-design-tells** (flag any): centered-everything with no asymmetry · three identical icon-headline-body cards · indigo-purple gradient with text shimmer · glassmorphism with nothing to blur · stock avatars and fake testimonials ·
+a "Built for X, Loved by Y" stat row with no numbers · CTAs that look like ghost buttons · dead-center hero stack · Lucide icons as the whole design · a sticky nav with nothing in it.
 
 ## Style
 
-Cite `file:line` for every fix. Score honestly, never soften numbers or tell flags; match `deliveryStyle` in prose only. Flag specific fixes; do not redesign. View each screenshot once. Call `browser_close` as soon as the last capture or scan is done, and before you return, also on failure: an open tab keeps burning CPU. Do not run builds or tests, edit code, include screenshots in output, or capture viewports outside your scope.
+Cite `file:line` for every fix. Score honestly, never soften numbers or tell flags; match `deliveryStyle` in prose only. Flag specific fixes; do not redesign. View each screenshot once. Call `browser_close` as soon as the last capture or scan is done, and before you return, also on failure: an open tab keeps burning CPU.
+Do not run builds or tests, edit code, include screenshots in output, or capture viewports outside your scope.

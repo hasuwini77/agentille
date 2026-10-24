@@ -23,6 +23,12 @@ A framed dispatch tree above your prompt, rooted at your session.
 - A pane that finishes silently is flagged to you.
 - `/agt` refuses to open panes when the session runs an older agentille than the one installed (restart first).
 - **The wire**: pane workers report to your session when they finish, so it wakes on its own; their live status reaches your band through a shared store.
+- **When no wire message comes:** if a pane finishes and no wire message arrives within about 20 s, the mod tries to send the lead one `[agt wake]` message naming the pane and the read command (`herdr agent read <name> --source recent-unwrapped --lines 200`, or `tmux capture-pane -p -t <id> -S -200`). A session cannot message itself, so this usually reaches you as a `⚑` toast instead of waking the lead. A blocked pane gets no wake: it waits on you.
+- **What counts as harvested:** the mod closes an `idle` `agt-` pane only while the lead has no turn running, and a `done` one about 10 s after it settles, and only once it is harvested:
+  - that pane's own answer file `agents/pane-<role>.<pane>.md` was written after the pane opened (an earlier pane's file does not count), its wire done message reached the lead, or the lead closed it;
+  - an older worker's legacy `pane-<role>.md` counts only while exactly one pane has that name;
+  - a role the lead respawns is a new pane and starts unharvested, even while the earlier pane is still open.
+- **Until then** the pane stays open and is flagged once (`⚑ <name> done, not harvested`, or `idle, not harvested`).
 
 ## Best with Herdr
 

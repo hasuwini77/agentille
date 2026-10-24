@@ -364,8 +364,22 @@ else
     else
       fail "hooks/register.js failed to import:"; printf '%s\n' "$imp" | head -8 | sed 's/^/    /'
     fi
+    # Each owner module makes its store at load time and the modules import one another in a cycle, so a module
+    # that reads another's store at top level breaks only when it happens to load first. Import each one alone.
+    mod_bad=0
+    for m in hooks/*.js; do
+      imp=$(node -e "import(process.argv[1]).then(()=>{},e=>{console.error(e&&e.message||e);process.exit(1)})" "./$m" 2>&1) || { fail "$m failed to import on its own: $(printf '%s' "$imp" | head -1)"; mod_bad=1; }
+    done
+    [ "$mod_bad" = 0 ] && pass "every hooks/*.js module imports cleanly on its own"
   fi
 fi
+
+# ── 6b'''. Stores: a module writes only its own (hooks/store.js) ────────────
+# store.js seed() writes a store past its owner's transitions; it exists for tests only.
+hdr "Mod stores"
+seeded=$(grep -lE '\bseed\(' hooks/*.js 2>/dev/null | grep -v '^hooks/store\.js$')
+if [ -n "$seeded" ]; then fail "store.js seed() is for tests only; called in: $(printf '%s' "$seeded" | tr '\n' ' ')"
+else pass "no hooks module writes a store through store.js seed()"; fi
 
 # ── 6c. The mod: Claude Code's own validator + its tests ────────────────────
 # WARN where the claude CLI is absent on a developer machine; in CI (CI=true) its absence is a
@@ -407,7 +421,10 @@ hdr "Hook scripts"
 # tests/hooks/test-validate-gate.sh runs this script with a fake claude; it sets this so the inner
 # run does not run the hook tests again. Nothing else should set it, and under CI=true it is a FAIL:
 # the runner must never go green with the hook tests skipped.
-for t in tests/hooks/test-*.sh; do
+# A test that cannot run here (a tool it needs is missing) prints `SKIP: <reason>` and exits 3: a WARN on a
+# developer machine, a FAIL under CI=true. Exit 3 without that line is a failure like any other exit.
+# AGENTILLE_VALIDATE_HOOK_TESTS_DIR points the loop at fixtures: test-validate-gate.sh only.
+for t in "${AGENTILLE_VALIDATE_HOOK_TESTS_DIR:-tests/hooks}"/test-*.sh; do
   if [ -n "${AGENTILLE_VALIDATE_SKIP_HOOK_TESTS:-}" ]; then
     m="hook tests skipped (AGENTILLE_VALIDATE_SKIP_HOOK_TESTS set: inner run of test-validate-gate.sh)"
     if [ "${CI:-}" = "true" ]; then fail "$m: CI=true, unset it on the runner"; else warn "$m"; fi
@@ -415,7 +432,10 @@ for t in tests/hooks/test-*.sh; do
   fi
   [ -e "$t" ] || { warn "no tests/hooks/test-*.sh found"; break; }
   tout=$(bash "$t" 2>&1); trc=$?
-  if [ "$trc" = 0 ]; then pass "$t: $(printf '%s\n' "$tout" | tail -1)"; else fail "$t failed:"; printf '%s\n' "$tout" | tail -12 | sed 's/^/    /'; fi
+  why=$(printf '%s\n' "$tout" | sed -n 's/^SKIP: //p' | tail -1)
+  if [ "$trc" = 0 ]; then pass "$t: $(printf '%s\n' "$tout" | tail -1)"
+  elif [ "$trc" = 3 ] && [ -n "$why" ]; then skip_or_fail "$t skipped: $why"
+  else fail "$t failed (exit $trc):"; printf '%s\n' "$tout" | tail -12 | sed 's/^/    /'; fi
 done
 
 # ── 7. PII / privacy scan (public repo — hard fail) ──────────────────────────

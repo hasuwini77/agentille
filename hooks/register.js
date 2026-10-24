@@ -1,89 +1,92 @@
 // agentille mod entry: wires the hooks. The state is in state.js; routing, panes, sessions, the reaper, the
 // timers, the worker's wire, display settings, drawing and run files each have a module beside this one.
 
-import { S, ctx, isLead } from './state.js'
+import { ctx, isLead, Profile, Display, Runs, Spawn, Panes, Proofs, Session, setRunningVersion, markSkewToasted, setHostVersion, markHostOld, setIdentity, setWeeklyPct, setLeadModel, setLeadTurn } from './state.js'
 import { registerAutocomplete } from './autocomplete.js'
 import { toolLabel, runPhases } from './board.js'
 import { cleanText } from './clean.js'
-import { routingView, ledgerView, completeReport, dispatchAgent } from './dispatch.js'
-import { DECK, applyDisplay, answerPanel, deckCommand, focusCommand, highlightCommand } from './display.js'
-import { canDraw, drawingBlock, reportRun } from './drawing.js'
+import { routingView, ledgerView, dispatchAgent } from './dispatch.js'
+import { DECK, applyDisplay, answerPanel, deckCommand, focusCommand, highlightCommand, setStoredRaw, setLastAnswer, mascotHello, mascotWorking } from './display.js'
+import { canDraw, drawingBlock } from './drawing.js'
 import { highlightFor, litFor } from './highlight.js'
 import { parseInfoArgs, routeText, routingSummary, ledgerSummary, squadsSummary, overviewText } from './info.js'
 import { verdictChip } from './links.js'
 import { addUsage, ledger } from './live.js'
-import { HELLO_MS, parseWorker } from './mascot.js'
+import { parseWorker } from './mascot.js'
 import { PROBE, SPAWN_ROLE, transportBlock, paneName, newRunId, paneKey, parseSpawnArgs, herdrPromptArgv } from './panes.js'
 import { installedSkew, loadProfile, loadSquads, squadsView, tipOnce } from './profile.js'
-import { bashCall } from './guard.js'
+import { bashCall, writeCall, editCall } from './guard.js'
 import { pollNow, cleanWorkspace } from './reaper.js'
 import { cardBox, answerBox, switchboard, deck } from './render.js'
 import { registerRows } from './rows.js'
 import { hostMessage, hostTooOld, hostVersionOf, skewMessage } from './skew.js'
-import { detectTransport, transportOf, openPane, loadOwned, savePanes } from './spawn.js'
+import { probeTransport, transportOf, openPane, loadOwned, savePanes, ownName } from './spawn.js'
 import { spawnPane, openSessions, closePane } from './tools.js'
 import { registerStatus } from './status.js'
 import { refreshAgents, working, ensurePolling, ensureTicker } from './ticker.js'
-import { statusKey, freshStatus, validLead, parseWire, shortName, logWire, parseTellArgs } from './wire.js'
-import { publish } from './worker.js'
+import { statusKey, freshStatus, validLead, parseWire, shortName, parseTellArgs } from './wire.js'
+import { publish, noteWire, pubRoute, pubTool, pubStep, pubWorking } from './worker.js'
 import { onPromptSubmit, onTurnComplete } from './turns.js'
 import { dispatchedRun, agtTurnFromDispatch } from './proofs.js'
 import { parseHeader, roleOf } from './routing.js'
 import * as P from './panerec.js'
-const { runs, live, paneRoutes, openedNames, mascot, litMemo, hlMemo, rawIds, wireLog, pub } = S
+
+// Per message id, whether a reply is lit and its highlight: only the AssistantMessage render below reads them.
+const litMemo = new Map()
+const hlMemo = new Map()
 
 export function register(on) {
   on('session.start', async ($, e, next) => {
     await loadProfile($)
     await loadSquads($)
     try {
-      S.runningVersion = JSON.parse(await $.fs.read($.plugin.root + '/.claude-plugin/plugin.json')).version ?? null
+      setRunningVersion(JSON.parse(await $.fs.read($.plugin.root + '/.claude-plugin/plugin.json')).version ?? null)
     } catch {
-      S.runningVersion = null
+      setRunningVersion(null)
     }
     const skew = await installedSkew($)
     if (skew) {
-      S.skewToasted = true
-      $.ui.toast('agt ⚑ ' + skewMessage(skew, S.runningVersion))
+      markSkewToasted()
+      $.ui.toast('agt ⚑ ' + skewMessage(skew, Session.runningVersion))
     }
     // The host's own version: too old for the mod's pane tools → one toast, and ensureTools registers none.
-    S.hostVersion = hostVersionOf(await Promise.resolve().then(() => $.session.version()).catch(() => null))
-    if (S.hostVersion && hostTooOld(S.hostVersion)) {
-      S.hostOld = true
-      $.ui.toast('agt ⚑ ' + hostMessage(S.hostVersion))
+    setHostVersion(hostVersionOf(await Promise.resolve().then(() => $.session.version()).catch(() => null)))
+    if (Session.hostVersion && hostTooOld(Session.hostVersion)) {
+      markHostOld()
+      $.ui.toast('agt ⚑ ' + hostMessage(Session.hostVersion))
     }
-    S.transport = await detectTransport($)
-    S.worker = parseWorker(await $.env.get('AGENTILLE_WORKER'))
-    S.sessionId = validLead(await $.session.id().catch(() => null))
-    S.wireName = /^agt-[A-Za-z0-9_-]+$/.test((await $.env.get('AGENTILLE_NAME')) ?? '') ? await $.env.get('AGENTILLE_NAME') : null
-    S.leadSession = S.wireName ? validLead(await $.env.get('AGENTILLE_LEAD')) : null
-    if (S.worker) { pub.model = S.worker.model; pub.effort = S.worker.effort || null }
+    await probeTransport($)
+    const worker = parseWorker(await $.env.get('AGENTILLE_WORKER'))
+    const sessionId = validLead(await $.session.id().catch(() => null))
+    const wireName = /^agt-[A-Za-z0-9_-]+$/.test((await $.env.get('AGENTILLE_NAME')) ?? '') ? await $.env.get('AGENTILLE_NAME') : null
+    setIdentity({ worker, sessionId, wireName, leadSession: wireName ? validLead(await $.env.get('AGENTILLE_LEAD')) : null })
+    if (Session.worker) pubRoute(Session.worker.model, Session.worker.effort)
     await $.command.register({ name: 'agt-deck', description: 'Open the agentille deck: the cast, routing timeline, wire log and tokens. auto = open on every /agt (saved as display.deck) · off', argumentHint: '[auto|off]', immediate: true })
     await $.command.register({ name: 'agt-tell', description: 'Send a message to a worker pane over the wire', argumentHint: '<worker> <message>', immediate: true })
     await $.command.register({ name: 'agt-spawn', description: 'Open a routed claude pane beside this one (Herdr or tmux); it closes itself once its answer is saved', argumentHint: '"task" [--model sonnet|opus|haiku|fable]' })
-    S.storedRaw = {
+    setStoredRaw({
       deckAuto: await $.store.get('deck:auto'),
       focusMode: await $.store.get('focus:mode'),
       highlightOn: await $.store.get('highlight:on'),
       highlightAll: await $.store.get('highlight:all'),
-    }
+    })
     applyDisplay()
     await $.command.register({ name: 'agt-info', description: 'Settings in effect, routing, ledger, squads, or a route dry-run: routing | ledger | squads | route <role>', argumentHint: '[routing|ledger|squads|route <role> [size=…] [risk=…] [depth=…]]', immediate: true })
     await $.command.register({ name: 'agt-highlight', description: 'Highlight replies: on (/agt replies lit; a paste-ready ask gets a plain-text note) · all (every typed question gets the answer shape) · off (nothing added to any prompt). Saved as display.highlight in profile.json; goes away in v4', argumentHint: '[on|all|off]', immediate: true })
     await $.command.register({ name: 'agt-clean', description: 'Tidy up now: close finished agt panes, remove merged agt/* worktrees and branches this session\'s runs made, drop run folders untouched for 14 days. Anything still working, unmerged or made elsewhere stays', immediate: true })
     await $.command.register({ name: 'agt-focus', description: 'Agent flags above the prompt (a REVISE, a FAIL, a blocked pane): on · off. Saved as display.focus in profile.json; goes away in v4', argumentHint: '[on|off]', immediate: true })
-    if (S.transport !== 'none') {
+    if (Spawn.transport !== 'none') {
       // One look now: a lead restarted mid-run takes back the panes it opened (lead-<pane>.panes) and no other
       // session's. It reaps only those whose answer was written after this look; an older one is flagged
       // "not harvested" and left to the person. A session that opened none polls nothing.
       await loadOwned($)
-      await pollNow($, S.transport)
-      if (S.panes.length) ensurePolling($)
+      await pollNow($, Spawn.transport)
+      if (Panes.panes.length) ensurePolling($)
       // A lead that died skipped its SessionEnd sweep: close its finished workers now.
-      if (S.panes.length && isLead()) void cleanWorkspace($, { auto: true, panesOnly: true }).catch(() => {})
+      if (Panes.panes.length && isLead()) void cleanWorkspace($, { auto: true, panesOnly: true }).catch(() => {})
     }
     if (working()) ensureTicker($)
-    if (S.wireName) await publish($, true)
+    if (Session.wireName) await publish($, true)
     await refreshAgents($)
     return next(e)
   })
@@ -99,7 +102,7 @@ export function register(on) {
     if (!['composer', 'bridge'].includes(e.origin?.kind)) return { text: '/agt-tell runs only when typed.' }
     const t = await transportOf($)
     if (t !== 'none') await pollNow($, t)
-    const a = parseTellArgs(e.args, S.panes)
+    const a = parseTellArgs(e.args, Panes.panes)
     if (a.usage || a.error) return { text: a.usage ?? a.error }
     const rec = await $.store.get(statusKey(a.name)).catch(() => null)
     const sid = freshStatus(rec, a.name, Date.now()) ? validLead(rec.session) : null
@@ -107,7 +110,7 @@ export function register(on) {
     if (sid) sent = (await $.session.send({ to: { sessionId: sid }, text: '[agt wire] lead note · ' + a.text }).catch(() => ({ isDelivered: false }))).isDelivered
     if (!sent && t === 'herdr') sent = (await $.process.run(herdrPromptArgv(a.name, a.text), PROBE).catch(() => null))?.exitCode === 0
     if (!sent) return { text: 'Could not reach ' + a.name + '.' }
-    logWire(wireLog, { from: 'lead', to: shortName(a.name), kind: 'note', summary: a.text, at: Date.now() })
+    noteWire({ from: 'lead', to: shortName(a.name), kind: 'note', summary: a.text, at: Date.now() })
     $.ui.invalidate('ui.render')
     return { text: '⇄ sent to ' + a.name }
   })
@@ -119,10 +122,10 @@ export function register(on) {
     if (a.view === 'routing') return { text: routingView() }
     if (a.view === 'ledger') return { text: ledgerView() }
     if (a.view === 'squads') return { text: await squadsView($) }
-    if (a.view === 'route') return { text: routeText({ ...a, depth: a.depth ?? S.depth }, S.settings, S.weeklyPct) }
+    if (a.view === 'route') return { text: routeText({ ...a, depth: a.depth ?? Profile.depth }, Profile.settings, Session.weeklyPct) }
     await loadSquads($)
-    const log = runs.get(S.lastRun)?.log ?? []
-    return { text: overviewText({ display: S.display, squads: squadsSummary(S.squadRows), routing: routingSummary(log), ledger: ledgerSummary(ledger(live, S.lastRun, paneRoutes)) }) }
+    const log = Runs.runs.get(Runs.lastRun)?.log ?? []
+    return { text: overviewText({ display: Display.display, squads: squadsSummary(Profile.squadRows), routing: routingSummary(log), ledger: ledgerSummary(ledger(Runs.live, Runs.lastRun, Runs.paneRoutes)) }) }
   })
 
   // Typed only: a plugin, a scheduled task or a notification never opens a pane.
@@ -139,7 +142,7 @@ export function register(on) {
     } catch (err) {
       return { text: 'Could not open a ' + t + ' pane: ' + String(err?.message ?? err).slice(0, 160) }
     }
-    openedNames.add(name)
+    ownName(name)
     await savePanes($)
     ensurePolling($)
     return { text: 'Opened ' + name + ' · ' + a.model + ' · ' + t + ' pane.' }
@@ -149,6 +152,11 @@ export function register(on) {
   on('tool.call', { tool: 'mcp__agentille__open_sessions' }, openSessions)
   on('tool.call', { tool: 'mcp__agentille__close_pane' }, closePane)
   on('tool.call', { tool: 'Bash' }, bashCall)  // guard.js: integration guard + worktree ownership
+  // guard.js: a run below auto may not write the trust root or the repo's git state through a non-Bash tool either.
+  on('tool.call', { tool: 'Write' }, writeCall)
+  on('tool.call', { tool: 'Edit' }, editCall)
+  on('tool.call', { tool: 'MultiEdit' }, editCall)
+  on('tool.call', { tool: 'NotebookEdit' }, editCall)
 
   on('command.run', { command: 'agt-clean' }, async ($, e) => {
     if (!isLead()) return { text: 'agt clean runs in the lead session, not in a worker pane.' }
@@ -165,7 +173,7 @@ export function register(on) {
     if (t !== 'none') ensurePolling($)
     const draws = canDraw(await $.session.surfaces().catch(() => []))
     if (draws) await tipOnce($)
-    return next({ ...e, text: e.text + S.squadBlock + transportBlock(t, S.paneTools && isLead()) + drawingBlock(draws) })
+    return next({ ...e, text: e.text + Profile.squadBlock + transportBlock(t, Spawn.paneTools && isLead()) + drawingBlock(draws) })
   })
 
   // Worker results arrive as peer messages: log them for the band and the deck, then let the
@@ -175,11 +183,11 @@ export function register(on) {
     if (w) {
       const from = shortName(w.from)
       // Only the pane whose key the message names: a stale list or a respawned role must not harvest the older pane.
-      const hit = w.kind === 'done' && w.key ? S.panes.find((p) => paneKey(p.id) === w.key && p.name === w.from) : null
+      const hit = w.kind === 'done' && w.key ? Panes.panes.find((p) => paneKey(p.id) === w.key && p.name === w.from) : null
       if (hit) { const r = P.rec(hit.id); r.harvested = true; r.wireDone = true }
-      const route = w.kind === 'done' ? paneRoutes.findLast((r) => r.name === w.from) : null
+      const route = w.kind === 'done' ? Runs.paneRoutes.findLast((r) => r.name === w.from) : null
       if (route) route.verdict = verdictChip(route.agent, w.summary)
-      logWire(wireLog, { from, to: S.wireName ? shortName(S.wireName) : 'lead', kind: w.kind, summary: w.summary, at: Date.now() })
+      noteWire({ from, to: Session.wireName ? shortName(Session.wireName) : 'lead', kind: w.kind, summary: w.summary, at: Date.now() })
       $.ui.toast('⇄ ' + from + ' ' + w.kind)
       $.ui.invalidate('ui.render')
     }
@@ -188,15 +196,11 @@ export function register(on) {
 
   // What each agent is doing right now, for its band row: a subagent's call carries its agentId;
   // a worker pane's own main loop publishes for its lead. Observe only.
-  on('tool.call', { tool: 'Write' }, async ($, e, next) => {
-    const r = await next(e)
-    if (!e.agentId && reportRun(e.file_path)) await completeReport($, e.file_path)
-    return r
-  })
+  // The Write hook (guard.js writeCall) both guards protected writes and observes a run's report write.
 
   on('tool.call', async ($, e, next) => {
     if (e.agentId) {
-      const a = live.get(e.agentId)
+      const a = Runs.live.get(e.agentId)
       if (a) {
         a.tool = toolLabel(e.tool, e)
         a.heard = Date.now()
@@ -212,8 +216,8 @@ export function register(on) {
           a.heard = Date.now()
         }
       }
-    } else if (S.wireName) {
-      pub.tool = toolLabel(e.tool, e)
+    } else if (Session.wireName) {
+      pubTool(toolLabel(e.tool, e))
       void publish($).catch(() => {})
     }
     return next(e)
@@ -221,7 +225,7 @@ export function register(on) {
 
   on('session.measure', async ($, e, next) => {
     const week = e.rateLimits.find((r) => r.kind === 'seven_day')
-    if (week) S.weeklyPct = week.percentUsed
+    if (week) setWeeklyPct(week.percentUsed)
     return next(e)
   })
 
@@ -234,13 +238,11 @@ export function register(on) {
   })
 
   on('turn.step', async function* ($, e, next) {
-    const a = e.agentId ? live.get(e.agentId) : undefined
-    if (!e.agentId) S.leadModel = e.model
+    const a = e.agentId ? Runs.live.get(e.agentId) : undefined
+    if (!e.agentId) setLeadModel(e.model)
     const result = yield* next(a && a.routed ? { ...e, effort: a.effort } : e)
-    if (!e.agentId && S.wireName && result?.usage) {
-      const u = result.usage
-      pub.tok += (u.input_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0) + (u.output_tokens ?? 0)
-      pub.model = e.model
+    if (!e.agentId && Session.wireName && result?.usage) {
+      pubStep(result.usage, e.model)
       await publish($)
     }
     if (a) {
@@ -255,23 +257,20 @@ export function register(on) {
 
   // A main-loop turn began (a subagent's run raises none). A worker's first one plays hello.
   on('turn.start', async ($, e, next) => {
-    S.leadTurn = true
-    if (e.agentId === undefined) S.lastAnswer = null
-    if (S.worker) {
+    setLeadTurn(true)
+    if (e.agentId === undefined) setLastAnswer(null)
+    if (Session.worker) {
       const now = await $.clock.now()
-      if (!mascot.greeted) {
-        mascot.greeted = true
-        mascot.hiUntil = now + HELLO_MS
+      if (mascotHello(now)) {
         // tmux tags the pane name after the split, so the first poll can miss it: look once more.
-        if (!S.selfName && S.transport && S.transport !== 'none') await pollNow($, S.transport)
+        if (!Session.selfName && Spawn.transport && Spawn.transport !== 'none') await pollNow($, Spawn.transport)
       }
-      mascot.working = true
-      mascot.start = now
+      mascotWorking(now)
       ensureTicker($)
       $.ui.invalidate('ui.render')
     }
-    if (S.wireName) {
-      Object.assign(pub, { state: 'working', tool: null, start: Date.now(), ms: null })
+    if (Session.wireName) {
+      pubWorking()
       await publish($, true)
     }
     return next(e)
@@ -289,9 +288,9 @@ export function register(on) {
   // A long /agt reply: an essentials card on top, the body dim with its tokens lit. The
   // decision is memoised per message id so a reply does not restyle when a later turn changes.
   on('ui.render', { component: 'AssistantMessage' }, async ($, e, next) => {
-    if (!litFor(litMemo, e.requestId, { on: S.highlightOn, agtTurn: S.agtTurn || S.highlightAll })) return next(e)
+    if (!litFor(litMemo, e.requestId, { on: Display.highlightOn, agtTurn: Proofs.agtTurn || Display.highlightAll })) return next(e)
     const final = e.surface === 'terminal' && !e.props?.isSummary ? answerPanel(e.requestId, e.props?.text) : null
-    if (rawIds.has(e.requestId)) return next(e)
+    if (Display.rawIds.has(e.requestId)) return next(e)
     const h = final ? null : highlightFor(hlMemo, e.requestId, e.props?.text)
     if (!final && !h) return next(e)
     const els = $.ui.resolve(e)
@@ -303,12 +302,12 @@ export function register(on) {
 
   // Main-session spinner: how many subagents (◇) and pane sessions (▣) work behind it.
   on('ui.render', { component: 'Spinner' }, async ($, e, next) => {
-    if (live.has(e.requestId)) return next(e)
-    const subs = [...live.values()].filter((a) => a.state === 'working').length
-    const busy = S.panes.filter((p) => p.state === 'working').length
+    if (Runs.live.has(e.requestId)) return next(e)
+    const subs = [...Runs.live.values()].filter((a) => a.state === 'working').length
+    const busy = Panes.panes.filter((p) => p.state === 'working').length
     if (subs + busy === 0) return next(e)
     // In an /agt run the status line holds the counts; the spinner names the phases at work.
-    const phases = S.lastRun === 'adhoc' ? '' : runPhases(live, paneRoutes, S.lastRun)
+    const phases = Runs.lastRun === 'adhoc' ? '' : runPhases(Runs.live, Runs.paneRoutes, Runs.lastRun)
     const parts = phases || [subs ? '◇' + subs : '', busy ? '▣' + busy : ''].filter(Boolean).join(' ') + ' working'
     return next({ ...e, props: { ...e.props, suffix: (e.props.suffix ?? '') + ' · ' + parts } })
   })

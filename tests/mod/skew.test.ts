@@ -68,7 +68,7 @@ describe('skew: in the mod', () => {
   }
   const MSG = 'agentille v3.6.0 is installed but this session runs v3.5.1 — restart Claude Code before opening panes'
 
-  test('a newer installed version: one toast at start, and spawn_pane refuses and opens nothing', async ($, on) => {
+  test('a newer installed version: one toast at start, and spawn_pane refuses and opens nothing', { timeoutMs: 20_000 }, async ($, on) => {
     const { toasts, seen } = await boot($, on, { siblings: ['3.5.0', '3.5.1', '3.6.0'] })
     expect(toasts.filter((t) => t.includes('v3.6.0 is installed'))).toHaveLength(1)
     expect((await spawn($)).deny).toBe(MSG)

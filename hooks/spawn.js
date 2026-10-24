@@ -2,10 +2,36 @@
 // lead (split or run tab), the startup dialogs it clears, the run tabs a lead records, and the pane tools'
 // registration on the typed prompt that unlocks them.
 
-import { S, isLead } from './state.js'
-import { PROBE, HERDR_START_TIMEOUT, pickTransport, splitName, paneKey, answerFile, advisorEnv, tmuxSplitArgv, tmuxEvenArgv, tmuxTagArgvs, tmuxPaneIdOf, tmuxKillArgv, herdrSplitArgv, herdrPaneIdOf, herdrTabArgv, herdrTabOf, herdrTabListArgv, herdrTabIds, tabsFile, panesFile, startupDialog, dialogKeys, herdrReadArgv, herdrKeysArgv, agentStatusOf, herdrGetArgv, screenLine, codexTask, herdrStartArgv, herdrPromptArgv, herdrCloseArgv, herdrMetaArgv, SPAWN_TOOL, CLOSE_TOOL, OPEN_SESSIONS_TOOL } from './panes.js'
+import { isLead, Profile, Session } from './state.js'
+import { makeStore } from './store.js'
+import { PROBE, HERDR_START_TIMEOUT, pickTransport, splitName, paneKey, answerFile, advisorEnv, tmuxSplitArgv, tmuxEvenArgv, tmuxTagArgvs, tmuxTitleLockArgv, tmuxPaneIdOf, tmuxKillArgv, herdrSplitArgv, herdrPaneIdOf, herdrTabArgv, herdrTabOf, herdrTabListArgv, herdrTabIds, tabsFile, panesFile, startupDialog, dialogKeys, herdrReadArgv, herdrKeysArgv, agentStatusOf, herdrGetArgv, screenLine, codexTask, herdrStartArgv, herdrPromptArgv, herdrCloseArgv, herdrMetaArgv, SPAWN_TOOL, CLOSE_TOOL, OPEN_SESSIONS_TOOL } from './panes.js'
 import { wireEnv, shortName } from './wire.js'
-const { ownedTabs, openedNames } = S
+import { sameConfig } from './trust.js'
+export { sameConfig, commandPaths } from './trust.js'
+
+// The pane transport's store: the transport probed for this session, every pane name this lead opened, the run tabs
+// it made and which pane tools are registered. Read through the Spawn view; written only here.
+const { s: my, view } = makeStore('spawn.js', {
+  transport: null,  // 'herdr' | 'tmux' | 'none', probed once at session start
+  openedNames: new Set(),  // every pane name this lead opened, kept after the pane closes
+  ownedTabs: new Set(),  // herdr: run tabs this session created; its panes are reaped, closed and swept like the lead's tab's
+  paneTools: false,  // spawn_pane (and close_pane) registered: a typed /agt arrived in this lead session
+  sessionTools: false,  // open_sessions (and close_pane) registered: a typed ask for sessions arrived
+  closeTool: false,  // close_pane registered, by whichever of the two came first
+  trustUnresolvedTold: false,  // the once-per-session note that a worktree's config runs a command the mod cannot follow
+})
+export const Spawn = view
+
+// Session start: probe the transport afresh.
+export async function probeTransport($) {
+  my.transport = await detectTransport($)
+  return my.transport
+}
+
+// A pane this lead opened (spawn_pane, /agt-spawn): it is the lead's to reap, close and sweep from now on.
+export function ownName(name) {
+  my.openedNames.add(name)
+}
 
 export async function probeOk($, argv) {
   try {
@@ -24,15 +50,15 @@ export async function detectTransport($) {
 }
 
 export async function transportOf($) {
-  S.transport ??= await detectTransport($)
-  return S.transport
+  my.transport ??= await detectTransport($)
+  return my.transport
 }
 
 // The run tabs this lead made, one id per line where the SessionEnd sweep reads them. A failed write loses
 // only the sweep's reach, so it never blocks.
 export async function saveTabs($) {
-  const file = tabsFile(S.home, await $.env.get('HERDR_PANE_ID'))
-  if (file) await $.fs.write(file, [...ownedTabs].map((t) => t + '\n').join('')).catch(() => {})
+  const file = tabsFile(Profile.home, await $.env.get('HERDR_PANE_ID'))
+  if (file) await $.fs.write(file, [...my.ownedTabs].map((t) => t + '\n').join('')).catch(() => {})
 }
 
 // The lead's pane id in this transport: where its tabs, panes and sessions files are keyed.
@@ -43,30 +69,30 @@ export async function leadPane($) {
 // The worker panes this lead opened, one name per line, where the SessionEnd sweep reads them. Ownership is by
 // name (agt-<run>-<role>, the run id is random), so a restarted lead takes its own panes back and no other.
 export async function savePanes($) {
-  const file = panesFile(S.home, await leadPane($))
-  if (file) await $.fs.write(file, [...openedNames].map((n) => n + '\n').join('')).catch(() => {})
+  const file = panesFile(Profile.home, await leadPane($))
+  if (file) await $.fs.write(file, [...my.openedNames].map((n) => n + '\n').join('')).catch(() => {})
 }
 
 export async function loadOwned($) {
-  const file = panesFile(S.home, await leadPane($))
+  const file = panesFile(Profile.home, await leadPane($))
   if (!file) return
   const text = await $.fs.read(file).catch(() => '')
-  for (const n of String(text ?? '').split('\n')) if (splitName(n)) openedNames.add(n)
+  for (const n of String(text ?? '').split('\n')) if (splitName(n)) my.openedNames.add(n)
 }
 
 // A run tab herdr no longer lists is gone (its last pane closed): forget it.
 export async function pruneTabs($, workspace) {
-  if (!ownedTabs.size || !workspace) return
+  if (!my.ownedTabs.size || !workspace) return
   const r = await $.process.run(herdrTabListArgv(workspace), PROBE).catch(() => null)
   const ids = r?.exitCode === 0 ? herdrTabIds(r.stdout) : null
   if (!ids) return
-  const gone = [...ownedTabs].filter((t) => !ids.includes(t))
-  for (const t of gone) ownedTabs.delete(t)
+  const gone = [...my.ownedTabs].filter((t) => !ids.includes(t))
+  for (const t of gone) my.ownedTabs.delete(t)
   if (gone.length) await saveTabs($)
 }
 
 // The lead's cwd and a pane's cwd are the same repo when they share a git common dir (a worktree does).
-export async function sameRepo($, a, b) {
+export async function sameCheckout($, a, b) {
   if (a === b) return true
   const dir = async (d) => {
     const r = await $.process.run(['git', '-C', d, 'rev-parse', '--path-format=absolute', '--git-common-dir'], PROBE).catch(() => null)
@@ -85,14 +111,6 @@ export async function sameRepo($, a, b) {
 // whose project config matches the lead checkout's (sameConfig). A folder below either root is never accepted. With
 // no list nothing but the lead's own cwd and checkout root is accepted.
 const OWN_BRANCH = /^agt\/[A-Za-z0-9._/-]+$/
-// Absent in the worktree is fine for these (settings.local.json and CLAUDE.local.md are gitignored, so a fresh
-// worktree has none); present, they must be the lead checkout's byte for byte.
-const CONFIG_FILES = ['.mcp.json', '.claude/settings.json', '.claude/settings.local.json', 'CLAUDE.local.md']
-// These must match both ways: absent on both sides, or the same bytes.
-const MEMORY_FILES = ['CLAUDE.md', 'AGENTS.md', '.claude/CLAUDE.md']
-const CONFIG_DIRS = ['.claude/agents', '.claude/commands', '.claude/skills', '.claude/hooks']
-const TREE_MAX = 500
-const REFS_MAX = 64
 // The worktree paths a lead-<pane>.worktrees file names: the `path` of each JSON record (guard.js), or the absolute
 // paths on a plain one-per-line list. Branch names are skipped: a branch can be checked out anywhere.
 export function listedPaths(listed) {
@@ -107,135 +125,8 @@ export function ownedWorktree(listed, top) {
   return listedPaths(listed).some((p) => p.replace(/\/+$/, '') === top)
 }
 
-// A file's text, ABSENT when there is none, UNREADABLE when it is there but cannot be read. Existence is asked of
-// stat, the call that answers for files and folders alike.
-const ABSENT = Symbol('absent')
-const UNREADABLE = Symbol('unreadable')
-async function missing($, path) {
-  return $.fs.stat(path).then(() => false, () => true)
-}
-async function configFile($, path) {
-  const text = await $.fs.read(path).catch(() => null)
-  if (typeof text === 'string') return text
-  return (await missing($, path)) ? ABSENT : UNREADABLE
-}
-
-// Every file under `dir` as relative path → text (empty for no dir), or null when any part cannot be read or the
-// tree is too big to compare.
-async function configTree($, dir) {
-  const out = new Map()
-  const walk = async (rel) => {
-    const entries = await $.fs.list(rel ? dir + '/' + rel : dir).catch(() => null)
-    if (!Array.isArray(entries)) return false
-    for (const e of entries) {
-      const path = rel ? rel + '/' + e.name : e.name
-      if (e.kind === 'dir') {
-        if (!(await walk(path))) return false
-        continue
-      }
-      const text = await $.fs.read(dir + '/' + path).catch(() => null)
-      if (typeof text !== 'string' || out.size >= TREE_MAX) return false
-      out.set(path, text)
-    }
-    return true
-  }
-  if (await walk('')) return out
-  return (await missing($, dir)) && out.size === 0 ? out : null
-}
-
-// The repo-relative files a command line may run: each word that is a path (holds a `/`) or names a script, with
-// $CLAUDE_PROJECT_DIR (bare or braced) read as the checkout's root and an absolute path under `top` made relative.
-// Other variables, `~` and absolute paths outside the checkout are the same file for both sides, so they are skipped.
-// Over-reading is safe: a word that is no file is absent on both sides, and absent on both sides is equal.
-const SCRIPT = /\.(?:sh|bash|zsh|fish|js|mjs|cjs|ts|mts|py|rb|pl|php|lua)$/i
-export function commandPaths(command, top) {
-  const out = []
-  for (let w of String(command ?? '').split(/[\s;|&()<>=,]+/)) {
-    w = w.replace(/^["'`]+|["'`]+$/g, '')
-    const rooted = /^\$\{?CLAUDE_PROJECT_DIR\}?["']?(?=\/|$)/
-    if (rooted.test(w)) w = w.replace(rooted, '').replace(/^\/+/, '')
-    else if (w.startsWith(top + '/')) w = w.slice(top.length + 1)
-    else if (w.startsWith('/')) continue
-    if (!w || w.startsWith('-') || w.startsWith('~') || w.includes('$')) continue
-    w = w.replace(/^(?:\.\/)+/, '')
-    if (w && (w.includes('/') || SCRIPT.test(w))) out.push(w)
-  }
-  return out
-}
-
-// Every command string a settings file runs: hook commands and statusLine.command (any `command` key), and the
-// helpers that run a command (apiKeyHelper, awsAuthRefresh, awsCredentialExport, otelHeadersHelper).
-const HELPER_KEYS = new Set(['command', 'apiKeyHelper', 'awsAuthRefresh', 'awsCredentialExport', 'otelHeadersHelper'])
-function settingsCommands(value, out = []) {
-  if (Array.isArray(value)) for (const v of value) settingsCommands(v, out)
-  else if (value && typeof value === 'object') {
-    for (const [k, v] of Object.entries(value)) {
-      if (HELPER_KEYS.has(k) && typeof v === 'string') out.push(v)
-      else settingsCommands(v, out)
-    }
-  }
-  return out
-}
-
-// The command and args of every .mcp.json server.
-function mcpCommands(json) {
-  const servers = json && typeof json === 'object' ? json.mcpServers : null
-  if (!servers || typeof servers !== 'object') return []
-  return Object.values(servers).flatMap((v) => (v && typeof v === 'object' ? [v.command, ...(Array.isArray(v.args) ? v.args : [])] : [])).filter((x) => typeof x === 'string')
-}
-
-async function sameText($, a, b) {
-  const [x, y] = await Promise.all([configFile($, a), configFile($, b)])
-  return x !== UNREADABLE && y !== UNREADABLE && x === y
-}
-// A file a command names, or a folder (`--directory tools/mcp`, `cd apps/web`): a folder is compared file by file,
-// and one too big to compare refuses.
-async function sameEntry($, a, b) {
-  const [x, y] = await Promise.all([configFile($, a), configFile($, b)])
-  if (x !== UNREADABLE && y !== UNREADABLE) return x === y
-  const [sa, sb] = await Promise.all([$.fs.stat(a).catch(() => null), $.fs.stat(b).catch(() => null)])
-  if (sa?.kind !== 'dir' || sb?.kind !== 'dir') return false
-  const [ta, tb] = await Promise.all([configTree($, a), configTree($, b)])
-  if (!ta || !tb || ta.size !== tb.size) return false
-  for (const [k, v] of ta) if (tb.get(k) !== v) return false
-  return true
-}
-
-// The worktree brings no project config of its own: what it has is the lead checkout's, byte for byte. That is the
-// .mcp.json, settings and local files (CONFIG_FILES, absent in the worktree is fine), CLAUDE.md, AGENTS.md and
-// .claude/CLAUDE.md (MEMORY_FILES, absent on both sides or the same), .claude/agents, commands, skills and hooks
-// (CONFIG_DIRS, every file, nested ones too), and every repo file a settings command or an .mcp.json server names
-// (commandPaths): settings.json can stay byte for byte the same while the hook script it runs changes. A settings
-// or .mcp.json file that does not parse refuses.
-export async function sameConfig($, top, leadTop) {
-  const mine = new Map()
-  for (const f of CONFIG_FILES) {
-    const text = await configFile($, top + '/' + f)
-    if (text === ABSENT) continue
-    if (text === UNREADABLE || text !== (await configFile($, leadTop + '/' + f))) return false
-    mine.set(f, text)
-  }
-  for (const f of MEMORY_FILES) if (!(await sameText($, top + '/' + f, leadTop + '/' + f))) return false
-  for (const d of CONFIG_DIRS) {
-    const [here, lead] = await Promise.all([configTree($, top + '/' + d), configTree($, leadTop + '/' + d)])
-    if (!here || !lead || here.size !== lead.size) return false
-    for (const [k, v] of here) if (lead.get(k) !== v) return false
-  }
-  const commands = []
-  try {
-    for (const f of ['.claude/settings.json', '.claude/settings.local.json']) if (mine.has(f)) commands.push(...settingsCommands(JSON.parse(mine.get(f))))
-    if (mine.has('.mcp.json')) commands.push(...mcpCommands(JSON.parse(mine.get('.mcp.json'))))
-  } catch {
-    return false
-  }
-  const refs = [...new Set(commands.flatMap((c) => commandPaths(c, top)))]
-  if (refs.length > REFS_MAX) return false
-  for (const r of refs) if (!(await sameEntry($, top + '/' + r, leadTop + '/' + r))) return false
-  return true
-}
-
 // git's answer, trimmed, or null when git failed: '' is a real answer (--show-prefix at a checkout's root).
-async function gitOut($, d, ...a) {
+async function gitOutOrNull($, d, ...a) {
   const r = await $.process.run(['git', '-C', d, ...a], PROBE).catch(() => null)
   return r?.exitCode === 0 ? String(r.stdout ?? '').trim() : null
 }
@@ -245,25 +136,33 @@ async function listsRoot($, listed, top) {
   if (ownedWorktree(listed, top)) return true
   const leaf = top.split('/').pop()
   for (const p of listedPaths(listed).filter((x) => x.replace(/\/+$/, '').split('/').pop() === leaf).slice(0, 8)) {
-    const [real, prefix] = await Promise.all([gitOut($, p, 'rev-parse', '--show-toplevel'), gitOut($, p, 'rev-parse', '--show-prefix')])
+    const [real, prefix] = await Promise.all([gitOutOrNull($, p, 'rev-parse', '--show-toplevel'), gitOutOrNull($, p, 'rev-parse', '--show-prefix')])
     if (real === top && prefix === '') return true
   }
   return false
 }
 
-export async function trustable($, cwd, leadCwd) {
+export async function trustable($, cwd, leadCwd, why = {}) {
   if (cwd === leadCwd) return true
-  if (!(await sameRepo($, cwd, leadCwd))) return false
-  const [top, leadTop, prefix] = await Promise.all([gitOut($, cwd, 'rev-parse', '--show-toplevel'), gitOut($, leadCwd, 'rev-parse', '--show-toplevel'), gitOut($, cwd, 'rev-parse', '--show-prefix')])
+  if (!(await sameCheckout($, cwd, leadCwd))) return false
+  const [top, leadTop, prefix] = await Promise.all([gitOutOrNull($, cwd, 'rev-parse', '--show-toplevel'), gitOutOrNull($, leadCwd, 'rev-parse', '--show-toplevel'), gitOutOrNull($, cwd, 'rev-parse', '--show-prefix')])
   // A folder below a checkout's root brings whatever .claude/ or .mcp.json sits in it: never on the person's behalf.
   if (!top || !leadTop || prefix !== '') return false
   if (top === leadTop) return true
-  const branch = await gitOut($, cwd, 'symbolic-ref', '--short', 'HEAD')
+  const branch = await gitOutOrNull($, cwd, 'symbolic-ref', '--short', 'HEAD')
   if (!branch || !OWN_BRANCH.test(branch)) return false
-  const file = String(panesFile(S.home, await leadPane($)) ?? '').replace(/\.panes$/, '.worktrees')
+  const file = String(panesFile(Profile.home, await leadPane($)) ?? '').replace(/\.panes$/, '.worktrees')
   const listed = file ? await $.fs.read(file).catch(() => null) : null
   if (typeof listed !== 'string' || !(await listsRoot($, listed, top))) return false
-  return sameConfig($, top, leadTop)
+  return sameConfig($, top, leadTop, why)
+}
+
+// Once per session: a worktree whose config runs a command the mod cannot follow to files (an npx package no lockfile
+// pins, a script that reads another package folder) is never trusted for the person. One toast says so and names it.
+function unresolvedOnce($, cwd, what) {
+  if (my.trustUnresolvedTold) return
+  my.trustUnresolvedTold = true
+  Promise.resolve($.ui.toast('agt ⚑ ' + cwd + ': ' + what[0] + ' could not be followed to files, so the folder is not trusted for you; open it once by hand to trust it')).catch(() => {})
 }
 
 // A fresh worker stopped on a startup screen (agent_not_ready): classify it, press the keys that clear it, up to
@@ -274,7 +173,13 @@ export async function clearDialogs($, name, cwd) {
     const screen = String(read.stdout ?? '')
     const kind = startupDialog(screen)
     if (!kind) throw new Error(screenLine(screen))
-    if (kind === 'trust' && !(await trustable($, cwd, await $.session.cwd()))) throw new Error(cwd + ' needs a one-time trust: open it once by hand.')
+    if (kind === 'trust') {
+      const why = {}
+      if (!(await trustable($, cwd, await $.session.cwd(), why))) {
+        if (why.unresolved?.length) unresolvedOnce($, cwd, why.unresolved)
+        throw new Error(cwd + ' needs a one-time trust: open it once by hand.' + (why.unresolved?.length ? ' The mod could not follow ' + why.unresolved[0] + ' to files.' : ''))
+      }
+    }
     const keys = dialogKeys(kind, screen)
     if (!keys.length) throw new Error(screenLine(screen))
     // One key at a time: a menu that has only just drawn drops keys sent in one burst.
@@ -321,10 +226,11 @@ export async function openPane($, t, o) {
     if (!lead) throw new Error('TMUX_PANE is not set')
     const target = o.split?.target ?? lead
     const shell = (await $.env.get('SHELL')) ?? ''
-    const id = tmuxPaneIdOf((await runOk($, tmuxSplitArgv({ ...o, target, shell, direction: o.split?.direction, env: [...wireEnv({ name: o.name, lead: S.sessionId }), ...advisorEnv(o.model, S.settings)] }), PROBE)).stdout)
+    const id = tmuxPaneIdOf((await runOk($, tmuxSplitArgv({ ...o, target, shell, direction: o.split?.direction, env: [...wireEnv({ name: o.name, lead: Session.sessionId }), ...advisorEnv(o.model, Profile.settings)] }), PROBE)).stdout)
     if (!id) throw new Error('tmux gave no pane id')
     try {
       for (const argv of tmuxTagArgvs(id, o.name)) await runOk($, argv, PROBE)
+      await $.process.run(tmuxTitleLockArgv(id), PROBE).catch(() => {})  // tmux < 3.3 has no allow-set-title; the pane still opens
     } catch (err) {
       await $.process.run(tmuxKillArgv(id), PROBE).catch(() => {})
       throw err
@@ -335,17 +241,17 @@ export async function openPane($, t, o) {
   }
   const lead = await $.env.get('HERDR_PANE_ID')
   if (!lead) throw new Error('HERDR_PANE_ID is not set')
-  const env = [...wireEnv({ name: o.name, lead: S.sessionId }), ...advisorEnv(o.model, S.settings)]
+  const env = [...wireEnv({ name: o.name, lead: Session.sessionId }), ...advisorEnv(o.model, Profile.settings)]
   let id
   let tab = o.split?.tab ?? null
   if (o.newTab) {
-    const workspace = S.selfWorkspace ?? (await $.env.get('HERDR_WORKSPACE_ID'))
+    const workspace = Session.selfWorkspace ?? (await $.env.get('HERDR_WORKSPACE_ID'))
     if (!workspace) throw new Error('HERDR_WORKSPACE_ID is not set')
     const made = herdrTabOf((await runOk($, herdrTabArgv({ workspace, cwd: o.cwd, run: o.run, agent: o.agent, model: o.model, effort: o.effort, env }), PROBE)).stdout)
     if (!made) throw new Error('herdr gave no tab id')
     id = made.pane
     tab = made.tab
-    ownedTabs.add(tab)
+    my.ownedTabs.add(tab)
     await saveTabs($)
   } else {
     const pane = o.split?.target ?? lead
@@ -355,12 +261,12 @@ export async function openPane($, t, o) {
   try {
     await startAgent($, herdrStartArgv({ name: o.name, pane: id, model: o.model, effort: o.effort, agent: o.agent, vendor: o.vendor }), o.name, o.cwd)
     // Codex has no pane tools of ours: it saves its answer where the harvest, reaper and wake paths look.
-    const task = o.vendor === 'codex' ? codexTask(o.task, answerFile(S.home, o.run, splitName(o.name).role, paneKey(id))) : o.task
+    const task = o.vendor === 'codex' ? codexTask(o.task, answerFile(Profile.home, o.run, splitName(o.name).role, paneKey(id))) : o.task
     await runOk($, herdrPromptArgv(o.name, task), PROBE)
   } catch (err) {
     await $.process.run(herdrCloseArgv(id), PROBE).catch(() => {})
     if (o.newTab) {
-      ownedTabs.delete(tab) // a run tab's only pane closing takes the tab with it
+      my.ownedTabs.delete(tab) // a run tab's only pane closing takes the tab with it
       await saveTabs($)
     }
     throw err
@@ -377,16 +283,16 @@ export async function openPane($, t, o) {
 // and a host without a pane transport gets none. A tool registered while a prompt is submitted is in that
 // turn's list.
 export async function ensureTools($, which) {
-  if (!isLead() || S.hostOld) return
-  if ((which === 'panes' ? S.paneTools : S.sessionTools) || (await transportOf($)) === 'none') return
+  if (!isLead() || Session.hostOld) return
+  if ((which === 'panes' ? my.paneTools : my.sessionTools) || (await transportOf($)) === 'none') return
   try {
     await $.tool.register(which === 'panes' ? SPAWN_TOOL : OPEN_SESSIONS_TOOL)
-    if (!S.closeTool) {
+    if (!my.closeTool) {
       await $.tool.register(CLOSE_TOOL)
-      S.closeTool = true
+      my.closeTool = true
     }
-    if (which === 'panes') S.paneTools = true
-    else S.sessionTools = true
+    if (which === 'panes') my.paneTools = true
+    else my.sessionTools = true
   } catch {
     // an older host without $.tool.register: /agt runs its heavy level as subagent waves
   }

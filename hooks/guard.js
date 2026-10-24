@@ -967,8 +967,10 @@ async function pushMode($, profile, c, cwd, cache) {
       name = local.remotes.map((x) => x.name).sort((x, y) => y.length - x.length).find((n) => to.startsWith(n + '/')) ?? 'origin'
     }
     url = await gitOut($, c.dir, 'remote', 'get-url', '--push', name)
+    // Not a remote: git tries the name as a path (a repo, a symlink to one, a checkout) before it gives up.
+    if (!url) url = (await gitOut($, c.dir, 'rev-parse', '--resolve-git-dir', name)) || (await gitOut($, c.dir, 'rev-parse', '--resolve-git-dir', name + '/.git'))
   }
-  // No such remote: git refuses the push itself, so the dir's own mode stands.
+  // Neither a remote nor a repo by that name: git refuses the push itself, so the dir's own mode stands.
   if (!url || (local.url && sameRepo(normUrl(url), normUrl(local.url)))) return modeFor($, profile, { ...c, slug: null }, cwd, cache)
   const path = remotePath(url, c.dir)
   const paths = path ? [path.replace(/\/\.git$/, '')] : []

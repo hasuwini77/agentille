@@ -106,6 +106,11 @@ try {
     check('auto checkout, its own origin: allowed and landed', !ok?.deny && refOf('origin.git', 'main') === sh('git rev-parse agt/x', APP), JSON.stringify(ok))
     const url = await run('git push -q ' + T + '/prod.git agt/x:main')
     check('auto checkout, a push to another repo by path: denied', url?.deny?.includes('git push to main') && refOf('prod.git', 'main') === null, JSON.stringify(url))
+    fs.symlinkSync(T + '/prod.git', APP + '/p')
+    const link = await run('git push -q p agt/x:main')
+    check('auto checkout, a bare name that is a symlink to another repo: denied', link?.deny?.includes('git push to main') && refOf('prod.git', 'main') === null, JSON.stringify(link))
+    const none = await run('git push -q nosuch agt/y:main')
+    check('auto checkout, a name that is neither remote nor repo: judged as its own (git refuses it)', !none?.deny, JSON.stringify(none))
   }
   {
     const w = world()

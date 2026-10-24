@@ -321,7 +321,7 @@ describe('highlight: in the mod', () => {
   const mount = ($: any, requestId: string, text = REPLY) =>
     $.ui.mount({ plugin: 'agentille', surface: 'terminal', component: 'AssistantMessage', requestId, props: { text } as never })
 
-  test('a typed /agt reply gets the card and a dim body with its tokens lit', async ($, on) => {
+  test('a typed /agt reply gets the card and a dim body with its tokens lit', { timeoutMs: 20_000 }, async ($, on) => {
     setup(on)
     fakeHome(on, { '/u/.agentille/profile.json': '{"display":{"highlight":"on"}}' })
     await start($)

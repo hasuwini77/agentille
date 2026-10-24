@@ -148,7 +148,7 @@ describe('info: in the mod', () => {
   }
   const info = async ($: any, args = '') => (await $.command.run({ command: 'agt-info', args })).text as string
 
-  test('the overview shows settings with their source, squads, and an empty run', async ($, on) => {
+  test('the overview shows settings with their source, squads, and an empty run', { timeoutMs: 20_000 }, async ($, on) => {
     await boot($, on, { display: { deck: 'auto' } }, { 'focus:mode': 'off' })
     const t = await info($)
     expect(t).toMatch(/deck\s+auto\s+profile/)

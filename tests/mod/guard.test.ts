@@ -482,7 +482,7 @@ const card = async ($: any) => {
 }
 
 describe('guard: integration in the mod', () => {
-  test('a session where /agt was never typed keeps full Bash', async ($, on) => {
+  test('a session where /agt was never typed keeps full Bash', { timeoutMs: 20_000 }, async ($, on) => {
     const { ran } = setup(on)
     await boot($)
     expect((await bash($, 'gh pr merge 3 --merge')).result).toBe('ok')

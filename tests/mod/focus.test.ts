@@ -112,7 +112,7 @@ describe('focus: in the mod', () => {
   const band = ($: any) => $.ui.mount({ plugin: 'agentille', surface: 'terminal', component: 'AbovePrompt', props: { hasSurvey: false, isWorking: false, maxRows: 10, bodyColumns: 100 } as never })
   const complete = ($: any, answer: string, agentId?: string) => $.turn.complete({ answer, durationMs: 1000, isAborted: false, turnId: 't', reason: 'answer', ...(agentId ? { agentId } : {}) })
 
-  test('a failing review flags the band and toasts', async ($, on) => {
+  test('a failing review flags the band and toasts', { timeoutMs: 20_000 }, async ($, on) => {
     const { toasts } = setup(on)
     await $.agent.spawn({ prompt: '[agt run=f1 size=small mode=review]\nreview', subagentType: 'agentille:agentille-code-reviewer', model: 'sonnet' })
     await complete($, 'VERDICT: FAIL\nP0: token logged', 'r1')

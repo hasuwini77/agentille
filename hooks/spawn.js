@@ -3,8 +3,32 @@
 // registration on the typed prompt that unlocks them.
 
 import { S, isLead, Profile } from './state.js'
+import { makeStore } from './store.js'
 import { PROBE, HERDR_START_TIMEOUT, pickTransport, splitName, paneKey, answerFile, advisorEnv, tmuxSplitArgv, tmuxEvenArgv, tmuxTagArgvs, tmuxPaneIdOf, tmuxKillArgv, herdrSplitArgv, herdrPaneIdOf, herdrTabArgv, herdrTabOf, herdrTabListArgv, herdrTabIds, tabsFile, panesFile, startupDialog, dialogKeys, herdrReadArgv, herdrKeysArgv, agentStatusOf, herdrGetArgv, screenLine, codexTask, herdrStartArgv, herdrPromptArgv, herdrCloseArgv, herdrMetaArgv, SPAWN_TOOL, CLOSE_TOOL, OPEN_SESSIONS_TOOL } from './panes.js'
 import { wireEnv, shortName } from './wire.js'
+
+// The pane transport's store: the transport probed for this session, every pane name this lead opened, the run tabs
+// it made and which pane tools are registered. Read through the Spawn view; written only here.
+const { s: my, view } = makeStore('spawn.js', {
+  transport: null,  // 'herdr' | 'tmux' | 'none', probed once at session start
+  openedNames: new Set(),  // every pane name this lead opened, kept after the pane closes
+  ownedTabs: new Set(),  // herdr: run tabs this session created; its panes are reaped, closed and swept like the lead's tab's
+  paneTools: false,  // spawn_pane (and close_pane) registered: a typed /agt arrived in this lead session
+  sessionTools: false,  // open_sessions (and close_pane) registered: a typed ask for sessions arrived
+  closeTool: false,  // close_pane registered, by whichever of the two came first
+})
+export const Spawn = view
+
+// Session start: probe the transport afresh.
+export async function probeTransport($) {
+  my.transport = await detectTransport($)
+  return my.transport
+}
+
+// A pane this lead opened (spawn_pane, /agt-spawn): it is the lead's to reap, close and sweep from now on.
+export function ownName(name) {
+  my.openedNames.add(name)
+}
 
 export async function probeOk($, argv) {
   try {
@@ -23,15 +47,15 @@ export async function detectTransport($) {
 }
 
 export async function transportOf($) {
-  S.transport ??= await detectTransport($)
-  return S.transport
+  my.transport ??= await detectTransport($)
+  return my.transport
 }
 
 // The run tabs this lead made, one id per line where the SessionEnd sweep reads them. A failed write loses
 // only the sweep's reach, so it never blocks.
 export async function saveTabs($) {
   const file = tabsFile(Profile.home, await $.env.get('HERDR_PANE_ID'))
-  if (file) await $.fs.write(file, [...S.ownedTabs].map((t) => t + '\n').join('')).catch(() => {})
+  if (file) await $.fs.write(file, [...my.ownedTabs].map((t) => t + '\n').join('')).catch(() => {})
 }
 
 // The lead's pane id in this transport: where its tabs, panes and sessions files are keyed.
@@ -43,24 +67,24 @@ export async function leadPane($) {
 // name (agt-<run>-<role>, the run id is random), so a restarted lead takes its own panes back and no other.
 export async function savePanes($) {
   const file = panesFile(Profile.home, await leadPane($))
-  if (file) await $.fs.write(file, [...S.openedNames].map((n) => n + '\n').join('')).catch(() => {})
+  if (file) await $.fs.write(file, [...my.openedNames].map((n) => n + '\n').join('')).catch(() => {})
 }
 
 export async function loadOwned($) {
   const file = panesFile(Profile.home, await leadPane($))
   if (!file) return
   const text = await $.fs.read(file).catch(() => '')
-  for (const n of String(text ?? '').split('\n')) if (splitName(n)) S.openedNames.add(n)
+  for (const n of String(text ?? '').split('\n')) if (splitName(n)) my.openedNames.add(n)
 }
 
 // A run tab herdr no longer lists is gone (its last pane closed): forget it.
 export async function pruneTabs($, workspace) {
-  if (!S.ownedTabs.size || !workspace) return
+  if (!my.ownedTabs.size || !workspace) return
   const r = await $.process.run(herdrTabListArgv(workspace), PROBE).catch(() => null)
   const ids = r?.exitCode === 0 ? herdrTabIds(r.stdout) : null
   if (!ids) return
-  const gone = [...S.ownedTabs].filter((t) => !ids.includes(t))
-  for (const t of gone) S.ownedTabs.delete(t)
+  const gone = [...my.ownedTabs].filter((t) => !ids.includes(t))
+  for (const t of gone) my.ownedTabs.delete(t)
   if (gone.length) await saveTabs($)
 }
 
@@ -344,7 +368,7 @@ export async function openPane($, t, o) {
     if (!made) throw new Error('herdr gave no tab id')
     id = made.pane
     tab = made.tab
-    S.ownedTabs.add(tab)
+    my.ownedTabs.add(tab)
     await saveTabs($)
   } else {
     const pane = o.split?.target ?? lead
@@ -359,7 +383,7 @@ export async function openPane($, t, o) {
   } catch (err) {
     await $.process.run(herdrCloseArgv(id), PROBE).catch(() => {})
     if (o.newTab) {
-      S.ownedTabs.delete(tab) // a run tab's only pane closing takes the tab with it
+      my.ownedTabs.delete(tab) // a run tab's only pane closing takes the tab with it
       await saveTabs($)
     }
     throw err
@@ -377,15 +401,15 @@ export async function openPane($, t, o) {
 // turn's list.
 export async function ensureTools($, which) {
   if (!isLead() || S.hostOld) return
-  if ((which === 'panes' ? S.paneTools : S.sessionTools) || (await transportOf($)) === 'none') return
+  if ((which === 'panes' ? my.paneTools : my.sessionTools) || (await transportOf($)) === 'none') return
   try {
     await $.tool.register(which === 'panes' ? SPAWN_TOOL : OPEN_SESSIONS_TOOL)
-    if (!S.closeTool) {
+    if (!my.closeTool) {
       await $.tool.register(CLOSE_TOOL)
-      S.closeTool = true
+      my.closeTool = true
     }
-    if (which === 'panes') S.paneTools = true
-    else S.sessionTools = true
+    if (which === 'panes') my.paneTools = true
+    else my.sessionTools = true
   } catch {
     // an older host without $.tool.register: /agt runs its heavy level as subagent waves
   }

@@ -2,7 +2,7 @@
 // the mod holds (proofs.js: spawnAllowed, sessionsAllowed), the installed version and the transport before it touches a pane;
 // register.js only wires them to tool.call.
 
-import { S, isLead, Profile } from './state.js'
+import { S, isLead, Profile, Spawn } from './state.js'
 import { demoteToast, runState, writeRunFile, setLastRun, addRoute, addDecision } from './dispatch.js'
 import { pieceOf, party, taskLine } from './links.js'
 import { PROBE, newRunId, doneFile, paneKey, answerFile, tmuxKillArgv, placePlan, codexNote, herdrCloseArgv, paneRole, spawnToolInput, closeTarget, sessionName, sessionsToolInput, sessionsNote, droppedNote } from './panes.js'
@@ -12,11 +12,14 @@ import { spawnAllowed, sessionsAllowed, fableProof, moment, startRun, agtTurnFro
 import { formationOf, mentionsCodex, mentionsFable, proveHeader, demoteHeaderText, ladderFixes, decide } from './routing.js'
 import { saveSessions, closeSession, openSession } from './sessions.js'
 import { skewMessage } from './skew.js'
-import { transportOf, openPane, savePanes } from './spawn.js'
+import { transportOf, openPane, savePanes, ownName } from './spawn.js'
 import { ensurePolling, ensureTicker } from './ticker.js'
 import { shortName } from './wire.js'
 import { noteWire } from './worker.js'
 import * as P from './panerec.js'
+
+// { id, name, run, tab } of the panes this lead opened via spawn_pane, in spawn order: where the next one splits.
+let opened = []
 
 // spawn_pane: the /agt heavy level's worker pane, the same openPane as /agt-spawn, with the input validated here.
 export async function spawnPane($, e) {
@@ -69,9 +72,9 @@ export async function spawnPane($, e) {
   const r = paneRole(a.agent)
   if (!r.pane) return { deny: r.why }
   await pollNow($, t)
-  S.opened = S.opened.filter((o) => S.panes.some((p) => p.id === o.id))
+  opened = opened.filter((o) => S.panes.some((p) => p.id === o.id))
   const lead = t === 'tmux' ? await $.env.get('TMUX_PANE') : await $.env.get('HERDR_PANE_ID')
-  const plan = placePlan({ transport: t, layout: a.layout, run: a.run, lead, opened: S.opened, live: S.panes })
+  const plan = placePlan({ transport: t, layout: a.layout, run: a.run, lead, opened, live: S.panes })
   // A respawned role (a fix round, a retry) must not inherit the earlier pane's done file: the SessionEnd sweep
   // and the tmux poll would read the new worker as finished and close it mid-slice.
   const stale = doneFile(Profile.home, a.run, a.role)
@@ -100,8 +103,8 @@ export async function spawnPane($, e) {
     await $.store.set('fable:' + a.run, run.fable)
   }
   startRun(a.run)
-  S.opened.push({ id, name: a.name, run: a.run, tab })
-  S.openedNames.add(a.name)
+  opened.push({ id, name: a.name, run: a.run, tab })
+  ownName(a.name)
   await savePanes($)
   const piece = pieceOf(a.hdr)
   addRoute({ name: a.name, run: a.run, role: a.role, agent: a.agent, model: d.model, effort: d.effort, reason: d.reason, start: Date.now(), end: null, piece, verdict: null })
@@ -179,7 +182,7 @@ export async function closePane($, e) {
     return { result: c === 'closed' ? 'Closed ' + s.name + '.' : s.name + ' is already closed.' }
   }
   await pollNow($, t)
-  const c = closeTarget(e, S.panes, t === 'herdr' && S.selfTab ? [S.selfTab, ...S.ownedTabs] : null, S.openedNames)
+  const c = closeTarget(e, S.panes, t === 'herdr' && S.selfTab ? [S.selfTab, ...Spawn.ownedTabs] : null, Spawn.openedNames)
   if (c.gone) return { result: c.gone + ' is already closed (the reaper closed it after its answer was saved).' }
   if (c.error) return { deny: c.error }
   const r = await $.process.run(t === 'herdr' ? herdrCloseArgv(c.pane.id) : tmuxKillArgv(c.pane.id), PROBE).catch(() => null)

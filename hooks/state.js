@@ -8,25 +8,19 @@ import { Wire } from './worker.js'
 import { Profile } from './profile.js'
 import { Display } from './display.js'
 import { Runs } from './dispatch.js'
+import { Spawn } from './spawn.js'
 
 // The read views of the stores the owner modules keep (store.js): read through these, written only by their owners.
-export { Timers, Wire, Profile, Display, Runs }
+export { Timers, Wire, Profile, Display, Runs, Spawn }
 
 export const S = {
   weeklyPct: null,
   panes: [],  // agt-* panes (herdr or tmux) other than this one
-  opened: [],  // { id, name } of panes this lead opened via spawn_pane, in spawn order
-  openedNames: new Set(),  // every pane name this lead opened, kept after the pane closes
   sessions: [],  // { id, name, kind, tab, terminal } of the sessions this lead opened via open_sessions, oldest first
   selfName: null,  // this pane's name when it is an agt-* worker
   worker: null,  // { agent, model, effort } from AGENTILLE_WORKER: this session is a worker pane
   selfTab: null,  // herdr: the lead's own tab, where its workers split
   selfWorkspace: null,  // herdr: the lead's workspace, where a run tab opens
-  ownedTabs: new Set(),  // herdr: run tabs this session created; its panes are reaped, closed and swept like the lead's tab's
-  paneTools: false,  // spawn_pane (and close_pane) registered: a typed /agt arrived in this lead session
-  sessionTools: false,  // open_sessions (and close_pane) registered: a typed ask for sessions arrived
-  closeTool: false,  // close_pane registered, by whichever of the two came first
-  transport: null,  // 'herdr' | 'tmux' | 'none', probed once at session start
   agtTurn: false,  // this turn is part of an /agt run (written only through proofs.js agtTurnStart / agtTurnFromDispatch)
   worktrees: [],  // { path, branch, head, run, at, src } of the worktrees this session's runs made (guard.js), saved to lead-<pane>.worktrees
   // The typed proofs: written only through proofs.js, read here and through ctx.

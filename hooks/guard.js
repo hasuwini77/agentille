@@ -19,7 +19,7 @@
 // or curl is refused, and a script file, a sourced file or a make target is read first and refused when it pushes,
 // merges, tags or releases. Probing that fails denies the command: the guard never lets a line through unread.
 
-import { S, Profile, Runs } from './state.js'
+import { S, Profile, Runs, Spawn } from './state.js'
 import { parseWorktrees } from './clean.js'
 import { PROBE, SAFE_RUN, SPAWN_ROLE, splitName, paneKey } from './panes.js'
 import { ROLES } from './routing.js'
@@ -1244,7 +1244,7 @@ export async function ownedWorktrees($) {
   const all = [...S.worktrees]
   const file = Profile.home ? worktreesFile(Profile.home, await leadPane($).catch(() => null)) : null
   if (file) all.push(...parseOwned(await $.fs.read(file).catch(() => '')))
-  const runs = new Set([...S.openedNames].map((n) => splitName(n)?.run).filter((r) => r && SAFE_RUN.test(r)))
+  const runs = new Set([...Spawn.openedNames].map((n) => splitName(n)?.run).filter((r) => r && SAFE_RUN.test(r)))
   for (const run of runs) {
     const dir = Profile.home + '/.agentille/state/run-' + run + '/worktrees'
     for (const f of await $.fs.list(dir).catch(() => [])) {

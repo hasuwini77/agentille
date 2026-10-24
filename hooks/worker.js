@@ -1,7 +1,7 @@
 // agentille worker side of the wire: what this pane publishes about itself, the answer it saves under the run,
 // the done message it sends its lead, and (lead side) the status each visible worker last published.
 
-import { S, Profile } from './state.js'
+import { S, Profile, Spawn } from './state.js'
 import { makeStore } from './store.js'
 import { writeRunFile } from './dispatch.js'
 import { short, elapsed } from './live.js'
@@ -58,7 +58,7 @@ export async function publishNow($, force) {
   if (!force && now - my.pub.at < PUBLISH_MS) return
   my.pub.at = now
   await $.store.set(statusKey(S.wireName), workerStatus({ name: S.wireName, session: S.sessionId, ...my.pub, now })).catch(() => {})
-  if (S.transport !== 'herdr') return
+  if (Spawn.transport !== 'herdr') return
   // Herdr's sidebar follows the worker: its route, then what it is doing. Changes only.
   const title = my.pub.state === 'done' ? '✓ done ' + elapsed(my.pub.ms ?? 0) : my.pub.tool ?? my.pub.state
   if (title === lastMeta) return

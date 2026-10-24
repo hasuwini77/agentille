@@ -1,7 +1,7 @@
 // agentille mod entry: wires the hooks. The state is in state.js; routing, panes, sessions, the reaper, the
 // timers, the worker's wire, display settings, drawing and run files each have a module beside this one.
 
-import { S, ctx, isLead, Profile, Display, Runs } from './state.js'
+import { S, ctx, isLead, Profile, Display, Runs, Spawn } from './state.js'
 import { registerAutocomplete } from './autocomplete.js'
 import { toolLabel, runPhases } from './board.js'
 import { cleanText } from './clean.js'
@@ -20,7 +20,7 @@ import { pollNow, cleanWorkspace } from './reaper.js'
 import { cardBox, answerBox, switchboard, deck } from './render.js'
 import { registerRows } from './rows.js'
 import { hostMessage, hostTooOld, hostVersionOf, skewMessage } from './skew.js'
-import { detectTransport, transportOf, openPane, loadOwned, savePanes } from './spawn.js'
+import { probeTransport, transportOf, openPane, loadOwned, savePanes, ownName } from './spawn.js'
 import { spawnPane, openSessions, closePane } from './tools.js'
 import { registerStatus } from './status.js'
 import { refreshAgents, working, ensurePolling, ensureTicker } from './ticker.js'
@@ -55,7 +55,7 @@ export function register(on) {
       S.hostOld = true
       $.ui.toast('agt ⚑ ' + hostMessage(S.hostVersion))
     }
-    S.transport = await detectTransport($)
+    await probeTransport($)
     S.worker = parseWorker(await $.env.get('AGENTILLE_WORKER'))
     S.sessionId = validLead(await $.session.id().catch(() => null))
     S.wireName = /^agt-[A-Za-z0-9_-]+$/.test((await $.env.get('AGENTILLE_NAME')) ?? '') ? await $.env.get('AGENTILLE_NAME') : null
@@ -75,12 +75,12 @@ export function register(on) {
     await $.command.register({ name: 'agt-highlight', description: 'Highlight replies: on (/agt replies lit; a paste-ready ask gets a plain-text note) · all (every typed question gets the answer shape) · off (nothing added to any prompt). Saved as display.highlight in profile.json; goes away in v4', argumentHint: '[on|all|off]', immediate: true })
     await $.command.register({ name: 'agt-clean', description: 'Tidy up now: close finished agt panes, remove merged agt/* worktrees and branches this session\'s runs made, drop run folders untouched for 14 days. Anything still working, unmerged or made elsewhere stays', immediate: true })
     await $.command.register({ name: 'agt-focus', description: 'Agent flags above the prompt (a REVISE, a FAIL, a blocked pane): on · off. Saved as display.focus in profile.json; goes away in v4', argumentHint: '[on|off]', immediate: true })
-    if (S.transport !== 'none') {
+    if (Spawn.transport !== 'none') {
       // One look now: a lead restarted mid-run takes back the panes it opened (lead-<pane>.panes) and no other
       // session's. It reaps only those whose answer was written after this look; an older one is flagged
       // "not harvested" and left to the person. A session that opened none polls nothing.
       await loadOwned($)
-      await pollNow($, S.transport)
+      await pollNow($, Spawn.transport)
       if (S.panes.length) ensurePolling($)
       // A lead that died skipped its SessionEnd sweep: close its finished workers now.
       if (S.panes.length && isLead()) void cleanWorkspace($, { auto: true, panesOnly: true }).catch(() => {})
@@ -142,7 +142,7 @@ export function register(on) {
     } catch (err) {
       return { text: 'Could not open a ' + t + ' pane: ' + String(err?.message ?? err).slice(0, 160) }
     }
-    S.openedNames.add(name)
+    ownName(name)
     await savePanes($)
     ensurePolling($)
     return { text: 'Opened ' + name + ' · ' + a.model + ' · ' + t + ' pane.' }
@@ -168,7 +168,7 @@ export function register(on) {
     if (t !== 'none') ensurePolling($)
     const draws = canDraw(await $.session.surfaces().catch(() => []))
     if (draws) await tipOnce($)
-    return next({ ...e, text: e.text + Profile.squadBlock + transportBlock(t, S.paneTools && isLead()) + drawingBlock(draws) })
+    return next({ ...e, text: e.text + Profile.squadBlock + transportBlock(t, Spawn.paneTools && isLead()) + drawingBlock(draws) })
   })
 
   // Worker results arrive as peer messages: log them for the band and the deck, then let the
@@ -262,7 +262,7 @@ export function register(on) {
       const now = await $.clock.now()
       if (mascotHello(now)) {
         // tmux tags the pane name after the split, so the first poll can miss it: look once more.
-        if (!S.selfName && S.transport && S.transport !== 'none') await pollNow($, S.transport)
+        if (!S.selfName && Spawn.transport && Spawn.transport !== 'none') await pollNow($, Spawn.transport)
       }
       mascotWorking(now)
       ensureTicker($)

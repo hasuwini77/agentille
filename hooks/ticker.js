@@ -1,7 +1,7 @@
 // agentille timers: the agent list refresh, the 5 s pane poll that runs while panes may exist, and the 300 ms
 // redraw ticker that runs while something works or animates.
 
-import { S, ctx, Display, Runs } from './state.js'
+import { S, ctx, Display, Runs, Spawn } from './state.js'
 import { makeStore } from './store.js'
 import { waving } from './live.js'
 import { moodAt } from './mascot.js'
@@ -55,10 +55,10 @@ export const working = () => [...Runs.live.values()].some((a) => a.state === 'wo
 // Pane polling starts when panes can exist (an /agt run, a spawn, panes found at start) and
 // stops after a minute with no agt- pane and nothing working.
 export function ensurePolling($) {
-  if (pollTimer || !S.transport || S.transport === 'none') return
+  if (pollTimer || !Spawn.transport || Spawn.transport === 'none') return
   quietPolls = 0
   pollTimer = $.clock.every(5000, () => {
-    pollNow($, S.transport).then(() => {
+    pollNow($, Spawn.transport).then(() => {
       if (S.panes.length || S.sessions.length || working()) { quietPolls = 0; ensureTicker($); return }
       if (++quietPolls >= 12) { pollTimer?.cancel(); pollTimer = null }
     })

@@ -2,7 +2,7 @@
 // band, built from the surface's own elements (`els`) and the state. Nothing here changes state; the one call
 // out is the ↗ button's jump to a pane.
 
-import { S, isLead, Timers, Wire, Profile, Display, Runs } from './state.js'
+import { S, isLead, Timers, Wire, Profile, Display, Runs, Spawn } from './state.js'
 import { ACCENT, FRAME_COLOR, DONE_COLOR, WIRE_COLOR, INK, hex, colorOf, chip, cast, boardRows, header, leadLine, wireRow, castColumns, routingLines, wireLines, tokenBars, swarm } from './board.js'
 import { focusLines } from './display.js'
 import { MARK, SPAN_COLOR, spans, bodyParts } from './highlight.js'
@@ -179,7 +179,7 @@ export async function switchboard($, e, next) {
 
   const rows = nest(linkPieces(cast(scene, Runs.live, Runs.lastRun)))
   const cols = (e.props.bodyColumns ?? 80) - 4
-  const view = boardRows(rows, { now, tick: Timers.tick, cols, wire: Wire.wireStatus, transport: S.transport, view: e.props.view?.agentId ?? null })
+  const view = boardRows(rows, { now, tick: Timers.tick, cols, wire: Wire.wireStatus, transport: Spawn.transport, view: e.props.view?.agentId ?? null })
   const sw = swarm({ agents: Runs.live, routes: Runs.paneRoutes, run: Runs.lastRun, tick: Timers.tick })
   const room = Math.max(1, (e.props.maxRows ?? 10) - 4 - kids.length - (wire ? 1 : 0) - (sw ? 1 : 0))
   const waiting = rows.filter((r) => r.state === 'working').length
@@ -187,7 +187,7 @@ export async function switchboard($, e, next) {
   if (sw) inner.push(swarmLine(els, sw))
   if (rows.length) inner.push(leadRow(els, leadLine({ model: S.leadModel, busy: e.props.isWorking, waiting })))
   const shown = view.slice(0, room)
-  const argvs = shown.map((r) => (r.pane ? focusArgv(S.transport, rows.find((x) => x.id === r.id)) : null))
+  const argvs = shown.map((r) => (r.pane ? focusArgv(Spawn.transport, rows.find((x) => x.id === r.id)) : null))
   const slot = argvs.some(Boolean)
   shown.forEach((r, i) => inner.push(boardRow(els, r, argvs[i] ? () => { $.process.run(argvs[i], PROBE).catch(() => {}) } : null, slot)))
   if (view.length > room) inner.push(els.Text({ dimColor: true, children: ['   +' + (view.length - room) + ' more · /agt-deck'] }))

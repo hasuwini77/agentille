@@ -1,7 +1,7 @@
 // agentille reaper: what the lead sees of its panes (herdr or tmux poll), which finished worker is harvested,
 // which closes, which is flagged, the wake it sends itself, and the cleaner behind /agt-clean.
 
-import { S, Profile, Runs } from './state.js'
+import { S, Profile, Runs, Spawn } from './state.js'
 import { herdrOrphans, tmuxOrphans, orphanPlan, staleTabs, parseWorktrees, worktreePlan, cleanText, FRESH_MS } from './clean.js'
 import { ownedWorktrees, forgetOwned } from './guard.js'
 import { writeRunFile } from './dispatch.js'
@@ -108,7 +108,7 @@ export async function pollHerdr($) {
   // A lead sees, reaps and wakes for the panes it opened (openedNames, by name: the run id is random), never
   // another session's workers in the same tab. Workers (panes that are themselves agt-*) see their siblings and never reap.
   const real = paneAgents(list, selfPane).filter((p) => !me || p.workspace === me.workspace_id)
-  const owned = S.selfName ? real : real.filter((p) => S.openedNames.has(p.name))
+  const owned = S.selfName ? real : real.filter((p) => Spawn.openedNames.has(p.name))
   S.panes = quietSpawn(owned) // the band shows a spawn pane as `open`; the reaper below sees its real state
   const now = await $.clock.now()
   for (const p of S.panes) if (P.get(p.id)?.firstSeen === undefined) P.rec(p.id).firstSeen = now
@@ -147,7 +147,7 @@ export async function pollTmux($) {
   // Window-scope first, then ownership: no file is read for a pane this lead did not open. A done-file counts
   // only if it was written after the pane was first listed.
   const now = await $.clock.now()
-  const scoped = me ? scopeRows(rows, selfPane).filter((r) => S.selfName || S.openedNames.has(r.agt)) : []
+  const scoped = me ? scopeRows(rows, selfPane).filter((r) => S.selfName || Spawn.openedNames.has(r.agt)) : []
   for (const r of scoped) if (P.get(r.id)?.firstSeen === undefined) P.rec(r.id).firstSeen = now
   P.forgetGone(rows)
   const done = new Map()
@@ -162,7 +162,7 @@ export async function pollTmux($) {
       // missing or unreadable counts as not done
     }
   }
-  const real = tmuxPaneAgents(rows, selfPane, done).filter((p) => S.selfName || S.openedNames.has(p.name))
+  const real = tmuxPaneAgents(rows, selfPane, done).filter((p) => S.selfName || Spawn.openedNames.has(p.name))
   S.panes = quietSpawn(real)
   await notePaneExits($)
   if (isLead(rows, selfPane)) {
@@ -206,7 +206,7 @@ async function withAnswer($, plan) {
 export async function cleanWorkspace($, { all = false, auto = false, panesOnly = false } = {}) {
   const r = { closed: [], tabs: 0, removed: [], branches: [], runs: 0, keep: [] }
   const run = (argv) => $.process.run(argv, PROBE).catch(() => null)
-  if (S.transport === 'herdr') {
+  if (Spawn.transport === 'herdr') {
     const res = await run(['herdr', 'agent', 'list'])
     let list = []
     try { list = JSON.parse(res?.stdout ?? '').result?.agents ?? [] } catch { /* herdr down: nothing to judge */ }
@@ -232,7 +232,7 @@ export async function cleanWorkspace($, { all = false, auto = false, panesOnly =
       for (const a of list) if (names.includes(a.name) && a.agent_status === 'idle' && !a.focused && (await run(herdrCloseArgv(a.pane_id)))?.exitCode === 0) r.closed.push(a.name)
       await run(['rm', '-f', dir + '/lead-' + k + '.sessions'])
     }
-  } else if (S.transport === 'tmux') {
+  } else if (Spawn.transport === 'tmux') {
     const res = await run(TMUX_LIST_ARGV)
     let rows = res?.exitCode === 0 ? parseTmuxList(res.stdout) : []
     if (!isLead(rows, await $.env.get('TMUX_PANE'))) rows = []

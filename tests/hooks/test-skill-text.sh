@@ -100,8 +100,13 @@ check "routing.md's design-reviewer rule names quick and the ceiling" 'dr_rule |
 check "routing.md's ceiling bullet includes the design-reviewer" 'grep -F "Past the ceiling," skills/agt/routing.md | grep -qF "design-reviewer"'
 
 # setup skills that say "typed only" disable model invocation
-for f in skills/agentille-init/SKILL.md skills/agentille-project/SKILL.md; do
+for f in skills/agentille-init/SKILL.md skills/agentille-project/SKILL.md skills/agentille-claude-md/SKILL.md; do
   check "$f disables model invocation" 'grep -qE "^disable-model-invocation: true$" "$f"'
+done
+# a typed-only skill never describes itself as one the model picks up from what the user says or asks
+for f in skills/*/SKILL.md; do
+  grep -qE "^disable-model-invocation: true$" "$f" || continue
+  check "$f is typed only and its description says so" '! grep -E "^description:" "$f" | grep -qiE "use when the user says|when the user asks"'
 done
 
 [ "$bad" = 0 ] && echo "skill-text: $n checks pass" || { echo "skill-text: $bad of $n checks fail"; exit 1; }

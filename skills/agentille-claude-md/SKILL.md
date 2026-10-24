@@ -1,6 +1,6 @@
 ---
 name: agentille-claude-md
-description: Tune a CLAUDE.md to be lean and high-signal. Applies a fixed "less is more" rubric and proposes a shorter rewrite with a per-line cut-list. Non-destructive: shows a diff, backs up the original, writes only on explicit approval. Defaults to ~/.claude/CLAUDE.md; pass a path for a project file. Use when the user says "tune / slim / improve my CLAUDE.md" or types /agentille-claude-md.
+description: Tune a CLAUDE.md to be lean and high-signal. Applies a fixed "less is more" rubric and proposes a shorter rewrite with a per-line cut-list. Non-destructive: shows a diff, backs up the original, writes only on explicit approval. Defaults to ~/.claude/CLAUDE.md; pass a path for a project file. Runs only when the user types /agentille-claude-md; model invocation is disabled.
 argument-hint: [path-to-CLAUDE.md]
 disable-model-invocation: true
 ---

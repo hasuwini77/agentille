@@ -104,6 +104,9 @@ describe('guard: which commands integrate', () => {
       'git push --force-with-lease origin +agt/x',
       'git push -uf origin agt/x',
       'git push origin +agt/x',
+      'git push origin +HEAD:agt/x',
+      'git push origin +agt/x:agt/x',
+      'git push origin +feat/x:feat/x',
       'git merge --no-ff agt/x && git push origin main',
       'git push origin agt/x 2>&1 && git push origin main',
       'git push --tags',
@@ -1752,6 +1755,9 @@ describe('guard: the run pushes only branches it made or that are new', () => {
     expect(judgePush({ remote: 'origin', specs: ['feat/z'], force: false, del: false, bulk: null, dry: false, mergeOpt: false } as any, { current: 'feat/z', claim: (n: string, cur: boolean) => claims.push([n, cur]) } as any)).toBe(null)
     // A base-like branch is refused checked out or not: develop, when the guard read it as the base.
     expect(judgePush({ remote: 'origin', specs: ['develop'], force: false, del: false, bulk: null, dry: false, mergeOpt: false } as any, { current: 'develop', bases: new Set(['main', 'master', 'develop']), claim: (n: string) => claims.push(n) } as any)).toBe('git push to develop')
+    // remote.<name>.mirror = true: a bare push of that remote is a mirror push, whatever the line spells.
+    expect(judgePush({ remote: 'backup', specs: [], force: false, del: false, bulk: null, dry: false, mergeOpt: false } as any, { current: 'agt/x', mirror: true } as any)).toBe('git push (remote.backup.mirror = true: a mirror push)')
+    expect(judgePush({ remote: 'origin', specs: ['agt/x'], force: false, del: false, bulk: null, dry: false, mergeOpt: false } as any, { current: 'agt/x', mirror: true, claim: () => {} } as any)).toBe(null)
     expect(claims).toEqual([['feat/y', false], ['feat/z', true]])
   })
 })

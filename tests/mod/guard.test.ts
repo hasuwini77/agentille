@@ -1096,10 +1096,12 @@ describe('guard: package scripts, modules and imports are followed', () => {
     await deny('npm run wrap', 'tools/push.sh runs a script that calls git push')
     await deny('sh tools/wrap.sh', 'tools/push.sh runs a script that calls git push')
     const ok = ['npm run loop', 'npm run lint', 'npm run fine', 'node tools/fine.mjs', 'python3 -m pkg.ok', 'python3 -m pytest -q', 'python3 -m http.server', 'pnpm install', 'yarn', 'bun test',
-      'npm run check', 'sh tools/check.sh', 'npm i -g typescript', 'pnpm add -w lodash', 'pnpm -r install', 'npm install --prefix x', 'yarn add left-pad',
+      'npm run check', 'sh tools/check.sh', 'npm i -g typescript', 'yarn add left-pad',
       'npm run lint -- -g adds', 'npm run lint -- -w', 'pnpm run lint -- --filter x']
     for (const line of ok) expect([line, (await bash($, line)).result]).toEqual([line, 'ok'])
     expect(ran).toEqual(ok)
+    // An install runs lifecycle scripts: pointed at another package folder, the guard cannot tell whose, as for run.
+    for (const line of ['pnpm add -w lodash', 'pnpm -r install', 'npm install --prefix x']) await deny(line, 'another package folder')
   })
 
   test('a run script that is not there, or a package.json that does not parse, is refused', async ($, on) => {
@@ -1663,6 +1665,40 @@ describe('guard: the run\'s own branches and the base-like ones', () => {
     expect((await bash($, 'git push origin HEAD:develop')).deny).toContain('git push to develop')
     expect((await bash($, 'git push -u origin feat/slug')).result).toBe('ok')
     expect(ran).toEqual(['git push -u origin feat/slug'])
+  })
+})
+
+describe('guard: lifecycle scripts are read before install, pack and version run them', () => {
+  const pkg = (scripts: Record<string, string>) => ({ '/work/repo/package.json': JSON.stringify({ name: 'p', version: '1.0.0', scripts }) })
+
+  test('a lifecycle script that pushes refuses the command that runs it', async ($, on) => {
+    setup(on, { files: pkg({ postversion: 'git push && git push --tags', postinstall: 'git push origin HEAD:main', prepack: 'gh release create v1', prepare: 'sh tools/ship.sh' }), repos: { '/work/repo': { current: 'agt/x' } } })
+    await boot($)
+    await typed($)
+    expect((await bash($, 'npm version minor')).deny).toContain('npm version minor (its postversion script) runs a package script that calls git push')
+    for (const line of ['npm install', 'npm i', 'npm ci', 'pnpm install', 'pnpm add left-pad', 'yarn', 'yarn add x', 'bun install', 'npm rebuild', 'npm it', 'npm pack', 'bun pm pack']) {
+      expect([line, (await bash($, line)).deny]).toEqual([line, expect.stringContaining('script')])
+    }
+  })
+
+  test('npm version tags as git tag does; --ignore-scripts and a package with no scripts run', async ($, on) => {
+    const { ran } = setup(on, { files: pkg({ prepare: 'husky', test: 'vitest run' }), repos: { '/work/repo': { current: 'agt/x' } } })
+    await boot($)
+    await typed($)
+    expect((await bash($, 'npm version patch')).deny).toBe(DENY_INTEGRATION)
+    expect((await bash($, 'npm version patch --no-git-tag-version')).result).toBe('ok')
+    expect((await bash($, 'npm ci')).result).toBe('ok')
+    expect((await bash($, 'npm install --ignore-scripts')).result).toBe('ok')
+    expect((await bash($, 'npm version')).result).toBe('ok')
+    expect(ran).toEqual(['npm version patch --no-git-tag-version', 'npm ci', 'npm install --ignore-scripts', 'npm version'])
+  })
+
+  test('a lifecycle run in another package folder, or a package.json that does not parse, refuses', async ($, on) => {
+    setup(on, { files: { '/work/repo/package.json': '{ not json' }, repos: { '/work/repo': { current: 'agt/x' } } })
+    await boot($)
+    await typed($)
+    expect((await bash($, 'npm ci')).deny).toContain('cannot read')
+    expect((await bash($, 'npm --prefix ../other ci')).deny).toContain('another package folder')
   })
 })
 

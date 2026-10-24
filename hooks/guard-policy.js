@@ -367,7 +367,7 @@ async function fileRisk($, c, depth = 0, seen = new Set(), from = 'line') {
     if (!c.path) return skip ? null : c.what + ' runs a package script the guard cannot locate (write the command out)'
     const found = await nearestPkg($, c.dir)
     if (!found) return c.optional || skip ? null : c.what + ' runs a package script the guard cannot read'
-    const key = found.path + '#' + c.script
+    const key = found.path + '#' + (c.lifecycle ? c.lifecycle.join(',') : c.script)
     if (seen.has(key)) return null
     seen.add(key)
     let scripts
@@ -376,6 +376,15 @@ async function fileRisk($, c, depth = 0, seen = new Set(), from = 'line') {
       scripts = pkg?.scripts && typeof pkg.scripts === 'object' ? pkg.scripts : {}
     } catch {
       return c.what + ' runs a package script the guard cannot read'
+    }
+    // A lifecycle run (install, ci, pack, version, …): each of its scripts the package has, read as `run` reads one.
+    if (c.lifecycle) {
+      for (const k of c.lifecycle) {
+        if (typeof scripts[k] !== 'string') continue
+        const why = await textRisk($, scripts[k], found.dir, c.what + ' (its ' + k + ' script)', 'package script', depth, seen)
+        if (why) return why
+      }
+      return null
     }
     if (typeof scripts[c.script] !== 'string') return c.optional || skip ? null : c.what + ' names a package script that is not in ' + found.path
     for (const k of scriptChain(c.script)) {

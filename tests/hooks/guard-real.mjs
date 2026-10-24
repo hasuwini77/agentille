@@ -548,6 +548,18 @@ try {
     sh('git checkout -q agt/x', APP)
     await loadRunProfile($)
   }
+  if (spawnSync('npm', ['--version'], { env }).status === 0) {
+    // npm version runs the package's version scripts: a postversion that pushes refuses it, and the tag never lands.
+    const w = world()
+    fs.writeFileSync(APP + '/package.json', JSON.stringify({ name: 'p', version: '1.0.0', scripts: { postversion: 'git push -q origin HEAD:main && git push -q origin --tags' } }))
+    sh('git add package.json && git commit -qm pkg', APP)
+    const r = await run('npm version minor')
+    check('npm version minor with a postversion push: denied', r?.deny?.includes('postversion script'), JSON.stringify(r))
+    check('... origin/main unchanged, no tag on origin, package still 1.0.0', refOf('origin.git', 'main') === w.main && refOf('origin.git', 'refs/tags/v1.1.0') === null && JSON.parse(fs.readFileSync(APP + '/package.json', 'utf8')).version === '1.0.0')
+    fs.writeFileSync(APP + '/package.json', JSON.stringify({ name: 'p', version: '1.0.0', scripts: { prepare: 'echo prepared' } }))
+    const ok = await run('npm install --no-audit --no-fund')
+    check('control: npm install with a harmless prepare runs', !ok?.deny && ok.exit === 0, JSON.stringify(ok))
+  }
   {
     // Controls below auto: the run's own branch and ordinary writes still pass.
     world()

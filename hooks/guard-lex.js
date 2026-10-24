@@ -820,6 +820,35 @@ const PM_BUILTINS = new Set(('add remove rm uninstall un install i ci isntall in
 const PM_FOLDER_VALUE = new Set(['--prefix', '-C', '--dir', '--cwd', '--filter', '-F', '--workspace', '-w', '--location'])
 const isScriptWord = (w) => w === 'run' || w === 'run-script' || Object.hasOwn(NPM_SCRIPT_ALIASES, w)
 
+// The package's own lifecycle scripts a manager command runs, in the order npm runs them. A dependency's scripts
+// are installed code (not read); `--ignore-scripts` runs none.
+const INSTALL_LIFE = ['preinstall', 'install', 'postinstall', 'prepublish', 'preprepare', 'prepare', 'postprepare']
+const LIFECYCLE = {
+  install: INSTALL_LIFE,
+  rebuild: ['preinstall', 'install', 'postinstall', 'prepare'],
+  pack: ['prepack', 'prepare', 'postpack'],
+  publish: ['prepublishOnly', 'prepack', 'prepare', 'postpack', 'prepublish', 'publish', 'postpublish'],
+  version: ['preversion', 'version', 'postversion'],
+  'install-test': [...INSTALL_LIFE, 'pretest', 'test', 'posttest'],
+}
+const LIFE_WORDS = {
+  install: 'install', i: 'install', in: 'install', isntall: 'install', add: 'install', ci: 'install', 'clean-install': 'install', ic: 'install', 'install-clean': 'install', 'isntall-clean': 'install',
+  rebuild: 'rebuild', rb: 'rebuild', pack: 'pack', publish: 'publish', version: 'version',
+  it: 'install-test', 'install-test': 'install-test', cit: 'install-test', 'install-ci-test': 'install-test', 'clean-install-test': 'install-test', sit: 'install-test',
+}
+
+// A manager command that runs the package's lifecycle scripts → { lifecycle, what, tags }, or null. `npm version`
+// with no new version prints versions and runs nothing; with one it also makes a git tag unless told not to.
+function lifecycleOf(p, pos, own) {
+  // A global install runs no script of the package here.
+  if (own.some((a) => a === '--ignore-scripts' || a === '--ignore-scripts=true' || a === '-g' || a === '--global' || a === '--location=global')) return null
+  const sub = pos[0] === undefined && p === 'yarn' ? 'install' : pos[0] === 'pm' && p === 'bun' && pos[1] === 'pack' ? 'pack' : pos[0]
+  const life = Object.hasOwn(LIFE_WORDS, sub ?? '') ? LIFE_WORDS[sub] : null
+  if (!life || (life === 'version' && (p === 'npm' || p === 'pnpm') && !pos[1])) return null
+  const tags = life === 'version' && p === 'npm' && !own.some((a) => a === '--no-git-tag-version' || a === '--git-tag-version=false')
+  return { lifecycle: LIFECYCLE[life], what: p + ' ' + (pos[0] ?? 'install') + (life === 'version' && pos[1] ? ' ' + pos[1] : ''), tags }
+}
+
 function pkgScript(p, args) {
   // Words after `--` are the script's own arguments (`npm test -- -g adds`), never the manager's flags.
   const dd = args.indexOf('--')
@@ -833,8 +862,10 @@ function pkgScript(p, args) {
   }
   const sub = pos[0]
   if (sub === 'exec' || sub === 'dlx' || sub === 'x') return { deny: true, what: p + ' ' + sub + ' runs a package the guard cannot read' }
-  let r = null
-  if ((sub === 'run' || sub === 'run-script') && pos[1]) {
+  let r = lifecycleOf(p, pos, own)
+  if (r) {
+    // read below, like a run of each script
+  } else if ((sub === 'run' || sub === 'run-script') && pos[1]) {
     if (p === 'bun' && (pos[1].includes('/') || /\.[cm]?[jt]sx?$/.test(pos[1]))) return { file: pos[1], what: 'bun run ' + pos[1] }
     r = { script: pos[1], what: p + ' run ' + pos[1] }
   } else if (sub !== undefined && p !== 'bun' && Object.hasOwn(NPM_SCRIPT_ALIASES, sub)) r = { script: NPM_SCRIPT_ALIASES[sub], what: p + ' ' + sub, optional: true }
@@ -906,6 +937,7 @@ function codeStep(w, here, stdin = null, piped = false, env = null) {
     if (!r) return null // not a script-running form (install, a builtin): left alone
     if (r.deny) return hidden(r.what)
     if (r.file) return file(r.file, r.what, 'node')
+    if (r.lifecycle) return { kind: 'file', how: 'pkg', what: r.what, lifecycle: r.lifecycle, tags: r.tags, optional: true, path: here ? joinPath(here, PKG_FILE[p]) : null, dir: here, slug: null }
     return { kind: 'file', how: 'pkg', what: r.what, script: r.script, optional: !!r.optional, path: here ? joinPath(here, PKG_FILE[p]) : null, dir: here, slug: null }
   }
   if (Object.hasOwn(RUNNER_FILE, p)) {
@@ -1045,6 +1077,8 @@ export function commandSteps(line, cwd = null, depth = 0, homes = [], { strict =
     } else if (p !== 'gh' && p !== 'git' && p !== 'hub') {
       const k = codeStep(w, at, c.stdin, c.piped, c.env)
       if (k) out.push(k)
+      // `npm version <x>` commits and tags: a tag, as `git tag` is.
+      if (k?.tags) out.push({ kind: 'step', what: k.what + ' (it makes a git tag)', dir: at, slug: null })
       // The words passed to a script are read as a command too: a wrapper that runs `exec "$@"` runs them.
       if (k?.rest?.length) {
         if (depth >= LINE_DEPTH) out.push({ kind: 'hidden', what: LINE_TOO_DEEP, dir: at, slug: null, unread: true })

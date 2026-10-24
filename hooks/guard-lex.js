@@ -130,11 +130,14 @@ function writeTargets(words) {
 }
 
 
-// `ln` and `mv` → the paths they link to or move away (every positional but the destination, or all of them
-// with -t).
+// `ln`, `mv` and a `cp` that links (`-l`, `-s`, `--link`, `--symbolic-link`, in any cluster such as `-al`) → the
+// paths they link to or move away (every positional but the destination, or all of them with -t). A hard link made
+// by `cp -l` is a second name for the file: a later write to it rewrites the original.
+const CP_LINKS = (w) => w === '--link' || w === '--symbolic-link' || (/^-[a-zA-Z]+$/.test(w) && /[ls]/.test(w))
 function linkSources(words) {
   const p = base(words[0])
-  if (p !== 'ln' && p !== 'mv') return []
+  if (p === 'cp' && !words.slice(1).some(CP_LINKS)) return []
+  if (p !== 'ln' && p !== 'mv' && p !== 'cp') return []
   const pos = []
   let t = false
   for (let i = 1; i < words.length; i++) {
@@ -726,7 +729,7 @@ function riskyCode(code) {
 }
 
 // Interpreter code that names the trust root or the repo's own git state: it may write them directly.
-const PROTECT_IN_CODE = /\.agentille\/|\.gitattributes|\.git\/config|\.git\/hooks|\.git\/refs|\.git\/info|packed-refs|\.git\/modules\/\S*(config|hooks|refs)/i
+const PROTECT_IN_CODE = /\.agentille(?![\w-])|\.gitattributes|\.git\/config|\.git\/hooks|\.git\/refs|\.git\/info|packed-refs|\.git\/modules\/\S*(config|hooks|refs)/i
 
 // A script that pushes, merges, tags or releases: per line, git with push/merge/tag/send-pack/update-ref, gh or
 // hub with a merge, release, api or alias, curl or wget at GitHub.

@@ -378,6 +378,18 @@ try {
     await loadRunProfile($)
   }
   {
+    // A hard link to the profile is a second name for it: `cp -l` is judged by its source, so the rewrite through the
+    // link never reaches the trust root.
+    const w = world()
+    const a = await run('cp -l ~/.agentille/profile.json p.json')
+    check('cp -l ~/.agentille/profile.json: denied', a?.deny?.includes('may not write'), JSON.stringify(a))
+    const b = await run(`printf '{"integration":"auto"}' > p.json`)
+    check('control: the write to p.json runs (it is no link)', !b?.deny && b.exit === 0, JSON.stringify(b))
+    check('... the profile is still pr', JSON.parse(fs.readFileSync(HOME + '/.agentille/profile.json', 'utf8')).integration === 'pr')
+    const p = await run('git push -q origin agt/x:main')
+    check('... and the base push is denied', !!p?.deny && refOf('origin.git', 'main') === w.main, JSON.stringify(p))
+  }
+  {
     // Controls below auto: the run's own branch and ordinary writes still pass.
     world()
     const ok = await run('git push -q -u origin agt/x')

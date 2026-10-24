@@ -1413,3 +1413,28 @@ describe('guard: with no profile the run is held to the default', () => {
     expect(integrationIn('echo x > notes/agentille.md', onSlice)).toBe(null)
   })
 })
+
+describe('guard: a cp link, or interpreter code that links, is judged by its source', () => {
+  test('cp -l, -s, -al and --link of the trust root or git state are refused; a plain copy of them is not', async () => {
+    for (const line of [
+      'cp -l ~/.agentille/profile.json p.json',
+      'cp --link "$HOME/.agentille/profile.json" p.json',
+      'cp -al ~/.agentille snap',
+      'cp -s ~/.agentille/profile.json p.json',
+      'cp --symbolic-link .git/config cfg',
+      'cp -l .git/hooks/pre-push h',
+      "python3 -c \"import os; os.link(os.path.expanduser('~/.agentille'), 'x')\"",
+      "node -e \"require('fs').symlinkSync(require('os').homedir() + '/.agentille', 'x')\"",
+      "perl -e 'link(\"$ENV{HOME}/.agentille/profile.json\", \"p\")'",
+    ]) expect([line, integrationIn(line, onSlice)]).toEqual([line, expect.any(String)])
+    for (const line of ['cp ~/.agentille/profile.json backup.json', 'cp -a src dst', 'cp -c -R node_modules wt/', 'cp -L a b']) expect([line, integrationIn(line, onSlice)]).toEqual([line, null])
+  })
+
+  test('in the mod: the hard link is refused, so the later write lands on a plain file', async ($, on) => {
+    const { ran } = setup(on, { profile: { integration: 'pr' } })
+    await boot($)
+    await typed($)
+    expect((await bash($, 'cp -l ~/.agentille/profile.json p.json')).deny).toContain('may not write ~/.agentille (through cp)')
+    expect(ran).toEqual([])
+  })
+})

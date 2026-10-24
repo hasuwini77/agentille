@@ -162,7 +162,7 @@ export async function setDisplay($, key, value) {
   return "saved in this machine's mod store, not in profile.json: " + why
 }
 
-export const MOVED = (key) => '\nmoved: display.' + key + ' in ~/.agentille/profile.json — this command goes away in v4'
+export const MOVED = (key) => '\nmoved: display.' + key + ' in ~/.agentille/profile.json — this command is deprecated; removed in 4.0.0'
 
 export function addFlag($, key, text) {
   my.flags = mergeFlags(my.flags, key, text, Date.now(), FLAG_TTL_MS)

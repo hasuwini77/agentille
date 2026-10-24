@@ -116,7 +116,7 @@ The viewports the design reviewer screenshots when your task names none: any of 
 
 `/agt-routing`, `/agt-ledger` and `/agt-squads` were removed in v3.14.0: use `/agt-info routing|ledger|squads`.
 
-Two commands still work and write the `display` block, but both are deprecated and go away in v4:
+Two commands still work and write the `display` block. Both are deprecated; removed in 4.0.0:
 
 | You type | You get | Instead |
 |---|---|---|

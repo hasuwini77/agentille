@@ -22,4 +22,11 @@ Every command agentille adds, with its arguments. The README's Commands section 
 
 ## Deprecated
 
-Two older commands still work but are deprecated and go away in v4: `/agt-focus` and `/agt-highlight` ([settings.md](./settings.md#older-commands)).
+Still honored when typed, never suggested. Each one is deprecated; removed in 4.0.0.
+
+| You type | Instead |
+|---|---|
+| `/agt-focus [on\|off]` | set `display.focus` in your profile ([settings.md](./settings.md#older-commands)) |
+| `/agt-highlight [on\|all\|off]` | set `display.highlight` in your profile ([settings.md](./settings.md#older-commands)) |
+| `/agt --mode solo\|subagent\|panes\|herdr` | `/agt low\|medium\|heavy` |
+| `/agt --plan` · `/agt --formation <f>` | no replacement: the run picks its own formation |

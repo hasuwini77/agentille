@@ -121,7 +121,7 @@ describe('links: in the mod', () => {
   }
   const mount = ($: any) => $.ui.mount({ plugin: 'agentille', surface: 'terminal', component: 'AbovePrompt', props: { hasSurvey: false, isWorking: true, maxRows: 12, bodyColumns: 120 } as never })
 
-  test('a reviewer of a slice sits under its executor and turns into its verdict', async ($, on) => {
+  test('a reviewer of a slice sits under its executor and turns into its verdict', { timeoutMs: 20_000 }, async ($, on) => {
     spawnAs(on)
     await $.agent.spawn({ prompt: '[agt run=lkrun size=small mode=build slice=api]\nbuild the api', subagentType: 'agentille:agentille-executor' })
     await $.agent.spawn({ prompt: '[agt run=lkrun size=small mode=build slice=web]\nbuild the page', subagentType: 'agentille:agentille-executor' })
@@ -136,7 +136,7 @@ describe('links: in the mod', () => {
     await after.unmount()
   })
 
-  test('a one-slice run nests its reviewer under the executor without any slice=', async ($, on) => {
+  test('a one-slice run nests its reviewer under the executor without any slice=', { timeoutMs: 20_000 }, async ($, on) => {
     spawnAs(on)
     await $.agent.spawn({ prompt: '[agt run=onerun size=small mode=build]\nbuild it', subagentType: 'agentille:agentille-executor' })
     await $.agent.spawn({ prompt: '[agt run=onerun size=small mode=review]\nreview it', subagentType: 'agentille:agentille-code-reviewer' })

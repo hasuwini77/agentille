@@ -102,7 +102,7 @@ check "routing.md's ceiling bullet includes the design-reviewer" 'grep -F "Past 
 # solo is the lead alone: no agents, no reviewer agent, and its own review of the diff before the push
 check "routing.md's solo lines never name the code-reviewer" '! grep -i "solo" skills/agt/routing.md | grep -qF "code-reviewer"'
 check "routing.md says a solo run dispatches no role in the roster" 'grep -F "solo run dispatches no role" skills/agt/routing.md | grep -qF "reviews its own diff"'
-check "SKILL.md's solo step has no reviewer agent and a self-review before the push" 'grep -F "Solo steps aside" skills/agt/SKILL.md | grep -qF "no reviewer" && has skills/agt/SKILL.md "Before the push, review your own full diff"'
+check "SKILL.md's solo step has no reviewer agent and a self-review before the push" 'grep -F "Solo steps aside" skills/agt/SKILL.md | grep -qF "no reviewer" && has skills/agt/SKILL.md "Before the push (under \`local\`, before you report), review your own full diff"'
 check "factory.md gives a solo run no fix attempts" '! has skills/agt/factory.md "solo run counts its own review-fix rounds" && grep -F "solo run dispatches no executor" skills/agt/factory.md | grep -qF "reviews its own diff"'
 
 # setup skills that say "typed only" disable model invocation

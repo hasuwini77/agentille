@@ -38,26 +38,33 @@ The executor already holds the slice in context; a fresh one would re-read the r
 - **Subagent executor:** keep its agent id. Send the P0/P1 `FIX:` lines with `SendMessage`, starting with the `[agt … mode=fix …]` header: "fix these in the slice's worktree, commit, re-verify, reply in your output format".
   Fallback when the agent is gone: a fresh `mode=fix` executor (`isolated: true`) seeded with its checkpoint, `branch:`, `base:` and the findings; it re-attaches ("Worktree lifecycle").
 - **Pane executor:** its pane closed on harvest. Open a fresh pane executor (`isolated: false`) with `cwd` = the slice's worktree (re-attach it first if it is gone), the branch, its answer file path and the findings.
-- **One definition.** A fix attempt is one `mode=fix` executor dispatch for a slice: a `SendMessage` round or a fresh fix executor. It is counted per `slice=`. A solo run dispatches no executor, so it has no attempts: it reviews its own diff before the push and fixes in place (`SKILL.md` → "The contract" step 3). Retries inside one dispatch (the three-miss stop of the executor and of solo), a resume and a `mode=diagnose` planner are not attempts.
-- **Limit: 2 per slice.** Still blocking after the 2nd → a bugfix or debug slice gets one `mode=diagnose` planner (read-only root cause) and a 3rd attempt that implements it. Any other slice, or a failed 3rd, → `⚑` on the card, branch kept. The effort ladder reads this same counter (`routing.md` → "Escalation ladder").
-- **`STUCK:` takes the diagnose path, on any slice.** An executor whose first line is `STUCK: <assumption or check>` is never resumed with a plain `RESUME:`. Send the slice, that line and the executor's body to one `mode=diagnose` planner. Then send one `mode=fix` dispatch that implements its root cause; it counts as an attempt.
-  One diagnose per slice, whichever asks first. A second `STUCK:`, or a `STUCK:` after the diagnose is spent, → `⚑ <slice> stuck: <line>` on the card, branch kept. This path may take any slice to a 3rd attempt. Once a slice's diagnose is spent, the 2-attempt limit above ends in `⚑`, whatever the slice's category.
+
+**One definition.** A fix attempt is one `mode=fix` executor dispatch for a slice: a `SendMessage` round or a fresh fix executor. It is counted per `slice=`, and the effort ladder reads this same counter (`routing.md` → "Escalation ladder"). **Limit: 2 per slice.** One `mode=diagnose` planner per slice, whichever row below asks first, may add a 3rd. Every event a slice can meet:
+
+| Event | Fix attempt? | What happens next | The card shows |
+|---|---|---|---|
+| Review finds a P0/P1 (or the adversary a BROKEN case), fewer than 2 attempts so far | yes | resume the executor with the `FIX:` lines, as above | — |
+| Still blocking after the 2nd attempt, on a bugfix or debug slice whose diagnose is unspent | the planner no, its fix yes | one `mode=diagnose` planner (read-only root cause), then a 3rd attempt that implements it | — |
+| Still blocking after the 2nd attempt on any other slice, after the slice's diagnose is spent (whatever its category), or after a failed 3rd | — | stop the slice, branch kept | a `⚑` line |
+| First line `STUCK: <assumption or check>`, on any slice, diagnose unspent | the planner no, its fix yes | never a plain `RESUME:`: send the slice, that line and the executor's body to one `mode=diagnose` planner, then one `mode=fix` dispatch that implements its root cause (this may take any slice to a 3rd attempt) | — |
+| A second `STUCK:`, or a `STUCK:` after the diagnose is spent | — | stop the slice, branch kept | `⚑ <slice> stuck: <line>` |
+| `CONTEXT …` | no, not by itself (a successor sent `mode=fix` counts like any fix dispatch) | a fresh executor seeded from its checkpoint and slice (`SKILL.md` → "Hard rules") | — |
+| `BLOCKED: <need>` | no | stop: only the person can give it | `⚑ <slice> blocked: <need>` |
+| `CONTRACT: <what and why>` | no | stop, branch kept: the contract is frozen (`formations.md` → "relay — contract first, then parallel") | `⚑ <slice> contract: <what>` |
+| Early stop, the slice's first ("Early stop — resume once") | no: a resume is `mode=build` and counts toward neither the 2 nor the escalation ladder | resume once with `RESUME:` | — |
+| A second early stop | no | stop, branch kept | `⚑ <slice> stopped early twice` |
+| Retries inside one dispatch: the three-miss stop of the executor and of solo | no | the executor answers `STUCK:` (row above); solo names the assumption that may be wrong | — |
+| `INTEGRATE:` once a formation clears ("Integrate") | no, and not a resume either | the kept executor pushes and opens the PR | — |
+| Solo review: a solo run dispatches no executor, so it has no attempts; it reviews its own diff before the push and fixes in place (`SKILL.md` → "The contract" step 3) | no | the solo run pushes or reports | — |
 
 ## Early stop — resume once
 
-An executor stopped early when its handoff has no `VERIFICATION:` block and no stop line, or ends on a question, or its pane went `done` mid-slice. A stop line is not an early stop and is never resumed:
+An executor stopped early when its handoff has no `VERIFICATION:` block and no stop line, or ends on a question, or its pane went `done` mid-slice. A stop line (`CONTEXT …`, `BLOCKED:`, `STUCK:`, `CONTRACT:`) is not an early stop and is never resumed: the table above routes each one.
 
-- `CONTEXT …` gets a successor (`SKILL.md` → "Hard rules").
-- `BLOCKED: <need>` goes on the card as `⚑ <slice> blocked: <need>`.
-- `STUCK: <assumption or check>` goes to the diagnose planner ("Fix rounds" above).
-- `CONTRACT: <what and why>` goes on the card as `⚑ <slice> contract: <what>`, branch kept, since the contract is frozen (`formations.md` → "relay — contract first, then parallel").
+Resume once per slice. Its header says `mode=build`, never `mode=fix`:
 
-For an early stop:
-
-- Resume once per slice. Its header says `mode=build`, never `mode=fix`: a resume is not a fix round and does not count toward the 2 or the escalation ladder.
 - **Subagent executor:** `SendMessage` to the same agent id: "RESUME: finish the slice from your checkpoint and `git log $BASE..HEAD`, keep landed commits, reply in your output format."
 - **Pane executor:** `close_pane`, then `spawn_pane` the same role and cwd (the slice's worktree, `isolated: false`) with the slice, `RESUME:`, the checkpoint path and the answer file path (the same path as a pane fix round).
-- A second early stop → `⚑ <slice> stopped early twice`, branch kept.
 
 ## Gate — merge or escalate
 

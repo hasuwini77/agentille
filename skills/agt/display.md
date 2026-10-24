@@ -36,7 +36,7 @@ Every agent's output starts with a head; relay the head, never the body:
 - planner: `PLAN: <n> steps · <p> parallel-safe · <w> waves` · ui-prototyper: `BLUEPRINT: <name> ready · <stack>`
 - plan-reviewer: `VERDICT: APPROVE` or `VERDICT: REVISE · BLOCKER:n HIGH:n LOW:n`, then `FIX: <step> <one line>` per BLOCKER/HIGH
 - adversary: `BROKEN: n · HELD: n`, then `FIX:` per broken case
-- executor: `<what changed · files · verified yes/no>`, then `FIX:` per known remaining defect; or one stop line: `CONTEXT …`, `BLOCKED: <need>`, `STUCK: <the assumption that failed or the check that will not pass>`, `CONTRACT: <what and why>` (each routed in `factory.md` → "Early stop — resume once"). Its `VERIFICATION:` block is body evidence the gate reads, not the head.
+- executor: `<what changed · files · verified yes/no>`, then `FIX:` per known remaining defect; or one stop line: `CONTEXT …`, `BLOCKED: <need>`, `STUCK: <the assumption that failed or the check that will not pass>`, `CONTRACT: <what and why>` (each routed in `factory.md` → "Fix rounds"). Its `VERIFICATION:` block is body evidence the gate reads, not the head.
   `RESUME:` is the lead's message to an executor that stopped early with none of these, and `INTEGRATE:` its message to the kept executor once a gauntlet clears or a duel picks it (`factory.md` → "Integrate"); it answers either with its normal head.
 
 ## Final card

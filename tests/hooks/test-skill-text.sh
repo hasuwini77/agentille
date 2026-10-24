@@ -42,6 +42,14 @@ for tok in "CONTEXT" "BLOCKED:" "CONTRACT:" "STUCK:" "RESUME:"; do
   check "executor writes $tok" 'has agents/agentille-executor.md "$tok"'
 done
 check "Codex workers get the STUCK: line" 'has skills/agt/panes-mode.md "STUCK:"'
+# fix rounds and early stops are counted in one table in factory.md: every stop head and lead message has its row
+fixtable() { sed -n '/^## Fix rounds/,/^## Early stop/p' skills/agt/factory.md | grep '^|'; }
+check "factory.md counts fix attempts in one table" 'fixtable | grep -qF "| Event | Fix attempt? | What happens next | The card shows |"'
+for tok in "CONTEXT" "BLOCKED:" "STUCK:" "CONTRACT:" "RESUME:" "INTEGRATE:"; do
+  check "factory.md's fix table has a row for $tok" 'fixtable | grep -qF "$tok"'
+done
+check "factory.md's fix table: an early stop is no fix attempt" 'fixtable | grep -F "| Early stop" | grep -qF "| no: a resume is \`mode=build\`"'
+check "factory.md's fix table: the limit is 2 per slice" 'sed -n "/^## Fix rounds/,/^## Early stop/p" skills/agt/factory.md | grep -qF "Limit: 2 per slice."'
 
 # worktrees: one script, no inline recipe for the two files to drift apart on
 for f in skills/agt/factory.md agents/agentille-executor.md; do

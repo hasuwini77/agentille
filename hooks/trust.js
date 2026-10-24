@@ -265,8 +265,8 @@ const NPM_SCRIPT_ALIASES = { test: 'test', t: 'test', tst: 'test', start: 'start
 const INSTALLS = new Set(['install', 'i', 'ci', 'add', 'isntall', 'in'])
 // Flags that read another package.json: the mod cannot tell which, so the command refuses.
 const ELSEWHERE = new Set(['--prefix', '-C', '--dir', '--cwd', '--filter', '-F', '--workspace', '-w', '--workspaces', '-ws', '-r', '--recursive', '--workspace-root', '--global', '-g', '--location'])
-// pnpm, yarn and bun subcommands that run no script of the package.
-const PM_BUILTINS = new Set(['remove', 'rm', 'uninstall', 'un', 'update', 'up', 'upgrade', 'list', 'ls', 'll', 'why', 'outdated', 'audit', 'link', 'unlink', 'prune', 'store', 'publish', 'pack', 'env', 'setup', 'init', 'create', 'import', 'rebuild', 'rb', 'root', 'bin', 'config', 'c', 'get', 'set', 'patch', 'patch-commit', 'licenses', 'deploy', 'fetch', 'server', 'self-update', 'info', 'view', 'login', 'logout', 'whoami', 'cache', 'version', 'help', 'node', 'plugin', 'npm', 'constraints', 'dedupe', 'explain', 'search', 'test-runner', 'build', 'upgrade-interactive', 'workspace', 'workspaces'])
+// Flags that take a value before the subcommand (`npm --loglevel silent run x`): the value is not the subcommand.
+const VALUE_FLAGS = new Set(['--loglevel', '--registry', '--userconfig', '--globalconfig', '--cache', '--scope', '--tag', '--otp', '--reporter', '--color', '--network-concurrency', '--mutex', '--cache-folder', '--modules-folder', '--config'])
 
 // One program and its arguments. Package managers, npx-style runners, python -m and uv are followed to the files
 // they run; anything else runs only what commandPaths already compared.
@@ -274,7 +274,14 @@ async function followProgram($, ctx, name, args, base, depth) {
   if (args.some((a) => ELSEWHERE.has(a.split('=')[0])) && ['npm', 'pnpm', 'yarn', 'bun', 'npx', 'pnpx', 'bunx'].includes(name)) {
     return unresolved(ctx, name + ' ' + args.join(' '), 'it reads another package folder')
   }
-  const sub = args.findIndex((a) => !a.startsWith('-'))
+  let sub = -1
+  for (let i = 0; i < args.length; i++) {
+    if (VALUE_FLAGS.has(args[i])) i++
+    else if (!args[i].startsWith('-')) {
+      sub = i
+      break
+    }
+  }
   const word = sub < 0 ? null : args[sub]
   const rest = sub < 0 ? [] : args.slice(sub + 1)
   const firstArg = (list) => list.find((a) => !a.startsWith('-'))
@@ -296,9 +303,12 @@ async function followProgram($, ctx, name, args, base, depth) {
     if (word === 'dlx' || (name === 'bun' && word === 'x')) return followPackage($, ctx, runnerPackage(rest), base, depth)
     if (word === 'exec') return followBin($, ctx, firstArg(rest), base)
     if (INSTALLS.has(word)) return followInstall($, ctx, base)
-    if (name === 'bun') return word === 'test' || PM_BUILTINS.has(word) || word.includes('/') || SCRIPT.test(word) ? true : followScript($, ctx, word, base, depth)
-    if (PM_BUILTINS.has(word)) return true
-    // pnpm <name> and yarn <name> run that script, else that package's bin.
+    if (word === 'workspace' || word === 'workspaces') return unresolved(ctx, name + ' ' + args.join(' '), 'it reads another package folder')
+    // `bun file.ts` runs a file, which commandPaths compared.
+    if (name === 'bun' && (word.includes('/') || SCRIPT.test(word))) return true
+    // pnpm <name>, yarn <name> and bun <name> run that script (else that package's bin, or a builtin). Which words are
+    // builtins changes between versions, so the script of that name is compared whatever the word: comparing a script
+    // the builtin never runs costs nothing, missing one that runs lets it through.
     if (NPM_SCRIPT_ALIASES[word]) return followScript($, ctx, NPM_SCRIPT_ALIASES[word], base, depth)
     return (await followScript($, ctx, word, base, depth)) && followBin($, ctx, word, base)
   }

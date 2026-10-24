@@ -66,7 +66,7 @@ export async function pruneTabs($, workspace) {
 }
 
 // The lead's cwd and a pane's cwd are the same repo when they share a git common dir (a worktree does).
-export async function sameRepo($, a, b) {
+export async function sameCheckout($, a, b) {
   if (a === b) return true
   const dir = async (d) => {
     const r = await $.process.run(['git', '-C', d, 'rev-parse', '--path-format=absolute', '--git-common-dir'], PROBE).catch(() => null)
@@ -235,7 +235,7 @@ export async function sameConfig($, top, leadTop) {
 }
 
 // git's answer, trimmed, or null when git failed: '' is a real answer (--show-prefix at a checkout's root).
-async function gitOut($, d, ...a) {
+async function gitOutOrNull($, d, ...a) {
   const r = await $.process.run(['git', '-C', d, ...a], PROBE).catch(() => null)
   return r?.exitCode === 0 ? String(r.stdout ?? '').trim() : null
 }
@@ -245,7 +245,7 @@ async function listsRoot($, listed, top) {
   if (ownedWorktree(listed, top)) return true
   const leaf = top.split('/').pop()
   for (const p of listedPaths(listed).filter((x) => x.replace(/\/+$/, '').split('/').pop() === leaf).slice(0, 8)) {
-    const [real, prefix] = await Promise.all([gitOut($, p, 'rev-parse', '--show-toplevel'), gitOut($, p, 'rev-parse', '--show-prefix')])
+    const [real, prefix] = await Promise.all([gitOutOrNull($, p, 'rev-parse', '--show-toplevel'), gitOutOrNull($, p, 'rev-parse', '--show-prefix')])
     if (real === top && prefix === '') return true
   }
   return false
@@ -253,12 +253,12 @@ async function listsRoot($, listed, top) {
 
 export async function trustable($, cwd, leadCwd) {
   if (cwd === leadCwd) return true
-  if (!(await sameRepo($, cwd, leadCwd))) return false
-  const [top, leadTop, prefix] = await Promise.all([gitOut($, cwd, 'rev-parse', '--show-toplevel'), gitOut($, leadCwd, 'rev-parse', '--show-toplevel'), gitOut($, cwd, 'rev-parse', '--show-prefix')])
+  if (!(await sameCheckout($, cwd, leadCwd))) return false
+  const [top, leadTop, prefix] = await Promise.all([gitOutOrNull($, cwd, 'rev-parse', '--show-toplevel'), gitOutOrNull($, leadCwd, 'rev-parse', '--show-toplevel'), gitOutOrNull($, cwd, 'rev-parse', '--show-prefix')])
   // A folder below a checkout's root brings whatever .claude/ or .mcp.json sits in it: never on the person's behalf.
   if (!top || !leadTop || prefix !== '') return false
   if (top === leadTop) return true
-  const branch = await gitOut($, cwd, 'symbolic-ref', '--short', 'HEAD')
+  const branch = await gitOutOrNull($, cwd, 'symbolic-ref', '--short', 'HEAD')
   if (!branch || !OWN_BRANCH.test(branch)) return false
   const file = String(panesFile(S.home, await leadPane($)) ?? '').replace(/\.panes$/, '.worktrees')
   const listed = file ? await $.fs.read(file).catch(() => null) : null

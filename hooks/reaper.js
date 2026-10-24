@@ -6,7 +6,7 @@ import { herdrOrphans, tmuxOrphans, orphanPlan, staleTabs, parseWorktrees, workt
 import { ownedWorktrees, forgetOwned } from './guard.js'
 import { writeRunFile } from './dispatch.js'
 import { paneAgents, reapPlan, ledger, panesLeft, endRoute } from './live.js'
-import { SAFE_RUN, PROBE, SPAWN_ROLE, splitName, doneFile, paneKey, answerFile, parseTmuxList, scopeRows, isFreshDone, quietSpawn, tmuxPaneAgents, isLead, TMUX_LIST_ARGV, reapPool, tmuxKillArgv, herdrCloseArgv, herdrPaneGetArgv, herdrTerminalOf, SESSION_IDLE_MS, sessionSweep } from './panes.js'
+import { SAFE_RUN, PROBE, SPAWN_ROLE, splitName, doneFile, paneKey, answerFile, parseTmuxList, scopeRows, isFreshDone, quietSpawn, tmuxPaneAgents, rowIsLead, TMUX_LIST_ARGV, reapPool, tmuxKillArgv, herdrCloseArgv, herdrPaneGetArgv, herdrTerminalOf, SESSION_IDLE_MS, sessionSweep } from './panes.js'
 import { closeSession, forgetSession } from './sessions.js'
 import { pruneTabs } from './spawn.js'
 import { wakeDue, wakeMessage } from './wire.js'
@@ -166,7 +166,7 @@ export async function pollTmux($) {
   const real = tmuxPaneAgents(rows, selfPane, done).filter((p) => S.selfName || openedNames.has(p.name))
   S.panes = quietSpawn(real)
   await notePaneExits($)
-  if (isLead(rows, selfPane)) {
+  if (rowIsLead(rows, selfPane)) {
     await sweep($, reapPool(real), now, 'tmux', (p) => $.process.run(tmuxKillArgv(p.id), PROBE))
   }
   $.ui.invalidate('ui.render')
@@ -236,7 +236,7 @@ export async function cleanWorkspace($, { all = false, auto = false, panesOnly =
   } else if (S.transport === 'tmux') {
     const res = await run(TMUX_LIST_ARGV)
     let rows = res?.exitCode === 0 ? parseTmuxList(res.stdout) : []
-    if (!isLead(rows, await $.env.get('TMUX_PANE'))) rows = []
+    if (!rowIsLead(rows, await $.env.get('TMUX_PANE'))) rows = []
     const done = new Set()
     for (const row of rows) {
       const n = splitName(row.agt)

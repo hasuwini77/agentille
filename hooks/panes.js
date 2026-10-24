@@ -146,7 +146,7 @@ export function tmuxPaneAgents(rows, selfPane, done) {
 }
 
 // Only a pane with no @agt name of its own is a lead; workers never reap.
-export function isLead(rows, selfPane) {
+export function rowIsLead(rows, selfPane) {
   const me = rows.find((r) => r.id === selfPane)
   return !!me && !me.agt.startsWith('agt-')
 }

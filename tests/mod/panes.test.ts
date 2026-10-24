@@ -1,5 +1,5 @@
 import { describe, expect, mock, test } from 'claude-code/testing'
-import { advisorEnv, EFFORTS, PANE_RULE, splitPlan, tmuxEvenArgv, SPAWN_TOOL, closeTarget, paneRole, doneFile, spawnToolInput, TOOL_MODELS, herdrCloseArgv, herdrPaneIdOf, herdrPromptArgv, herdrSplitArgv, herdrStartArgv, isFreshDone, isLead, newRunId, paneName, parseSpawnArgs, parseTmuxList, pickTransport, quietSpawn, reapPool, scopeRows, splitName, tmuxKillArgv, tmuxPaneAgents, tmuxPaneIdOf, tmuxSplitArgv, tmuxTagArgvs, transportBlock, TMUX_LIST_FORMAT } from '../../hooks/panes.js'
+import { advisorEnv, EFFORTS, PANE_RULE, splitPlan, tmuxEvenArgv, SPAWN_TOOL, closeTarget, paneRole, doneFile, spawnToolInput, TOOL_MODELS, herdrCloseArgv, herdrPaneIdOf, herdrPromptArgv, herdrSplitArgv, herdrStartArgv, isFreshDone, rowIsLead, newRunId, paneName, parseSpawnArgs, parseTmuxList, pickTransport, quietSpawn, reapPool, scopeRows, splitName, tmuxKillArgv, tmuxPaneAgents, tmuxPaneIdOf, tmuxSplitArgv, tmuxTagArgvs, transportBlock, TMUX_LIST_FORMAT } from '../../hooks/panes.js'
 import { agentStatusOf, codexNote, codexTask, dialogKeys, herdrKeysArgv, herdrReadArgv, herdrTabArgv, herdrTabIds, herdrTabListArgv, herdrTabOf, herdrGetArgv, placePlan, screenLine, startupDialog, tabIdsOf, tabsFile } from '../../hooks/panes.js'
 import { DONE_GRACE_MS, reapPlan } from '../../hooks/live.js'
 import { ROLES, roleOf } from '../../hooks/routing.js'
@@ -138,9 +138,9 @@ describe('tmux panes', () => {
 
   test('only an unnamed pane is a lead', async () => {
     const rows = parseTmuxList([row('%1', ''), row('%2', 'agt-r1-executor')].join('\n'))
-    expect(isLead(rows, '%1')).toBe(true)
-    expect(isLead(rows, '%2')).toBe(false)
-    expect(isLead(rows, '%9')).toBe(false)
+    expect(rowIsLead(rows, '%1')).toBe(true)
+    expect(rowIsLead(rows, '%2')).toBe(false)
+    expect(rowIsLead(rows, '%9')).toBe(false)
   })
 
   test('a spawn pane shows as open in the band but keeps its real state for the reaper', async () => {

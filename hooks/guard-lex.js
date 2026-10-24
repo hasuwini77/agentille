@@ -604,7 +604,7 @@ function tagListing(args) {
 
 // `git push …` args → what it would push.
 function parsePush(args) {
-  const p = { remote: null, specs: [], force: false, del: false, bulk: null, dry: false, mergeOpt: false }
+  const p = { remote: null, specs: [], force: false, lease: false, leaseRefs: [], del: false, bulk: null, dry: false, mergeOpt: false }
   let rest = false
   let positional = 0
   const opt = (v) => { if (/merge_when_pipeline_succeeds|auto_merge/i.test(v ?? '')) p.mergeOpt = true }
@@ -618,6 +618,10 @@ function parsePush(args) {
       if (k === '--repo') p.remote = v ?? args[++i] ?? null
       else if (k === '--push-option') opt(v ?? args[++i])
       else if (k === '--receive-pack' || k === '--exec') { if (v === undefined) i++ }
+      // --force-with-lease (and --force-if-includes, which only sharpens it) checks the remote first: the run may
+      // use it on its own agt/* branch. Plain --force may not.
+      else if (k === '--force-with-lease') { p.lease = true; if (v) p.leaseRefs.push(v.split(':')[0]) }
+      else if (k === '--force-if-includes') p.lease = true
       else if (k.startsWith('--force')) p.force = true
       else if (k === '--delete') p.del = true
       else if (['--all', '--branches', '--mirror', '--tags', '--follow-tags', '--prune'].includes(k)) p.bulk = k

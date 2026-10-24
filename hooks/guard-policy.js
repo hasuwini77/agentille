@@ -58,6 +58,9 @@ export function judgePush(p, { current = null, pushDst = null, bases = new Set([
   if (p.bulk) return 'git push ' + p.bulk
   if (p.force) return 'git push --force'
   if (p.mergeOpt) return 'git push -o merge'
+  // --force-with-lease only onto an agt/* branch, and only one the run owns (claimed with `lease`, judged by the caller).
+  const LEASE = 'git push --force-with-lease of a branch that is not an agt/* branch of this run'
+  if (p.lease && (p.leaseRefs ?? []).some((r) => !/^(refs\/heads\/)?agt\//.test(r))) return LEASE
   const cur = p.headMoved ? null : current || null
   if (p.headMoved) pushDst = null
   const dst = (d) => {
@@ -66,6 +69,7 @@ export function judgePush(p, { current = null, pushDst = null, bases = new Set([
     const name = d.replace(/^refs\/heads\//, '')
     if (name.startsWith('refs/')) return 'git push ' + d
     if (bases.has(name)) return 'git push to ' + name
+    if (p.lease && !name.startsWith('agt/')) return LEASE
     if (name === cur || OWN_BRANCH.test(name)) {
       claim?.(name, name === cur)
       return null
@@ -853,6 +857,16 @@ async function othersBranch($, c, name, cwd, { current = false, guessed = true, 
   return 'git push ' + name + ' (a branch the remote already has that this run did not make)'
 }
 
+// A --force-with-lease push onto an agt/* branch: only one the run owns, the slice branch checked out here or one its
+// worktrees or pushes made. Whether the remote has it does not make it the run's: another run's agt/* would be
+// overwritten. Returns why it is refused, or null.
+async function leaseOnto($, c, name, cwd, current, cache) {
+  const at = c.dir ?? cwd
+  if (current && name.startsWith('agt/')) return null
+  if (at && (await madeByRun($, at, name, cache))) return null
+  return 'git push --force-with-lease onto ' + name + ', an agt/* branch this run did not make'
+}
+
 // A merge into a branch below auto (and above local, where nothing leaves the machine): only into one the run made.
 // Merging into a branch the remote has and the run did not make, then pushing it, is the integrate step `auto`
 // owns. A merge of the branch's own upstream (`git merge origin/<branch>`, `@{u}`) only catches up. Returns why it
@@ -1046,7 +1060,7 @@ async function judgeCands($, cands, ctx, depth) {
       const why = judgePush(c.push, { ...info, claim: (n, current) => claims.push({ n, current }) })
       if (why) return DENY_PUSH + ' Refused: ' + why + '.'
       for (const { n, current } of claims) {
-        const other = await othersBranch($, c, n, cwd, { current, guessed: info.guessed, made: ctx.made, cache })
+        const other = c.push.lease ? await leaseOnto($, c, n, cwd, current, cache) : await othersBranch($, c, n, cwd, { current, guessed: info.guessed, made: ctx.made, cache })
         if (other) return DENY_PUSH + ' Refused: ' + other + '.'
       }
       const tag = await followedTags($, c, c.dir ?? cwd, c.push.headMoved ? null : info.current)

@@ -581,6 +581,22 @@ try {
     check('... no tag on origin, origin/main unchanged', refOf('origin.git', 'refs/tags/feat/rel') === null && refOf('origin.git', 'main') === w.main)
   }
   {
+    // --force-with-lease on the run's own agt/* slice branch goes; on a branch it did not make, and plain --force, not.
+    const w = world()
+    sh('git push -q origin agt/x && git branch agt/other main && git push -q origin agt/other && git commit -q --amend -m slice2', APP)
+    const x0 = refOf('origin.git', 'agt/x')
+    const f = await run('git push -q --force origin agt/x')
+    check('git push --force origin agt/x: denied', f?.deny?.includes('git push --force'), JSON.stringify(f))
+    check('... origin agt/x unchanged', refOf('origin.git', 'agt/x') === x0)
+    const o0 = refOf('origin.git', 'agt/other')
+    const o = await run('git push -q --force-with-lease origin agt/x:agt/other')
+    check('--force-with-lease onto agt/other (not the run\'s): denied', o?.deny?.includes('did not make'), JSON.stringify(o))
+    check('... origin agt/other unchanged', refOf('origin.git', 'agt/other') === o0)
+    const l = await run('git push -q --force-with-lease origin agt/x')
+    check('--force-with-lease origin agt/x (the slice checked out): allowed and landed', !l?.deny && refOf('origin.git', 'agt/x') === sh('git rev-parse agt/x', APP) && refOf('origin.git', 'agt/x') !== x0, JSON.stringify(l))
+    check('... origin/main unchanged', refOf('origin.git', 'main') === w.main)
+  }
+  {
     // Controls below auto: the run's own branch and ordinary writes still pass.
     world()
     const ok = await run('git push -q -u origin agt/x')

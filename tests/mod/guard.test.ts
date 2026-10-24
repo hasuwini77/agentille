@@ -98,7 +98,10 @@ describe('guard: which commands integrate', () => {
       'git push origin master',
       'git push -f origin agt/x',
       'git push --force origin agt/x',
-      'git push --force-with-lease origin agt/x',
+      'git push --force-with-lease origin feat/x',
+      'git push --force-with-lease=main origin agt/x',
+      'git push --force-with-lease origin agt/x:main',
+      'git push --force-with-lease origin +agt/x',
       'git push -uf origin agt/x',
       'git push origin +agt/x',
       'git merge --no-ff agt/x && git push origin main',
@@ -591,7 +594,8 @@ describe('guard: integration in the mod', () => {
     expect(main.deny).toContain(DENY_PUSH)
     expect(main.deny).toContain('git push to main')
     expect((await bash($, 'git push')).deny).toContain('git push to main')
-    expect((await bash($, 'git push --force-with-lease origin agt/x')).deny).toContain('--force')
+    // agt/x is the run's now (its push above created it): a lease push of it goes; one of agt/y, which it did not make, does not.
+    expect((await bash($, 'git push --force-with-lease origin agt/y')).deny).toContain('--force')
     expect((await bash($, 'cd "$WT" && git push -u origin "$BRANCH"')).deny).toContain('(a variable)')
     expect((await bash($, 'cd "$WT" && git push -u origin HEAD')).deny).toContain('cannot be read')
     expect(ran).toEqual(['cd /work/repo-x && git push -u origin HEAD', 'git -C /work/repo-x push', 'git push -u origin agt/x'])
@@ -1744,6 +1748,24 @@ describe('guard: a tag named like a branch is a tag push', () => {
     expect((await bash($, 'git push origin v2:feat/new')).deny).toContain('v2 names a tag')
     expect((await bash($, 'git push origin feat/other')).result).toBe('ok')
     expect(ran).toEqual(['git push origin feat/other'])
+  })
+})
+
+describe('guard: --force-with-lease on the run\'s own agt/* branch', () => {
+  test('allowed on the slice branch checked out or one the run made; refused on any other, and plain --force stays refused', async ($, on) => {
+    const { ran } = setup(on, { profile: { integration: 'pr' }, originHead: 'main', remoteHeads: ['agt/x', 'agt/other', 'agt/made'], repos: { '/work/repo-x': { current: 'agt/x' } } })
+    await boot($)
+    await typed($)
+    expect((await bash($, 'cd /work/repo-x && git push --force-with-lease origin agt/x')).result).toBe('ok')
+    expect((await bash($, 'cd /work/repo-x && git push --force-with-lease=agt/x --force-if-includes origin HEAD')).result).toBe('ok')
+    // From the main checkout, agt/x is not checked out: it is the run's because one of its worktrees was made on it.
+    expect((await bash($, 'git push --force-with-lease origin agt/x')).deny).toContain('an agt/* branch this run did not make')
+    expect((await bash($, 'git worktree add ../repo-x -b agt/x')).result).toBe('ok')
+    expect((await bash($, 'git push --force-with-lease origin agt/x')).result).toBe('ok')
+    expect((await bash($, 'git push --force-with-lease origin agt/other')).deny).toContain('an agt/* branch this run did not make')
+    expect((await bash($, 'cd /work/repo-x && git push --force origin agt/x')).deny).toContain('git push --force')
+    expect((await bash($, 'cd /work/repo-x && git push --force-with-lease=main origin agt/x')).deny).toContain('not an agt/* branch of this run')
+    expect(ran).toEqual(['cd /work/repo-x && git push --force-with-lease origin agt/x', 'cd /work/repo-x && git push --force-with-lease=agt/x --force-if-includes origin HEAD', 'git worktree add ../repo-x -b agt/x', 'git push --force-with-lease origin agt/x'])
   })
 })
 

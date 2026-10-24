@@ -110,6 +110,11 @@ reentry() { grep -F "compaction" skills/agt/SKILL.md | grep -F "Re-enter"; }
 check "SKILL.md has a re-entry rule" '[ -n "$(reentry)" ]'
 check "the re-entry rule names ledger.json and context-pack.md" 'reentry | grep -F "ledger.json" | grep -qF "context-pack.md"'
 check "SKILL.md never re-dispatches a finished slice" 'has skills/agt/SKILL.md "Never re-dispatch a finished slice"'
+# every hard rule carries its reason: the lead's in parentheses right after the bold rule, the executor's in its line
+rules_of() { awk '/^## Hard rules/ { on = 1; next } on && /^## / { on = 0 } on && /^- /' "$1"; }
+check "SKILL.md has hard rules" '[ "$(rules_of skills/agt/SKILL.md | wc -l)" -ge 10 ]'
+check "every SKILL.md hard rule gives its reason" '! rules_of skills/agt/SKILL.md | grep -vqE "^- \*\*[^*]+\*\* \("'
+check "every executor hard rule gives its reason" '[ -n "$(rules_of agents/agentille-executor.md)" ] && ! rules_of agents/agentille-executor.md | grep -vqF " ("'
 # the hook lines of one SessionStart matcher: from its "matcher" line to the next matcher or hook event
 matcher_block() { awk -v m="\"matcher\": \"$1\"" 'index($0, m) { on = 1; next } on && /"matcher"|"SessionEnd"/ { on = 0 } on' hooks/hooks.json; }
 check "the compact hook runs the re-entry script" 'matcher_block compact | grep -qF "hooks/agentille-compact.sh"'

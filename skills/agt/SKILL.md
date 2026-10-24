@@ -95,18 +95,18 @@ Ask: <preTaskQuestioning>. Depth: <thinkingDepth>.
 
 ## Hard rules
 
-- **Honor `neverDo`.** Absolute; pass it verbatim into every dispatch.
-- **Review gate: P0/P1 block; P2/P3 advisory.** Fix every P0/P1 and confirm the fix. If it cannot or should not be fixed, put it on the card's `⚑` line; never call it shipped.
-- **Never commit to `main` directly.** Work lands through a branch and a PR or a local merge (`factory.md` → "Integrate").
-- **Never let an agent push through context pressure.** An executor that reports `CONTEXT …` is replaced by a fresh one seeded from its checkpoint and slice.
-- **At most 3 executors at once.** Batch the rest in waves; the mod flags a fourth on the band and in `routing.jsonl` but does not block it.
-- **Executor is never Haiku**; Haiku only classifies and scouts (read-only). Fable comes only from the ladder or `--fable`.
-- **Foreground when it gates.** A dispatch whose result feeds the next step runs in the foreground; independent dispatches go out as one message of background calls, then one wait.
-- **Mods off still works.** The mod only adds the band, routing, the wire between panes and the automatic pane cleanup. What the lead does itself without it: `no-mod.md`.
-- **Never close a pane you did not open.** The `agt-` prefix is ownership.
-- **Re-enter from the files, not from memory.** Do it after a compaction or a `/clear`, and whenever you cannot name the current slice and its state. Before the next dispatch, re-read the sections you need of this file, `routing.md` and `factory.md`. Then read `run-<id>/context-pack.md`, the mod's `ledger.json` and `routing.jsonl` when present, and `git log $BASE..<branch>` for each slice branch still there.
+- **Honor `neverDo`** (a worker knows only what its prompt carries). Absolute; pass it verbatim into every dispatch.
+- **Review gate: P0/P1 block; P2/P3 advisory** (a P0/P1 that ships is a defect the person finds after the card called it done). Fix every P0/P1 and confirm the fix. If it cannot or should not be fixed, put it on the card's `⚑` line; never call it shipped.
+- **Never commit to `main` directly** (a direct commit skips the review gate and the person's integration mode). Work lands through a branch and a PR or a local merge (`factory.md` → "Integrate").
+- **Never let an agent push through context pressure** (an agent near a full window writes subtly worse code). An executor that reports `CONTEXT …` is replaced by a fresh one seeded from its checkpoint and slice.
+- **At most 3 executors at once** (each is a full session, ~500–700 MB as a pane, and slices still merge one at a time). Batch the rest in waves; the mod flags a fourth on the band and in `routing.jsonl` but does not block it.
+- **Executor is never Haiku** (it writes the code that ships); Haiku only classifies and scouts (read-only). Fable comes only from the ladder or `--fable`.
+- **Foreground when it gates** (the next step cannot start without that result, and independent ones lose nothing by going out together). A dispatch whose result feeds the next step runs in the foreground; independent dispatches go out as one message of background calls, then one wait.
+- **Mods off still works** (the skill also runs where the mod is off or cannot draw, such as `claude -p`). The mod only adds the band, routing, the wire between panes and the automatic pane cleanup. What the lead does itself without it: `no-mod.md`.
+- **Never close a pane you did not open** (a pane the person opened holds their own work). The `agt-` prefix is ownership.
+- **Re-enter from the files, not from memory** (a compaction's summary can drop which slices are done and which are still building). Do it after a compaction or a `/clear`, and whenever you cannot name the current slice and its state. Before the next dispatch, re-read the sections you need of this file, `routing.md` and `factory.md`. Then read `run-<id>/context-pack.md`, the mod's `ledger.json` and `routing.jsonl` when present, and `git log $BASE..<branch>` for each slice branch still there.
   After a compaction the mod's hook prints an `[agt re-entry]` block with the run id and each slice's state from `ledger.json`: start from it, then read the files above.
-- **Never re-dispatch a finished slice.** A slice is done when its branch has a PR (`gh pr list --head <branch> --state all`) or is merged into `$BASE`. A deleted branch whose merge is in `git log $BASE` counts as merged. A slice whose executor report under `run-<id>/agents/` carries `VERIFICATION:` is built: it goes to review, not to a new executor.
+- **Never re-dispatch a finished slice** (a lead that lost its place after a compaction would rebuild finished work). A slice is done when its branch has a PR (`gh pr list --head <branch> --state all`) or is merged into `$BASE`. A deleted branch whose merge is in `git log $BASE` counts as merged. A slice whose executor report under `run-<id>/agents/` carries `VERIFICATION:` is built: it goes to review, not to a new executor.
 
 ## Deprecated
 

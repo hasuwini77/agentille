@@ -2062,6 +2062,85 @@ describe('sessions: the idle sweep', () => {
   })
 })
 
+import { cleanWorkspace } from '../../hooks/reaper.js'
+import { S as modState } from '../../hooks/state.js'
+import { strandedNow } from '../../hooks/panerec.js'
+
+describe('/agt-clean: a stranded pane', () => {
+  const LEAD = { name: 'lead', pane_id: 'w1:p1', agent: 'claude', agent_status: 'working', state_change_seq: 1, tab_id: 'w1:t1', workspace_id: 'w1' }
+  const DONE = { name: 'agt-r9-executor', pane_id: 'w1:p2', agent: 'claude', agent_status: 'done', state_change_seq: 4, tab_id: 'w1:t1', workspace_id: 'w1' }
+  const herdrList = () => ({ value: { exitCode: 0, stderr: '', stdout: JSON.stringify({ result: { agents: [LEAD, DONE] } }) } })
+
+  test('a done pane with no saved answer and no wire message is flagged, kept by the run-end tidy, and closed by a typed /agt-clean', async ($, on) => {
+    const seen: string[][] = []
+    const toasts: string[] = []
+    on('env.get', async ($: any, e: any) => ({ value: ({ HERDR_ENV: '1', HERDR_PANE_ID: 'w1:p1', HOME: '/h' } as any)[e.name] }))
+    on('session.start', async ($: any, e: any) => ({ cwd: e.cwd }))
+    on('session.id', async () => ({ value: 'lead-sid' }))
+    on('session.cwd', async () => ({ value: '/work/repo' }))
+    on('session.send', async () => ({ isDelivered: true }))
+    on('command.register', async () => ({ value: undefined }))
+    on('tool.register', async ($: any, e: any) => ({ value: { tool: 'mcp__agentille__' + e.name } }))
+    on('prompt.submit', async ($: any, e: any) => ({ text: e.text }))
+    on('turn.start', async ($: any, e: any) => ({ turnId: e.turnId }))
+    on('turn.complete', async ($: any, e: any) => ({ text: e.answer }))
+    on('ui.toast', async ($: any, e: any) => { toasts.push(e.text); return { value: undefined } })
+    on('ui.render', async () => ({ type: 'engine', ref: 0 }) as never)
+    // Ownership: a previous session of this lead recorded the pane in lead-w1-p1.panes. No answer file exists.
+    on('fs.read', async ($: any, e: any) => (e.path === '/h/.agentille/state/lead-w1-p1.panes' ? { value: 'agt-r9-executor\n' } : { deny: 'ENOENT' }))
+    on('fs.exists', async () => ({ value: false }))
+    on('fs.stat', async () => ({ deny: 'ENOENT' }))
+    on('store.get', async () => ({ value: undefined }))
+    on('process.run', async ($: any, e: any) => {
+      seen.push(e.argv)
+      if (e.argv.slice(0, 3).join(' ') === 'herdr agent list') return herdrList()
+      return { value: { exitCode: 0, stdout: '', stderr: '' } }
+    })
+    const clock = mock.clock(on, { now: 1_000_000 })
+    const closes = () => seen.filter((a) => a.slice(0, 3).join(' ') === 'herdr pane close').map((a) => a[3])
+    await $.session.start({ cwd: '/work/repo', surface: null, isInteractive: false })
+    await clock.advance(30_000)
+    expect(toasts.filter((t) => t.includes('agt-r9-executor done, not harvested'))).toHaveLength(1)
+    expect(closes()).toEqual([])
+    // A typed /agt run ends on its ✓ card: the run-end tidy runs and leaves the unread pane open.
+    await $.prompt.submit({ text: '/agt ship it', origin: { kind: 'composer' } } as never)
+    await $.turn.start({ text: '/agt ship it', turnId: 't1' })
+    await $.turn.complete({ answer: '✓ shipped · 1 slice', durationMs: 10, isAborted: false, turnId: 't1', reason: 'answer' })
+    await clock.advance(5_000)
+    expect(seen.some((a) => a[0] === 'git')).toBe(true) // the tidy ran
+    expect(closes()).toEqual([])
+    const r = await $.command.run({ command: 'agt-clean', args: '', origin: { kind: 'composer' } } as never)
+    expect(closes()).toEqual(['w1:p2'])
+    expect(r.text).toContain('1 pane closed')
+  })
+
+  test('the tidy without all keeps a stranded pane and says why; with all it closes it', async () => {
+    const saved = { transport: modState.transport, home: modState.home, panes: modState.panes }
+    const runs: string[][] = []
+    const fake = {
+      process: { run: async (argv: string[]) => { runs.push(argv); return argv.slice(0, 3).join(' ') === 'herdr agent list' ? herdrList().value : { exitCode: 0, stdout: '', stderr: '' } } },
+      env: { get: async (k: string) => (k === 'HERDR_PANE_ID' ? 'w1:p1' : undefined) },
+      fs: { list: async () => [], read: async () => '', exists: async () => false, stat: async () => null },
+      session: { cwd: async () => null },
+      ui: { invalidate: () => {}, toast: () => {} },
+    }
+    try {
+      Object.assign(modState, { transport: 'herdr', home: '/h', panes: [{ id: 'w1:p2', name: 'agt-r9-executor', state: 'done' }] })
+      strandedNow.add('agt-r9-executor')
+      const kept = await cleanWorkspace(fake as never, { auto: true })
+      expect(kept.closed).toEqual([])
+      expect(kept.keep).toContainEqual({ what: 'agt-r9-executor', why: 'answer not read · /agt-clean closes it' })
+      expect(runs.filter((a) => a.slice(0, 3).join(' ') === 'herdr pane close')).toEqual([])
+      const all = await cleanWorkspace(fake as never, { all: true, panesOnly: true })
+      expect(all.closed).toEqual(['agt-r9-executor'])
+      expect(runs).toContainEqual(herdrCloseArgv('w1:p2'))
+    } finally {
+      Object.assign(modState, saved)
+      strandedNow.clear()
+    }
+  })
+})
+
 describe('sessions: /agt-clean after a lead died', () => {
   test('a dead lead\'s idle sessions close and its list goes; a live lead\'s, a done or a focused one stay', async ($, on) => {
     const seen: string[][] = []

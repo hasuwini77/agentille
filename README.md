@@ -15,6 +15,8 @@ One command. Type `/agt "task"` in Claude Code and that one prompt becomes a pla
 
    It reads your repo and picks a level: low (it just does it, or one builder), medium (2–3 builders in parallel) or heavy (one Herdr or tmux pane per part). It hardens risky changes (auth, payments, data) with a red-team pass, leaves one reviewed PR per part for you to merge (merging on green is opt-in, see "What it touches") and closes every pane it opened.
 
+   **Verify it works:** a one-sentence task with no risk words (`/agt "fix the typo in the footer"`) prints one line, `recon: low · solo · <one-clause reason>` (plus `[agentille v<version>]` when the mod is not drawing), then Claude does it: no agents, no card.
+
 3. **Read the card** it ends on. Everything else (plan, findings, each agent's full report) is in that `report.md`:
    ```
    ✓ dark mode toggle on /settings  ·  low  ·  4 files  ·  PR #12 ready  ·  6m
@@ -171,7 +173,7 @@ Each role gets a model and an effort. The mod picks them from the dispatch heade
 | Claude Code 2.1.294+ | the mod: switchboard, routing, the wire, pane tools, deck | the skill still runs, with explicit models |
 | `git` | every level | nothing works |
 | `gh` (GitHub CLI, logged in) | PRs, issues, `auto` merges | `integration` falls back to `push` or `local` |
-| [Herdr](https://github.com/hasuwini77/herdr) or tmux | the heavy level (one pane per slice), `/agt-spawn`, sessions | heavy runs as a workflow or subagent waves |
+| [Herdr](https://github.com/hasuwini77/herdr) (install from its repo) or tmux (`brew install tmux`, `apt install tmux`) | the heavy level (one pane per slice), `/agt-spawn`, sessions | heavy runs as a workflow or subagent waves |
 | Herdr | Codex worker panes, auto-closing idle sessions | tmux panes stay open until you close them |
 | Codex CLI, logged in | "codex builds the API slice" | the slice runs on Claude |
 | Playwright MCP plugin (`mcp__plugin_playwright_playwright__*`) and a running dev server | the design reviewer's screenshots and axe scan | the design reviewer reads code only and says so |

@@ -293,8 +293,9 @@ async function importRisk($, c, text, from) {
 }
 
 // python -m pkg.mod: the module is looked for where python looks first, the command's folder, then each PYTHONPATH
-// entry; its parent packages' __init__.py and its own file are read. Not there, python is asked where the module
-// lives (by its top-level name, isolated from the folder and PYTHONPATH, so no repo code runs): a module inside
+// entry; its parent packages' __init__.py and its own file are read. Not there, the interpreter the line names (a
+// virtualenv's python in the repo included) is asked where the module lives, by its top-level name, with -I so the
+// folder and PYTHONPATH are not on its path (site stays on, or pytest would be found nowhere): a module inside
 // the folder (an editable install) is read from there, one installed elsewhere (the standard library, a
 // site-packages tool such as pytest) is a program, not read. A module found nowhere, or a PYTHONPATH entry the guard
 // cannot read before it is found, refuses (from a shell script: skipped).

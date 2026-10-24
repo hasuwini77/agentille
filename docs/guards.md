@@ -27,7 +27,7 @@ It reads each **Bash** line the way the shell would: words, quotes, `$( )`, back
 
 It follows what a script runs one hop at a time, five hops deep: a package script that runs `npm run y`, `sh tools/x.sh`, `node tools/x.mjs` or `python -m tools.x` has that step read in turn, and so on.
 
-The guard never runs the command it judges. To place a command it asks git about the repo (its remotes, branches and config, `git config --get alias.<word>` included), reads files through the mod, and, for a `python -m` module it cannot find in the folder or on `PYTHONPATH`, asks the interpreter named on the line where that module lives. That question runs with `-I`, so the folder and `PYTHONPATH` are left out and no file of the repo is imported.
+The guard never runs the command it judges. To place a command it asks git about the repo (its remotes, branches and config, `git config --get alias.<word>` included), reads files through the mod, and, for a `python -m` module it cannot find in the folder or on `PYTHONPATH`, asks the interpreter named on the line where that module lives. That runs the interpreter the line names, a virtualenv's `python` inside the repo included, with `-I`, so the folder and `PYTHONPATH` are not on its path.
 
 ### What it refuses below `auto`, from a run
 

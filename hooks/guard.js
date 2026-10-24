@@ -37,7 +37,7 @@ import { DENY_UNREAD, denyProtected, guardLine, integrationAllowed, readProfile,
 import { WT_SCRIPT, listTrees, newTrees, claimedTrees, scriptTrees, scriptSlugs, worktreeAdds, saveOwned, runOf } from './guard-own.js'
 
 // Re-exports: every name ./guard.js used to carry still resolves here.
-export { protectedPath, SHELLS, commands, splitCommands, gitCall, commandSteps, joinPath, MENTIONS_TOOL, SCRIPT_RISK, MAKE_RISK } from './guard-lex.js'
+export { protectedPath, SHELLS, commands, splitCommands, gitCall, commandSteps, lineMovesHead, joinPath, MENTIONS_TOOL, SCRIPT_RISK, MAKE_RISK } from './guard-lex.js'
 export { ghStep, httpStep } from './guard-steps.js'
 export { DENY_INTEGRATION, DENY_PUSH, DENY_LOCAL, DENY_UNREAD, denyHidden, denyProtected, judgePush, judgeRef, judgeLocal, resolvedProtected, integrationIn, integrationOf, integrationAllowed, guardLine, makeRecipe, normUrl, normSlug, sameRemote, capsOf } from './guard-policy.js'
 export { OWNED_TTL_MS, worktreeAdds, newTrees, WT_SCRIPT, scriptTrees, scriptSlugs, claimedTrees, recordTrees, parseOwned, Worktrees, worktreesFile, saveOwned, ownedWorktrees, forgetOwned } from './guard-own.js'

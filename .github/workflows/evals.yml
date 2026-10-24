@@ -1,0 +1,83 @@
+name: evals
+
+# The dispatch-decision eval suite (evals/<case>/case.yaml, `claude plugin eval`): it checks /agt's
+# level, roster, model routing and formation choices on real claude sessions. Every run spends API
+# credit, so it never runs on a PR or a push to main: weekly, on each release tag, and by hand.
+#
+# Ceilings: --max-cost-usd 2 (the CLI checks it before each run launches and aborts with exit 2
+# once it is reached; runs go one at a time, so one run in flight is the most it can overshoot),
+# each case's own max_turns and timeout_seconds, and the job's timeout-minutes.
+# It never publishes: --no-publish keeps the HTML report local, and the token is read-only.
+# Without the ANTHROPIC_API_KEY secret (forks, a repo that has not added it) the job prints one
+# line and passes. What the result means and how to read it: docs/testing.md.
+
+on:
+  push:
+    tags: ['v[0-9]+.[0-9]+.[0-9]+']
+  schedule:
+    - cron: '17 6 * * 1'  # Mondays 06:17 UTC
+  workflow_dispatch:
+    inputs:
+      runs:
+        description: 'Runs per case (1-3; the $2 ceiling still applies)'
+        required: false
+        default: '1'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: evals
+  cancel-in-progress: false
+
+jobs:
+  evals:
+    # macOS: the eval runs its claude children in the platform sandbox, which macOS always has.
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install the Claude Code CLI (same pin as validate.yml)
+        run: npm install -g @anthropic-ai/claude-code@2.1.309
+      - name: Dispatch-decision evals
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          RUNS: ${{ inputs.runs || '1' }}
+        run: |
+          if [ -z "${ANTHROPIC_API_KEY:-}" ]; then
+            echo "evals skipped: no ANTHROPIC_API_KEY secret"
+            exit 0
+          fi
+          case "$RUNS" in 1|2|3) ;; *) echo "runs must be 1, 2 or 3 (got: $RUNS)"; exit 1;; esac
+          # The case schema only takes EVAL_* env keys, so pane-transport isolation comes from here:
+          # drop every HERDR_* and TMUX* variable, and point the update check at nothing.
+          strip=()
+          for v in $(compgen -e); do case "$v" in HERDR_*|TMUX*) strip+=(-u "$v");; esac; done
+          mkdir -p evals/results
+          set +e
+          # --trust-plugin: there is no terminal to answer the first-run trust prompt; without it the
+          # CLI refuses to load the plugin. This checkout is the repo's own code.
+          env ${strip[@]+"${strip[@]}"} AGENTILLE_RAW_URL=file:///dev/null \
+            claude plugin eval . --runs "$RUNS" --ablation none --no-publish --trust-plugin \
+              --max-cost-usd 2 --threshold 0.66 2>&1 | tee evals/results/console.log
+          rc=${PIPESTATUS[0]}
+          set -e
+          case "$rc" in
+            0) echo "every case at or above the 0.66 threshold" ;;
+            1) echo "::error::a case passed under 66% of its weighted checks (or the run failed): see the evals-results artifact" ;;
+            2) echo "::error::the \$2 cost ceiling was reached; results are partial" ;;
+            *) echo "::error::claude plugin eval exited $rc" ;;
+          esac
+          { echo '### Evals'; echo '```'; tail -n 40 evals/results/console.log; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          exit "$rc"
+      - name: Upload the results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: evals-results
+          path: evals/results/
+          retention-days: 30
+          if-no-files-found: ignore

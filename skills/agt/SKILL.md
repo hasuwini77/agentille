@@ -83,8 +83,8 @@ Ask: <preTaskQuestioning>. Depth: <thinkingDepth>.
 - **Foreground when it gates.** A dispatch whose result feeds the next step runs in the foreground; independent dispatches go out as one message of background calls, then one wait.
 - **Mods off still works.** The mod only adds the band, routing, the wire between panes and the automatic pane cleanup.
 - **Never close a pane you did not open.** The `agt-` prefix is ownership.
-- **Re-enter from the files, not from memory.** After a compaction or a `/clear`, or whenever you cannot name the current slice and its state, re-read before the next dispatch: the sections you need of this file, `routing.md` and `factory.md`, then `run-<id>/context-pack.md`, the mod's `ledger.json` and `routing.jsonl` when present, and `git log $BASE..<branch>` per slice branch.
-- **Never re-dispatch a finished slice.** A slice whose branch is merged into `$BASE` or has a PR (`gh pr list --head <branch>`) is done; one whose executor report under `run-<id>/agents/` carries `VERIFICATION:` is built and goes to review, not to a new executor.
+- **Re-enter from the files, not from memory.** After a compaction or a `/clear`, or whenever you cannot name the current slice and its state, re-read before the next dispatch: the sections you need of this file, `routing.md` and `factory.md`, then `run-<id>/context-pack.md`, the mod's `ledger.json` and `routing.jsonl` when present, and `git log $BASE..<branch>` per slice branch still there.
+- **Never re-dispatch a finished slice.** A slice is done when its branch has a PR (`gh pr list --head <branch> --state all`) or is merged into `$BASE` (a deleted branch whose merge is in `git log $BASE` counts). One whose executor report under `run-<id>/agents/` carries `VERIFICATION:` is built: it goes to review, not to a new executor.
 
 ## Deprecated
 

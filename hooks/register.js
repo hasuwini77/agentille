@@ -27,6 +27,8 @@ import { refreshAgents, working, ensurePolling, ensureTicker } from './ticker.js
 import { statusKey, freshStatus, validLead, parseWire, shortName, logWire, parseTellArgs } from './wire.js'
 import { publish } from './worker.js'
 import { onPromptSubmit, onTurnComplete } from './turns.js'
+import { dispatchedRun } from './proofs.js'
+import { parseHeader, roleOf } from './routing.js'
 import * as P from './panerec.js'
 const { runs, live, paneRoutes, openedNames, mascot, litMemo, hlMemo, rawIds, wireLog, pub } = S
 
@@ -226,6 +228,7 @@ export function register(on) {
   // Routing happens in dispatch.js; the redraw ticker is nudged here so dispatch.js needs no timer.
   on('agent.spawn', async ($, e, next) => {
     const res = await dispatchAgent($, e, next)
+    if (!res?.deny && roleOf(e.subagentType)) dispatchedRun(parseHeader(e.prompt)?.run)
     ensureTicker($)
     return res
   })

@@ -11,7 +11,7 @@ import { verdictChip, party, answerLine } from './links.js'
 import { addUsage, finish, ledger } from './live.js'
 import { BYE_MS } from './mascot.js'
 import { cleanWorkspace } from './reaper.js'
-import { typedPrompt, endRun, rawDone, sessionsAllowed } from './proofs.js'
+import { typedPrompt, endRun, rawDone, sessionsAllowed, moment } from './proofs.js'
 import { verdictOf } from './routing.js'
 import { ensureTools } from './spawn.js'
 import { refreshAgents, ensureTicker } from './ticker.js'
@@ -22,7 +22,7 @@ const { live, paneRoutes, mascot, wireLog, pub } = S
 // A typed /agt starts a clean run; the turn's proofs are set or dropped in proofs.js. Returns the event to pass on:
 // the answer style is added to its context when this turn asks for one.
 export async function onPromptSubmit($, e) {
-  const { typed, agt } = typedPrompt(e.text, e.origin)
+  const { typed, agt } = typedPrompt(e.text, e.origin, await moment($))
   if (!typed) return e
   S.agtTurn = agt
   if (S.agtTurn) S.flags = []   // a new run starts with a clean slate

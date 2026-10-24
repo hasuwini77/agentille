@@ -720,8 +720,8 @@ describe('pane tools: in the mod', () => {
       const v = key === undefined ? {} : typeof table[key] === 'function' ? table[key]() : table[key]
       return { value: { exitCode: 0, stdout: '', stderr: '', ...v } }
     })
-    mock.clock(on, { now: 1_000_000 })
-    return { seen, tools }
+    const clock = mock.clock(on, { now: 1_000_000 })
+    return { seen, tools, clock }
   }
   const TMUX = { TMUX: '/tmp/tmux-1/default,1,0', TMUX_PANE: '%1', SHELL: '/bin/zsh', HOME: '/h' }
   const EXEC = { agent: 'executor', header: '[agt run=k7f2ab size=small mode=build]' }
@@ -782,6 +782,91 @@ describe('pane tools: in the mod', () => {
     expect((await call('exec-3')).deny).toBe('spawn_pane opens worker panes only while the typed /agt run is in flight; the next run needs the next typed /agt.')
     await plain('five')
     expect((await call('exec-3')).deny).toContain('/agt was typed')
+  })
+
+  // The run id is born on the typed /agt's own turn; later turns open panes for that run only. Reproduced: a typed
+  // /agt heavy, six unrelated typed prompts and a task notification, then a pane for a brand-new run id.
+  test('after the typed /agt\'s turn, spawn_pane opens panes only for that run\'s id', async ($, on) => {
+    let rows = [['%1', '', 'claude', '0', '@1']]
+    setup(on, TMUX, { 'tmux split-window': { stdout: '%9\n' }, 'tmux list-panes': () => ({ stdout: rows.map((r) => r.join(T)).join('\n') + '\n' }) })
+    await $.session.start({ cwd: '/work/repo', surface: null, isInteractive: false })
+    const call = (run: string, role: string) => $.tool.call({ tool: 'mcp__agentille__spawn_pane', run, role, task: 'build the filter', agent: 'executor', header: '[agt run=' + run + ' size=small mode=build]' })
+    await typed($, '/agt heavy ship it')
+    rows = [...rows, ['%9', 'agt-k7f2ab-exec-1', 'claude', '0', '@1']]
+    expect((await call('k7f2ab', 'exec-1')).result).toContain('Opened agt-k7f2ab-exec-1')
+    for (let n = 0; n < 6; n++) await $.prompt.submit({ text: 'unrelated question ' + n, origin: { kind: 'composer' } } as never)
+    await $.prompt.submit({ text: 'task finished', origin: { kind: 'notification' } } as never)
+    expect((await call('zq81mx', 'exec-1')).deny).toBe('spawn_pane opens panes only for run k7f2ab, the run the typed /agt started; run zq81mx needs its own typed /agt.')
+    // The run's own fix round still opens.
+    expect((await call('k7f2ab', 'fix-1')).result).toContain('Opened agt-k7f2ab-fix-1')
+    // A new typed /agt is a new birth: its turn may name a new run.
+    await typed($, '/agt heavy ship the rest')
+    expect((await call('zq81mx', 'exec-1')).result).toContain('Opened agt-zq81mx-exec-1')
+  })
+
+  test('the run id is learned from a routed dispatch on the typed turn, and its turn may open any id', async ($, on) => {
+    setup(on, TMUX, { 'tmux split-window': { stdout: '%9\n' } })
+    const call = (run: string, role: string) => $.tool.call({ tool: 'mcp__agentille__spawn_pane', run, role, task: 'build the filter', agent: 'executor', header: '[agt run=' + run + ' size=small mode=build]' })
+    const plain = (text: string, kind = 'composer') => $.prompt.submit({ text, origin: { kind } } as never)
+    await typed($, '/agt heavy ship it')
+    await $.agent.spawn({ prompt: '[agt run=k7f2ab size=small mode=build]\nplan it', subagentType: 'agentille:agentille-planner', model: 'opus' } as never)
+    await plain('the second option') // the person answers the planner's question
+    expect((await call('zq81mx', 'exec-1')).deny).toContain('only for run k7f2ab')
+    expect((await call('k7f2ab', 'exec-1')).result).toContain('Opened agt-k7f2ab-exec-1')
+    // On the typed turn itself any id opens; the first one named is the run's.
+    await typed($, '/agt heavy next')
+    expect((await call('aa11bb', 'exec-1')).result).toContain('Opened agt-aa11bb-exec-1')
+    expect((await call('cc22dd', 'exec-1')).result).toContain('Opened agt-cc22dd-exec-1')
+    await plain('[agt wire] done', 'notification')
+    expect((await call('cc22dd', 'exec-2')).deny).toContain('only for run aa11bb')
+    expect((await call('aa11bb', 'exec-2')).result).toContain('Opened agt-aa11bb-exec-2')
+  })
+
+  test('a typed turn that named no run: the first pane on a later turn names it', async ($, on) => {
+    setup(on, TMUX, { 'tmux split-window': { stdout: '%9\n' } })
+    const call = (run: string, role: string) => $.tool.call({ tool: 'mcp__agentille__spawn_pane', run, role, task: 'build the filter', agent: 'executor', header: '[agt run=' + run + ' size=small mode=build]' })
+    await typed($, '/agt heavy ship it')
+    await $.prompt.submit({ text: 'yes, go', origin: { kind: 'composer' } } as never)
+    expect((await call('k7f2ab', 'exec-1')).result).toContain('Opened agt-k7f2ab-exec-1')
+    expect((await call('zq81mx', 'exec-1')).deny).toContain('only for run k7f2ab')
+  })
+
+  test('a tmux worker that never writes its done file keeps the run in flight for AGT_INFLIGHT_MAX_MS at most', async ($, on) => {
+    let rows = [['%1', '', 'claude', '0', '@1']]
+    const { clock } = setup(on, TMUX, { 'tmux split-window': { stdout: '%9\n' }, 'tmux list-panes': () => ({ stdout: rows.map((r) => r.join(T)).join('\n') + '\n' }) })
+    on('ui.status', async () => ({ value: undefined }))
+    await $.session.start({ cwd: '/work/repo', surface: null, isInteractive: false })
+    const call = (role: string) => $.tool.call({ tool: 'mcp__agentille__spawn_pane', run: 'k7f2ab', role, task: 'build the filter', ...EXEC })
+    await typed($)
+    rows = [...rows, ['%9', 'agt-k7f2ab-exec-1', 'claude', '0', '@1']]
+    expect((await call('exec-1')).result).toContain('Opened agt-k7f2ab-exec-1')
+    for (const t of ['one', 'two', 'three', 'four']) await $.prompt.submit({ text: t, origin: { kind: 'composer' } } as never)
+    for (let n = 0; n < 59; n++) await clock.advance(60_000) // the poll's interval runs all along
+    expect((await call('exec-2')).result).toContain('Opened agt-k7f2ab-exec-2')
+    await clock.advance(60_000)
+    expect((await call('exec-3')).deny).toBe('spawn_pane opens worker panes only while the typed /agt run is in flight; the next run needs the next typed /agt.')
+    await typed($, '/agt ship the rest')
+    expect((await call('exec-3')).result).toContain('Opened agt-k7f2ab-exec-3')
+  })
+
+  test('a Herdr worker stuck at a prompt stops keeping the run in flight after PANE_REST_MS', async ($, on) => {
+    const LEAD = { name: 'lead', pane_id: 'w1:p1', agent: 'claude', agent_status: 'working', state_change_seq: 1, tab_id: 'w1:t1', workspace_id: 'w1' }
+    let agents: any[] = []
+    const { clock } = setup(on, { HERDR_ENV: '1', HERDR_PANE_ID: 'w1:p1', HOME: '/h' }, {
+      'herdr pane split': { stdout: JSON.stringify({ result: { pane: { pane_id: 'w1:p5' } } }) },
+      'herdr agent list': () => ({ stdout: JSON.stringify({ result: { agents: [LEAD, ...agents] } }) }),
+    })
+    await $.session.start({ cwd: '/work/repo', surface: null, isInteractive: false })
+    const call = (role: string) => $.tool.call({ tool: 'mcp__agentille__spawn_pane', run: 'k7f2ab', role, task: 'build the filter', ...EXEC })
+    await typed($)
+    agents = [{ name: 'agt-k7f2ab-exec-1', pane_id: 'w1:p5', agent: 'claude', agent_status: 'blocked', state_change_seq: 2, tab_id: 'w1:t1', workspace_id: 'w1' }]
+    expect((await call('exec-1')).result).toContain('Opened agt-k7f2ab-exec-1')
+    for (const t of ['one', 'two', 'three', 'four']) await $.prompt.submit({ text: t, origin: { kind: 'composer' } } as never)
+    agents = [...agents, { name: 'agt-k7f2ab-exec-2', pane_id: 'w1:p6', agent: 'claude', agent_status: 'working', state_change_seq: 2, tab_id: 'w1:t1', workspace_id: 'w1' }]
+    expect((await call('exec-2')).result).toContain('Opened agt-k7f2ab-exec-2') // exec-1 blocked a moment: still the run's
+    agents = agents.slice(0, 1) // exec-2 finished and closed; exec-1 still waits on its permission prompt
+    await clock.advance(15 * 60_000)
+    expect((await call('exec-3')).deny).toBe('spawn_pane opens worker panes only while the typed /agt run is in flight; the next run needs the next typed /agt.')
   })
 
   test('fable=forced without a typed --fable is dropped from the worker task, once per run', async ($, on) => {

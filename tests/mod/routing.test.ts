@@ -1,5 +1,5 @@
 import { describe, expect, mock, test } from 'claude-code/testing'
-import { AGENT_SILENT_MS, AGT_GRACE_TYPED, DEFAULTS, asksSessions, decide, demoteHeaderText, formationOf, ladderFixes, mentionsCodex, mentionsFable, parseHeader, proveHeader, roleOf, runInFlight, typedFable, verdictOf } from '../../hooks/routing.js'
+import { AGENT_SILENT_MS, AGT_GRACE_TYPED, AGT_INFLIGHT_MAX_MS, PANE_REST_MS, DEFAULTS, asksSessions, decide, demoteHeaderText, formationOf, ladderFixes, mentionsCodex, mentionsFable, parseHeader, proveHeader, roleOf, runInFlight, typedFable, verdictOf } from '../../hooks/routing.js'
 import { pieceOf } from '../../hooks/links.js'
 
 const fresh = () => ({ revise: 0, fixes: 0, fable: 0 })
@@ -331,6 +331,27 @@ describe('typed proof', () => {
     expect(runInFlight(st({ live: agent({ run: 'r0' }) }), now)).toBe(false)
     expect(runInFlight(st({ live: agent({ run: 'adhoc' }), lastRun: 'adhoc' }), now)).toBe(false)
     expect(runInFlight(st({ live: agent({ heard: now - AGENT_SILENT_MS }) }), now)).toBe(false) // cancelled: never completes
+  })
+
+  // A Herdr worker at a permission prompt and a tmux worker that never writes its done file used to keep the run in
+  // flight for good. The cap runs from the typed /agt; a blocked pane counts only until it has sat PANE_REST_MS.
+  test('runInFlight: nothing keeps a run in flight forever', async () => {
+    const now = 10_000_000
+    const st = (o: Record<string, unknown> = {}) => ({ agtTyped: true, panes: [], live: new Map(), lastRun: 'r1', agtTypedSince: AGT_GRACE_TYPED, ...o })
+    const pane = (role: string, state: string) => ({ id: 'p-' + role, name: 'agt-r1-' + role, role, state })
+    const tmuxWorking = [pane('exec-1', 'working')] // tmux has no agent status: working until its done file appears
+    expect(runInFlight(st({ panes: tmuxWorking, agtTypedAt: now - AGT_INFLIGHT_MAX_MS + 1 }), now)).toBe(true)
+    expect(runInFlight(st({ panes: tmuxWorking, agtTypedAt: now - AGT_INFLIGHT_MAX_MS }), now)).toBe(false)
+    expect(runInFlight(st({ agtTypedSince: 0, agtTypedAt: now - AGT_INFLIGHT_MAX_MS }), now)).toBe(false) // the grace ends too
+    expect(runInFlight(st({ panes: tmuxWorking }), now)).toBe(true) // no typed time recorded: the old behaviour
+    const blocked = [pane('exec-1', 'blocked')]
+    expect(runInFlight(st({ panes: blocked }), now, () => PANE_REST_MS - 1)).toBe(true)
+    expect(runInFlight(st({ panes: blocked }), now, () => PANE_REST_MS)).toBe(false)
+    expect(runInFlight(st({ panes: blocked }), now, () => null)).toBe(true) // not timed yet: still counts
+    // One pane still working keeps it going however long the other has sat at its prompt.
+    expect(runInFlight(st({ panes: [...blocked, pane('exec-2', 'working')] }), now, (p: any) => (p.state === 'blocked' ? PANE_REST_MS * 2 : 0))).toBe(true)
+    // A parked pane does not end the run on its own: the grace still holds after the /agt.
+    expect(runInFlight(st({ panes: blocked, agtTypedSince: 0 }), now, () => PANE_REST_MS)).toBe(true)
   })
 
   test('mentionsCodex: the word on its own, not a tool or flag that contains it', async () => {

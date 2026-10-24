@@ -8,7 +8,7 @@ import { pieceOf, party, taskLine } from './links.js'
 import { PROBE, newRunId, doneFile, paneKey, answerFile, tmuxKillArgv, placePlan, codexNote, herdrCloseArgv, paneRole, spawnToolInput, closeTarget, sessionName, sessionsToolInput, sessionsNote } from './panes.js'
 import { installedSkew } from './profile.js'
 import { pollNow } from './reaper.js'
-import { spawnAllowed, sessionsAllowed, fableProof } from './proofs.js'
+import { spawnAllowed, sessionsAllowed, fableProof, moment, startRun } from './proofs.js'
 import { formationOf, mentionsCodex, mentionsFable, proveHeader, demoteHeaderText, ladderFixes, decide } from './routing.js'
 import { saveSessions, closeSession, openSession } from './sessions.js'
 import { skewMessage } from './skew.js'
@@ -32,10 +32,13 @@ export async function spawnPane($, e) {
   if (t === 'none') return { deny: 'No pane transport here: run the slice as a subagent.' }
   if (!S.agtTyped) return { deny: spawnAllowed() }
   await pollNow($, t) // the panes as they are now: one that closed since the last poll no longer keeps the run going
-  const why = spawnAllowed()
+  const at = await moment($)
+  const why = spawnAllowed(null, S, at)
   if (why) return { deny: why }
   const a = spawnToolInput(e, S.panes)
   if (a.error) return { deny: a.error }
+  const other = spawnAllowed(a.run, S, at)
+  if (other) return { deny: other }
   // Codex is the person's pick, never the lead's: their /agt prompt or their newest typed prompt names it.
   const codex = a.vendor === 'codex'
   if (codex && !mentionsCodex(S.agtPrompt) && !mentionsCodex(S.lastTyped)) return { deny: 'vendor "codex" runs only when the person asked for Codex in their prompt, so run this slice as a Claude pane.' }
@@ -96,6 +99,7 @@ export async function spawnPane($, e) {
     run.fable += 1
     await $.store.set('fable:' + a.run, run.fable)
   }
+  startRun(a.run)
   S.opened.push({ id, name: a.name, run: a.run, tab })
   openedNames.add(a.name)
   await savePanes($)

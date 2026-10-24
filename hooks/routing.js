@@ -87,12 +87,23 @@ export function mentionsFable(text) {
 // was heard from lately (a cancelled one raises no turn.complete), or, until its ✓/✗ card clears the proof, for
 // fewer than AGT_GRACE_TYPED typed prompts after the /agt: the person answering a question the run asked. Turns the
 // run itself wakes (a worker's report, a task notification) do not count, so a fix round after a quiet gap still
-// opens its pane. `st` is the mod's state record (S); `now` is Date.now(), the clock agents are heard by.
+// opens its pane. Nothing keeps it in flight forever: AGT_INFLIGHT_MAX_MS after the typed /agt (`st.agtTypedAt`) it
+// is over whatever is still listed (a tmux worker that never wrote its done file reads as working for good), and a
+// pane sitting at a prompt (Herdr `blocked`: a permission ask nobody answers) stops counting once `restMs(pane)`
+// says it has been there PANE_REST_MS. `st` is the mod's state record (S); `now` is Date.now(), the clock agents
+// are heard by; `restMs` is how long a pane has been in its current state on the reaper's clock, or null when unknown;
+// `clockNow` is that clock's now ($.clock.now(), the one `st.agtTypedAt` was read on; `now` when omitted).
 export const AGT_GRACE_TYPED = 3
 export const AGENT_SILENT_MS = 10 * 60_000
-export function runInFlight(st, now = Date.now()) {
+export const AGT_INFLIGHT_MAX_MS = 60 * 60_000
+export const PANE_REST_MS = 15 * 60_000
+const PANE_RESTING = new Set(['done', 'idle', 'dead'])
+const PANE_AT_PROMPT = new Set(['blocked'])
+export function runInFlight(st, now = Date.now(), restMs = () => null, clockNow = now) {
   if (!st?.agtTyped) return false
-  if ((st.panes ?? []).some((p) => p.role !== 'spawn' && !['done', 'idle', 'dead'].includes(p.state))) return true
+  if (typeof st.agtTypedAt === 'number' && typeof clockNow === 'number' && clockNow - st.agtTypedAt >= AGT_INFLIGHT_MAX_MS) return false
+  const parked = (p) => PANE_AT_PROMPT.has(p.state) && (restMs(p) ?? 0) >= PANE_REST_MS
+  if ((st.panes ?? []).some((p) => p.role !== 'spawn' && !PANE_RESTING.has(p.state) && !parked(p))) return true
   const run = st.lastRun
   if (run && run !== 'adhoc' && [...(st.live?.values() ?? [])].some((a) => a.run === run && a.state === 'working' && now - (a.heard ?? a.start ?? 0) < AGENT_SILENT_MS)) return true
   return (st.agtTypedSince ?? 0) < AGT_GRACE_TYPED

@@ -4,6 +4,7 @@
 import { Profile } from './profile.js'
 import { Panes } from './reaper.js'
 import { makeStore } from './store.js'
+import { on } from './bus.js'
 import { mergeFlags, paneFlags, parseFocusArgs, focusText } from './focus.js'
 import { isAnswerBlock, panel, parseHighlightArgs, highlightText } from './highlight.js'
 import { PROBE } from './panes.js'
@@ -35,10 +36,11 @@ const { s: my, view } = makeStore('display.js', {
 })
 export const Display = view
 
-// profile.json → display, as loadProfile read it.
+// profile.json → display, as loadProfile read it. profile.js reaches it through the bus, since this file reads Profile.
 export function setProfileDisplay(d) {
   my.profileDisplay = d
 }
+on('profile.display', setProfileDisplay)
 
 // The old $.store toggles, read once at session start.
 export function setStoredRaw(raw) {

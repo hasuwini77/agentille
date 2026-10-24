@@ -6,7 +6,7 @@ import { makeStore } from './store.js'
 import { TIP } from './drawing.js'
 import { DEFAULTS } from './routing.js'
 import { cleanDisplay, cleanSessions, hasVoice } from './settings.js'
-import { setProfileDisplay } from './display.js'
+import { emit } from './bus.js'
 import { compareVersions, newerInstalled, cacheDirOf } from './skew.js'
 import { depsOf, activeSquads, explain, squadsText, allPaths, injection } from './squads.js'
 
@@ -45,7 +45,7 @@ export async function installedSkew($) {
 
 export async function loadProfile($) {
   my.home = (await $.env.get('HOME')) ?? null
-  setProfileDisplay({})
+  emit('profile.display', {})
   my.sessions = null
   my.profileMissing = false
   if (!my.home) return
@@ -55,7 +55,7 @@ export async function loadProfile($) {
     my.profileMissing = !hasVoice(p)
     my.depth = p.thinkingDepth ?? null
     my.settings = { ...DEFAULTS, ...(p.routing ?? {}) }
-    setProfileDisplay(cleanDisplay(p.display))
+    emit('profile.display', cleanDisplay(p.display))
     my.sessions = cleanSessions(p.sessions)
   } catch {
     // no profile yet: the tip says /agentille-init (the mod's toast when it draws, else /agt's line)

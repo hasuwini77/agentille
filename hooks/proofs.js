@@ -4,13 +4,17 @@
 //   typedPrompt(text, origin)  every prompt.submit: the per-turn proofs end, a typed /agt starts a run's proof,
 //                              a worker's first prompt decides its fable proof, a typed ask for sessions or for
 //                              raw or shaped text holds for its own turn
+//   agtTurnStart(agt)          a typed prompt: this turn is part of an /agt run only when it is the typed /agt
+//   agtTurnFromDispatch()      a routed dispatch, a worker pane or the /agt skill: this turn is part of the run
 //   startRun(id)               the typed /agt's own turn named its run (a pane; a routed dispatch through
-//                              dispatchedRun): later turns may open panes for that run only
-//   endRun()                   the run's ✓/✗ card: the /agt proof and its --fable lapse
-//   dropProof()                the first turn after the run is over (routing.js runInFlight): the same lapse
+//                              dispatchedRun, or a later turn's while none is named): later turns may open panes
+//                              for that run only, and the lead's Bash guard holds until the run's card
+//   endRun()                   the run's ✓/✗ card: the /agt proof, its --fable and the guard's hold lapse
+//   dropProof()                the first turn after the run is over (routing.js runInFlight): the /agt proof and
+//                              its --fable lapse; the guard's hold (agtRun) waits for the card or the next /agt
 //   rawDone()                  the raw answer went on the clipboard: a later turn is not raw
 //
-// and the gates read them through spawnAllowed, sessionsAllowed and fableProof.
+// and the gates read them through spawnAllowed, sessionsAllowed, fableProof and runHeld.
 
 import { S, isLead } from './state.js'
 import { SAFE_RUN } from './panes.js'
@@ -64,6 +68,16 @@ export function typedPrompt(text, origin, at = NO_MOMENT) {
   return { typed, agt }
 }
 
+// A typed prompt starts a turn: it is an /agt run's turn when it is the typed /agt. A turn nobody typed keeps the flag.
+export function agtTurnStart(agt) {
+  S.agtTurn = !!agt
+}
+
+// A routed dispatch, a worker pane or the /agt skill on this turn: the turn is the run's, whatever started it.
+export function agtTurnFromDispatch() {
+  S.agtTurn = true
+}
+
 // The typed /agt's turn named a run id. Only the first counts, and only from a lead whose proof holds; a later turn
 // that finds none yet (the run planned, asked a question, and builds after the answer) adopts its first pane's.
 export function startRun(id) {
@@ -71,24 +85,28 @@ export function startRun(id) {
   S.agtRun = id
 }
 
-// A routed dispatch on the typed /agt's own turn names the run from its header.
+// A routed dispatch names the run from its header: on the typed /agt's own turn, or on a later one while the run has
+// no id yet (it planned, asked, and dispatches after the answer).
 export function dispatchedRun(id) {
-  if (S.agtBirth) startRun(id)
+  if (S.agtBirth || !S.agtRun) startRun(id)
 }
 
-// The run's ✓/✗ card: the next worker pane needs the next typed /agt.
+// The run's ✓/✗ card: the next worker pane needs the next typed /agt, and the lead's Bash is its own again.
 export function endRun() {
   S.agtTyped = false
   S.fableTyped = false
   S.agtRun = null
 }
 
-// The run is over without a card (a question, an error, an interrupt): the proof lapses the same way.
+// The run is over without a card (a question, an error, an interrupt): the proof lapses the same way. The run id
+// stays: the lead's Bash guard holds until the card or the next typed /agt, past any in-flight window.
 export function dropProof() {
   S.agtTyped = false
   S.fableTyped = false
-  S.agtRun = null
 }
+
+// The lead's Bash guard holds for a run that named its id and has not printed its card (guard.js fromRun).
+export const runHeld = () => !!S.agtRun
 
 export function rawDone() {
   S.rawTurn = false

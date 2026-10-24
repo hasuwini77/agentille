@@ -8,7 +8,7 @@ import { pieceOf, party, taskLine } from './links.js'
 import { PROBE, newRunId, doneFile, paneKey, answerFile, tmuxKillArgv, placePlan, codexNote, herdrCloseArgv, paneRole, spawnToolInput, closeTarget, sessionName, sessionsToolInput, sessionsNote } from './panes.js'
 import { installedSkew } from './profile.js'
 import { pollNow } from './reaper.js'
-import { spawnAllowed, sessionsAllowed, fableProof, moment, startRun } from './proofs.js'
+import { spawnAllowed, sessionsAllowed, fableProof, moment, startRun, agtTurnFromDispatch } from './proofs.js'
 import { formationOf, mentionsCodex, mentionsFable, proveHeader, demoteHeaderText, ladderFixes, decide } from './routing.js'
 import { saveSessions, closeSession, openSession } from './sessions.js'
 import { skewMessage } from './skew.js'
@@ -55,7 +55,7 @@ export async function spawnPane($, e) {
     const s = await $.fs.stat(cwd).catch(() => null)
     if (s?.kind !== 'dir') return { deny: cwd + ' is not a directory.' }
   }
-  S.agtTurn = true
+  agtTurnFromDispatch()
   S.lastRun = a.run
   const run = runState(a.run)
   run.formation = formationOf(a.hdr) ?? run.formation

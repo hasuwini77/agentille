@@ -1,5 +1,5 @@
 import { describe, expect, mock, test } from 'claude-code/testing'
-import { DENY_INTEGRATION, DENY_LOCAL, DENY_PUSH, capsOf, integrationIn, integrationOf, joinPath, judgePush, newTrees, normSlug, normUrl, parseOwned, sameRepo, splitCommands, worktreeAdds } from '../../hooks/guard.js'
+import { DENY_INTEGRATION, DENY_LOCAL, DENY_PUSH, DENY_UNREAD, capsOf, integrationIn, integrationOf, joinPath, judgePush, newTrees, normSlug, normUrl, parseOwned, sameRepo, splitCommands, worktreeAdds } from '../../hooks/guard.js'
 import { parseWorktrees } from '../../hooks/clean.js'
 
 // What the repo looks like to a line read alone: the slice branch is checked out, the base is main.
@@ -80,6 +80,9 @@ describe('guard: which commands integrate', () => {
       '(cd ../app && git push origin main)',
       'git -C ../app push origin HEAD:main',
       'git push origin release/1.0',
+      'git push origin --delete agt/x',
+      'git push origin :feat/other',
+      'git push -d origin fix/y',
     ]) expect([line, integrationIn(line, onSlice)]).toEqual([line, expect.any(String)])
   })
 
@@ -93,6 +96,27 @@ describe('guard: which commands integrate', () => {
     expect(integrationIn('git push origin HEAD', { current: 'storm/2026-10-24-x' })).toBeNull()
   })
 
+  test('a branch switch earlier on the line makes HEAD unreadable for a later push; a written-out name still goes', async () => {
+    for (const line of [
+      'git checkout main && git merge --ff-only agt/x && git push origin HEAD',
+      'git switch main && git merge --ff-only agt/x && git push -u origin HEAD',
+      'git checkout -q main; git push',
+      'git branch -m main && git push origin HEAD',
+      'git branch -M agt/x main; git push origin @',
+      'git reset --hard main && git push origin HEAD',
+      'git symbolic-ref HEAD refs/heads/main && git push origin HEAD',
+      'git -C ../app checkout main && cd ../app && git push origin "$(git branch --show-current)"',
+      'gh pr checkout 12 && git push origin HEAD',
+      'git rebase main agt/y && git push origin HEAD',
+    ]) expect([line, integrationIn(line, onSlice)]).toEqual([line, expect.stringContaining('switches branches')])
+    for (const line of [
+      'git checkout -b agt/y && git push -u origin agt/y',
+      'git checkout -- README.md && git push origin HEAD',
+      'git push origin HEAD && git checkout main',
+      'git rebase main && git push origin HEAD',
+    ]) expect([line, integrationIn(line, onSlice)]).toEqual([line, null])
+  })
+
   test('the slice\'s own pushes, PRs, tag listing, API reads and quoted text are left alone', async () => {
     for (const line of [
       'git push -u origin agt/filter',
@@ -102,7 +126,6 @@ describe('guard: which commands integrate', () => {
       'git push',
       'git push -u origin "$(git branch --show-current)"',
       'SLUG=filter; git push -u origin "agt/$SLUG"',
-      'git push origin --delete agt/x',
       'git push -n origin main',
       'git push -u origin agt/x 2>&1 | tail -3',
       'git push origin agt/x > /dev/null 2>&1',
@@ -137,6 +160,90 @@ describe('guard: which commands integrate', () => {
     expect(integrationIn('git push -u origin agt/x', { ...onSlice, mode: 'local' })).toBe('git push')
     expect(integrationIn('gh pr create --title x', { mode: 'local' })).toBe('gh pr create')
     expect(integrationIn('gh pr create --title x', { mode: 'push' })).toBeNull()
+  })
+
+  test('aliases, plumbing, file-fed GraphQL, curl flag clusters and hub are caught', async () => {
+    for (const line of [
+      'git -c alias.p=push p origin agt/x:main',
+      'git -c alias.t=tag t v9',
+      'git --config-env=alias.p=P p origin agt/x:main',
+      'GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=alias.p GIT_CONFIG_VALUE_0=push git p origin agt/x:main',
+      'git config alias.sh push && git sh origin HEAD:main',
+      'git config --global alias.p push',
+      'git config set alias.p push',
+      'git send-pack ../origin.git agt/x:main',
+      'git subtree push --prefix=x origin agt/x',
+      'git update-ref refs/tags/v1 HEAD',
+      'git update-ref -d refs/tags/v1',
+      'git update-ref refs/heads/main agt/x',
+      'git update-ref --stdin < refs.txt',
+      'git symbolic-ref refs/heads/main refs/heads/agt/x',
+      'gh alias set mm "pr merge" && gh mm 12',
+      'gh alias import aliases.yml',
+      'gh api graphql -F query=@m.graphql',
+      'gh api graphql -f query=@m.graphql',
+      'gh api graphql --input body.json',
+      "gh api graphql -f query='mutation { deleteRef(input: {refId: \"x\"}) { clientMutationId } }'",
+      "gh api graphql -f query='mutation($id: ID!) { mergePullRequest(input: {pullRequestId: $id}) { clientMutationId } }' -F id=1",
+      'curl -sXPUT https://api.github.com/repos/o/r/pulls/1/merge',
+      'curl -sfX PUT https://api.github.com/repos/o/r/pulls/1/merge',
+      'curl -sSd @body.json https://api.github.com/graphql',
+      'curl -sd \'{"tag_name":"v1"}\' https://api.github.com/repos/o/r/releases',
+      'hub release create v1',
+      'hub api -X PUT repos/o/r/pulls/1/merge',
+      'hub push origin main',
+    ]) expect([line, integrationIn(line, onSlice)]).toEqual([line, expect.any(String)])
+    for (const line of [
+      'git config --get alias.p',
+      'git -c core.pager=cat log --oneline',
+      'gh alias list',
+      "gh api graphql -f query='{ repository(owner: \"o\", name: \"r\") { pullRequest(number: 1) { mergeable } } }'",
+      'curl -sS https://api.github.com/repos/o/r/pulls/1',
+      'curl -sI https://api.github.com/repos/o/r/pulls/1/merge',
+      'git update-ref refs/heads/agt/y HEAD',
+      'git symbolic-ref --short HEAD',
+      'hub pull-request -m "agt: filter"',
+    ]) expect([line, integrationIn(line, onSlice)]).toEqual([line, null])
+  })
+
+  test('interpreter code, more shells and more wrappers are seen through', async () => {
+    for (const line of [
+      'python3 -c "import subprocess;subprocess.run([\'git\',\'push\',\'origin\',\'main\'])"',
+      'node -e "require(\'child_process\').execSync(\'gh pr merge 12\')"',
+      "perl -e 'system(\"git push origin main\")'",
+      "ruby -e 'system(\"git tag v1\")'",
+      "osascript -e 'do shell script \"gh pr merge 3\"'",
+      'fish -c "git push origin main"',
+      'zsh -fc "git push origin main"',
+      'bash --norc -c "git push origin main"',
+      'script -q /dev/null git push origin main',
+      "script -qc 'git push origin main' /dev/null",
+      'watch -n1 git push origin main',
+      'flock /tmp/l git push origin main',
+      'flock /tmp/l -c "git push origin main"',
+      'caffeinate -i git push origin main',
+      'stdbuf -oL git push origin main',
+      'arch -arm64 git push origin main',
+      'find . -maxdepth 0 -exec git push origin main \\;',
+      'parallel git push origin ::: main',
+      'parallel ::: "git push origin main"',
+      'coproc git push origin main',
+      'coproc P { git push origin main; }',
+      'ssh host git push origin main',
+      "ssh -p 22 host 'cd app && git push origin main'",
+      'xcrun git push origin main',
+      'env -iC /w git push origin main',
+      'sudo -nu bob gh pr merge 4',
+    ]) expect([line, integrationIn(line, onSlice)]).toEqual([line, expect.any(String)])
+    for (const line of [
+      'python3 -c "print(1)"',
+      'node -e "console.log(require(\'./package.json\').version)"',
+      'watch -n5 git status',
+      'find . -name "*.ts" -exec grep -l TODO {} +',
+      'ssh host uptime',
+      'parallel echo ::: a b',
+      'caffeinate -i npm test',
+    ]) expect([line, integrationIn(line, onSlice)]).toEqual([line, null])
   })
 
   test('judgePush on its own: a dry run passes, refs outside heads do not', async () => {
@@ -182,6 +289,9 @@ describe('guard: the repo a profile entry names', () => {
     expect(integrationOf({ integration: 'auto', projects: [{ name: 'app', integration: 'local' }] }, repo)).toBe('local')
     expect(integrationOf({ integration: 'auto', projects: [{ id: 'other', integration: 'pr' }] }, repo)).toBe('auto')
     expect(integrationOf({ integration: 'auto', projects: [{ id: 'app', integration: 'pr' }, { url: 'github.com/me/app', integration: 'auto' }] }, repo)).toBe('auto')
+    // A repo with no checkout here (gh -R, GH_REPO, a push URL) has only its URL: a name entry grants it nothing.
+    expect(integrationOf({ projects: [{ name: 'api', integration: 'auto' }] }, { url: 'github.com/stranger/api', paths: [], name: 'api' })).toBe('pr')
+    expect(integrationOf({ projects: [{ name: 'api', integration: 'auto' }] }, { url: null, paths: [], name: 'api' })).toBe('pr')
   })
 
   test('CLAUDE.md and AGENTS.md caps: local-only, no-mistakes, as words', async () => {
@@ -233,8 +343,8 @@ describe('guard: worktree adds', () => {
 
 // A run in a session with no pane transport: the ownership list lives in memory.
 // git: per dir, the branch checked out (`current`), its remote URL and its main checkout (default /work/repo).
-type Repo = { current?: string; remote?: string; common?: string }
-const setup = (on: any, o: { profile?: unknown; repoConfig?: unknown; env?: Record<string, string>; files?: Record<string, string>; repos?: Record<string, Repo>; feat?: boolean } = {}) => {
+type Repo = { current?: string; remote?: string; common?: string; pushurl?: string; upstream?: string }
+const setup = (on: any, o: { profile?: unknown; repoConfig?: unknown; env?: Record<string, string>; files?: Record<string, string>; repos?: Record<string, Repo>; feat?: boolean; broken?: boolean } = {}) => {
   const seen: string[][] = []
   const ran: string[] = []
   const git = { made: false, committed: false, feat: false }
@@ -273,6 +383,7 @@ const setup = (on: any, o: { profile?: unknown; repoConfig?: unknown; env?: Reco
   on('process.run', async ($: any, e: any) => {
     seen.push(e.argv)
     const a = e.argv.join(' ')
+    if (o.broken && e.argv[0] === 'git' && !a.includes('worktree list')) return { deny: 'git could not be run' }
     const out = (stdout: string, exitCode = 0) => ({ value: { exitCode, stdout, stderr: '' } })
     if (a === 'git -C /work/repo worktree list --porcelain') {
       return out([
@@ -284,7 +395,12 @@ const setup = (on: any, o: { profile?: unknown; repoConfig?: unknown; env?: Reco
     }
     const dir = e.argv[1] === '-C' ? e.argv[2] : ''
     if (a.endsWith('symbolic-ref --short -q HEAD')) return repos[dir]?.current ? out(repos[dir].current + '\n') : out('', 1)
-    if (a.includes('config --get-regexp')) return out(repos[dir]?.remote ? 'remote.origin.url ' + repos[dir].remote + '\n' : '', repos[dir]?.remote ? 0 : 1)
+    if (a.includes('config --get-regexp')) {
+      const r = repos[dir] ?? {}
+      const lines = [r.remote && 'remote.origin.url ' + r.remote, r.pushurl && 'remote.origin.pushurl ' + r.pushurl, r.upstream && 'remote.upstream.url ' + r.upstream, r.upstream && 'remote.upstream.gh-resolved base'].filter(Boolean)
+      return out(lines.join('\n') + '\n', lines.length ? 0 : 1)
+    }
+    if (a.includes('remote get-url --push')) return repos[dir]?.pushurl || repos[dir]?.remote ? out((repos[dir].pushurl || repos[dir].remote) + '\n') : out('', 2)
     if (a.includes('@{push}')) return out('', 128)
     if (a.includes('rev-parse --path-format=absolute --git-common-dir') && repos[dir]?.common) return out(repos[dir].common + '\n')
     if (a.includes('symbolic-ref')) return out('', 1)
@@ -294,8 +410,8 @@ const setup = (on: any, o: { profile?: unknown; repoConfig?: unknown; env?: Reco
     if (a.includes('rev-parse --path-format=absolute --git-common-dir')) return out('/work/repo/.git\n')
     return out('')
   })
-  mock.clock(on, { now: 1_000_000 })
-  return { seen, ran, git }
+  const clock = mock.clock(on, { now: 1_000_000 })
+  return { seen, ran, git, clock }
 }
 const boot = ($: any) => $.session.start({ cwd: '/work/repo', surface: null, isInteractive: false })
 const typed = ($: any, text = '/agt ship it') => $.prompt.submit({ text, origin: { kind: 'composer' } } as never)
@@ -510,5 +626,208 @@ describe('guard: worktree ownership and the run-end tidy', () => {
     const r = await $.command.run({ command: 'agt-clean', args: '', origin: { kind: 'composer' } } as never)
     expect(r.text).toContain('agt/x (not opened by this session)')
     expect(seen.some((a) => a.includes('remove'))).toBe(false)
+  })
+})
+
+describe('guard: it fails closed', () => {
+  test('a repo probe that throws denies the command in one sentence', async ($, on) => {
+    const { ran } = setup(on, { broken: true, profile: { projects: [{ id: 'repo', integration: 'auto' }] } })
+    await boot($)
+    await typed($)
+    expect((await bash($, 'git push -u origin agt/x')).deny).toBe(DENY_UNREAD)
+    expect((await bash($, 'gh pr merge 3')).deny).toBe(DENY_UNREAD)
+    expect((await bash($, 'npm test')).result).toBe('ok')
+    expect(ran).toEqual(['npm test'])
+  })
+
+  test('below auto no branch is deleted on the remote, an own-prefix one included', async ($, on) => {
+    setup(on)
+    await boot($)
+    await typed($)
+    for (const line of ['git push origin :feat/someone-else', 'git push origin --delete agt/x', 'git push -d origin fix/y']) expect((await bash($, line)).deny).toContain('git push --delete')
+    expect((await bash($, 'git push -u origin agt/x')).result).toBe('ok')
+  })
+})
+
+// The lead's guard lasts for its run, not for a clock window: a run that named its id is guarded until its card.
+describe('guard: the lead stays guarded for the whole run', () => {
+  const sub = (run: string) => ({ prompt: '[agt run=' + run + ' size=small mode=build]\nbuild', subagentType: 'agentille:agentille-executor', model: 'sonnet' })
+  // In steps: the redraw ticker keeps a short interval while the band shows the run.
+  const later = async (clock: any, ms: number) => { for (let t = 0; t < ms; t += 60_000) await clock.advance(60_000) }
+  const subDone = async ($: any) => {
+    await $.turn.start({ text: 'go', turnId: 's1', agentId: 'sub1' })
+    await $.turn.complete({ answer: 'done', durationMs: 1, isAborted: false, turnId: 's1', reason: 'answer', agentId: 'sub1' })
+  }
+
+  test('61 minutes into a run with its id named, after a typed question, a merge is still denied', async ($, on) => {
+    const { clock } = setup(on)
+    await boot($)
+    await typed($)
+    await $.agent.spawn(sub('gl1'))
+    await subDone($)
+    await later(clock, 61 * 60_000)
+    await typed($, 'still there?')
+    expect((await bash($, 'gh pr merge 9 --merge --delete-branch')).deny).toBe(DENY_INTEGRATION)
+  })
+
+  test('three typed replies with nothing working do not switch it off', async ($, on) => {
+    setup(on)
+    await boot($)
+    await typed($)
+    await $.agent.spawn(sub('gl2'))
+    await subDone($)
+    for (const t of ['a', 'b', 'c', 'd']) await typed($, t)
+    expect((await bash($, 'gh pr merge 9 --merge')).deny).toBe(DENY_INTEGRATION)
+  })
+
+  test('a dispatch on a later turn names the run when the /agt turn did not', async ($, on) => {
+    const { clock } = setup(on)
+    await boot($)
+    await typed($)
+    await typed($, 'yes, go ahead')
+    await $.agent.spawn(sub('gl3'))
+    await subDone($)
+    await later(clock, 61 * 60_000)
+    for (const t of ['a', 'b', 'c']) await typed($, t)
+    expect((await bash($, 'gh pr merge 9')).deny).toBe(DENY_INTEGRATION)
+  })
+
+  test('the card ends it, even on a turn the person typed after the run lapsed', async ($, on) => {
+    const { clock } = setup(on)
+    await boot($)
+    await typed($)
+    await $.agent.spawn(sub('gl4'))
+    await subDone($)
+    await later(clock, 61 * 60_000)
+    await typed($, 'merge it once green')
+    expect((await bash($, 'gh pr merge 9')).deny).toBe(DENY_INTEGRATION)
+    await card($)
+    await typed($, 'something else')
+    expect((await bash($, 'gh pr merge 9')).result).toBe('ok')
+  })
+})
+
+// The repo a write lands in decides, not the folder the session sits in.
+describe('guard: the target repo is read from the write', () => {
+  const sandbox = { profile: { integration: 'pr', projects: [{ path: '/work/repo', integration: 'auto' }] }, repos: { '/work/repo': { current: 'agt/x', remote: 'git@github.com:me/sandbox.git' } } }
+
+  test('GH_REPO on the line, exported earlier, or in the session names gh\'s repo', async ($, on) => {
+    const { ran } = setup(on, sandbox)
+    await boot($)
+    await typed($)
+    expect((await bash($, 'gh pr merge 7 --merge')).result).toBe('ok')
+    expect((await bash($, 'GH_REPO=victim/prod gh pr merge 7 --merge')).deny).toBe(DENY_INTEGRATION)
+    expect((await bash($, 'export GH_REPO=victim/prod; gh pr merge 7 --merge')).deny).toBe(DENY_INTEGRATION)
+    expect((await bash($, 'GITHUB_REPOSITORY=victim/prod gh release create v1')).deny).toBe(DENY_INTEGRATION)
+    expect((await bash($, 'GH_REPO=me/sandbox gh pr merge 8')).result).toBe('ok')
+    expect(ran).toEqual(['gh pr merge 7 --merge', 'GH_REPO=me/sandbox gh pr merge 8'])
+  })
+
+  test('GH_REPO in the session\'s environment counts too', async ($, on) => {
+    setup(on, { ...sandbox, env: { GH_REPO: 'victim/prod' } })
+    await boot($)
+    await typed($)
+    expect((await bash($, 'gh pr merge 7')).deny).toBe(DENY_INTEGRATION)
+  })
+
+  test('gh repo set-default: the remote it resolved is the target', async ($, on) => {
+    setup(on, { ...sandbox, repos: { '/work/repo': { current: 'agt/x', remote: 'git@github.com:me/sandbox.git', upstream: 'https://github.com/victim/prod.git' } } })
+    await boot($)
+    await typed($)
+    expect((await bash($, 'gh pr merge 7')).deny).toBe(DENY_INTEGRATION)
+    expect((await bash($, 'gh pr merge 7 -R me/sandbox')).result).toBe('ok')
+  })
+
+  test('a push to a URL, a path, an edited remote or a pushurl is judged by where it lands', async ($, on) => {
+    setup(on, sandbox)
+    await boot($)
+    await typed($)
+    expect((await bash($, 'git push origin agt/x:main')).result).toBe('ok')
+    for (const line of [
+      'git push https://github.com/victim/prod.git agt/x:main',
+      'git push /work/prod.git agt/x:main',
+      'git push ../prod.git agt/x:main',
+      'git remote set-url origin https://github.com/victim/prod && git push origin agt/x:main',
+      'git remote add prod https://github.com/victim/prod && git push prod agt/x:main',
+      'git -c remote.origin.pushurl=https://github.com/victim/prod push origin agt/x:main',
+      'git -c url.https://github.com/victim/prod.pushInsteadOf=git@github.com:me/sandbox.git push origin agt/x:main',
+      'GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=remote.origin.pushurl GIT_CONFIG_VALUE_0=x git push origin agt/x:main',
+      'cd "$OTHER" && git push origin agt/x:main',
+    ]) expect([line, (await bash($, line)).deny]).toEqual([line, expect.stringContaining('git push to main')])
+    expect((await bash($, 'git push git@github.com:me/sandbox.git agt/x:main')).result).toBe('ok')
+  })
+
+  test('a pushurl set before the line sends the push elsewhere', async ($, on) => {
+    setup(on, { ...sandbox, repos: { '/work/repo': { current: 'agt/x', remote: 'git@github.com:me/sandbox.git', pushurl: 'https://github.com/victim/prod.git' } } })
+    await boot($)
+    await typed($)
+    expect((await bash($, 'git push origin agt/x:main')).deny).toContain('git push to main')
+    expect((await bash($, 'gh pr merge 7')).result).toBe('ok')
+  })
+
+  test('a name-only profile entry grants a stranger\'s repo of that name nothing', async ($, on) => {
+    setup(on, { profile: { projects: [{ name: 'api', integration: 'auto' }] } })
+    await boot($)
+    await typed($)
+    expect((await bash($, 'gh pr merge 3 -R stranger/api --merge')).deny).toBe(DENY_INTEGRATION)
+  })
+})
+
+describe('guard: aliases and plumbing in the mod', () => {
+  test('a ref write is judged against the repo\'s own base, a tag as git tag is', async ($, on) => {
+    setup(on)
+    await boot($)
+    await typed($)
+    expect((await bash($, 'git update-ref refs/tags/v1 HEAD')).deny).toContain(DENY_INTEGRATION)
+    expect((await bash($, 'git update-ref HEAD agt/x')).deny).toContain('base branch main')
+    expect((await bash($, 'git -C /work/repo-x update-ref HEAD agt/x~1')).result).toBe('ok')
+    expect((await bash($, 'git -c alias.p=push p origin agt/x:main')).deny).toBe(DENY_INTEGRATION)
+    expect((await bash($, 'git send-pack origin agt/x:main')).deny).toBe(DENY_INTEGRATION)
+  })
+})
+
+describe('guard: scripts are read before they run', () => {
+  const files = {
+    '/work/repo/ship.sh': '#!/bin/sh\nset -e\ngit push origin main\n',
+    '/work/repo/ship.py': 'import subprocess\nsubprocess.run(["git", "push", "origin", "main"])\n',
+    '/work/repo/test.sh': '#!/bin/sh\nnpm test\n',
+    '/work/repo/Makefile': 'test:\n\tnpm test\n\nrelease: test tag-it\n\nlint:\n\tnpm run lint\n\ntag-it:\n\tgit tag v1 && git push --tags\n\n%.o: %.c\n\tcc $<\n',
+  }
+
+  test('a script that pushes, merges or tags is refused, and the text says why; a plain one runs', async ($, on) => {
+    const { ran } = setup(on, { files })
+    await boot($)
+    await typed($)
+    for (const line of ['./ship.sh', 'sh ship.sh', 'bash ./ship.sh', 'source ship.sh', '. ./ship.sh', 'python3 ship.py', 'cd /work/repo && ./ship.sh --fast']) {
+      const r = await bash($, line)
+      expect([line, r.deny]).toEqual([line, expect.stringContaining('runs a script that calls git push')])
+    }
+    expect((await bash($, 'cd "$X" && ./ship.sh')).deny).toContain('cannot locate')
+    expect((await bash($, './test.sh')).result).toBe('ok')
+    expect((await bash($, './missing.sh')).result).toBe('ok')
+    expect(ran).toEqual(['./test.sh', './missing.sh'])
+  })
+
+  test('make: the target\'s recipe and prerequisites are read, the whole file when the target is not a rule', async ($, on) => {
+    const { ran } = setup(on, { files })
+    await boot($)
+    await typed($)
+    expect((await bash($, 'make release')).deny).toContain('make release runs a recipe that mentions push')
+    expect((await bash($, 'make -C /work/repo release')).deny).toContain('make release')
+    expect((await bash($, 'make deploy')).deny).toContain('make deploy')
+    expect((await bash($, 'make test lint')).result).toBe('ok')
+    expect((await bash($, 'make')).result).toBe('ok')
+    expect((await bash($, 'make -C /work/elsewhere release')).result).toBe('ok')
+    expect(ran).toEqual(['make test lint', 'make', 'make -C /work/elsewhere release'])
+  })
+
+  test('under auto, or outside a run, a script runs unread', async ($, on) => {
+    const { ran } = setup(on, { files, profile: { projects: [{ id: 'repo', integration: 'auto' }] } })
+    await boot($)
+    expect((await bash($, './ship.sh')).result).toBe('ok')
+    await typed($)
+    expect((await bash($, './ship.sh')).result).toBe('ok')
+    expect((await bash($, 'python3 -c "import os; os.system(\'git push origin main\')"')).result).toBe('ok')
+    expect(ran).toHaveLength(3)
   })
 })

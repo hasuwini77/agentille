@@ -10,9 +10,10 @@
 //   startRun(id)               the typed /agt's own turn named its run (a pane; a routed dispatch through
 //                              dispatchedRun, or a later turn's while none is named): later turns may open panes
 //                              for that run only, and the lead's Bash guard holds until the run's card
+//                              (a solo run, which prints none: until the turn that printed its recon line ends)
 //   setRunProfile(profile)     the typed /agt's turn read the profile: the run's integration ceiling (guard.js)
-//   endRun()                   the run's ✓/✗ card: the /agt proof, its --fable, the guard's hold and the run's
-//                              profile snapshot lapse
+//   endRun()                   the run's ✓/✗ card, or the end of a solo run's turn (turns.js soloTurn): the /agt
+//                              proof, its --fable, the guard's hold and the run's profile snapshot lapse
 //   dropProof()                the first turn after the run is over (routing.js runInFlight): the /agt proof and
 //                              its --fable lapse; the guard's hold (agtHeld, agtRun) waits for the card or the next /agt
 //   rawDone()                  the raw answer went on the clipboard: a later turn is not raw
@@ -129,7 +130,8 @@ export function setRunProfile(profile) {
   my.agtProfile = profile ?? null
 }
 
-// The run's ✓/✗ card: the next worker pane needs the next typed /agt, and the lead's Bash is its own again.
+// The run's ✓/✗ card, or the end of the turn that printed a solo run's recon line: the next worker pane needs the
+// next typed /agt, and the lead's Bash is its own again.
 export function endRun() {
   my.agtTyped = false
   my.fableTyped = false
@@ -147,7 +149,7 @@ export function dropProof() {
 }
 
 // The lead's Bash guard holds for a typed /agt's run until its card (guard.js fromRun), whether or not it named an
-// id: a solo or inline run never does.
+// id: an inline run never does. A solo run prints no card; the turn that printed its recon line ends it instead.
 export const runHeld = () => !!my.agtRun || my.agtHeld
 
 export function rawDone() {

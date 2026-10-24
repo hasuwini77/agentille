@@ -89,6 +89,17 @@ check "the compact hook runs the re-entry script" 'matcher_block compact | grep 
 check "the re-entry script exists and is executable" '[ -x hooks/agentille-compact.sh ]'
 check "the update check still runs at startup and resume" 'matcher_block "startup|resume" | grep -qF "hooks/agentille-update-check.sh"'
 
+# the init skill's `display` row says what hooks/settings.js defaults to: every key, and each key's default, in order
+# (the Default cell is DISPLAY_DEFAULTS with the quotes dropped), so the table cannot drift from the code again
+display_defaults() { sed -n 's/^export const DISPLAY_DEFAULTS = \({.*}\)$/\1/p' hooks/settings.js | tr -d "'" | sed 's/^{ /{/; s/ }$/}/'; }
+init_display_row() { grep -E '^\| `display` \|' skills/agentille-init/SKILL.md; }
+init_display_values() { init_display_row | sed 's/^| `display` | `\([^`]*\)`.*/\1/'; }
+check "hooks/settings.js declares DISPLAY_DEFAULTS on one line" '[ -n "$(display_defaults)" ]'
+check "the init skill's display default is hooks/settings.js's DISPLAY_DEFAULTS" '[ "$(init_display_row | awk -F"|" "{ print \$(NF-1) }" | sed "s/^ *\`//; s/\` *$//")" = "$(display_defaults)" ]'
+for k in $(display_defaults | tr -d '{}' | tr ',' '\n' | sed 's/:.*//; s/ //g'); do
+  check "the init skill's display row lists the values $k takes" 'init_display_values | grep -qE "[{ ]$k: [^,}]+[,}]"'
+done
+
 # setup skills that say "typed only" disable model invocation
 for f in skills/agentille-init/SKILL.md skills/agentille-project/SKILL.md; do
   check "$f disables model invocation" 'grep -qE "^disable-model-invocation: true$" "$f"'

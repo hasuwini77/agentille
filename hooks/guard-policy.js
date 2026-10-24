@@ -4,7 +4,7 @@
 // (guard-lex.js) turns a line into the candidates these functions judge.
 import { Profile, Proofs } from './state.js'
 import { PROBE } from './panes.js'
-import { base, commands, commandSteps, joinPath, SCRIPT_RISK, MAKE_RISK } from './guard-lex.js'
+import { base, commands, commandSteps, joinPath, protectedPath, SCRIPT_RISK, MAKE_RISK } from './guard-lex.js'
 
 // The gh and curl/wget step readers live in a leaf the lexer shares; the policy keeps carrying their names.
 export { ghStep, httpStep } from './guard-steps.js'
@@ -132,7 +132,7 @@ export function integrationIn(line, { cwd = null, current = null, pushDst = null
       continue
     }
     if (c.kind === 'hidden') return c.what
-    if (c.kind === 'file') continue // read in guardLine: a line alone has no files
+    if (c.kind === 'file' || c.kind === 'write') continue // read in guardLine: a line alone has no files
     if (mode === 'local') return c.what
     if (c.kind === 'push') {
       const why = judgePush(c.push, { current, pushDst, bases: new Set(['main', 'master', b].filter(Boolean)) })
@@ -225,6 +225,40 @@ async function fileRisk($, c) {
     expanded = ''
   }
   return SCRIPT_RISK.test(text) || SCRIPT_RISK.test(expanded) ? c.what + ' runs a script that calls git push, merge or tag, gh or curl to GitHub' : null
+}
+
+
+// Where a path lands once every link is followed: the file's own real path, else (a file not there yet) its
+// folder's plus the name. null when neither stats; DANGLING when the path is a link that leads nowhere, since a
+// write through it creates whatever it names.
+const DANGLING = Symbol('dangling')
+
+async function landing($, abs) {
+  const own = await $.fs.stat(abs, { resolve: true }).catch(() => null)
+  if (own) return own.realPath ?? (own.isLink ? DANGLING : null)
+  const cut = abs.lastIndexOf('/')
+  const dir = await $.fs.stat(abs.slice(0, cut) || '/', { resolve: true }).catch(() => null)
+  return dir?.realPath ? dir.realPath.replace(/\/+$/, '') + '/' + abs.slice(cut + 1) : null
+}
+
+// The home folder as the guard compares it: as spelled and where it lands (a linked home, /var → /private/var).
+let homeReal = { home: null, real: null }
+async function homes($) {
+  if (!Profile.home) return []
+  if (homeReal.home !== Profile.home) homeReal = { home: Profile.home, real: (await $.fs.stat(Profile.home, { resolve: true }).catch(() => null))?.realPath ?? null }
+  return [Profile.home, homeReal.real].filter(Boolean)
+}
+
+// A write target → the protected label of where it lands, or null. The spelling is judged first (protectedPath),
+// then the real path, so `cfg` linked to .git/config on an earlier line, or `.GIT/CONFIG`, is refused. A link that
+// leads nowhere is refused: the guard cannot see what the write would create.
+export async function resolvedProtected($, raw, abs) {
+  const hs = await homes($)
+  const spelled = protectedPath(raw, abs, hs)
+  if (spelled || !abs) return spelled
+  const real = await landing($, abs)
+  if (real === DANGLING) return 'a link that leads nowhere (' + raw + ')'
+  return real && real !== abs ? protectedPath('', real, hs) : null
 }
 
 
@@ -496,6 +530,13 @@ export async function guardLine($, line, cwd) {
   // GH_REPO in the session's own environment names gh's repo as one set on the line does.
   const envRepo = cands.some((c) => c.gh && !c.slug) ? (await $.env.get('GH_REPO').catch(() => null)) || null : null
   for (const c of cands) {
+    if (c.kind === 'write') {
+      // An ordinary write target: judged by where it lands, and only a protected landing costs a mode lookup.
+      const lbl = await resolvedProtected($, c.raw, c.path)
+      if (!lbl) continue
+      if ((await modeFor($, profile, { ...c, slug: null }, cwd, cache)) === 'auto') continue
+      return denyProtected(lbl)
+    }
     const slug = c.gh && !c.slug ? envRepo ?? (await ghDefault($, c.dir, cache)) : c.slug
     const mode = c.kind === 'push' ? await pushMode($, profile, c, cwd, cache) : await modeFor($, profile, { ...c, slug }, cwd, cache)
     if (mode === 'auto') continue

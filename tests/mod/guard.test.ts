@@ -982,12 +982,31 @@ describe('guard: the trust root and the repo git state are off-limits below auto
       'git --config-env=core.sshCommand=CMD fetch',
       'GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=push.default GIT_CONFIG_VALUE_0=matching git push',
     ]) expect([line, integrationIn(line, onSlice)]).toEqual([line, expect.stringContaining('git config key')])
+    // Any case (APFS and NTFS open .GIT/CONFIG as .git/config), a submodule's git dir, and a link to or a move of
+    // a protected path.
+    for (const line of [
+      'echo x >> .GIT/CONFIG',
+      'echo x >> .Git/Hooks/pre-push',
+      'printf x > ~/.Agentille/profile.json',
+      'echo x >> /work/repo/.git/modules/sub/config',
+      'cp hook .git/modules/sub/hooks/pre-push',
+      'echo x >> .git/modules/a/modules/b/config',
+      'echo abc > .git/modules/sub/refs/heads/main',
+      'ln -s .git g',
+      'ln -s .git/config cfg',
+      'ln -sf ../.git/hooks h',
+      'mv .git/config /tmp/c',
+    ]) expect([line, integrationIn(line, onSlice)]).toEqual([line, expect.any(String)])
     for (const line of [
       'echo x > notes.md',
       'cp a b',
       'git config user.name me',
       'git config --get remote.origin.url',
       'git config --get push.default',
+      'ln -s ../shared/config.json config.json',
+      'mv notes.md docs/notes.md',
+      'cat .git/modules/sub/config',
+      'ls 2>&1 > /dev/null',
     ]) expect([line, integrationIn(line, onSlice)]).toEqual([line, null])
   })
 })
@@ -1002,6 +1021,9 @@ describe('guard: protected writes and package scripts in the mod', () => {
     expect((await $.tool.call({ tool: 'Write', file_path: '/h/.agentille/profile.json', content: 'x' } as never)).deny).toContain('may not write')
     expect((await $.tool.call({ tool: 'Edit', file_path: '/work/repo/.git/config', old_string: 'a', new_string: 'b' } as never)).deny).toContain('may not write')
     expect((await $.tool.call({ tool: 'Write', file_path: '/work/repo/notes.md', content: 'x' } as never))?.deny).toBeUndefined()
+    expect((await $.tool.call({ tool: 'Edit', file_path: '/work/repo/.GIT/Config', old_string: 'a', new_string: 'b' } as never)).deny).toContain('may not write')
+    expect((await $.tool.call({ tool: 'Write', file_path: '/H/.AGENTILLE/profile.json', content: 'x' } as never)).deny).toContain('may not write')
+    expect((await $.tool.call({ tool: 'Write', file_path: '/work/repo/.git/modules/sub/hooks/pre-push', content: 'x' } as never)).deny).toContain('may not write')
   })
 
   test('inside a run a Write/Edit the guard cannot judge is refused; outside a run it goes through', async ($, on) => {

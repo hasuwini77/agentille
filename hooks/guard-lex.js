@@ -11,24 +11,35 @@ export { base }
 // The trust root and the repo's own git state: a write to any of these below auto is refused, because a run could
 // use it to lift its own ceiling (rewrite ~/.agentille/profile.json), run code (a git hook) or publish (a ref).
 // `raw` is the path as the line wrote it (so `~`, `$HOME`, a relative `.git/config` are seen); `abs` its resolved
-// form. Returns a short label for the deny message, or null.
-export function protectedPath(raw, abs) {
+// form (the guard also passes where a link lands, guard-policy.js resolvedProtected); `homes` the home folder's
+// spellings. Matching ignores case: APFS and NTFS open `.GIT/CONFIG` as `.git/config`. A submodule's own git dir
+// (`.git/modules/<name>/…`, nested at any depth) counts as the repo's. Returns a short label for the deny
+// message, or null.
+export function protectedPath(raw, abs, homes = [Profile.home]) {
   const r = String(raw ?? '')
   const a = String(abs ?? '')
   if (/\$\{?GIT_DIR\}?/.test(r)) return '$GIT_DIR'
-  if (/^~\/\.agentille(\/|$)/.test(r)) return '~/.agentille'
-  if (/^(\$HOME|\$\{HOME\})\/\.agentille(\/|$)/.test(r)) return '~/.agentille'
-  if (Profile.home && (a === Profile.home + '/.agentille' || a.startsWith(Profile.home + '/.agentille/'))) return '~/.agentille'
+  if (/^~\/\.agentille(\/|$)/i.test(r)) return '~/.agentille'
+  if (/^(\$HOME|\$\{HOME\})\/\.agentille(\/|$)/i.test(r)) return '~/.agentille'
+  const al = a.toLowerCase()
+  for (const h of homes) {
+    const t = String(h ?? '').toLowerCase().replace(/\/+$/, '')
+    if (t && (al === t + '/.agentille' || al.startsWith(t + '/.agentille/'))) return '~/.agentille'
+  }
   const git = (s) =>
-    /(^|\/)\.git\/config$/.test(s) ? '.git/config'
-    : /(^|\/)\.git\/hooks(\/|$)/.test(s) ? '.git/hooks'
-    : /(^|\/)\.git\/info(\/|$)/.test(s) ? '.git/info'
-    : /(^|\/)\.git\/refs(\/|$)/.test(s) ? '.git/refs'
-    : /(^|\/)\.git\/packed-refs$/.test(s) ? '.git/packed-refs'
-    : /(^|\/)\.git$/.test(s) ? 'the worktree .git file'
+    /(^|\/)\.git\/config$/i.test(s) ? '.git/config'
+    : /(^|\/)\.git\/hooks(\/|$)/i.test(s) ? '.git/hooks'
+    : /(^|\/)\.git\/info(\/|$)/i.test(s) ? '.git/info'
+    : /(^|\/)\.git\/refs(\/|$)/i.test(s) ? '.git/refs'
+    : /(^|\/)\.git\/packed-refs$/i.test(s) ? '.git/packed-refs'
+    : MODULE_GIT.test(s) ? 'a submodule\'s .git/modules config, hooks or refs'
+    : /(^|\/)\.git$/i.test(s) ? 'the worktree .git file'
     : null
   return git(a) ?? git(r)
 }
+
+// A submodule's git dir under the repo's: its config, hooks and refs (`.git/modules/a/modules/b/config` too).
+const MODULE_GIT = /(^|\/)\.git\/modules\/(?:[^/]+\/)+?(config$|hooks(\/|$)|refs(\/|$)|packed-refs$)/i
 
 
 // git config keys a run may not set below auto: aliases (rename a step past the reader), the hooks path, the
@@ -102,6 +113,24 @@ function writeTargets(words) {
     return scriptGiven ? pos : pos.slice(1)
   }
   return out
+}
+
+
+// `ln` and `mv` → the paths they link to or move away (every positional but the destination, or all of them
+// with -t).
+function linkSources(words) {
+  const p = base(words[0])
+  if (p !== 'ln' && p !== 'mv') return []
+  const pos = []
+  let t = false
+  for (let i = 1; i < words.length; i++) {
+    const w = words[i]
+    if (w === '-t' || w === '--target-directory') { t = true; i++; continue }
+    if (/^--target-directory=/.test(w)) { t = true; continue }
+    if (['-S', '--suffix'].includes(w)) { i++; continue }
+    if (!w.startsWith('-')) pos.push(w)
+  }
+  return t ? pos : pos.slice(0, -1)
 }
 
 
@@ -602,7 +631,7 @@ function riskyCode(code) {
 }
 
 // Interpreter code that names the trust root or the repo's own git state: it may write them directly.
-const PROTECT_IN_CODE = /\.agentille\/|\.git\/config|\.git\/hooks|\.git\/refs|\.git\/info|packed-refs/
+const PROTECT_IN_CODE = /\.agentille\/|\.git\/config|\.git\/hooks|\.git\/refs|\.git\/info|packed-refs|\.git\/modules\/\S*(config|hooks|refs)/i
 
 // A script that pushes, merges, tags or releases: per line, git with push/merge/tag/send-pack/update-ref, gh or
 // hub with a merge, release, api or alias, curl or wget at GitHub.
@@ -748,10 +777,20 @@ export function commandSteps(line, cwd = null) {
     }
     const at = c.dir ? (/[$`~]/.test(c.dir) ? null : c.dir.startsWith('/') ? joinPath('/', c.dir) : here && joinPath(here, c.dir)) : here
     // A write into the trust root or the repo's own git state: redirects (`>`/`>>`) and tee/cp/mv/ln/sed -i/… targets.
+    // A target that reads clean is still a `write` candidate: guardLine resolves where it lands (a link made on an
+    // earlier line, `cfg` → .git/config) and judges that path too.
     for (const t of [...(c.redirects ?? []), ...writeTargets(w)]) {
       const abs = t.startsWith('/') ? joinPath('/', t) : !/[$`~]/.test(t) && at ? joinPath(at, t) : null
       const lbl = protectedPath(t, abs)
       if (lbl) out.push({ kind: 'protected', what: lbl, dir: at, slug: null })
+      else if (abs && !/^\/dev(\/|$)/.test(abs) && !/^\d+$/.test(t)) out.push({ kind: 'write', raw: t, path: abs, dir: at, slug: null })
+    }
+    // A link to (or a move of) the trust root or git state: the link is a second name a later write would land
+    // through, the move rewrites it.
+    for (const t of linkSources(w)) {
+      const abs = t.startsWith('/') ? joinPath('/', t) : !/[$`~]/.test(t) && at ? joinPath(at, t) : null
+      const lbl = protectedPath(t, abs)
+      if (lbl) out.push({ kind: 'protected', what: lbl + ' (through ' + p + ')', dir: at, slug: null })
     }
     // A tool whose subcommand and arguments xargs appends from stdin cannot be read: fail closed below auto.
     if (c.viaXargs && ['git', 'gh', 'hub', 'curl', 'wget'].includes(p)) {

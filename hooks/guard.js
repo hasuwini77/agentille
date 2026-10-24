@@ -32,14 +32,14 @@ import { SPAWN_ROLE, splitName } from './panes.js'
 import { moment, inFlight, runHeld, flight, setRunProfile } from './proofs.js'
 import { reportRun } from './drawing.js'
 import { completeReport } from './dispatch.js'
-import { joinPath, protectedPath } from './guard-lex.js'
-import { DENY_UNREAD, denyProtected, guardLine, integrationAllowed, readProfile } from './guard-policy.js'
+import { joinPath } from './guard-lex.js'
+import { DENY_UNREAD, denyProtected, guardLine, integrationAllowed, readProfile, resolvedProtected } from './guard-policy.js'
 import { WT_SCRIPT, listTrees, newTrees, claimedTrees, scriptTrees, scriptSlugs, worktreeAdds, saveOwned, runOf } from './guard-own.js'
 
 // Re-exports: every name ./guard.js used to carry still resolves here.
 export { protectedPath, SHELLS, commands, splitCommands, gitCall, commandSteps, joinPath, MENTIONS_TOOL, SCRIPT_RISK, MAKE_RISK } from './guard-lex.js'
 export { ghStep, httpStep } from './guard-steps.js'
-export { DENY_INTEGRATION, DENY_PUSH, DENY_LOCAL, DENY_UNREAD, denyHidden, denyProtected, judgePush, judgeRef, judgeLocal, integrationIn, integrationOf, integrationAllowed, guardLine, makeRecipe, normUrl, normSlug, sameRemote, capsOf } from './guard-policy.js'
+export { DENY_INTEGRATION, DENY_PUSH, DENY_LOCAL, DENY_UNREAD, denyHidden, denyProtected, judgePush, judgeRef, judgeLocal, resolvedProtected, integrationIn, integrationOf, integrationAllowed, guardLine, makeRecipe, normUrl, normSlug, sameRemote, capsOf } from './guard-policy.js'
 export { OWNED_TTL_MS, worktreeAdds, newTrees, WT_SCRIPT, scriptTrees, scriptSlugs, claimedTrees, recordTrees, parseOwned, Worktrees, worktreesFile, saveOwned, ownedWorktrees, forgetOwned } from './guard-own.js'
 
 // ── who is a run ─────────────────────────────────────────────────────────────
@@ -111,7 +111,7 @@ async function editDeny($, e) {
 async function judgeEdit($, path) {
   const cwd = await $.session.cwd().catch(() => null)
   const abs = path.startsWith('/') ? joinPath('/', path) : !/[$`~]/.test(path) && cwd ? joinPath(cwd, path) : null
-  const lbl = protectedPath(path, abs)
+  const lbl = await resolvedProtected($, path, abs)
   if (!lbl) return null
   const mode = await integrationAllowed($, cwd).catch(() => 'pr')
   return mode === 'auto' ? null : denyProtected(lbl)

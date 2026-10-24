@@ -188,6 +188,32 @@ try {
     check('... origin/main unchanged, push.default unset', refOf('origin.git', 'main') === w.main && spawnSync('git', ['-C', APP, 'config', 'push.default'], { env, encoding: 'utf8' }).stdout.trim() === '')
   }
   {
+    // A link made before the line runs (by an earlier line, or found in the tree) is judged by where it lands; a
+    // link made on the line to a protected path is refused itself. Any case, and a submodule's own git dir.
+    const w = world()
+    const cfg0 = fs.readFileSync(APP + '/.git/config', 'utf8')
+    const l1 = await run('ln -s .git g')
+    check('ln -s .git g: denied (a link to the repo git state)', l1?.deny?.includes('may not write'), JSON.stringify(l1))
+    sh('ln -s .git g && ln -s .git/config cfg && ln -s .git/hooks/pre-push dangling', APP)
+    const a = await run("printf '[alias]\\n\\tp = push\\n' >> g/config")
+    check('>> g/config through a linked .git dir: denied', a?.deny?.includes('may not write'), JSON.stringify(a))
+    const b = await run('echo x | tee -a cfg')
+    check('tee -a cfg, cfg a link to .git/config: denied', b?.deny?.includes('may not write'), JSON.stringify(b))
+    const d = await run('echo x > dangling')
+    check('a write through a link that leads nowhere: denied', d?.deny?.includes('leads nowhere'), JSON.stringify(d))
+    const c = await run("printf '[alias]\\n\\tp = push\\n' >> .GIT/CONFIG")
+    check('>> .GIT/CONFIG: denied', c?.deny?.includes('may not write'), JSON.stringify(c))
+    check('... .git/config untouched', fs.readFileSync(APP + '/.git/config', 'utf8') === cfg0)
+    const n = await run('echo x > notes-link-ok.md')
+    check('control: an ordinary new file is still allowed', !n?.deny && n.exit === 0, JSON.stringify(n))
+    sh('git -c protocol.file.allow=always submodule -q add ' + T + '/origin.git sub && git commit -qm sub', APP)
+    const m = await run("printf '[alias]\\n\\tp = push\\n' >> .git/modules/sub/config")
+    check(">> .git/modules/sub/config: denied (a submodule's config)", m?.deny?.includes('may not write'), JSON.stringify(m))
+    const h = await run("printf '#!/bin/sh\\n' > .git/modules/sub/hooks/pre-commit")
+    check('> .git/modules/sub/hooks/pre-commit: denied', h?.deny?.includes('may not write') && !fs.existsSync(APP + '/.git/modules/sub/hooks/pre-commit'), JSON.stringify(h))
+    check('... origin/main unchanged', refOf('origin.git', 'main') === w.main)
+  }
+  {
     // Controls below auto: the run's own branch and ordinary writes still pass.
     world()
     const ok = await run('git push -q -u origin agt/x')

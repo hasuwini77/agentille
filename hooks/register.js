@@ -16,6 +16,7 @@ import { addUsage, finish, ledger, isAgtPrompt } from './live.js'
 import { HELLO_MS, BYE_MS, parseWorker } from './mascot.js'
 import { PROBE, SPAWN_ROLE, transportBlock, paneName, newRunId, paneKey, parseSpawnArgs, herdrPromptArgv } from './panes.js'
 import { installedSkew, loadProfile, loadSquads, squadsView, tipOnce } from './profile.js'
+import { bashCall } from './guard.js'
 import { pollNow, cleanWorkspace } from './reaper.js'
 import { cardBox, answerBox, switchboard, deck } from './render.js'
 import { parseHeader, typedFable, asksSessions, verdictOf } from './routing.js'
@@ -145,6 +146,7 @@ export function register(on) {
   on('tool.call', { tool: 'mcp__agentille__spawn_pane' }, spawnPane)
   on('tool.call', { tool: 'mcp__agentille__open_sessions' }, openSessions)
   on('tool.call', { tool: 'mcp__agentille__close_pane' }, closePane)
+  on('tool.call', { tool: 'Bash' }, bashCall)  // guard.js: integration guard + worktree ownership
 
   on('command.run', { command: 'agt-clean' }, async ($, e) => {
     if (S.selfName || S.worker) return { text: 'agt clean runs in the lead session, not in a worker pane.' }

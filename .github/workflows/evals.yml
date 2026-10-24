@@ -8,10 +8,10 @@ name: evals
 # once it is reached; runs go one at a time, so one run in flight is the most it can overshoot),
 # each case's own max_turns and timeout_seconds, and the job's timeout-minutes.
 # It never publishes: --no-publish keeps the HTML report local, and the token is read-only.
-# Without the ANTHROPIC_API_KEY secret, a release tag push fails the job: a tag is a release, and its
-# eval signal must exist. On the weekly schedule and a run by hand (forks, a repo that has not added
-# the secret) the job prints one line and passes. What the result means and how to read it:
-# docs/testing.md.
+# Without the ANTHROPIC_API_KEY secret, a release tag push and the weekly schedule fail the job: a tag is
+# a release and the schedule is the upstream repo's own signal, so a missing secret must show red, not
+# quietly green (a fork has no schedule run until it enables workflows). A run by hand prints one line
+# and passes. What the result means and how to read it: docs/testing.md.
 
 on:
   push:
@@ -50,10 +50,14 @@ jobs:
           RUNS: ${{ inputs.runs || '1' }}
         run: |
           if [ -z "${ANTHROPIC_API_KEY:-}" ]; then
-            # A tag push is a release: it must carry an eval result. The event, not the ref type, decides,
-            # since a run by hand can be started on a tag ref too.
+            # A tag push is a release and the schedule is the repo's own weekly signal: both must carry an
+            # eval result. The event, not the ref type, decides, since a run by hand can be started on a tag.
             if [ "$GITHUB_EVENT_NAME" = push ]; then
               echo "::error::no ANTHROPIC_API_KEY secret: release tag $GITHUB_REF_NAME has no eval signal. Add the secret (docs/testing.md) and re-run this job."
+              exit 1
+            fi
+            if [ "$GITHUB_EVENT_NAME" = schedule ]; then
+              echo "::error::no ANTHROPIC_API_KEY secret: the weekly eval has no signal. Add the secret (docs/testing.md) or disable this workflow."
               exit 1
             fi
             echo "evals skipped: no ANTHROPIC_API_KEY secret"

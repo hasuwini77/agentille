@@ -54,7 +54,7 @@ Malformed JSON → `low` plus a one-line note; never crash. If the level hinges 
 - Design-reviewer viewports: the ones the user names, else `profile.viewports`, else desktop + mobile.
 - Design-reviewer URL: before its dispatch, start the project's dev server in the slice's worktree on a free port: `PORT=<free> <dev command> > ~/.agentille/state/run-<id>/dev-<slice>.log 2>&1 &`. The worktree lives until the gate; re-attach it if it is gone (`factory.md` → "Worktree lifecycle").
   Wait for a 2xx, then pass `url: http://localhost:<port>`. Stop that server once its verdict is harvested. The reviewer never starts one itself.
-- Debug: attempts, the limit and the `mode=diagnose` planner after 2 failed attempts are `factory.md` → "Fix rounds".
+- Debug: attempts, the limit and the `work=diagnose` planner after 2 failed attempts are `factory.md` → "Fix rounds".
 - Squads add payments / SEO / perf reviewers to the review step when the diff touches their domain (`squads.md`). Formations reshape the workers (`formations.md`).
 - Every reviewer column ticked for a slice runs **at once**: one message, parallel background calls (`SKILL.md` → "The contract" step 8).
 - Never more than 3 executors at once; batch the rest in waves. The mod refuses a 4th executor subagent at once (`agt ✗ run <id>: a 4th executor at once is refused; the roster runs at most 3`) and flags it on the band; dispatch it again once one of the three is done. A 4th executor pane is flagged, not refused.
@@ -99,7 +99,7 @@ The mod logs the table's pick beside the model that ran, flags a drift (`/agt-in
 Evidence is observed by the mod, not claimed by the lead.
 
 - **Plan:** 1st REVISE → next planner runs opus · max. 2nd REVISE → next planner is a Fable candidate.
-- **Fix** (attempts per `slice=`, as `factory.md` → "Fix rounds" defines them): attempt 2 → executor effort high; attempt 3, only after a diagnose planner → max. One slice's rounds never raise another's effort. A `mode=diagnose` planner after 2 failed attempts → Fable candidate.
+- **Fix** (attempts per `slice=`, as `factory.md` → "Fix rounds" defines them): attempt 2 → executor effort high; attempt 3, only after a diagnose planner → max. One slice's rounds never raise another's effort. A `work=diagnose` planner after 2 failed attempts → Fable candidate.
 - **Fable gate** (all must pass, else opus · max with the reason logged): candidate · `profile.routing.autoFable` is `true` (default `false`: Fable costs about twice Opus, so the ladder is opt-in) · fewer than `maxFablePerRun` (default 1) Fable spawns this run · weekly plan usage below `fableWeeklyCeiling` (default 60%).
 
 ### Cost ceiling

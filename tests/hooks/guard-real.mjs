@@ -586,6 +586,35 @@ try {
     check('control: --no-follow-tags pushes the branch alone', !ok?.deny && refOf('origin.git', 'agt/x') === w.slice && refOf('origin.git', 'refs/tags/v9.0.0') === null, JSON.stringify(ok))
   }
   {
+    // remote.<name>.mirror: a bare push of that remote is `git push --mirror` (the base moves, tags go, remote
+    // branches not held locally are deleted), however the key is set: by hand, by -c, by GIT_CONFIG_*, or by
+    // `git remote add --mirror=push`. Each spelling is refused and origin keeps its refs.
+    const w = world()
+    sh('git branch -f main agt/x && git tag -a v9.9.9 -m v9 && git push -q origin main:release', APP)
+    const before = { main: refOf('origin.git', 'main'), release: refOf('origin.git', 'release') }
+    const same = () => refOf('origin.git', 'main') === before.main && refOf('origin.git', 'release') === before.release && refOf('origin.git', 'refs/tags/v9.9.9') === null
+    let r = await run('git -c remote.origin.mirror=true push -q origin')
+    check('git -c remote.origin.mirror=true push: denied', r?.deny?.includes('git config key'), JSON.stringify(r))
+    r = await run('git config remote.origin.mirror true')
+    check('git config remote.origin.mirror true: denied as a config write', r?.deny?.includes('git config key'), JSON.stringify(r))
+    sh('git config remote.origin.mirror true', APP) // set past the guard, as a script or an earlier session could
+    r = await run('git push -q origin')
+    check('bare push with remote.origin.mirror set: denied as a mirror push', r?.deny?.includes('remote.origin.mirror = true'), JSON.stringify(r))
+    sh('git config --unset remote.origin.mirror', APP)
+    r = await run('GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=remote.origin.mirror GIT_CONFIG_VALUE_0=true git push -q origin')
+    check('GIT_CONFIG_KEY_0=remote.origin.mirror push: denied', r?.deny?.includes('git config key') || r?.deny?.includes('mirror'), JSON.stringify(r))
+    r = await run('git remote add --mirror=push backup ' + T + '/prod.git')
+    check('git remote add --mirror=push: denied as a config write', r?.deny?.includes('git config key'), JSON.stringify(r))
+    sh('git remote add --mirror=push backup ' + T + '/prod.git', APP)
+    r = await run('git push -q backup')
+    check('bare push of a --mirror=push remote: denied as a mirror push', r?.deny?.includes('remote.backup.mirror = true'), JSON.stringify(r))
+    check('... origin unchanged (main, release, no tag), prod.git empty', same() && refOf('prod.git', 'main') === null && refOf('prod.git', 'agt/x') === null, refOf('origin.git', 'main') + ' ' + refOf('origin.git', 'release'))
+    r = await run('git push -q --mirror origin')
+    check('control: git push --mirror stays denied', r?.deny?.includes('git push --mirror'), JSON.stringify(r))
+    const ok = await run('git push -q origin agt/x')
+    check('control: the own branch still lands with a mirror remote configured elsewhere', !ok?.deny && refOf('origin.git', 'agt/x') === w.slice && same(), JSON.stringify(ok))
+  }
+  {
     // A tag named like a branch: git reads the plain name as the tag, so the push publishes a tag.
     const w = world()
     sh('git tag feat/rel agt/x', APP)

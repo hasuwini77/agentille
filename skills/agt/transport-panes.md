@@ -6,7 +6,7 @@ A multiplexer tracks one agent per pane, so pane workers have a readable lifecyc
 ## When panes open
 
 Panes only on the heavy level (detected, or typed `/agt heavy`) and for `/agt-spawn`. Only the executor (one per slice) and the adversary may be panes. Planners, plan-reviewers, the ui-prototyper and ALL reviewers are always subagents; a single executor is a subagent. `low` and `medium` never open panes.
-No pane transport: workflow if the `Workflow` tool exists, else subagent waves (`workflow-mode.md`).
+No pane transport: workflow if the `Workflow` tool exists, else subagent waves (`transport-workflow.md`).
 
 Pre-flight: the mod probes the transport once (Herdr first, then tmux) and names it in the `## Pane transport` block; none → fall through silently. Never drive a session from outside one. Without the mod: `no-mod.md` → "Pane transport".
 
@@ -20,7 +20,7 @@ Heavy is not wider than medium: it buys panes (a real session per slice in its o
 When the `## Pane transport` block says the tools are live, open every claude worker with `mcp__agentille__spawn_pane` and close it with `mcp__agentille__close_pane`, on Herdr and tmux alike:
 
 ```
-spawn_pane { run: "<run-id>", role: "exec-1", agent: "executor", header: "[agt run=<run-id> size=small mode=build slice=<slug>]", cwd: "<worktree>", task: "isolated: false\nbranch: feat/<slug>\nbase: <base>\n<full slice prompt>" }
+spawn_pane { run: "<run-id>", role: "exec-1", agent: "executor", header: "[agt run=<run-id> size=small work=build slice=<slug>]", cwd: "<worktree>", task: "isolated: false\nbranch: feat/<slug>\nbase: <base>\n<full slice prompt>" }
 → Opened agt-<run-id>-exec-1 · sonnet · medium · herdr pane.
 close_pane { name: "agt-<run-id>-exec-1" }
 → Closed agt-<run-id>-exec-1.

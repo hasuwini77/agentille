@@ -416,7 +416,7 @@ NODE
 fi
 
 # ── 6b-fable. Failed-fix count before Fable agrees across the docs ──────────
-# hooks/routing.js makes a mode=diagnose planner a Fable candidate after N failed fixes. README.md
+# hooks/routing.js makes a work=diagnose planner a Fable candidate after N failed fixes. README.md
 # (every "<N> failed fixes"), skills/agt/routing.md ("diagnose planner after <N> failed attempts")
 # and the /agt-info rung label in hooks/info.js ("diagnose, <N> failed fixes") must name the same N.
 # Number words one..five and digits compare equal. A phrase that vanished from README.md,
@@ -426,13 +426,13 @@ ff_num() { tr 'A-Z' 'a-z' | sed -E 's/(^|[^a-z])one([^a-z]|$)/\11\2/; s/(^|[^a-z
 ff_n='([0-9]+|[Oo]ne|[Tt]wo|[Tt]hree|[Ff]our|[Ff]ive)'
 ff_readme="${AGENTILLE_VALIDATE_README:-README.md}"
 ff_js=$(grep -oE "hdr\.mode === 'diagnose' && run\.fixes >= [0-9]+" hooks/routing.js 2>/dev/null | head -1 | grep -oE '[0-9]+$')
-ff_md_all=$(grep -oE "mode=diagnose\`? planner after $ff_n failed (attempts?|fix(es)?)" skills/agt/routing.md 2>/dev/null)
+ff_md_all=$(grep -oE "work=diagnose\`? planner after $ff_n failed (attempts?|fix(es)?)" skills/agt/routing.md 2>/dev/null)
 ff_md=$(printf '%s\n' "$ff_md_all" | grep -oE "after $ff_n failed" | sed 's/^after //; s/ failed$//' | sort -u | while IFS= read -r w; do [ -n "$w" ] && printf '%s\n' "$w" | ff_num; done | sort -u)
 ff_rd=$(grep -oE "(^|[^A-Za-z0-9])$ff_n failed fix(es)?" "$ff_readme" 2>/dev/null | sed -E 's/ failed fix(es)?$//' | while IFS= read -r w; do printf '%s\n' "$w" | ff_num; done | sort -u)
 ff_info=$(grep -oE "diagnose, $ff_n failed fix(es)?" hooks/info.js 2>/dev/null | sed -E 's/^diagnose, //; s/ failed fix(es)?$//' | while IFS= read -r w; do printf '%s\n' "$w" | ff_num; done | sort -u)
 ff_bad=0
 if [ -z "$ff_js" ]; then fail "fable-fixes: hooks/routing.js has no \"hdr.mode === 'diagnose' && run.fixes >= N\" rule (reword this check with it)"; ff_bad=1; fi
-if [ -z "$ff_md" ]; then fail "fable-fixes: skills/agt/routing.md has no \"mode=diagnose planner after N failed attempts\" rule"; ff_bad=1
+if [ -z "$ff_md" ]; then fail "fable-fixes: skills/agt/routing.md has no \"work=diagnose planner after N failed attempts\" rule"; ff_bad=1
 elif [ "$(printf '%s\n' "$ff_md" | wc -l | tr -d ' ')" != 1 ]; then fail "fable-fixes: skills/agt/routing.md names more than one count: $(printf '%s' "$ff_md" | tr '\n' ' ')"; ff_bad=1; fi
 if [ -z "$ff_rd" ]; then fail "fable-fixes: $ff_readme names no \"N failed fixes\" count"; ff_bad=1
 elif [ "$(printf '%s\n' "$ff_rd" | wc -l | tr -d ' ')" != 1 ]; then fail "fable-fixes: $ff_readme names different counts: $(printf '%s' "$ff_rd" | tr '\n' ' ')"; ff_bad=1; fi

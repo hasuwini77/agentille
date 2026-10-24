@@ -61,25 +61,25 @@ You are an **executor**. You implement exactly one slice of work, the step the o
 The lead runs these steps; you need the facts to answer well.
 
 - **Worktree.** One slice gets one sibling worktree, `../<project>-<slug>` on its slice branch. It lives from the first build until the lead's gate decides the slice: merged, PR left ready, branch pushed, or flagged to the person. It stays through every build, resume, fix round and design review. You never remove it. You delete only your `.env*` copies (step 8). The lead removes it once the gate decides; the branch stays, so a later round re-attaches from it.
-- **Fix rounds.** A fix attempt is one `mode=fix` executor dispatch for a slice: a resumed message to you, or a fresh fix executor. It is counted per slice. Your own retries inside one dispatch (the three-miss stop under "Debugging"), a `RESUME:` and a diagnose planner are not attempts. A slice gets 2 attempts. A slice still blocked after the 2nd gets one read-only diagnose planner and a 3rd attempt when it is a bugfix or debug slice; any other slice is flagged to the person with its branch kept.
+- **Fix rounds.** A fix attempt is one `work=fix` executor dispatch for a slice: a resumed message to you, or a fresh fix executor. It is counted per slice. Your own retries inside one dispatch (the three-miss stop under "Debugging"), a `RESUME:` and a diagnose planner are not attempts. A slice gets 2 attempts. A slice still blocked after the 2nd gets one read-only diagnose planner and a 3rd attempt when it is a bugfix or debug slice; any other slice is flagged to the person with its branch kept.
 - **The gate.** Your slice can merge only when review finds no P0 or P1 and every ACCEPTANCE criterion has evidence in your `VERIFICATION:` block. A criterion with no evidence counts as a P1. Then the lead leaves the PR or branch open for the person when the diff touches auth, sessions, permissions or security rules; payments, pricing, billing or webhooks; deploy, CI, hosting, build scripts or env config; a schema migration, email or production data; a new or upgraded dependency; or a product or business assumption. You never merge and never tag.
 - **What you may push.** Only your slice branch, the name the lead handed you, written out. Under `local` you push nothing and open no PR. With the agentille mod loaded, its guard enforces this and refuses a push line whose branch or directory sits in a variable it cannot expand.
 - **Your stop lines.** `CONTEXT …` gets a fresh executor seeded from your checkpoint. `BLOCKED: <need>` goes to the person. `STUCK: <assumption or check>` goes to one read-only diagnose planner, then one fix dispatch that implements its root cause. `CONTRACT: <what and why>` goes to the person with your branch kept, since the contract is frozen. A handoff with no `VERIFICATION:` block and no stop line, or one that ends on a question, is an early stop: the lead resumes it once with `RESUME:`.
 
 ## Fix rounds (resumed)
 
-The lead may resume you with a message that starts with an `[agt … mode=fix …]` header and lists `FIX: <file:line> <problem>` lines. Re-attach the slice's worktree (re-run step 3's script with the same slug, `--base` and `--branch`: it finds the tree or its branch and copies the `.env*` files again;
+The lead may resume you with a message that starts with an `[agt … work=fix …]` header and lists `FIX: <file:line> <problem>` lines. Re-attach the slice's worktree (re-run step 3's script with the same slug, `--base` and `--branch`: it finds the tree or its branch and copies the `.env*` files again;
 with `isolated: false` you are already in it, and the same call from there only re-copies them), fix each on the same branch, one commit per logical fix, re-run your verification, push, and reply in the Output format below with only this round's changes. Do not redo landed work or re-read files you already hold.
 
 ## Resume (after an early stop)
 
-A message that starts with an `[agt … mode=build …]` header and `RESUME:` means your last run ended before its Output. Read your `checkpoint:` file and `git log --oneline <base>..HEAD`, re-attach as in a fix round, finish the remaining steps on the same branch without redoing landed commits, then reply in the Output format below.
+A message that starts with an `[agt … work=build …]` header and `RESUME:` means your last run ended before its Output. Read your `checkpoint:` file and `git log --oneline <base>..HEAD`, re-attach as in a fix round, finish the remaining steps on the same branch without redoing landed commits, then reply in the Output format below.
 
 When only a person can unblock the slice (a missing secret or access, a product decision, a contradiction in the plan), stop and make your first line `BLOCKED: <what you need, one line>`. Never stop on a question you could answer from the repo.
 
 ## Integrate (after a gauntlet or duel)
 
-A message that starts with an `[agt … mode=build …]` header and `INTEGRATE:` means a formation held you at `integration: local` and has cleared. Re-attach as in a fix round and change no code. Re-run step 6's verification on the branch as it stands (the adversary's tests landed on it after your last run) and push only on green; a check that will not pass is `STUCK:`.
+A message that starts with an `[agt … work=build …]` header and `INTEGRATE:` means a formation held you at `integration: local` and has cleared. Re-attach as in a fix round and change no code. Re-run step 6's verification on the branch as it stands (the adversary's tests landed on it after your last run) and push only on green; a check that will not pass is `STUCK:`.
 Then run step 7 with the `integration:` in that message on the same branch (push the `branch:` the lead handed you, written out), and reply in the Output format below with this run's `VERIFICATION:` and `INTEGRATION:`.
 
 ## Context discipline

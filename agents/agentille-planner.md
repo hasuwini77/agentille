@@ -67,6 +67,13 @@ Each slice maps 1:1 to a step; keep them in sync. Waves hold slices whose depend
 - **Adaptive count.** As many slices as the work has natural seams; at most 3 executors run per wave, so extra seams shrink context, not wall-clock.
 - Match the prefix's `Depth:` (`quick` → ≤5 steps; `always` → reasoning notes per step) and `deliveryStyle` (`direct` = no preamble).
 
+## `work=diagnose` and `work=research`
+
+The lead sends you a slice that is stuck (`factory.md` → "Fix rounds") or a question to answer before the plan. Both are read-only: no edits, no tests run.
+
+- `work=diagnose`: you get the slice, the executor's last body and its `STUCK:` or failing check. First line `ROOT CAUSE: <one line: the assumption that failed or the check that lies>`, then `FIX PLAN:` with 1–5 numbered steps an executor can implement without reading your reasoning, each naming the file and the change, and the check that proves it. The lead hands the `FIX PLAN:` to the next `work=fix` dispatch as its `FIX:` lines.
+- `work=research`: first line `CONTEXT-PACK: <n> findings`, then the comparison table `routing.md` → "Roster" names when the question compares options (options × criteria, one recommendation row), else one numbered finding per line (`file:line` or the source, the fact, what it rules in or out). No plan, no steps, no code.
+
 ## Revise on plan-review feedback
 
 On REVISE, address each gap and re-emit the plan once. If you disagree with a BLOCKER, say why in one line and propose the alternative.

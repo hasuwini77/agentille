@@ -46,7 +46,7 @@ for tok in "CONTEXT" "BLOCKED:" "CONTRACT:" "STUCK:" "RESUME:"; do
   check "display.md lists $tok" 'has skills/agt/display.md "$tok"'
   check "executor writes $tok" 'has agents/agentille-executor.md "$tok"'
 done
-check "Codex workers get the STUCK: line" 'has skills/agt/panes-mode.md "STUCK:"'
+check "Codex workers get the STUCK: line" 'has skills/agt/transport-panes.md "STUCK:"'
 # fix rounds and early stops are counted in one table in factory.md: every stop head and lead message has its row
 fixtable() { sed -n '/^## Fix rounds/,/^## Early stop/p' skills/agt/factory.md | grep '^|'; }
 check "factory.md counts fix attempts in one table" 'fixtable | grep -qF "| Event | Fix attempt? | What happens next | The card shows |"'
@@ -63,7 +63,7 @@ check "no-mod.md holds the manual Herdr spawn" 'has skills/agt/no-mod.md "herdr 
 check "no-mod.md holds the manual tmux spawn" 'has skills/agt/no-mod.md "tmux split-window"'
 check "squads.md points at no-mod.md and no longer counts squad signals" 'has skills/agt/squads.md "no-mod.md" && ! has skills/agt/squads.md "signals.deps"'
 check "display.md points at no-mod.md and no longer seeds TodoWrite" 'has skills/agt/display.md "no-mod.md" && ! has skills/agt/display.md "seed TodoWrite"'
-check "panes-mode.md points at no-mod.md and carries no manual spawn" 'has skills/agt/panes-mode.md "no-mod.md" && ! has skills/agt/panes-mode.md "herdr pane split" && ! has skills/agt/panes-mode.md "tmux split-window -d"'
+check "transport-panes.md points at no-mod.md and carries no manual spawn" 'has skills/agt/transport-panes.md "no-mod.md" && ! has skills/agt/transport-panes.md "herdr pane split" && ! has skills/agt/transport-panes.md "tmux split-window -d"'
 check "SKILL.md names no-mod.md in its hard rules" 'grep -F "Mods off still works" skills/agt/SKILL.md | grep -qF "no-mod.md"'
 
 # every coined term the prompt files use is defined in SKILL.md's Words section, in one bolded entry
@@ -166,6 +166,14 @@ for k in $(display_defaults | tr -d '{}' | tr ',' '\n' | sed 's/:.*//; s/ //g') 
   check "docs/settings.md's switch table has a $k row" 'grep -qF "| \`$k\` " docs/settings.md'
   check "README.md's switch sentence names $k" 'readme_switches | grep -qF "\`$k\`"'
 done
+
+# the dispatch header's work type is spelled work= everywhere an agent reads it; mode= lives only in SKILL.md's
+# alias note and deprecation line and in commands.md's deprecated rows
+check "no prompt file emits mode= (SKILL.md keeps the alias note only)" '! grep -l "mode=" skills/agt/*.md agents/*.md | grep -qv "skills/agt/SKILL.md"'
+check "SKILL.md names mode= only as the alias or the deprecation" '! grep "mode=" skills/agt/SKILL.md | grep -vqE "work=|deprecated"'
+# every work= value the prose dispatches has an output head in the agent file that receives it
+check "the planner defines the diagnose head factory.md dispatches" 'has skills/agt/factory.md "work=diagnose" && has agents/agentille-planner.md "ROOT CAUSE:" && has agents/agentille-planner.md "FIX PLAN:" && has skills/agt/display.md "ROOT CAUSE:"'
+check "the planner defines the research head routing.md names" 'has agents/agentille-planner.md "CONTEXT-PACK:" && has skills/agt/display.md "CONTEXT-PACK:"'
 
 # setup skills that say "typed only" disable model invocation
 for f in skills/agentille-init/SKILL.md skills/agentille-project/SKILL.md skills/agentille-claude-md/SKILL.md; do

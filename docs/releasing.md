@@ -24,7 +24,7 @@ How often agentille ships, what each version number promises, and what a user wh
 
 ## Pinning
 
-To stay on one version: `claude plugin install agentille@hasuwini77-agentille --version x.y.z` (or check out the tag). A pinned version is safe to keep until the next major's CHANGELOG lists something you use.
+The marketplace entry installs `main`, and `claude plugin install` has no version option. To stay on one version, clone the repo, check out the tag (`git checkout vX.Y.Z`) and install from that path with `claude plugin install <path>`; `claude plugin update` then changes nothing until you move the checkout. A pinned version is safe to keep until the next major's CHANGELOG lists something you use.
 
 ## History note
 

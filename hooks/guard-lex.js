@@ -68,7 +68,7 @@ const MODULE_GIT = /(^|\/)\.git\/modules\/(?:[^/]+\/)+?(config$|hooks(\/|$)|refs
 // an external diff or textconv, the pager, the editors, a gpg program, a credential helper, a diff or merge tool),
 // an include (it pulls in any of these), a remote's push URL or refspec, push.default, URL rewriting, receive.* —
 // anything that runs code or changes where or how a push lands.
-const PROTECT_CFG = /^(alias\.|core\.(hookspath|fsmonitor|sshcommand|pager|editor|askpass|gitproxy|attributesfile)$|push\.default$|remote\..*\.(push|pushurl)$|url\..*\.(push)?insteadof$|receive\.|push\.followtags$|filter\.|diff\.external$|diff\..+\.(textconv|command)$|merge\..+\.driver$|pager\.|sequence\.editor$|gpg\.(.+\.)?program$|credential\.(.+\.)?helper$|include\.path$|includeif\..+\.path$|(diff|merge)tool\..+\.cmd$|uploadpack\.packobjectshook$|sendemail\.(.+\.)?(tocmd|cccmd|sendmailcmd)$)/i
+const PROTECT_CFG = /^(alias\.|core\.(hookspath|fsmonitor|sshcommand|pager|editor|askpass|gitproxy|attributesfile)$|push\.default$|remote\..*\.(push|pushurl|mirror)$|url\..*\.(push)?insteadof$|receive\.|push\.followtags$|filter\.|diff\.external$|diff\..+\.(textconv|command)$|merge\..+\.driver$|pager\.|sequence\.editor$|gpg\.(.+\.)?program$|credential\.(.+\.)?helper$|include\.path$|includeif\..+\.path$|(diff|merge)tool\..+\.cmd$|uploadpack\.packobjectshook$|sendemail\.(.+\.)?(tocmd|cccmd|sendmailcmd)$)/i
 
 // Keys that name a pager or an editor: setting one to a program that runs nothing else (`-c core.pager=cat`,
 // `-c core.editor=true`, as a run does to keep git from waiting) is allowed.
@@ -89,7 +89,7 @@ function safeCodeVar(k, v) {
 // A config key set to a value: refused below auto, unless it is a viewer set to a harmless program.
 const protectedCfg = (k, v) => PROTECT_CFG.test(k) && !(VIEWER_CFG.test(k) && v !== undefined && SAFE_PROGRAM.test(v))
 
-const CFG_WHAT = 'a git config key that runs code or moves a push (core.hooksPath, core.fsmonitor, core.sshCommand, a filter, diff or merge driver, the pager or editor, a credential helper, an include, push.default, push.followTags, remote push, URL rewriting or receive.*)'
+const CFG_WHAT = 'a git config key that runs code or moves a push (core.hooksPath, core.fsmonitor, core.sshCommand, a filter, diff or merge driver, the pager or editor, a credential helper, an include, push.default, push.followTags, remote push, remote mirror, URL rewriting or receive.*)'
 
 
 
@@ -1202,6 +1202,8 @@ export function commandSteps(line, cwd = null, depth = 0, homes = [], { strict =
       // `git config <key> <value>` setting a protected key (the hooks path, a remote's push, URL rewriting, …).
       const set = g.sub === 'config' && gitConfigSets(g.args) ? g.args.findIndex((x, n) => protectedCfg(x, g.args[n + 1])) : -1
       if (set >= 0) out.push(/^alias\./i.test(g.args[set]) ? { kind: 'step', what: 'git config alias.*', dir, slug: null } : { kind: 'protected', what: CFG_WHAT, dir, slug: null })
+      // `git remote add --mirror[=push]` sets remote.<name>.mirror: every later bare push of that remote is a mirror push.
+      if (g.sub === 'remote' && g.args[0] === 'add' && g.args.some((x) => /^--mirror(=push)?$/.test(x))) out.push({ kind: 'protected', what: CFG_WHAT, dir, slug: null })
       // Plumbing that writes a remote with no `push` in sight.
       if (['send-pack', 'http-push'].includes(g.sub) || (g.sub === 'subtree' && g.args[0] === 'push')) out.push({ kind: 'step', what: 'git ' + g.sub, dir, slug: null })
       const ref = refWrite(g)

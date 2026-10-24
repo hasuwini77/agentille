@@ -12,7 +12,7 @@ import { Worktrees, ownedBranches } from './guard-own.js'
 // The gh and curl/wget step readers live in a leaf the lexer shares; the policy keeps carrying their names.
 export { ghStep, httpStep } from './guard-steps.js'
 
-export const DENY_INTEGRATION = 'integration auto is not set in your profile for this repo; the run stops at the PR.'
+export const DENY_INTEGRATION = 'integration auto is not set in your profile for this repo; the run stops at the PR. Set `integration: auto` in ~/.agentille/profile.json (or in this repo\'s projects[] entry), or merge the PR yourself.'
 
 export const DENY_PUSH = 'integration auto is not set in your profile for this repo: a run pushes only its own branch (one it made a worktree on or created on the remote, its agt/* slice branch, or the branch checked out where /agt was typed), never the base branch (main, master, the remote default, the checkout upstream), a tag, a force push (--force-with-lease only on its own agt/* branch), a branch deletion or every branch. Write the branch name and the directory out (no variables) and push again.'
 
@@ -55,9 +55,12 @@ const CURRENT_SUB = /^\$\(git (branch --show-current|rev-parse --abbrev-ref HEAD
 // and handed to `claim` (name, whether it is the one checked out): guardLine then asks whether it is the run's own.
 // `bases` is every base-like branch (guardLine baseLike): never pushed below auto, checked out or not.
 // `tags`: the sources the push names that git reads as a tag (refs/tags/<name> exists): a tag push, however named.
-export function judgePush(p, { current = null, pushDst = null, bases = new Set(['main', 'master']), refspecs = [], pushDefault = null, claim = null, tags = new Set() } = {}) {
+export function judgePush(p, { current = null, pushDst = null, bases = new Set(['main', 'master']), refspecs = [], pushDefault = null, claim = null, tags = new Set(), mirror = false } = {}) {
   if (p.dry) return null
   if (p.bulk) return 'git push ' + p.bulk
+  // remote.<name>.mirror = true (`git remote add --mirror=push`, or the key set by hand): a bare push of that remote
+  // is `git push --mirror`, whatever the line spells.
+  if (mirror && !p.specs.length) return 'git push (remote.' + (p.remote || 'origin') + '.mirror = true: a mirror push)'
   if (p.force) return 'git push --force'
   if (p.mergeOpt) return 'git push -o merge'
   // --force-with-lease only onto an agt/* branch, and only one the run owns (claimed with `lease`, judged by the caller).
@@ -941,10 +944,16 @@ async function pushInfo($, c, cwd, cache, tree = null) {
   let pushDst = null
   let refspecs = []
   let pushDefault = null
+  let mirror = false
   if (at && !c.push.specs.length && !c.push.bulk) {
-    // A bare push follows the remote's configured push refspecs, or push.default when none is set.
-    refspecs = (await gitOutOrThrow($, at, 'config', '--get-all', 'remote.' + remote + '.push')).split('\n').filter(Boolean)
-    pushDefault = (await gitOutOrThrow($, at, 'config', 'push.default')) || null
+    // A bare push follows the remote's configured push refspecs, or push.default when none is set; with
+    // remote.<name>.mirror set it is a mirror push. Read from the config git reads for this push (the line's
+    // variables included), so a `-c` or GIT_CONFIG_* spelling counts too.
+    const env = Object.keys(c.genv ?? {}).length ? { ...PROBE, env: c.genv } : PROBE
+    const cfg = async (...a) => { const r = await $.process.run(['git', '-C', at, 'config', ...a], env).catch(() => null); if (!r || typeof r.exitCode !== 'number') throw new Error('git did not run'); return String(r.stdout ?? '').trim() }
+    refspecs = (await cfg('--get-all', 'remote.' + remote + '.push')).split('\n').filter(Boolean)
+    pushDefault = (await cfg('push.default')) || null
+    mirror = /^(true|yes|on|1)$/i.test(await cfg('--bool', 'remote.' + remote + '.mirror').catch(() => ''))
   }
   if (current && !c.push.specs.length) {
     const to = await gitOutOrThrow($, dir, 'rev-parse', '--abbrev-ref', '@{push}')
@@ -962,7 +971,7 @@ async function pushInfo($, c, cwd, cache, tree = null) {
     if (!r || typeof r.exitCode !== 'number') throw new Error('git did not run')
     if (r.exitCode === 0 && String(r.stdout ?? '').trim()) tags.add(src)
   }
-  return { current, pushDst, bases, guessed, refspecs, pushDefault, tags }
+  return { current, pushDst, bases, guessed, refspecs, pushDefault, tags, mirror }
 }
 
 

@@ -15,7 +15,7 @@ describe('transport', () => {
   test('the block names the transport and cites no playbook section', async () => {
     for (const t of ['herdr', 'tmux', 'none']) {
       expect(transportBlock(t, true).startsWith('\n## Pane transport (agentille mod)\n\ntransport: ' + t + '\n')).toBe(true)
-      expect(transportBlock(t, true)).not.toContain('panes-mode.md')
+      expect(transportBlock(t, true)).not.toContain('transport-panes.md')
     }
     expect(transportBlock('none')).toContain('No pane transport here: parallel slices run as a workflow, else subagent waves.')
     expect(transportBlock('herdr')).toBe('\n## Pane transport (agentille mod)\n\ntransport: herdr\n')
@@ -257,7 +257,7 @@ describe('skill prompt', () => {
     on('skill.prompt', async ($: any, e: any) => ({ text: e.text }))
     const r = await $.skill.prompt({ skill: 'agt', text: 'base' })
     expect(r.text).toContain('\n## Pane transport (agentille mod)\n\ntransport: herdr\n')
-    expect(r.text).not.toContain('panes-mode.md')
+    expect(r.text).not.toContain('transport-panes.md')
   })
 
   test('inside tmux it names tmux', async ($, on) => {

@@ -9,7 +9,7 @@ export const AGT_LEVELS = [
 ]
 export const AGT_FLAGS = [
   { text: '--fable', description: 'Fable ceiling on judgment roles' },
-  { text: '--local', description: 'Integration local for this run: commits, no push, no PR' },
+  { text: '--local', description: 'Integration local for this run: merged into your branch, no push, no PR' },
 ]
 
 const CMD = /^\/(agentille:)?agt$/

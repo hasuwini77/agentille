@@ -13,6 +13,6 @@ Every stage prompt starts with the `[agt …]` header (`SKILL.md` → "Dispatch 
 
 ## Adversarial verify
 
-Verification stages do not trust the builder's claim. A verify stage re-runs the slice's check itself and tries to refute the result; a finding it cannot reproduce is dropped. P0/P1 go back to the executor (`mode=fix`), at most 2 rounds, then onto the card's `⚑`.
+Verification stages do not trust the builder's claim. A verify stage re-runs the slice's check itself and tries to refute the result; a finding it cannot reproduce is dropped. P0/P1 go back to the executor (`work=fix`), at most 2 rounds, then onto the card's `⚑`.
 
 Load the `workflow-authoring` skill for the API.

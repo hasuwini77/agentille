@@ -148,6 +148,12 @@ next minor, `docs/releasing.md`).
 
 ### Changed
 
+- **`skills/agt/panes-mode.md` and `workflow-mode.md` are `transport-panes.md`
+  and `transport-workflow.md`:** "mode" names only the `--mode` flag.
+- **The weekly eval fails without `ANTHROPIC_API_KEY`**, like a tag push; a
+  run by hand still skips with a notice.
+- **README has a "Turn it off, or uninstall" section:** the switches, the
+  uninstall command, and every file the plugin leaves behind.
 - **Fix rounds are one table** in `factory.md` → "Fix rounds": event →
   counts as a fix attempt? → what happens next → what the card shows, 14
   rows from P0/P1 through `STUCK:`, `CONTEXT`, `BLOCKED:`, `CONTRACT:`,
@@ -251,6 +257,33 @@ next minor, `docs/releasing.md`).
 
 ### Fixed
 
+- **A push of a mirror remote is refused as the mirror push it is.**
+  `remote.<name>.mirror` (set by hand, by `-c`, by `GIT_CONFIG_*` or by
+  `git remote add --mirror[=push]`) made a bare push of that remote move
+  the base, publish tags and delete remote branches while only the spelled
+  `--mirror` flag was refused. The key is a protected config write, the
+  `remote add` form is one too, and `pushInfo` reads it from the config
+  git reads for the line. Real-git cases for each spelling (217 → 226).
+- **The `+src:dst` force refspec onto an own branch is pinned** (`+HEAD:agt/x`,
+  `+agt/x:agt/x`); only the bare `+agt/x` form was.
+- **The dispatch header's work type is spelled `work=` in every prompt
+  file** (factory, formations, routing, the transport files, the executor);
+  `mode=` stays the parsed alias until 4.0.0 and appears only in the
+  deprecation lines. `test-skill-text.sh` pins it.
+- **The planner defines the heads the fix table dispatches:** `work=diagnose`
+  emits `ROOT CAUSE:` then `FIX PLAN:` (handed to the next `work=fix` as its
+  `FIX:` lines), `work=research` emits `CONTEXT-PACK:`; `display.md` lists
+  both.
+- **`local` has one sentence** in README, `docs/settings.md`,
+  `docs/commands.md`, `SKILL.md` and `factory.md`: each slice is built on its
+  own branch and merged into the branch you were on with a merge commit;
+  nothing is pushed and no PR is opened.
+- **The integration refusal names the file:** "Set `integration: auto` in
+  ~/.agentille/profile.json (or in this repo's projects[] entry), or merge
+  the PR yourself."
+- **`docs/releasing.md` no longer documents a `--version` pin** the CLI does
+  not have; it says the marketplace installs `main` and how to pin by
+  checking out a tag.
 - **A solo run's guard hold ends with its turn.** A `low · solo` run
   prints no card, so the hold used to last until the next /agt; now
   `turns.js` `soloTurn` ends it when the turn that printed the solo recon

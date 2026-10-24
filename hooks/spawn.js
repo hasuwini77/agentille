@@ -5,6 +5,8 @@
 import { S, isLead } from './state.js'
 import { PROBE, HERDR_START_TIMEOUT, pickTransport, splitName, paneKey, answerFile, advisorEnv, tmuxSplitArgv, tmuxEvenArgv, tmuxTagArgvs, tmuxPaneIdOf, tmuxKillArgv, herdrSplitArgv, herdrPaneIdOf, herdrTabArgv, herdrTabOf, herdrTabListArgv, herdrTabIds, tabsFile, panesFile, startupDialog, dialogKeys, herdrReadArgv, herdrKeysArgv, agentStatusOf, herdrGetArgv, screenLine, codexTask, herdrStartArgv, herdrPromptArgv, herdrCloseArgv, herdrMetaArgv, SPAWN_TOOL, CLOSE_TOOL, OPEN_SESSIONS_TOOL } from './panes.js'
 import { wireEnv, shortName } from './wire.js'
+import { sameConfig } from './trust.js'
+export { sameConfig, commandPaths } from './trust.js'
 const { ownedTabs, openedNames } = S
 
 export async function probeOk($, argv) {
@@ -85,14 +87,6 @@ export async function sameCheckout($, a, b) {
 // whose project config matches the lead checkout's (sameConfig). A folder below either root is never accepted. With
 // no list nothing but the lead's own cwd and checkout root is accepted.
 const OWN_BRANCH = /^agt\/[A-Za-z0-9._/-]+$/
-// Absent in the worktree is fine for these (settings.local.json and CLAUDE.local.md are gitignored, so a fresh
-// worktree has none); present, they must be the lead checkout's byte for byte.
-const CONFIG_FILES = ['.mcp.json', '.claude/settings.json', '.claude/settings.local.json', 'CLAUDE.local.md']
-// These must match both ways: absent on both sides, or the same bytes.
-const MEMORY_FILES = ['CLAUDE.md', 'AGENTS.md', '.claude/CLAUDE.md']
-const CONFIG_DIRS = ['.claude/agents', '.claude/commands', '.claude/skills', '.claude/hooks']
-const TREE_MAX = 500
-const REFS_MAX = 64
 // The worktree paths a lead-<pane>.worktrees file names: the `path` of each JSON record (guard.js), or the absolute
 // paths on a plain one-per-line list. Branch names are skipped: a branch can be checked out anywhere.
 export function listedPaths(listed) {
@@ -105,133 +99,6 @@ export function listedPaths(listed) {
 // Does the list name this worktree root `top` (as git prints it) by its exact path.
 export function ownedWorktree(listed, top) {
   return listedPaths(listed).some((p) => p.replace(/\/+$/, '') === top)
-}
-
-// A file's text, ABSENT when there is none, UNREADABLE when it is there but cannot be read. Existence is asked of
-// stat, the call that answers for files and folders alike.
-const ABSENT = Symbol('absent')
-const UNREADABLE = Symbol('unreadable')
-async function missing($, path) {
-  return $.fs.stat(path).then(() => false, () => true)
-}
-async function configFile($, path) {
-  const text = await $.fs.read(path).catch(() => null)
-  if (typeof text === 'string') return text
-  return (await missing($, path)) ? ABSENT : UNREADABLE
-}
-
-// Every file under `dir` as relative path → text (empty for no dir), or null when any part cannot be read or the
-// tree is too big to compare.
-async function configTree($, dir) {
-  const out = new Map()
-  const walk = async (rel) => {
-    const entries = await $.fs.list(rel ? dir + '/' + rel : dir).catch(() => null)
-    if (!Array.isArray(entries)) return false
-    for (const e of entries) {
-      const path = rel ? rel + '/' + e.name : e.name
-      if (e.kind === 'dir') {
-        if (!(await walk(path))) return false
-        continue
-      }
-      const text = await $.fs.read(dir + '/' + path).catch(() => null)
-      if (typeof text !== 'string' || out.size >= TREE_MAX) return false
-      out.set(path, text)
-    }
-    return true
-  }
-  if (await walk('')) return out
-  return (await missing($, dir)) && out.size === 0 ? out : null
-}
-
-// The repo-relative files a command line may run: each word that is a path (holds a `/`) or names a script, with
-// $CLAUDE_PROJECT_DIR (bare or braced) read as the checkout's root and an absolute path under `top` made relative.
-// Other variables, `~` and absolute paths outside the checkout are the same file for both sides, so they are skipped.
-// Over-reading is safe: a word that is no file is absent on both sides, and absent on both sides is equal.
-const SCRIPT = /\.(?:sh|bash|zsh|fish|js|mjs|cjs|ts|mts|py|rb|pl|php|lua)$/i
-export function commandPaths(command, top) {
-  const out = []
-  for (let w of String(command ?? '').split(/[\s;|&()<>=,]+/)) {
-    w = w.replace(/^["'`]+|["'`]+$/g, '')
-    const rooted = /^\$\{?CLAUDE_PROJECT_DIR\}?["']?(?=\/|$)/
-    if (rooted.test(w)) w = w.replace(rooted, '').replace(/^\/+/, '')
-    else if (w.startsWith(top + '/')) w = w.slice(top.length + 1)
-    else if (w.startsWith('/')) continue
-    if (!w || w.startsWith('-') || w.startsWith('~') || w.includes('$')) continue
-    w = w.replace(/^(?:\.\/)+/, '')
-    if (w && (w.includes('/') || SCRIPT.test(w))) out.push(w)
-  }
-  return out
-}
-
-// Every command string a settings file runs: hook commands and statusLine.command (any `command` key), and the
-// helpers that run a command (apiKeyHelper, awsAuthRefresh, awsCredentialExport, otelHeadersHelper).
-const HELPER_KEYS = new Set(['command', 'apiKeyHelper', 'awsAuthRefresh', 'awsCredentialExport', 'otelHeadersHelper'])
-function settingsCommands(value, out = []) {
-  if (Array.isArray(value)) for (const v of value) settingsCommands(v, out)
-  else if (value && typeof value === 'object') {
-    for (const [k, v] of Object.entries(value)) {
-      if (HELPER_KEYS.has(k) && typeof v === 'string') out.push(v)
-      else settingsCommands(v, out)
-    }
-  }
-  return out
-}
-
-// The command and args of every .mcp.json server.
-function mcpCommands(json) {
-  const servers = json && typeof json === 'object' ? json.mcpServers : null
-  if (!servers || typeof servers !== 'object') return []
-  return Object.values(servers).flatMap((v) => (v && typeof v === 'object' ? [v.command, ...(Array.isArray(v.args) ? v.args : [])] : [])).filter((x) => typeof x === 'string')
-}
-
-async function sameText($, a, b) {
-  const [x, y] = await Promise.all([configFile($, a), configFile($, b)])
-  return x !== UNREADABLE && y !== UNREADABLE && x === y
-}
-// A file a command names, or a folder (`--directory tools/mcp`, `cd apps/web`): a folder is compared file by file,
-// and one too big to compare refuses.
-async function sameEntry($, a, b) {
-  const [x, y] = await Promise.all([configFile($, a), configFile($, b)])
-  if (x !== UNREADABLE && y !== UNREADABLE) return x === y
-  const [sa, sb] = await Promise.all([$.fs.stat(a).catch(() => null), $.fs.stat(b).catch(() => null)])
-  if (sa?.kind !== 'dir' || sb?.kind !== 'dir') return false
-  const [ta, tb] = await Promise.all([configTree($, a), configTree($, b)])
-  if (!ta || !tb || ta.size !== tb.size) return false
-  for (const [k, v] of ta) if (tb.get(k) !== v) return false
-  return true
-}
-
-// The worktree brings no project config of its own: what it has is the lead checkout's, byte for byte. That is the
-// .mcp.json, settings and local files (CONFIG_FILES, absent in the worktree is fine), CLAUDE.md, AGENTS.md and
-// .claude/CLAUDE.md (MEMORY_FILES, absent on both sides or the same), .claude/agents, commands, skills and hooks
-// (CONFIG_DIRS, every file, nested ones too), and every repo file a settings command or an .mcp.json server names
-// (commandPaths): settings.json can stay byte for byte the same while the hook script it runs changes. A settings
-// or .mcp.json file that does not parse refuses.
-export async function sameConfig($, top, leadTop) {
-  const mine = new Map()
-  for (const f of CONFIG_FILES) {
-    const text = await configFile($, top + '/' + f)
-    if (text === ABSENT) continue
-    if (text === UNREADABLE || text !== (await configFile($, leadTop + '/' + f))) return false
-    mine.set(f, text)
-  }
-  for (const f of MEMORY_FILES) if (!(await sameText($, top + '/' + f, leadTop + '/' + f))) return false
-  for (const d of CONFIG_DIRS) {
-    const [here, lead] = await Promise.all([configTree($, top + '/' + d), configTree($, leadTop + '/' + d)])
-    if (!here || !lead || here.size !== lead.size) return false
-    for (const [k, v] of here) if (lead.get(k) !== v) return false
-  }
-  const commands = []
-  try {
-    for (const f of ['.claude/settings.json', '.claude/settings.local.json']) if (mine.has(f)) commands.push(...settingsCommands(JSON.parse(mine.get(f))))
-    if (mine.has('.mcp.json')) commands.push(...mcpCommands(JSON.parse(mine.get('.mcp.json'))))
-  } catch {
-    return false
-  }
-  const refs = [...new Set(commands.flatMap((c) => commandPaths(c, top)))]
-  if (refs.length > REFS_MAX) return false
-  for (const r of refs) if (!(await sameEntry($, top + '/' + r, leadTop + '/' + r))) return false
-  return true
 }
 
 // git's answer, trimmed, or null when git failed: '' is a real answer (--show-prefix at a checkout's root).
@@ -251,7 +118,7 @@ async function listsRoot($, listed, top) {
   return false
 }
 
-export async function trustable($, cwd, leadCwd) {
+export async function trustable($, cwd, leadCwd, why = {}) {
   if (cwd === leadCwd) return true
   if (!(await sameCheckout($, cwd, leadCwd))) return false
   const [top, leadTop, prefix] = await Promise.all([gitOutOrNull($, cwd, 'rev-parse', '--show-toplevel'), gitOutOrNull($, leadCwd, 'rev-parse', '--show-toplevel'), gitOutOrNull($, cwd, 'rev-parse', '--show-prefix')])
@@ -263,7 +130,15 @@ export async function trustable($, cwd, leadCwd) {
   const file = String(panesFile(S.home, await leadPane($)) ?? '').replace(/\.panes$/, '.worktrees')
   const listed = file ? await $.fs.read(file).catch(() => null) : null
   if (typeof listed !== 'string' || !(await listsRoot($, listed, top))) return false
-  return sameConfig($, top, leadTop)
+  return sameConfig($, top, leadTop, why)
+}
+
+// Once per session: a worktree whose config runs a command the mod cannot follow to files (an npx package no lockfile
+// pins, a script that reads another package folder) is never trusted for the person. One toast says so and names it.
+function unresolvedOnce($, cwd, what) {
+  if (S.trustUnresolvedTold) return
+  S.trustUnresolvedTold = true
+  Promise.resolve($.ui.toast('agt ⚑ ' + cwd + ': ' + what[0] + ' could not be followed to files, so the folder is not trusted for you; open it once by hand to trust it')).catch(() => {})
 }
 
 // A fresh worker stopped on a startup screen (agent_not_ready): classify it, press the keys that clear it, up to
@@ -274,7 +149,13 @@ export async function clearDialogs($, name, cwd) {
     const screen = String(read.stdout ?? '')
     const kind = startupDialog(screen)
     if (!kind) throw new Error(screenLine(screen))
-    if (kind === 'trust' && !(await trustable($, cwd, await $.session.cwd()))) throw new Error(cwd + ' needs a one-time trust: open it once by hand.')
+    if (kind === 'trust') {
+      const why = {}
+      if (!(await trustable($, cwd, await $.session.cwd(), why))) {
+        if (why.unresolved?.length) unresolvedOnce($, cwd, why.unresolved)
+        throw new Error(cwd + ' needs a one-time trust: open it once by hand.' + (why.unresolved?.length ? ' The mod could not follow ' + why.unresolved[0] + ' to files.' : ''))
+      }
+    }
     const keys = dialogKeys(kind, screen)
     if (!keys.length) throw new Error(screenLine(screen))
     // One key at a time: a menu that has only just drawn drops keys sent in one burst.

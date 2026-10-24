@@ -28,7 +28,7 @@ They join when the UI work spans more than one screen (a new page, a flow, a sha
 - **auth** — session, token, JWT, cookie, OAuth, password hashing or reset, 2FA, CSRF, permission, role check, middleware guard, API key, secret
 - **money** — payment, checkout, price, subscription, invoice, refund, webhook, billing, Stripe
 - **data** — migration, schema, drop, truncate, backfill, production data, PII export
-- **none** — a screen named after one of those with no logic behind it: a login, sign-in or checkout form, page, button, copy or styling change that calls an existing endpoint and stores nothing. It runs solo or low like any other UI change, with the code-reviewer; the security-reviewer joins only when the diff turns out to touch a guard, a token or a secret, and the gauntlet never runs for it.
+- **none** — a screen named after one of those with no logic behind it: a login, sign-in or checkout form, page, button, copy or styling change that calls an existing endpoint and stores nothing. It runs solo or low like any other UI change, with the code-reviewer. The security-reviewer joins only when the diff turns out to touch a guard, a token or a secret. The gauntlet never runs for it.
 
 ## Stage 2 classify
 
@@ -51,12 +51,12 @@ Malformed JSON → `low` plus a one-line note; never crash. If the level hinges 
 - The ui-prototyper runs **before** the executor; pass its Blueprint into the executor prompt as the design contract.
 - Skip the plan-reviewer on `thinkingDepth=quick` and for a ≤3-step fully sequential plan. Its `quick` cell in "Default routing" is the route a plan-reviewer still dispatched under `quick` gets.
 - Design-reviewer viewports: the ones the user names, else `profile.viewports`, else desktop + mobile.
-- Design-reviewer URL: before its dispatch, start the project's dev server in the slice's worktree (it lives until the gate; re-attach it if it is gone: `factory.md` → "Worktree lifecycle") on a free port (`PORT=<free> <dev command> > ~/.agentille/state/run-<id>/dev-<slice>.log 2>&1 &`), wait for a 2xx, pass `url: http://localhost:<port>`, and stop that server once its verdict is harvested.
-  The reviewer never starts one itself.
+- Design-reviewer URL: before its dispatch, start the project's dev server in the slice's worktree on a free port: `PORT=<free> <dev command> > ~/.agentille/state/run-<id>/dev-<slice>.log 2>&1 &`. The worktree lives until the gate; re-attach it if it is gone (`factory.md` → "Worktree lifecycle").
+  Wait for a 2xx, then pass `url: http://localhost:<port>`. Stop that server once its verdict is harvested. The reviewer never starts one itself.
 - Debug: attempts, the limit and the `mode=diagnose` planner after 2 failed attempts are `factory.md` → "Fix rounds".
 - Squads add payments / SEO / perf reviewers to the review step when the diff touches their domain (`squads.md`). Formations reshape the workers (`formations.md`).
 - Every reviewer column ticked for a slice runs **at once**: one message, parallel background calls (`SKILL.md` → "The contract" step 8).
-- Never more than 3 executors at once; batch the rest in waves. The mod counts a run's working executor subagents and open executor panes when an executor subagent is dispatched, and flags a 4th (`⚑ run <id>: 4th executor at once; the roster says 3` on the band, one toast, a `cap` field on that line of `routing.jsonl`); it never refuses the dispatch.
+- Never more than 3 executors at once; batch the rest in waves. The mod flags a 4th executor at once (`⚑ run <id>: 4th executor at once; the roster says 3` on the band, and a `cap` field on that line of `routing.jsonl`). It never refuses the dispatch.
 
 ## Default routing
 
@@ -117,4 +117,4 @@ With `profile.routing.advisorOnOpus: false`, Opus and Fable pane workers start w
 ### `--fable`
 
 `fable=forced` in the header: planner, ui-prototyper, design-, security- and payments-reviewer, and a large code-/plan-reviewer run Fable; the executor never does. It bypasses the gate (the user chose it), and the mod checks that choice:
-`fable=forced` holds only in a session where the person's typed `/agt` line carried `--fable`; otherwise the mod rewrites the header to `fable=auto`, the ladder applies, and one `⚑` toast says so. If the `fable` alias does not resolve, re-dispatch that role once on `opus`; never retry-loop. `fable` appears only in dispatch-time model parameters, never in agent frontmatter.
+`fable=forced` holds only in a session where the person's typed `/agt` line carried `--fable`. Otherwise the mod rewrites the header to `fable=auto` and the ladder applies. If the `fable` alias does not resolve, re-dispatch that role once on `opus`. Never retry in a loop. `fable` appears only in dispatch-time model parameters, never in agent frontmatter.

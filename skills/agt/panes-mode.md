@@ -35,8 +35,8 @@ The mod enforces the `agt-<run>-<role>` name (32 chars max), no duplicate name, 
 
 Pane answers never reach the mod's result hook, so a pane worker raises no `⚑`: read the harvest yourself. Still yours: the tmux done-file instruction and isolation, one worktree per slice.
 
-**Who makes the worktree.** In panes mode the lead does, before each `spawn_pane`, with `scripts/agt-worktree.sh` as `factory.md` → "Worktree lifecycle" says (run from the main checkout; it re-attaches on a fix round or resume), and passes that path as `cwd`. In subagent mode the executor makes its own. Every executor dispatch states `isolated:` in its task text, never left to the default:
-`isolated: false` on every `spawn_pane` (the lead already made the tree; `isolated` is an executor input, not a `spawn_pane` field, so it goes in `task`), and `isolated: true` on an `Agent` executor (it has no `cwd`, and its recipe finds a tree the lead already made).
+**Who makes the worktree.** In panes mode the lead does, before each `spawn_pane`, with `scripts/agt-worktree.sh` as `factory.md` → "Worktree lifecycle" says. Run it from the main checkout; it re-attaches on a fix round or resume. Pass the printed path as `cwd`. In subagent mode the executor makes its own.
+Every executor dispatch states `isolated:` in its task text, never left to the default. Write `isolated: false` on every `spawn_pane`: the lead already made the tree, and `isolated` is an executor input, not a `spawn_pane` field, so it goes in `task`. Write `isolated: true` on an `Agent` executor: it has no `cwd`, and its recipe finds a tree the lead already made.
 Pass `branch:` (the slice branch `factory.md` → "Integrate" names, written out) and `base:` with it, so a re-run worker computes the same branch and target.
 
 ## Codex workers

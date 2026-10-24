@@ -102,7 +102,7 @@ Ask: <preTaskQuestioning>. Depth: <thinkingDepth>.
 - **At most 3 executors at once.** Batch the rest in waves; the mod flags a fourth on the band and in `routing.jsonl` but does not block it.
 - **Executor is never Haiku**; Haiku only classifies and scouts (read-only). Fable comes only from the ladder or `--fable`.
 - **Foreground when it gates.** A dispatch whose result feeds the next step runs in the foreground; independent dispatches go out as one message of background calls, then one wait.
-- **Mods off still works.** The mod only adds the band, routing, the wire between panes and the automatic pane cleanup.
+- **Mods off still works.** The mod only adds the band, routing, the wire between panes and the automatic pane cleanup. What the lead does itself without it: `no-mod.md`.
 - **Never close a pane you did not open.** The `agt-` prefix is ownership.
 - **Re-enter from the files, not from memory.** Do it after a compaction or a `/clear`, and whenever you cannot name the current slice and its state. Before the next dispatch, re-read the sections you need of this file, `routing.md` and `factory.md`. Then read `run-<id>/context-pack.md`, the mod's `ledger.json` and `routing.jsonl` when present, and `git log $BASE..<branch>` for each slice branch still there.
   After a compaction the mod's hook prints an `[agt re-entry]` block with the run id and each slice's state from `ledger.json`: start from it, then read the files above.

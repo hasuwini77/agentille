@@ -11,7 +11,7 @@ The skill text then ends with a `## Drawing (agentille mod)` block. With it, the
 - the profile tip (the mod toasts it once)
 - report.md's `## Agents` and `## Raw reports` sections (the mod appends them)
 
-Without that block (mods off, the VS Code chat panel, `claude -p`), do all of them as written below.
+Without that block (mods off, the VS Code chat panel, `claude -p`), do all of them: `no-mod.md` → "Drawing".
 
 ## Mid-run lines
 
@@ -26,7 +26,7 @@ recon: <level> · <solo|subagent|panes|workflow> · <one-clause reason>   [agent
 
 ## Progress spine
 
-Skip this section when the mod draws. Otherwise, before the first dispatch, seed TodoWrite with one todo per phase the roster actually has (e.g. plan · build · review · ship). Mark each in progress, then done, as it moves. That is the whole live view you write. With the mod loaded, it draws the band instead and you do nothing.
+With the mod drawing, it draws the band instead and you do nothing. Without it, the TodoWrite spine: `no-mod.md` → "Progress spine".
 
 ## Agent heads
 

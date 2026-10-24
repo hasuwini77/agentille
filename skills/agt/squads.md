@@ -5,7 +5,7 @@ A squad adds specialist reviewers and checklist lines when the repo matches its 
 ## Detection
 
 - **With the mod:** it scores the repo and injects a `## Squads detected by the agentille mod` block. Use it as-is; do not re-detect.
-- **Without the mod:** read `.claude-plugin/squads.json`. Score each squad = its `signals.deps` found in `package.json` + its `signals.paths` that exist. Active when score ≥ `minScore`.
+- **Without the mod:** `no-mod.md` → "Squad detection".
 
 ## How squads change the roster
 

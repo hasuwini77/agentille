@@ -78,7 +78,7 @@ Skip it for one-file edits, typos, renames and questions: a plain prompt is chea
 | `/agt low\|medium\|heavy "task"` | Force the level for one run |
 | `/agt next ["task"]` | Build the next item in `.agentille/backlog.md` and integrate it (PR by default) or escalate; after a merged item it takes the next one, and stops on the first escalation · with a task: queue it |
 | `/agt --fable "task"` | The top model tier on judgment roles for one run |
-| `/agt-info [routing\|ledger\|squads\|route <role>]` | Settings in effect, last run's routing and ledger, active squads · or one view: routing decisions, tokens per role, the squad rescan · or a dry-run of what a role would route to, escalation rungs included |
+| `/agt-info [routing\|ledger\|squads\|route <role>]` | Display settings in effect, last run's routing and ledger, active squads · or one view: routing decisions, tokens per role, the squad rescan · or a dry-run of what a role would route to, escalation rungs included |
 | `/agt-spawn "task" [--model …]` | One extra routed Claude pane (Herdr or tmux); it closes itself once its answer is saved |
 | `/agt-clean` | Tidy up now: close finished agt panes, remove merged and clean `agt/*` worktrees and branches, drop run folders untouched for 14 days. Anything still working, unmerged or with changes stays. When a run ends the pane and worktree part runs on its own; at session start only finished panes a dead lead left behind are closed |
 | `/agt-tell <worker> <message>` | Message a worker pane over the wire |
@@ -93,7 +93,7 @@ Skip it for one-file edits, typos, renames and questions: a plain prompt is chea
 Everything lives in `~/.agentille/profile.json`. Every key is optional, and a missing one takes its default.
 
 - **What is checked:** an invalid `display.*` value is ignored and falls back to the value an older command left behind, then to the default. An invalid `integration` value is ignored too, and the next rule below decides.
-- **What is not:** `thinkingDepth` and `routing.*` are read as written. A mistyped value is not replaced by its default, so a `thinkingDepth` other than `quick` routes as the default table, and Fable stays off unless `routing.autoFable` is exactly `true`.
+- **What is not:** `thinkingDepth` and `routing.*` are read as written. A mistyped value is not replaced by its default, so a `thinkingDepth` other than `quick` routes as the default table, and the escalation ladder reaches Fable only when `routing.autoFable` is exactly `true` (`--fable` works either way).
 - **See it:** `/agt-info` shows the `display` values in effect and where each came from; `/agt-info route <role>` shows what your `thinkingDepth` and `routing.*` do to that role's route.
 
 ```json

@@ -49,7 +49,15 @@ describe('policy', () => {
     expect(decide({ role: 'code-reviewer', hdr: { size: 'large' }, run: fresh(), settings: S })).toMatchObject({ model: 'opus', effort: 'high' })
     expect(decide({ role: 'security-reviewer', hdr: { risk: 'money' }, run: fresh(), settings: S })).toMatchObject({ model: 'opus', effort: 'max' })
     expect(decide({ role: 'planner', hdr: {}, run: fresh(), depth: 'quick', settings: S })).toMatchObject({ model: 'sonnet', effort: 'medium' })
-    expect(decide({ role: 'design-reviewer', hdr: {}, run: fresh(), depth: 'quick', settings: S })).toMatchObject({ model: 'opus', effort: 'high' })
+  })
+
+  test('design-reviewer: sonnet · high under quick, like the other reviewers; opus · high under complex-only and always', async () => {
+    expect(decide({ role: 'design-reviewer', hdr: {}, run: fresh(), depth: 'quick', settings: S })).toMatchObject({ model: 'sonnet', effort: 'high' })
+    expect(decide({ role: 'design-reviewer', hdr: { size: 'large', risk: 'auth' }, run: fresh(), depth: 'quick', settings: S })).toMatchObject({ model: 'sonnet', effort: 'high' })
+    for (const depth of ['complex-only', 'always', null]) {
+      expect(decide({ role: 'design-reviewer', hdr: {}, run: fresh(), depth, settings: S })).toMatchObject({ model: 'opus', effort: 'high' })
+      expect(decide({ role: 'design-reviewer', hdr: { size: 'large' }, run: fresh(), depth, settings: S })).toMatchObject({ model: 'opus', effort: 'high' })
+    }
   })
 
   test('executor never changes model, only effort', async () => {

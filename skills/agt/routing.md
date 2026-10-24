@@ -64,7 +64,7 @@ Model · effort per role. Size, risk and mode come from the dispatch header; the
 | ui-prototyper | opus · high | opus · high | — | sonnet · medium |
 | executor | sonnet · medium | sonnet · high | sonnet · high | sonnet · medium |
 | code-reviewer | sonnet · medium | opus · high | opus · high | sonnet · medium |
-| design-reviewer | opus · high | opus · high | opus · high | opus · high (never downgraded) |
+| design-reviewer | opus · high | opus · high | opus · high | sonnet · high |
 | security-reviewer | opus · high | opus · high | opus · max | sonnet · high |
 | payments-reviewer | opus · high | opus · high | opus · max | sonnet · high |
 | seo-reviewer | sonnet · medium | sonnet · high | — | sonnet · low |
@@ -84,7 +84,7 @@ Dispatch with aliases (`fable`/`opus`/`sonnet`/`haiku`), never pinned IDs. A pan
 ## Hard rules
 
 - **Never use Haiku for the executor**, and never change its model (effort only). Haiku is for Stage 2 classify and read-only scouts (`SKILL.md` → "The contract") only.
-- **Never downgrade the design-reviewer.**
+- **Never downgrade the design-reviewer** below opus · high, except under `thinkingDepth=quick`, where it runs sonnet · high like the other reviewers.
 - **Declare `model:` on every dispatch** (fallback when the mod is off).
 
 ## Escalation ladder

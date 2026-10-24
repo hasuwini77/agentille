@@ -52,6 +52,8 @@ describe('info: route dry-run', () => {
     expect(route('planner', { size: 'large' }).split('\n')[0]).toBe('planner size=large → opus · xhigh · table')
     expect(route('security-reviewer', { risk: 'money' }).split('\n')[0]).toBe('security-reviewer risk=money → opus · max · table')
     expect(route('security-reviewer', {}, 'quick').split('\n')[0]).toBe('security-reviewer depth=quick → sonnet · high · table')
+    expect(route('design-reviewer', {}, 'quick').split('\n')[0]).toBe('design-reviewer depth=quick → sonnet · high · table')
+    expect(route('design-reviewer', {}, 'always').split('\n')[0]).toBe('design-reviewer depth=always → opus · high · table')
   })
 
   test('the executor climbs on fix attempts and has no REVISE rung', () => {

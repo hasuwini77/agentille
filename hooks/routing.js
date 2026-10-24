@@ -11,7 +11,7 @@ const TABLE = {
   'ui-prototyper':     { base: ['opus', 'high'],     large: ['opus', 'high'],  risk: null,              quick: ['sonnet', 'medium'] },
   executor:            { base: ['sonnet', 'medium'], large: ['sonnet', 'high'], risk: ['sonnet', 'high'], quick: ['sonnet', 'medium'] },
   'code-reviewer':     { base: ['sonnet', 'medium'], large: ['opus', 'high'],  risk: ['opus', 'high'],   quick: ['sonnet', 'medium'] },
-  'design-reviewer':   { base: ['opus', 'high'],     large: ['opus', 'high'],  risk: ['opus', 'high'],   quick: ['opus', 'high'] },
+  'design-reviewer':   { base: ['opus', 'high'],     large: ['opus', 'high'],  risk: ['opus', 'high'],   quick: ['sonnet', 'high'] },
   'security-reviewer': { base: ['opus', 'high'],     large: ['opus', 'high'],  risk: ['opus', 'max'],    quick: ['sonnet', 'high'] },
   'payments-reviewer': { base: ['opus', 'high'],     large: ['opus', 'high'],  risk: ['opus', 'max'],    quick: ['sonnet', 'high'] },
   'seo-reviewer':      { base: ['sonnet', 'medium'], large: ['sonnet', 'high'], risk: null,              quick: ['sonnet', 'low'] },

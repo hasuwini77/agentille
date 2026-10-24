@@ -2416,3 +2416,20 @@ describe('sessions: an agent that left', () => {
     expect((await $.tool.call({ tool: 'mcp__agentille__close_pane', name } as never)).deny).toContain('agt-<run>-<role>')
   })
 })
+
+import { CLOSE_TOOL } from '../../hooks/panes.js'
+
+// The long text the model reads lives in text.js, wrapped; what the model gets must not change by a byte.
+describe('text.js: the model-facing text', () => {
+  test('tool descriptions, the pane rule and the sessions notes are the same one-line text', () => {
+    expect(SPAWN_TOOL.description).toBe('Open one agentille worker pane beside this session (Herdr or tmux, whichever is live), never focused, named agt-<run>-<role>, running Claude on the model and effort agentille routes for `agent`, with the task as its first prompt. Use it for each heavy-level slice in place of raw herdr/tmux commands. The pane closes itself once it is done and its answer is saved; close it yourself with close_pane right after harvesting.')
+    expect(CLOSE_TOOL.description).toBe('Close one agentille worker pane this session opened (an agt-<run>-<role> pane in this tab or window) after you have read its result, or a session it opened with open_sessions (s-<run>-<n>) when the person asks. Panes opened by a typed /agt-spawn (the reaper closes those) and panes of other sessions are refused.')
+    expect(OPEN_SESSIONS_TOOL.description).toBe('Open interactive sessions beside this one as Herdr or tmux panes, never focused: Claude by default, or Codex or a plain shell. Use it whenever the person asks to open or start sessions, panes, terminals, Claudes or Codexes ("open three sessions"): that is a direct action, not orchestration, so never answer it with subagents. Each session belongs to the person, like one opened by hand: no worker and no reports. On Herdr a Claude or Codex session is closed after 10 minutes idle and unfocused, and at session end when idle; a shell, or any session on tmux, closes only on request. Not for delegating work.')
+    expect(PANE_RULE).toBe('Pane rule: panes open only on the heavy level (auto-picked or typed `/agt heavy`): each slice\'s executor (and the adversary) via spawn_pane (agent + header); everyone else is a subagent. close_pane right after harvest.')
+    expect(transportBlock('herdr', true)).toBe('\n## Pane transport (agentille mod)\n\ntransport: herdr\nPane rule: panes open only on the heavy level (auto-picked or typed `/agt heavy`): each slice\'s executor (and the adversary) via spawn_pane (agent + header); everyone else is a subagent. close_pane right after harvest.\n')
+    expect(transportBlock('none')).toBe('\n## Pane transport (agentille mod)\n\ntransport: none\nNo pane transport here: parallel slices run as a workflow, else subagent waves.\n')
+    expect(sessionsNote('herdr', 'claude')).toBe(' Each is closed after 10 minutes idle and unfocused, and at session end when idle. To send one a prompt: herdr agent prompt <name> "…". To read it: herdr agent read <name> --source recent-unwrapped --lines 120. close_pane <name> closes one now when the person asks.')
+    expect(sessionsNote('tmux', 'claude')).toBe(' They close only on request: close_pane <name> when the person asks.')
+    for (const t of [SPAWN_TOOL.description, CLOSE_TOOL.description, OPEN_SESSIONS_TOOL.description, PANE_RULE]) expect(t).not.toMatch(/\n|  /)
+  })
+})

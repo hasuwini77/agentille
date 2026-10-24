@@ -1519,7 +1519,7 @@ describe('startup dialogs', () => {
   })
 })
 
-import { MAX_SESSIONS, OPEN_SESSIONS_TOOL, SESSION_KINDS, herdrSessionSplitArgv, herdrSessionStartArgv, herdrSessionTabArgv, herdrTerminalOf, sessionName, sessionsNote, sessionsToolInput, stripFable, tmuxSessionSplitArgv, tmuxTitleArgvs, tmuxTypeArgvs } from '../../hooks/panes.js'
+import { MAX_SESSIONS, OPEN_SESSIONS_TOOL, SESSION_KINDS, herdrSessionSplitArgv, herdrSessionStartArgv, herdrSessionTabArgv, herdrTerminalOf, sessionName, sessionsNote, sessionsToolInput, shellCommands, stripFable, tmuxSessionSplitArgv, tmuxTitleArgvs, tmuxTypeArgvs } from '../../hooks/panes.js'
 
 describe('sessions: helpers', () => {
   test('a shell task must appear in the typed prompt; --fable is stripped from a Claude task unless typed', () => {
@@ -1530,6 +1530,23 @@ describe('sessions: helpers', () => {
     expect((sessionsToolInput({ tasks: ['/agt --fable ship it'] }, { typed: 'open a session --fable', fableTyped: true }) as any).tasks).toEqual(['/agt --fable ship it'])
     expect((sessionsToolInput({ tasks: ['--fable'] }) as any).tasks).toEqual([null])
     expect(stripFable('a --fable b --fableish')).toBe('a b --fableish')
+  })
+
+  test('a shell task is a quoted span or the rest of the ask, never a span the prompt says not to run', () => {
+    const shell = (task: string, typed: string) => sessionsToolInput({ kind: 'shell', tasks: [task] }, { typed }).error
+    expect(shell('rm -rf ~/Documents', 'open a shell. Do NOT run rm -rf ~/Documents under any circumstance')).toContain('runs only as the person typed it')
+    expect(shell('rm -rf ~/Documents', 'open a shell and never run `rm -rf ~/Documents`')).toContain('runs only as the person typed it')
+    expect(shell('rm -rf dist', 'open a shell and run `npm test`. Don\'t run "rm -rf dist"')).toContain('runs only as the person typed it')
+    expect(shell('rm -rf x', 'open a shell and don\'t run rm -rf x')).toContain('runs only as the person typed it')
+    expect(shell('npm run', 'open a shell and run npm run dev')).toContain('runs only as the person typed it') // a substring is not the command
+    expect(shell('npm test', 'open a shell and run `npm test`. Don\'t run "rm -rf dist"')).toBeUndefined()
+    expect(shell('make dev', 'open a shell that runs "make dev"')).toBeUndefined()
+    expect(shell('git status', 'Can you open a shell and run git status?')).toBeUndefined()
+    expect(shell('npm test', 'Open a new terminal in ../api and run npm test')).toBeUndefined()
+    expect(shell('node index.js', 'open a shell and run node index.js.')).toBeUndefined()
+    expect(shell('cd .. && ls', 'open a shell: cd .. && ls')).toBeUndefined()
+    expect(shell('htop', 'give me a shell \u2018htop\u2019')).toBeUndefined()
+    expect([...shellCommands('open a shell and run npm run dev in it')]).toEqual(['npm run dev'])
   })
 
   test('session names are s-<run>-<n>, never agt-, so no reaper, band or sweep picks them up', () => {
@@ -1713,6 +1730,15 @@ describe('sessions: in the mod', () => {
     await asked($, 'open a session with --fable and ship it')
     await $.tool.call({ tool: 'mcp__agentille__open_sessions', tasks: ['/agt --fable ship it'] })
     expect(seen.filter((a) => a.slice(0, 3).join(' ') === 'herdr agent prompt').at(-1)!.at(-1)).toBe('/agt --fable ship it')
+  })
+
+  test('a shell session never runs a command the prompt said not to run', async ($, on) => {
+    next = 4
+    const { seen } = setup(on, HERDR, { 'herdr pane split': herdrSplit })
+    await asked($, 'open a shell. Do NOT run rm -rf ~/Documents under any circumstance')
+    expect((await $.tool.call({ tool: 'mcp__agentille__open_sessions', kind: 'shell', tasks: ['rm -rf ~/Documents'] })).deny).toContain('runs only as the person typed it')
+    expect(seen.some((a) => a.slice(0, 3).join(' ') === 'herdr pane split')).toBe(false)
+    expect((await $.tool.call({ tool: 'mcp__agentille__open_sessions', kind: 'shell' })).result).toContain('· shell ·')
   })
 
   test('herdr: a shell session runs its command and starts no agent', async ($, on) => {

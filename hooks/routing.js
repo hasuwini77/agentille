@@ -118,6 +118,19 @@ export function asksSessions(text) {
   return STORM_TYPED.test(t) || SESSION_ASK.test(t)
 }
 
+// Every ask for sessions in a typed prompt, as { start, end } offsets: start at the verb, end right after the noun.
+const SESSION_ASKS = new RegExp(SESSION_ASK.source, 'gi')
+export function sessionAskSpans(text) {
+  const t = String(text ?? '')
+  const out = []
+  for (const m of t.matchAll(SESSION_ASKS)) {
+    const end = m.index + m[0].length
+    const verb = m.index + m[0].toLowerCase().lastIndexOf(m[1].toLowerCase(), m[0].length - 1)
+    out.push({ start: Math.max(m.index, verb), end })
+  }
+  return out
+}
+
 // A plan-reviewer's verdict, or null. Its `VERDICT: APPROVE|REVISE` line (markdown emphasis tolerated)
 // decides; only without one does the first stray verdict word, so "nothing to REVISE" cannot flip it.
 export function verdictOf(answer) {

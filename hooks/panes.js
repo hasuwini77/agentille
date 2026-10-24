@@ -3,7 +3,7 @@
 // Pure on purpose — the hooks loader never follows `$` across an import — so every
 // $.process / $.env / $.fs call lives in register.js and only feeds these helpers.
 
-import { ROLES, parseHeader } from './routing.js'
+import { ROLES, parseHeader, sessionAskSpans } from './routing.js'
 
 export const SAFE_RUN = /^[A-Za-z0-9_-]{1,64}$/
 export const NAME_RE = /^[a-z][a-z0-9_-]{0,31}$/
@@ -480,9 +480,55 @@ export function stripFable(text) {
   return String(text ?? '').replace(/(^|\s)--fable(?=\s|$)/g, '$1').replace(/\s{2,}/g, ' ').trim()
 }
 
+// The commands a shell session may run, read off the person's typed prompt: a span they quoted (backticks, straight
+// or curly quotes), the rest of the sentence after an ask for a session with its connector dropped ("open a shell and
+// run npm run dev" → npm run dev), or the whole prompt minus the ask. Appearing somewhere in the prompt is not enough:
+// "open a shell. Do NOT run rm -rf ~/x" names a command nobody asked for, so a span in a sentence that says not to
+// run it ("do not run …", "never …", "don't …") is never one.
+const NEGATED = /\b(?:not|never|don'?t|dont|doesn'?t|won'?t|mustn'?t|shouldn'?t|avoid|without|nor)\b|\b(?:don|doesn|won|mustn|shouldn)[’']t\b/i
+const QUOTED = /`([^`\n]+)`|"([^"\n]+)"|“([^”\n]+)”|‘([^’\n]+)’|(?<=^|[\s(])'([^'\n]+)'(?!\w)/g
+const SENTENCE_END = /(?<=[\w)\]"'`”’~/])[.!?](?=\s|$)|\n/g
+function sentenceStart(t, pos) {
+  let s = 0
+  for (const m of t.slice(0, pos).matchAll(SENTENCE_END)) s = m.index + 1
+  return s
+}
+function sentenceEnd(t, pos) {
+  for (const m of t.slice(pos).matchAll(SENTENCE_END)) return pos + m.index
+  return t.length
+}
+function bareCommand(s) {
+  let c = String(s).trim().replace(/^(?:in|at|inside|from)\s+\S+(?=\s|$)/i, '').trim()
+  for (;;) {
+    const n = c.replace(/^[,:;\-–—]\s*/, '').replace(/^(?:and|then|to|that|which|so|also|please)\s+/i, '').replace(/^(?:runs?|running|execute|exec)\s+/i, '')
+    if (n === c) break
+    c = n
+  }
+  c = c.replace(/\s+(?:in\s+it|in\s+there|there|for\s+me|please|now)$/i, '').replace(/(?<=\w)[.!?]$/, '').trim()
+  const q = /^([`"'\u201c\u2018])([^`"'\u201c\u201d\u2018\u2019]+)([`"'\u201d\u2019])$/.exec(c) // a quoted command runs bare
+  return q ? q[2].trim() : c
+}
+export function shellCommands(typed) {
+  const t = String(typed ?? '')
+  const out = new Set()
+  for (const m of t.matchAll(QUOTED)) {
+    const span = (m[1] ?? m[2] ?? m[3] ?? m[4] ?? m[5]).trim()
+    if (span && !NEGATED.test(t.slice(sentenceStart(t, m.index), m.index))) out.add(span)
+  }
+  for (const a of sessionAskSpans(t)) {
+    const rest = t.slice(a.end, sentenceEnd(t, a.end))
+    const c = bareCommand(rest)
+    if (c && !NEGATED.test(t.slice(sentenceStart(t, a.start), a.end) + rest)) out.add(c)
+    const whole = t.slice(0, a.start) + ' ' + t.slice(a.end)
+    const w = bareCommand(whole)
+    if (w && !NEGATED.test(whole)) out.add(w)
+  }
+  return out
+}
+
 // open_sessions input → { count, tasks, kind, model, cwd, layout } or { error }. `tasks` has one entry per
-// session, null where none was given. `typed` is the person's own prompt: a shell command runs only when it
-// appears in it verbatim, and `--fable` rides into a Claude or Codex session only when `fableTyped` says the
+// session, null where none was given. `typed` is the person's own prompt: a shell command runs only when it is
+// one of its shellCommands, and `--fable` rides into a Claude or Codex session only when `fableTyped` says the
 // person typed it.
 export function sessionsToolInput(input, { typed = '', fableTyped = false } = {}) {
   const i = input ?? {}
@@ -503,8 +549,9 @@ export function sessionsToolInput(input, { typed = '', fableTyped = false } = {}
   if (cwd !== null && (!cwd.startsWith('/') || cwd.includes('\0'))) return { error: 'cwd must be an absolute path.' }
   let tasks = Array.from({ length: count }, (_, n) => str(given[n]) || null)
   if (kind === 'shell') {
-    const bad = tasks.find((t) => t && !String(typed ?? '').includes(t))
-    if (bad) return { error: 'A shell command runs only as the person typed it: "' + bad.slice(0, 60) + '" is not in their prompt.' }
+    const ok = shellCommands(typed)
+    const bad = tasks.find((t) => t && !ok.has(t))
+    if (bad) return { error: 'A shell command runs only as the person typed it: "' + bad.slice(0, 60) + '" is not a command they quoted or asked a shell to run.' }
   } else if (!fableTyped) tasks = tasks.map((t) => (t ? stripFable(t) || null : t))
   if (kind === 'claude' && tasks.some((t) => t && BARE_WORD.test(t))) return { error: 'A one-word task would run as a claude subcommand. Say more.' }
   return { count, tasks, kind, model, cwd, layout }

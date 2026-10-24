@@ -1,9 +1,8 @@
 // agentille run bookkeeping: per-run counters, the routing log and ledger under ~/.agentille/state/run-<id>/,
 // each subagent's raw report, and the Agents section the mod adds to a finished report.md.
 
-import { Session, ctxSource, isLead } from './session.js'
+import { Session, ctx, ctxSource, isLead } from './session.js'
 import { Profile } from './profile.js'
-import { Panes } from './reaper.js'
 import { makeStore } from './store.js'
 import { reportRun, reportTail } from './drawing.js'
 import { sliceOf, party, taskLine } from './links.js'
@@ -344,7 +343,7 @@ export async function dispatchAgent($, e, next) {
     // Its files and counters follow the header: a headerless agent files under 'adhoc' (which writes
     // nothing), so the run in progress keeps only its own routing log and ledger.
     const fileRun = named ?? 'adhoc'
-    const busy = [...my.live.values()].some((a) => a.run === my.lastRun && a.state === 'working') || Panes.panes.some((p) => splitName(p.name)?.run === my.lastRun && p.state === 'working')
+    const busy = [...my.live.values()].some((a) => a.run === my.lastRun && a.state === 'working') || ctx.panes.some((p) => splitName(p.name)?.run === my.lastRun && p.state === 'working')
     if (named && (my.lastRun === 'adhoc' || !busy)) my.lastRun = named
     agtTurnFromDispatch()
     // The table pick and the spend follow the run in progress (its REVISEs, its agents); `fileRun` is only where the

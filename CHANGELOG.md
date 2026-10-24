@@ -110,6 +110,9 @@ next minor, `docs/releasing.md`).
 - `/storm`'s plain build deletes copied `.env*` files from each worktree
   on every exit, including failed builds.
 - `/agentille-project` no longer calls the repo config authoritative.
+- A typed `/agt-clean` closes a done pane whose answer was never read,
+  and the run-end tidy lists it as kept with the reason; both compared a
+  pane id against a set of names and never matched.
 
 - README: a `## Routing` table that is the same table as `routing.md`
   → "Default routing" (the validator checks they match), the model list
@@ -189,11 +192,15 @@ next minor, `docs/releasing.md`).
 
 ### Changed (internal)
 
-- `hooks/register.js` holds the hook wiring only (390 lines); the pane
-  tool handlers moved to `hooks/tools.js`, the session's state lives in
-  `hooks/state.js` and the work in `dispatch.js`, `spawn.js`,
-  `sessions.js`, `reaper.js`, `ticker.js`, `worker.js`, `display.js`,
-  `render.js` and `profile.js`.
+- `hooks/register.js` holds the hook wiring only (316 lines). The pane
+  tool handlers live in `hooks/tools.js`, the prompt and turn-end run
+  logic in `hooks/turns.js`, the session's state in `hooks/state.js` and
+  the work in `dispatch.js`, `spawn.js`, `sessions.js`, `reaper.js`,
+  `ticker.js`, `worker.js`, `display.js`, `render.js` and `profile.js`.
+  Imports and state fields nothing read any more are gone.
+- Everything the mod tracks about one pane sits in one record per pane
+  (`hooks/panerec.js`, one `forget`) instead of nine collections cleaned
+  up in three places.
 
 ## [3.23.0] — 2026-10-23
 

@@ -2,7 +2,8 @@
 // which closes, which is flagged, the wake it sends itself, and the cleaner behind /agt-clean.
 
 import { S } from './state.js'
-import { herdrOrphans, tmuxOrphans, orphanPlan, staleTabs, parseWorktrees, worktreePlan, cleanText } from './clean.js'
+import { herdrOrphans, tmuxOrphans, orphanPlan, staleTabs, parseWorktrees, worktreePlan, cleanText, FRESH_MS } from './clean.js'
+import { ownedWorktrees, forgetOwned } from './guard.js'
 import { writeRunFile } from './dispatch.js'
 import { paneAgents, reapPlan, ledger, panesLeft, endRoute } from './live.js'
 import { SAFE_RUN, PROBE, SPAWN_ROLE, splitName, doneFile, paneKey, answerFile, parseTmuxList, scopeRows, isFreshDone, quietSpawn, tmuxPaneAgents, isLead, TMUX_LIST_ARGV, reapPool, tmuxKillArgv, herdrCloseArgv, herdrPaneGetArgv, herdrTerminalOf, SESSION_IDLE_MS, sessionSweep } from './panes.js'
@@ -204,7 +205,8 @@ async function withAnswer($, plan) {
 // ── the cleaner ──────────────────────────────────────────────────────────────
 // Panes: agt-* panes no live lead owns (their lead died before its SessionEnd sweep) close once
 // finished; a typed /agt-clean also closes this lead's stranded panes (done, answer never read). Run-tab files of gone leads are dropped.
-// Git (not on `panes` alone): agt/* worktrees merged and clean are removed, merged agt/* branches deleted.
+// Git (not on `panes` alone): agt/* worktrees this session's runs opened, merged and clean, are removed and
+// their merged branches deleted; at a run's end (auto) the .env* copies in them go first.
 // Clean means done/idle/dead panes, merged branches and clean checkouts only; the rest is reported, never touched.
 export async function cleanWorkspace($, { all = false, auto = false, panesOnly = false } = {}) {
   const r = { closed: [], tabs: 0, removed: [], branches: [], runs: 0, keep: [] }
@@ -251,7 +253,7 @@ export async function cleanWorkspace($, { all = false, auto = false, panesOnly =
     r.keep.push(...plan.keep)
   }
   if (!all) for (const p of S.panes) if (strandedNow.has(p.id)) r.keep.push({ what: p.name, why: 'answer not read · /agt-clean closes it' })
-  if (!panesOnly) await cleanGit($, run, r)
+  if (!panesOnly) await cleanGit($, run, r, { sweepEnv: auto })
   if (all && !panesOnly) await pruneRuns($, run, r)
   if (r.closed.length) $.ui.invalidate('ui.render')
   if (auto && (r.closed.length || r.removed.length || r.branches.length)) $.ui.toast(cleanText({ ...r, keep: [] }))
@@ -277,24 +279,52 @@ export async function pruneRuns($, run, r) {
   }
 }
 
-export async function cleanGit($, run, r) {
+// Only what this session's runs opened (guard.js records each `git worktree add`): another session's
+// worktree, even a merged-looking fresh one, is listed as kept and never read. An owned tree goes once it is
+// merged, clean, has commits of its own and is FRESH_MS old. sweepEnv (a run's end) first deletes the
+// untracked .env* copies in every owned worktree, so secrets never outlive the run.
+export async function cleanGit($, run, r, { sweepEnv = false } = {}) {
   const cwd = await $.session.cwd().catch(() => null)
   if (!cwd) return
   const git = (...a) => run(['git', '-C', cwd, ...a])
   const wl = await git('worktree', 'list', '--porcelain')
   if (wl?.exitCode !== 0) return
   const trees = parseWorktrees(wl.stdout)
+  const mine = await ownedWorktrees($).catch(() => [])
+  const paths = new Set(mine.map((o) => o.path))
+  const names = new Set(mine.map((o) => o.branch).filter(Boolean))
+  const born = new Map(mine.map((o) => [o.path, o.head]))
+  const owned = (t) => (t.path && paths.has(t.path)) || (!!t.branch && names.has(t.branch))
+  const linked = trees.slice(1).filter((t) => !t.prunable && t.path !== cwd)
+  // Ages first: deleting a .env copy touches the directory, and would make every swept tree look fresh.
+  const ages = new Map()
+  for (const t of linked.filter(owned)) ages.set(t.path, (await $.fs.stat(t.path).catch(() => null))?.mtimeMs)
+  if (sweepEnv) for (const t of linked.filter(owned)) await run(['git', '-C', t.path, 'clean', '-fqx', '--', '.env*'])
   const lines = (x) => (x?.exitCode === 0 ? String(x.stdout).split('\n').map((l) => l.trim()).filter(Boolean) : [])
   const base = lines(await git('symbolic-ref', '--short', 'refs/remotes/origin/HEAD'))[0]
   const merged = new Set()
-  for (const ref of [base, 'HEAD'].filter(Boolean)) for (const b of lines(await git('branch', '--merged', ref, '--format=%(refname:short)', '--list', 'agt/*'))) merged.add(b)
+  const tips = new Set()
+  for (const ref of [base, 'HEAD'].filter(Boolean)) {
+    for (const b of lines(await git('branch', '--merged', ref, '--format=%(refname:short)', '--list', 'agt/*'))) merged.add(b)
+    const tip = lines(await git('rev-parse', ref))[0]
+    if (tip) tips.add(tip)
+  }
   const dirty = new Set()
+  const empty = new Set()
+  const fresh = new Set()
   for (const t of trees.slice(1)) {
-    if (!t.branch?.startsWith('agt/') || t.prunable || !merged.has(t.branch)) continue
+    if (!t.branch?.startsWith('agt/') || t.prunable || !merged.has(t.branch) || !owned(t)) continue
     const st = await run(['git', '-C', t.path, 'status', '--porcelain'])
     if (st?.exitCode !== 0 || String(st.stdout).trim()) dirty.add(t.path)
+    // No commits of its own: the tip is still where it forked (recorded at `worktree add`); a tree with no
+    // recorded fork point counts as empty while its tip is the base's or HEAD's (a fast-forward looks the same).
+    const fork = born.get(t.path)
+    if (!t.head || (fork ? fork === t.head : tips.has(t.head))) empty.add(t.path)
+    const at = ages.get(t.path)
+    if (typeof at !== 'number' || Date.now() - at < FRESH_MS) fresh.add(t.path)
   }
-  const plan = worktreePlan(trees, merged, dirty, lines(await git('branch', '--format=%(refname:short)', '--list', 'agt/*')))
+  const branches = lines(await git('branch', '--format=%(refname:short)', '--list', 'agt/*'))
+  const plan = worktreePlan(trees, merged, dirty, branches, { owned, empty, fresh })
   r.keep.push(...plan.keep)
   for (const t of plan.remove) {
     if ((await git('worktree', 'remove', t.path))?.exitCode === 0) r.removed.push(t.branch)
@@ -305,4 +335,8 @@ export async function cleanGit($, run, r) {
     if ((await git('branch', '-d', b))?.exitCode === 0) r.branches.push(b)
   }
   if (plan.prune) await git('worktree', 'prune')
+  if (mine.length) {
+    const gone = new Set([...plan.remove.filter((t) => r.removed.includes(t.branch)).map((t) => t.path)])
+    await forgetOwned($, trees.filter((t) => !gone.has(t.path)), branches.filter((b) => !r.branches.includes(b))).catch(() => {})
+  }
 }

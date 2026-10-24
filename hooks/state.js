@@ -49,6 +49,7 @@ export const S = {
   focusOn: true,  // agent flags show above the prompt
   flags: [],  // [{ text, key, at }] from agent results this run
   agtTurn: false,  // this turn is part of an /agt run
+  worktrees: [],  // { path, branch, head, run, at } of the worktrees this session's runs made (guard.js), saved to lead-<pane>.worktrees
   agtTyped: false,  // the person typed /agt in this session: only then may the lead open worker panes
   fableTyped: false,  // ... and typed --fable on it: only then does a header's fable=forced hold
   sessionsAsked: false,  // the newest typed prompt asked for sessions of the person's own (open_sessions)

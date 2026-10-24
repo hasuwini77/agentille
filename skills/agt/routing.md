@@ -92,7 +92,7 @@ Dispatch with aliases (`fable`/`opus`/`sonnet`/`haiku`), never pinned IDs. A pan
 Evidence is observed by the mod, not claimed by the lead.
 
 - **Plan:** 1st REVISE → next planner runs opus · max. 2nd REVISE → next planner is a Fable candidate.
-- **Fix** (attempts per `piece=`, as `factory.md` → "Fix rounds" defines them): attempt 2 → executor effort high; attempt 3, only after a diagnose planner → max. One slice's rounds never raise another's effort. A `mode=diagnose` planner after 2 failed attempts → Fable candidate.
+- **Fix** (attempts per `slice=`, as `factory.md` → "Fix rounds" defines them): attempt 2 → executor effort high; attempt 3, only after a diagnose planner → max. One slice's rounds never raise another's effort. A `mode=diagnose` planner after 2 failed attempts → Fable candidate.
 - **Fable gate** (all must pass, else opus · max with the reason logged): candidate · `profile.routing.autoFable` is `true` (default `false`: Fable costs about twice Opus, so the ladder is opt-in) · fewer than `maxFablePerRun` (default 1) Fable spawns this run · weekly plan usage below `fableWeeklyCeiling` (default 60%).
 
 ### Advisor

@@ -50,13 +50,13 @@ Print the recon line before anything else: `recon: <level> · <transport> · <on
 
 Every `agentille:agentille-*` dispatch prompt starts with one line:
 
-`[agt run=<id> size=<small|large> risk=<none|auth|money|data> mode=<build|fix|diagnose|review|research> fable=<auto|forced> formation=<none|duel|gauntlet|relay> piece=<slug>]`
+`[agt run=<id> size=<small|large> risk=<none|auth|money|data> mode=<build|fix|diagnose|review|research> fable=<auto|forced> formation=<none|duel|gauntlet|relay> slice=<slug>]`
 
 - `size=large`: plan ≥6 steps or a shared contract, or a diff with logic in >1 file, >~150 LoC, or a public API/schema change.
 - `risk`: `routing.md` → "Risk words" (sessions, tokens, guards → `auth`; payments, webhooks → `money`; migrations → `data`; a form or page with no such logic → `none`).
 - `mode=fix` on every fix round, including a resumed executor's message; `diagnose` for the read-only root-cause planner.
 - `fable=forced` only when the user typed `--fable`.
-- `piece=<slug>` (lowercase, ≤24 chars) names the slice: its executor, adversary and reviewers share it. Omit it for planning roles and single-slice runs. (The key is spelled `piece` for compatibility; the docs say slice.)
+- `slice=<slug>` (lowercase, ≤24 chars) names the slice: its executor, adversary and reviewers share it. Omit it for planning roles and single-slice runs. The mod accepts the older `piece=` too for one release; write `slice=`.
 
 With the mod loaded it routes model + effort from this line. Still pass `model:` every time: the skill must work with mods off.
 

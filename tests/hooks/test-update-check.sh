@@ -51,4 +51,15 @@ out=$(run "$T/newer.json" 2>&1); rc=$?
 check "corrupt cache: exit 0, no stderr noise" '[ "$rc" = 0 ] && [[ "$out" != *"syntax error"* ]]'
 check "corrupt cache: replaced" 'grep -q "\"remote\": \"1.2.0\"" "$CACHE"'
 
+# 7. a cache written at an older local version is stale: after the plugin updates, refetch
+mkdir -p "$HOME/.agentille"
+printf '{\n  "checked_at": %s,\n  "local": "3.23.0",\n  "remote": "3.24.0",\n  "update_available": true,\n  "message": "agentille 3.24.0 available (you'"'"'re on 3.23.0) - run /plugin to update"\n}\n' "$(date +%s)" > "$CACHE"
+printf '{ "name": "agentille", "version": "3.24.0" }\n' > "$ROOT/.claude-plugin/plugin.json"
+printf '{ "version": "3.24.0" }\n' > "$T/now.json"
+out=$(run "$T/now.json" 2>&1); rc=$?
+check "updated plugin: exit 0" '[ "$rc" = 0 ]'
+check "updated plugin: stale 'newer version' notice gone" '[ -z "$out" ]'
+check "updated plugin: cache refetched at 3.24.0" 'grep -q "\"local\": \"3.24.0\"" "$CACHE" && grep -q "\"update_available\": false" "$CACHE"'
+printf '{ "name": "agentille", "version": "1.0.0" }\n' > "$ROOT/.claude-plugin/plugin.json"
+
 [ "$bad" = 0 ] && echo "$n checks passed" || { echo "$bad of $n checks failed"; exit 1; }

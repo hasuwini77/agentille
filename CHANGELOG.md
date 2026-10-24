@@ -9,6 +9,47 @@ next minor, `docs/releasing.md`).
 
 ### Changed (behaviour)
 
+- **A run tidies only the worktrees and branches it made.** The mod
+  records every worktree a run creates (`~/.agentille/state/lead-<pane>.worktrees`);
+  the run-end tidy and `/agt-clean` remove only merged, clean `agt/*`
+  worktrees on that list, never one under 10 minutes old or with no
+  commits of its own, and a session with no list removes nothing.
+  Untracked `.env*` copies in those worktrees are deleted when the run
+  ends, even when an executor forgot.
+- **`auto` integration comes from your profile alone.** A run cannot
+  `gh pr merge`, create or push a tag, or create a release unless
+  `~/.agentille/profile.json` sets `integration: "auto"` at the top level
+  or in that repo's `projects[]` entry; otherwise it stops at the PR and
+  says so. A repo's `.agentille/config.json`, or a CLAUDE.md saying
+  `no-mistakes` or `local-only`, can only lower the mode. Sessions where
+  `/agt` was never typed keep full Bash.
+- **Typed proofs last one run.** `spawn_pane` and `--fable` stay unlocked
+  while the typed `/agt` run is in flight (a worker pane or subagent still
+  working, or fewer than three later typed prompts), then lapse; a run
+  that ends in a question or an error no longer leaves them open for the
+  session. An ask for sessions counts only on the turn you typed it: a
+  task notification or peer message after it opens nothing.
+- **A worker runs on Codex only when you named Codex** in the typed
+  `/agt` prompt or your newest typed prompt.
+- **A shell session runs only a command you quoted or wrote right after
+  the ask** ("open a shell and run npm test"); a command your prompt says
+  not to run is refused. "Start a terminal emulator project", "give me a
+  session summary" and "spawn a shell injection test suite" are no longer
+  asks for sessions.
+- **The folder-trust prompt is answered for you only in your own checkout
+  or in an `agt/`, `feat/` or `fix/` worktree this session made.** Any
+  other worktree needs a one-time trust by hand.
+- **One worktree lifecycle.** A slice worktree stays until the gate
+  merges, leaves the PR ready, pushes the branch or escalates, so fix
+  rounds, resumes and the design-reviewer's dev server always have a
+  tree. The executor deletes only its `.env*` copies on exit; the lead
+  removes the worktree afterwards (the branch stays). A fix round or
+  resume re-attaches to the existing directory or branch instead of
+  failing on `git worktree add -b`. Every executor dispatch states
+  `isolated:`; in panes mode the lead makes the worktree.
+- **The pane pool is capped at three executors**, the same as medium;
+  heavy differs by giving each slice a real pane, not by width.
+
 - **The session-end sweep and the reaper touch only panes this session
   opened.** Every pane a lead opens (`spawn_pane`, `open_sessions`,
   `/agt-spawn`) is recorded by name in
@@ -58,6 +99,18 @@ next minor, `docs/releasing.md`).
 
 ### Fixed
 
+- The `open_sessions` description says when a session closes: on Herdr
+  after 10 minutes idle and unfocused, and at session end when idle;
+  shells and tmux sessions close only when you ask.
+- README: opens on a three-step first run (install, type a task, read the
+  card), the glossary follows "When to use it", and a new "When something
+  goes wrong" section covers `/agt-info`, the report path, the two
+  version toasts, a missing pane transport and the update-check opt-out.
+  The integration, worktree and trust bullets match the code above.
+- `/storm`'s plain build deletes copied `.env*` files from each worktree
+  on every exit, including failed builds.
+- `/agentille-project` no longer calls the repo config authoritative.
+
 - README: a `## Routing` table that is the same table as `routing.md`
   → "Default routing" (the validator checks they match), the model list
   and cost note match the code, `thinkingDepth` and
@@ -95,6 +148,25 @@ next minor, `docs/releasing.md`).
   rule matches `docs/releasing.md`.
 
 ### Added
+
+- `hooks/guard.js`: the Bash guard and the worktree ownership records.
+- `tests/hooks/test-sweep-parity.sh` (121 checks): the session-end
+  sweep's pane keys and answer paths match `hooks/panes.js`.
+- Validator: at least 500 passing mod tests (was 400);
+  `AGENTILLE_VALIDATE_SKIP_HOOK_TESTS` fails under `CI=true`.
+  `test-validate-gate.sh` covers both (35 checks). 576 mod tests.
+
+### Deprecated
+
+- The dispatch header key `piece=`: headers now carry `slice=`; `piece=`
+  is still read until the next major.
+- `/agt-focus`, `/agt-highlight` and the `--mode` and `--team` flags, as
+  before: they go in v4.
+
+### Removed
+
+- The `honestyLevel` profile key from the agent prompts: it was never in
+  the profile schema, so nothing read it. The profile prefix is one line.
 
 - `CONTRIBUTING.md`: the three verification layers and where the full
   guide lives.

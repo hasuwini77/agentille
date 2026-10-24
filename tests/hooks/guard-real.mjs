@@ -494,6 +494,78 @@ try {
     const note = await run('echo hello > notes.md')
     check('control: ordinary redirect allowed', !note?.deny && note.exit === 0, JSON.stringify(note))
   }
+  // ── allow paths: settling an operation under way on the base branch, run for real ───────────────────────────
+  // Below auto a merge or rebase that writes the base is refused; --abort/--continue (and the other settle flags)
+  // are exempt, so a run that hit a conflict on main can always back out or finish. Each conflict is made with sh()
+  // (unguarded), the settle line goes through the guard and runs for real, and origin/main never moves.
+  // The rebase cases run with HEAD detached, where the branch cannot be read and the guard passes anyway: the merge
+  // cases, on main itself, are the ones that fail if the exemption goes (tests/mod/guard-allow.test.ts pins both).
+  {
+    const w = world()
+    const git = (p) => fs.existsSync(APP + '/.git/' + p)
+    const onMain = () => sh('git symbolic-ref --short -q HEAD || echo detached', APP) === 'main'
+    // side changes a, main changes a: merging, rebasing onto, cherry-picking or applying side conflicts on main.
+    sh('git checkout -q main && git checkout -qb side && echo s > a && git commit -qam side && git checkout -q main && echo m > a && git commit -qam m', APP)
+    const mainAt = sh('git rev-parse main', APP)
+
+    const deny = await run('git merge -q side')
+    check('allow control: git merge side on the base is denied', deny?.deny?.includes('base branch main'), JSON.stringify(deny))
+    check('... and no merge started', !git('MERGE_HEAD'))
+
+    sh('git merge -q side >/dev/null 2>&1 || true', APP)
+    check('setup: a merge conflict is under way on main', git('MERGE_HEAD') && onMain())
+    const abort = await run('git merge --abort')
+    check('git merge --abort on the base: allowed and ran', !abort?.deny && abort.exit === 0, JSON.stringify(abort))
+    check('... the merge is gone and main is where it was', !git('MERGE_HEAD') && sh('git rev-parse HEAD', APP) === mainAt)
+
+    sh('git merge -q side >/dev/null 2>&1 || true; echo r > a && git add a', APP)
+    const cont = await run('GIT_EDITOR=true git merge --continue')
+    check('git merge --continue on the base: allowed and ran', !cont?.deny && cont.exit === 0, JSON.stringify(cont))
+    check('... the merge commit is on local main', !git('MERGE_HEAD') && sh('git rev-parse HEAD^2', APP) === sh('git rev-parse side', APP))
+    sh('git reset -q --hard ' + mainAt, APP)
+
+    const rdeny = await run('git rebase -q side')
+    check('allow control: git rebase side on the base is denied', rdeny?.deny?.includes('base branch main'), JSON.stringify(rdeny))
+    sh('git rebase -q side >/dev/null 2>&1 || true', APP)
+    check('setup: a rebase conflict is under way', git('rebase-merge') || git('rebase-apply'))
+    const rabort = await run('git rebase --abort')
+    check('git rebase --abort: allowed and ran', !rabort?.deny && rabort.exit === 0, JSON.stringify(rabort))
+    check('... back on main where it was', onMain() && sh('git rev-parse HEAD', APP) === mainAt)
+    sh('git rebase -q side >/dev/null 2>&1 || true; echo r > a && git add a', APP)
+    const rcont = await run('GIT_EDITOR=true git rebase --continue')
+    check('git rebase --continue: allowed and ran', !rcont?.deny && rcont.exit === 0 && onMain(), JSON.stringify(rcont))
+    sh('git reset -q --hard ' + mainAt, APP)
+
+    sh('git cherry-pick side >/dev/null 2>&1 || true', APP)
+    check('setup: a cherry-pick conflict is under way on main', git('CHERRY_PICK_HEAD'))
+    const cp = await run('git cherry-pick --abort')
+    check('git cherry-pick --abort on the base: allowed and ran', !cp?.deny && cp.exit === 0 && !git('CHERRY_PICK_HEAD'), JSON.stringify(cp))
+
+    sh('echo m2 > a && git commit -qam m2 && git revert --no-edit HEAD~1 >/dev/null 2>&1 || true', APP)
+    check('setup: a revert conflict is under way on main', git('REVERT_HEAD'))
+    const rv = await run('git revert --abort')
+    check('git revert --abort on the base: allowed and ran', !rv?.deny && rv.exit === 0 && !git('REVERT_HEAD'), JSON.stringify(rv))
+    sh('git reset -q --hard ' + mainAt, APP)
+
+    sh('git format-patch -q -1 side --stdout > ../side.patch && git am ../side.patch >/dev/null 2>&1 || true', APP)
+    check('setup: an am conflict is under way on main', git('rebase-apply'))
+    const am = await run('git am --abort')
+    check('git am --abort on the base: allowed and ran', !am?.deny && am.exit === 0 && !git('rebase-apply'), JSON.stringify(am))
+    check('... main is where it was', onMain() && sh('git rev-parse HEAD', APP) === mainAt)
+
+    sh('git checkout -q agt/x', APP)
+    fs.writeFileSync(APP + '/b', 'wip\n')
+    const st = await run('git stash -q')
+    check('git stash on the run\'s own worktree: allowed and ran', !st?.deny && st.exit === 0 && fs.readFileSync(APP + '/b', 'utf8') === 'b\n', JSON.stringify(st))
+    const pop = await run('git stash pop -q')
+    check('git stash pop: allowed and ran', !pop?.deny && pop.exit === 0 && fs.readFileSync(APP + '/b', 'utf8') === 'wip\n', JSON.stringify(pop))
+    sh('git checkout -q -- b', APP)
+
+    const before = sh('git rev-parse HEAD', APP)
+    const amend = await run('git commit -q --amend -m "slice, amended"')
+    check('git commit --amend on the unpushed slice commit: allowed and ran', !amend?.deny && amend.exit === 0 && sh('git rev-parse HEAD', APP) !== before, JSON.stringify(amend))
+    check('... origin/main never moved, and origin has no agt/x', refOf('origin.git', 'main') === w.main && refOf('origin.git', 'agt/x') === null)
+  }
 } catch (err) {
   bad++
   console.log('FAIL the run threw: ' + (err?.stack ?? err))

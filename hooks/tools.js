@@ -13,6 +13,7 @@ import { formationOf, mentionsCodex, mentionsFable, proveHeader, demoteHeaderTex
 import { saveSessions, closeSession, openSession, addSession } from './sessions.js'
 import { skewMessage } from './skew.js'
 import { transportOf, openPane, savePanes, ownName } from './spawn.js'
+import { tmuxInit } from './tmux-env.js'
 import { ensurePolling, ensureTicker } from './ticker.js'
 import { shortName } from './wire.js'
 import { noteWire } from './worker.js'
@@ -188,7 +189,8 @@ export async function closePane($, e) {
   const c = closeTarget(e, Panes.panes, t === 'herdr' && Session.selfTab ? [Session.selfTab, ...Spawn.ownedTabs] : null, Spawn.openedNames)
   if (c.gone) return { result: c.gone + ' is already closed (the reaper closed it after its answer was saved).' }
   if (c.error) return { deny: c.error }
-  const r = await $.process.run(t === 'herdr' ? herdrCloseArgv(c.pane.id) : tmuxKillArgv(c.pane.id), PROBE).catch(() => null)
+  const kill = t === 'herdr' ? herdrCloseArgv(c.pane.id) : tmuxKillArgv(c.pane.id)
+  const r = await $.process.run(kill, tmuxInit(kill, PROBE)).catch(() => null)
   if (!r || r.exitCode !== 0) return { deny: 'Could not close ' + c.pane.name + '.' }
   P.rec(c.pane.id).harvested = true
   await pollNow($, t)

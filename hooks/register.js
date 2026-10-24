@@ -30,7 +30,6 @@ import { onPromptSubmit, onTurnComplete } from './turns.js'
 import { dispatchedRun, agtTurnFromDispatch } from './proofs.js'
 import { parseHeader, roleOf } from './routing.js'
 import * as P from './panerec.js'
-const { runs, live, paneRoutes, openedNames, mascot, litMemo, hlMemo, rawIds, wireLog, pub } = S
 
 export function register(on) {
   on('session.start', async ($, e, next) => {
@@ -57,7 +56,7 @@ export function register(on) {
     S.sessionId = validLead(await $.session.id().catch(() => null))
     S.wireName = /^agt-[A-Za-z0-9_-]+$/.test((await $.env.get('AGENTILLE_NAME')) ?? '') ? await $.env.get('AGENTILLE_NAME') : null
     S.leadSession = S.wireName ? validLead(await $.env.get('AGENTILLE_LEAD')) : null
-    if (S.worker) { pub.model = S.worker.model; pub.effort = S.worker.effort || null }
+    if (S.worker) { S.pub.model = S.worker.model; S.pub.effort = S.worker.effort || null }
     await $.command.register({ name: 'agt-deck', description: 'Open the agentille deck: the cast, routing timeline, wire log and tokens. auto = open on every /agt (saved as display.deck) · off', argumentHint: '[auto|off]', immediate: true })
     await $.command.register({ name: 'agt-tell', description: 'Send a message to a worker pane over the wire', argumentHint: '<worker> <message>', immediate: true })
     await $.command.register({ name: 'agt-spawn', description: 'Open a routed claude pane beside this one (Herdr or tmux); it closes itself once its answer is saved', argumentHint: '"task" [--model sonnet|opus|haiku|fable]' })
@@ -107,7 +106,7 @@ export function register(on) {
     if (sid) sent = (await $.session.send({ to: { sessionId: sid }, text: '[agt wire] lead note · ' + a.text }).catch(() => ({ isDelivered: false }))).isDelivered
     if (!sent && t === 'herdr') sent = (await $.process.run(herdrPromptArgv(a.name, a.text), PROBE).catch(() => null))?.exitCode === 0
     if (!sent) return { text: 'Could not reach ' + a.name + '.' }
-    logWire(wireLog, { from: 'lead', to: shortName(a.name), kind: 'note', summary: a.text, at: Date.now() })
+    logWire(S.wireLog, { from: 'lead', to: shortName(a.name), kind: 'note', summary: a.text, at: Date.now() })
     $.ui.invalidate('ui.render')
     return { text: '⇄ sent to ' + a.name }
   })
@@ -121,8 +120,8 @@ export function register(on) {
     if (a.view === 'squads') return { text: await squadsView($) }
     if (a.view === 'route') return { text: routeText({ ...a, depth: a.depth ?? S.depth }, S.settings, S.weeklyPct) }
     await loadSquads($)
-    const log = runs.get(S.lastRun)?.log ?? []
-    return { text: overviewText({ display: S.display, squads: squadsSummary(S.squadRows), routing: routingSummary(log), ledger: ledgerSummary(ledger(live, S.lastRun, paneRoutes)) }) }
+    const log = S.runs.get(S.lastRun)?.log ?? []
+    return { text: overviewText({ display: S.display, squads: squadsSummary(S.squadRows), routing: routingSummary(log), ledger: ledgerSummary(ledger(S.live, S.lastRun, S.paneRoutes)) }) }
   })
 
   // Typed only: a plugin, a scheduled task or a notification never opens a pane.
@@ -139,7 +138,7 @@ export function register(on) {
     } catch (err) {
       return { text: 'Could not open a ' + t + ' pane: ' + String(err?.message ?? err).slice(0, 160) }
     }
-    openedNames.add(name)
+    S.openedNames.add(name)
     await savePanes($)
     ensurePolling($)
     return { text: 'Opened ' + name + ' · ' + a.model + ' · ' + t + ' pane.' }
@@ -177,9 +176,9 @@ export function register(on) {
       // Only the pane whose key the message names: a stale list or a respawned role must not harvest the older pane.
       const hit = w.kind === 'done' && w.key ? S.panes.find((p) => paneKey(p.id) === w.key && p.name === w.from) : null
       if (hit) { const r = P.rec(hit.id); r.harvested = true; r.wireDone = true }
-      const route = w.kind === 'done' ? paneRoutes.findLast((r) => r.name === w.from) : null
+      const route = w.kind === 'done' ? S.paneRoutes.findLast((r) => r.name === w.from) : null
       if (route) route.verdict = verdictChip(route.agent, w.summary)
-      logWire(wireLog, { from, to: S.wireName ? shortName(S.wireName) : 'lead', kind: w.kind, summary: w.summary, at: Date.now() })
+      logWire(S.wireLog, { from, to: S.wireName ? shortName(S.wireName) : 'lead', kind: w.kind, summary: w.summary, at: Date.now() })
       $.ui.toast('⇄ ' + from + ' ' + w.kind)
       $.ui.invalidate('ui.render')
     }
@@ -196,7 +195,7 @@ export function register(on) {
 
   on('tool.call', async ($, e, next) => {
     if (e.agentId) {
-      const a = live.get(e.agentId)
+      const a = S.live.get(e.agentId)
       if (a) {
         a.tool = toolLabel(e.tool, e)
         a.heard = Date.now()
@@ -213,7 +212,7 @@ export function register(on) {
         }
       }
     } else if (S.wireName) {
-      pub.tool = toolLabel(e.tool, e)
+      S.pub.tool = toolLabel(e.tool, e)
       void publish($).catch(() => {})
     }
     return next(e)
@@ -234,13 +233,13 @@ export function register(on) {
   })
 
   on('turn.step', async function* ($, e, next) {
-    const a = e.agentId ? live.get(e.agentId) : undefined
+    const a = e.agentId ? S.live.get(e.agentId) : undefined
     if (!e.agentId) S.leadModel = e.model
     const result = yield* next(a && a.routed ? { ...e, effort: a.effort } : e)
     if (!e.agentId && S.wireName && result?.usage) {
       const u = result.usage
-      pub.tok += (u.input_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0) + (u.output_tokens ?? 0)
-      pub.model = e.model
+      S.pub.tok += (u.input_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0) + (u.output_tokens ?? 0)
+      S.pub.model = e.model
       await publish($)
     }
     if (a) {
@@ -259,19 +258,19 @@ export function register(on) {
     if (e.agentId === undefined) S.lastAnswer = null
     if (S.worker) {
       const now = await $.clock.now()
-      if (!mascot.greeted) {
-        mascot.greeted = true
-        mascot.hiUntil = now + HELLO_MS
+      if (!S.mascot.greeted) {
+        S.mascot.greeted = true
+        S.mascot.hiUntil = now + HELLO_MS
         // tmux tags the pane name after the split, so the first poll can miss it: look once more.
         if (!S.selfName && S.transport && S.transport !== 'none') await pollNow($, S.transport)
       }
-      mascot.working = true
-      mascot.start = now
+      S.mascot.working = true
+      S.mascot.start = now
       ensureTicker($)
       $.ui.invalidate('ui.render')
     }
     if (S.wireName) {
-      Object.assign(pub, { state: 'working', tool: null, start: Date.now(), ms: null })
+      Object.assign(S.pub, { state: 'working', tool: null, start: Date.now(), ms: null })
       await publish($, true)
     }
     return next(e)
@@ -289,10 +288,10 @@ export function register(on) {
   // A long /agt reply: an essentials card on top, the body dim with its tokens lit. The
   // decision is memoised per message id so a reply does not restyle when a later turn changes.
   on('ui.render', { component: 'AssistantMessage' }, async ($, e, next) => {
-    if (!litFor(litMemo, e.requestId, { on: S.highlightOn, agtTurn: S.agtTurn || S.highlightAll })) return next(e)
+    if (!litFor(S.litMemo, e.requestId, { on: S.highlightOn, agtTurn: S.agtTurn || S.highlightAll })) return next(e)
     const final = e.surface === 'terminal' && !e.props?.isSummary ? answerPanel(e.requestId, e.props?.text) : null
-    if (rawIds.has(e.requestId)) return next(e)
-    const h = final ? null : highlightFor(hlMemo, e.requestId, e.props?.text)
+    if (S.rawIds.has(e.requestId)) return next(e)
+    const h = final ? null : highlightFor(S.hlMemo, e.requestId, e.props?.text)
     if (!final && !h) return next(e)
     const els = $.ui.resolve(e)
     if (!els.Markdown) return next(e)
@@ -303,12 +302,12 @@ export function register(on) {
 
   // Main-session spinner: how many subagents (◇) and pane sessions (▣) work behind it.
   on('ui.render', { component: 'Spinner' }, async ($, e, next) => {
-    if (live.has(e.requestId)) return next(e)
-    const subs = [...live.values()].filter((a) => a.state === 'working').length
+    if (S.live.has(e.requestId)) return next(e)
+    const subs = [...S.live.values()].filter((a) => a.state === 'working').length
     const busy = S.panes.filter((p) => p.state === 'working').length
     if (subs + busy === 0) return next(e)
     // In an /agt run the status line holds the counts; the spinner names the phases at work.
-    const phases = S.lastRun === 'adhoc' ? '' : runPhases(live, paneRoutes, S.lastRun)
+    const phases = S.lastRun === 'adhoc' ? '' : runPhases(S.live, S.paneRoutes, S.lastRun)
     const parts = phases || [subs ? '◇' + subs : '', busy ? '▣' + busy : ''].filter(Boolean).join(' ') + ' working'
     return next({ ...e, props: { ...e.props, suffix: (e.props.suffix ?? '') + ' · ' + parts } })
   })

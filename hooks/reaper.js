@@ -11,17 +11,16 @@ import { closeSession, forgetSession } from './sessions.js'
 import { pruneTabs } from './spawn.js'
 import { wakeDue, wakeMessage } from './wire.js'
 import * as P from './panerec.js'
-const { runs, live, paneRoutes, openedNames } = S
 const { restingSince, staged, strandedNow } = P
 
 // Panes that left the stage this poll: end their route and refresh the ledger.
 export async function notePaneExits($) {
   const touched = new Set()
   for (const name of panesLeft(staged, S.panes)) {
-    const r = endRoute(paneRoutes, name, Date.now())
+    const r = endRoute(S.paneRoutes, name, Date.now())
     if (r) touched.add(r.run)
   }
-  for (const run of touched) await writeRunFile($, run, 'ledger.json', JSON.stringify(ledger(live, run, paneRoutes), null, 2) + '\n')
+  for (const run of touched) await writeRunFile($, run, 'ledger.json', JSON.stringify(ledger(S.live, run, S.paneRoutes), null, 2) + '\n')
 }
 
 // A file counts only if it was written once this session knew the pane: a role can be respawned, and
@@ -109,7 +108,7 @@ export async function pollHerdr($) {
   // A lead sees, reaps and wakes for the panes it opened (openedNames, by name: the run id is random), never
   // another session's workers in the same tab. Workers (panes that are themselves agt-*) see their siblings and never reap.
   const real = paneAgents(list, selfPane).filter((p) => !me || p.workspace === me.workspace_id)
-  const owned = S.selfName ? real : real.filter((p) => openedNames.has(p.name))
+  const owned = S.selfName ? real : real.filter((p) => S.openedNames.has(p.name))
   S.panes = quietSpawn(owned) // the band shows a spawn pane as `open`; the reaper below sees its real state
   const now = await $.clock.now()
   for (const p of S.panes) if (P.get(p.id)?.firstSeen === undefined) P.rec(p.id).firstSeen = now
@@ -148,7 +147,7 @@ export async function pollTmux($) {
   // Window-scope first, then ownership: no file is read for a pane this lead did not open. A done-file counts
   // only if it was written after the pane was first listed.
   const now = await $.clock.now()
-  const scoped = me ? scopeRows(rows, selfPane).filter((r) => S.selfName || openedNames.has(r.agt)) : []
+  const scoped = me ? scopeRows(rows, selfPane).filter((r) => S.selfName || S.openedNames.has(r.agt)) : []
   for (const r of scoped) if (P.get(r.id)?.firstSeen === undefined) P.rec(r.id).firstSeen = now
   P.forgetGone(rows)
   const done = new Map()
@@ -163,7 +162,7 @@ export async function pollTmux($) {
       // missing or unreadable counts as not done
     }
   }
-  const real = tmuxPaneAgents(rows, selfPane, done).filter((p) => S.selfName || openedNames.has(p.name))
+  const real = tmuxPaneAgents(rows, selfPane, done).filter((p) => S.selfName || S.openedNames.has(p.name))
   S.panes = quietSpawn(real)
   await notePaneExits($)
   if (isLead(rows, selfPane)) {
@@ -264,7 +263,7 @@ export const RUN_TTL_MS = 14 * 24 * 60 * 60_000
 export async function pruneRuns($, run, r) {
   if (!S.home) return
   const dir = S.home + '/.agentille/state'
-  const keep = new Set([S.lastRun, ...runs.keys(), ...S.panes.map((p) => splitName(p.name)?.run), ...[...live.values()].map((a) => a.run)])
+  const keep = new Set([S.lastRun, ...S.runs.keys(), ...S.panes.map((p) => splitName(p.name)?.run), ...[...S.live.values()].map((a) => a.run)])
   for (const e of await $.fs.list(dir).catch(() => [])) {
     if (e.kind !== 'dir' || !e.name.startsWith('run-')) continue
     const id = e.name.slice(4)

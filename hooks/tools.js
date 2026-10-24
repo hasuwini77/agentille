@@ -16,7 +16,6 @@ import { transportOf, openPane, savePanes } from './spawn.js'
 import { ensurePolling, ensureTicker } from './ticker.js'
 import { shortName, logWire } from './wire.js'
 import * as P from './panerec.js'
-const { decisions, paneRoutes, openedNames, ownedTabs, wireLog } = S
 
 // spawn_pane: the /agt heavy level's worker pane, the same openPane as /agt-spawn, with the input validated here.
 export async function spawnPane($, e) {
@@ -101,13 +100,13 @@ export async function spawnPane($, e) {
   }
   startRun(a.run)
   S.opened.push({ id, name: a.name, run: a.run, tab })
-  openedNames.add(a.name)
+  S.openedNames.add(a.name)
   await savePanes($)
   const piece = pieceOf(a.hdr)
-  paneRoutes.push({ name: a.name, run: a.run, role: a.role, agent: a.agent, model: d.model, effort: d.effort, reason: d.reason, start: Date.now(), end: null, piece, verdict: null })
-  logWire(wireLog, { from: 'lead', to: party(shortName(a.name), piece), kind: 'task', summary: taskLine(a.task) || a.agent, at: Date.now() })
+  S.paneRoutes.push({ name: a.name, run: a.run, role: a.role, agent: a.agent, model: d.model, effort: d.effort, reason: d.reason, start: Date.now(), end: null, piece, verdict: null })
+  logWire(S.wireLog, { from: 'lead', to: party(shortName(a.name), piece), kind: 'task', summary: taskLine(a.task) || a.agent, at: Date.now() })
   const rec = { at: new Date().toISOString(), role: a.agent, model: d.model, effort: d.effort, reason: d.reason, asked: a.asked, agentId: null, kind: 'pane', pane: a.name }
-  decisions.push(rec)
+  S.decisions.push(rec)
   run.log.push(JSON.stringify(rec))
   await writeRunFile($, a.run, 'routing.jsonl', run.log.join('\n') + '\n')
   await pollNow($, t)
@@ -179,7 +178,7 @@ export async function closePane($, e) {
     return { result: c === 'closed' ? 'Closed ' + s.name + '.' : s.name + ' is already closed.' }
   }
   await pollNow($, t)
-  const c = closeTarget(e, S.panes, t === 'herdr' && S.selfTab ? [S.selfTab, ...ownedTabs] : null, openedNames)
+  const c = closeTarget(e, S.panes, t === 'herdr' && S.selfTab ? [S.selfTab, ...S.ownedTabs] : null, S.openedNames)
   if (c.gone) return { result: c.gone + ' is already closed (the reaper closed it after its answer was saved).' }
   if (c.error) return { deny: c.error }
   const r = await $.process.run(t === 'herdr' ? herdrCloseArgv(c.pane.id) : tmuxKillArgv(c.pane.id), PROBE).catch(() => null)

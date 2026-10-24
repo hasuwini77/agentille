@@ -10,7 +10,6 @@ import { formationOf, roleOf, parseHeader, proveHeader, demoteHeaderText, ladder
 import { addFlag } from './display.js'
 import { logWire } from './wire.js'
 import { agtTurnFromDispatch } from './proofs.js'
-const { wfToasted, runs, live, decisions, paneRoutes, demotedToasted, wireLog } = S
 
 // A workflow agent is in no agent list, and a cancelled one raises no turn.complete: it is marked,
 // and every event of its loop says it is still alive (tree.js quietWorkflows ends a silent one).
@@ -22,8 +21,8 @@ export function heard(a, e) {
 
 // Once per run: the model wrote fable=forced, nobody typed --fable, so the ladder applies.
 export function demoteToast($, run) {
-  if (demotedToasted.has(run)) return
-  demotedToasted.add(run)
+  if (S.demotedToasted.has(run)) return
+  S.demotedToasted.add(run)
   $.ui.toast('agt ⚑ fable=forced dropped: --fable was not typed, the ladder applies')
 }
 
@@ -36,8 +35,8 @@ export function ceilingOnce($, runId, run, spent) {
 }
 
 export function runState(id) {
-  if (!runs.has(id)) runs.set(id, { revise: 0, fixes: 0, fixesByPiece: {}, fable: 0, formation: null, log: [], reports: {} })
-  return runs.get(id)
+  if (!S.runs.has(id)) S.runs.set(id, { revise: 0, fixes: 0, fixesByPiece: {}, fable: 0, formation: null, log: [], reports: {} })
+  return S.runs.get(id)
 }
 
 export function shortType(t) {
@@ -45,14 +44,14 @@ export function shortType(t) {
 }
 
 export function routingView() {
-  if (decisions.length === 0) return 'No agentille dispatches this session.'
-  return decisions.slice(-30).map((d) => d.role + ' → ' + d.model + (d.effort ? ' · ' + d.effort : '') + (d.reason === 'table' ? '' : '  (' + d.reason + ')') + (d.kind === 'pane' ? ' · pane' : '')).join('\n')
+  if (S.decisions.length === 0) return 'No agentille dispatches this session.'
+  return S.decisions.slice(-30).map((d) => d.role + ' → ' + d.model + (d.effort ? ' · ' + d.effort : '') + (d.reason === 'table' ? '' : '  (' + d.reason + ')') + (d.kind === 'pane' ? ' · pane' : '')).join('\n')
 }
 
 export function ledgerView() {
-  const text = ledgerText(ledger(live, S.lastRun, paneRoutes))
+  const text = ledgerText(ledger(S.live, S.lastRun, S.paneRoutes))
   const max = maxRunUsdOf(S.settings)
-  return max == null ? text : text + '\nestimate ~' + usd(estimateRunUsd(live, S.lastRun)) + ' of maxRunUsd ' + usd(max) + ' (list prices; pane workers not counted)'
+  return max == null ? text : text + '\nestimate ~' + usd(estimateRunUsd(S.live, S.lastRun)) + ' of maxRunUsd ' + usd(max) + ' (list prices; pane workers not counted)'
 }
 
 export async function writeRunFile($, runId, name, text) {
@@ -85,8 +84,8 @@ export async function completeReport($, path) {
   try {
     const text = await $.fs.read(path)
     const files = (await $.fs.list(dir + '/agents').catch(() => [])).filter((f) => f.kind !== 'dir' && f.name.endsWith('.md')).map((f) => f.name)
-    const agents = [...live.values()].filter((a) => fileRunOf(a) === run)
-    const tail = reportTail(text, { agents, routes: paneRoutes.filter((r) => r.run === run), files })
+    const agents = [...S.live.values()].filter((a) => fileRunOf(a) === run)
+    const tail = reportTail(text, { agents, routes: S.paneRoutes.filter((r) => r.run === run), files })
     if (tail) await $.fs.write(path, text + tail)
   } catch {
     // the report is the lead's; a missing section never fails its Write
@@ -101,7 +100,7 @@ export async function dispatchAgent($, e, next) {
 
   if (!role) {
     const res = await next(e)
-    if (res.agentId) live.set(res.agentId, heard(newAgent({ id: res.agentId, role: shortType(e.subagentType), routed: false, model: res.model, effort: null, reason: null, run: S.lastRun, now: Date.now(), parentId: e.parentAgentId ?? null }), e))
+    if (res.agentId) S.live.set(res.agentId, heard(newAgent({ id: res.agentId, role: shortType(e.subagentType), routed: false, model: res.model, effort: null, reason: null, run: S.lastRun, now: Date.now(), parentId: e.parentAgentId ?? null }), e))
     $.ui.invalidate('ui.render')
     return res
   }
@@ -123,7 +122,7 @@ export async function dispatchAgent($, e, next) {
     // nothing), so the run in progress keeps only its own routing log and ledger.
     const fileRun = named ?? 'adhoc'
     const run = runState(fileRun)
-    const busy = [...live.values()].some((a) => a.run === S.lastRun && a.state === 'working') || S.panes.some((p) => splitName(p.name)?.run === S.lastRun && p.state === 'working')
+    const busy = [...S.live.values()].some((a) => a.run === S.lastRun && a.state === 'working') || S.panes.some((p) => splitName(p.name)?.run === S.lastRun && p.state === 'working')
     if (named && (S.lastRun === 'adhoc' || !busy)) S.lastRun = named
     agtTurnFromDispatch()
     // The table pick follows the run in progress (its REVISEs); `run` is only where the log goes.
@@ -136,14 +135,14 @@ export async function dispatchAgent($, e, next) {
       const a = heard(newAgent({ id: res.agentId, role, routed: false, model: res.model, effort: null, reason: off ? drift : null, run: runId, now: Date.now(), parentId: e.parentAgentId ?? null }), e)
       a.fileRun = fileRun
       a.piece = pieceOf(hdr)
-      live.set(res.agentId, a)
+      S.live.set(res.agentId, a)
     }
     const rec = { at: new Date().toISOString(), role, model: res.model, effort: null, reason: drift, asked: e.model ?? null, agentId: res.agentId ?? null, kind: 'workflow' }
-    decisions.push(rec)
+    S.decisions.push(rec)
     run.log.push(JSON.stringify(rec))
     await writeRunFile($, fileRun, 'routing.jsonl', run.log.join('\n') + '\n')
-    if (off && !wfToasted.has(runId + ':' + role)) {
-      wfToasted.add(runId + ':' + role)
+    if (off && !S.wfToasted.has(runId + ':' + role)) {
+      S.wfToasted.add(runId + ':' + role)
       $.ui.toast('agt workflow ' + role + ' runs ' + short(res.model) + ' — table says ' + d.model + ' · ' + d.effort)
     }
     $.ui.invalidate('ui.render')
@@ -164,7 +163,7 @@ export async function dispatchAgent($, e, next) {
   run.fable = Math.max(run.fable, shared)
 
   // The run's spend so far, estimated from its agents' tokens, only when a maxRunUsd ceiling is set.
-  const spent = maxRunUsdOf(S.settings) == null ? null : estimateRunUsd(live, runId)
+  const spent = maxRunUsdOf(S.settings) == null ? null : estimateRunUsd(S.live, runId)
   const d = decide({ role, hdr, run: { ...run, fixes: ladderFixes(run, pieceOf(hdr)), usd: spent }, depth: S.depth, settings: S.settings, weeklyPct: S.weeklyPct })
   const res = await next({ ...e, model: d.model })
   if (res.deny) return res
@@ -175,11 +174,11 @@ export async function dispatchAgent($, e, next) {
   }
   const piece = pieceOf(hdr)
   // At most 3 executors at once: counted before this one joins, subagents and the run's executor panes alike.
-  const cap = role === 'executor' && runId !== 'adhoc' && res.agentId ? executorCapFlag(runId, executorsWorking(live, paneRoutes, runId) + 1) : null
-  if (res.agentId) live.set(res.agentId, { ...newAgent({ id: res.agentId, role, routed: true, model: res.model, effort: d.effort, reason: d.reason, run: runId, now: Date.now(), parentId: e.parentAgentId ?? null }), piece })
-  if (runId !== 'adhoc') logWire(wireLog, { from: 'lead', to: party(role, piece), kind: 'task', summary: taskLine(e.prompt) || role, at: Date.now(), via: 'sub' })
+  const cap = role === 'executor' && runId !== 'adhoc' && res.agentId ? executorCapFlag(runId, executorsWorking(S.live, S.paneRoutes, runId) + 1) : null
+  if (res.agentId) S.live.set(res.agentId, { ...newAgent({ id: res.agentId, role, routed: true, model: res.model, effort: d.effort, reason: d.reason, run: runId, now: Date.now(), parentId: e.parentAgentId ?? null }), piece })
+  if (runId !== 'adhoc') logWire(S.wireLog, { from: 'lead', to: party(role, piece), kind: 'task', summary: taskLine(e.prompt) || role, at: Date.now(), via: 'sub' })
   const rec = { at: new Date().toISOString(), role, model: res.model, effort: d.effort, reason: d.reason, asked: e.model ?? null, agentId: res.agentId ?? null, ...(cap && { cap }), ...(d.capped && { capped: true }) }
-  decisions.push(rec)
+  S.decisions.push(rec)
   run.log.push(JSON.stringify(rec))
   await writeRunFile($, runId, 'routing.jsonl', run.log.join('\n') + '\n')
   if (cap) addFlag($, 'cap|' + runId, cap) // the band's ⚑ line and one toast; the dispatch itself goes ahead

@@ -6,7 +6,6 @@ import { writeRunFile } from './dispatch.js'
 import { short, elapsed } from './live.js'
 import { PROBE, splitName, paneKey, answerFile, herdrMetaArgv } from './panes.js'
 import { PUBLISH_MS, statusKey, workerStatus, freshStatus, doneMessage, parseWire, shortName, logWire } from './wire.js'
-const { wireLog, wireStatus, pub } = S
 
 // Worker: what it is doing, into the shared store, at most once per PUBLISH_MS unless forced.
 // Publishes run one after another, so a late tool-call publish never lands over a forced 'done'.
@@ -21,16 +20,16 @@ export function publish($, force = false) {
 export async function publishNow($, force) {
   if (!S.wireName) return
   const now = Date.now()
-  if (!force && now - pub.at < PUBLISH_MS) return
-  pub.at = now
-  await $.store.set(statusKey(S.wireName), workerStatus({ name: S.wireName, session: S.sessionId, ...pub, now })).catch(() => {})
+  if (!force && now - S.pub.at < PUBLISH_MS) return
+  S.pub.at = now
+  await $.store.set(statusKey(S.wireName), workerStatus({ name: S.wireName, session: S.sessionId, ...S.pub, now })).catch(() => {})
   if (S.transport !== 'herdr') return
   // Herdr's sidebar follows the worker: its route, then what it is doing. Changes only.
-  const title = pub.state === 'done' ? '✓ done ' + elapsed(pub.ms ?? 0) : pub.tool ?? pub.state
+  const title = S.pub.state === 'done' ? '✓ done ' + elapsed(S.pub.ms ?? 0) : S.pub.tool ?? S.pub.state
   if (title === S.lastMeta) return
   S.lastMeta = title
   const pane = await $.env.get('HERDR_PANE_ID')
-  const argv = pane && herdrMetaArgv(pane, { display: '▣ ' + shortName(S.wireName) + ' · ' + (S.worker?.model ?? short(pub.model)), title })
+  const argv = pane && herdrMetaArgv(pane, { display: '▣ ' + shortName(S.wireName) + ' · ' + (S.worker?.model ?? short(S.pub.model)), title })
   if (argv) await $.process.run(argv, PROBE).catch(() => {})
 }
 
@@ -51,9 +50,9 @@ export async function saveAnswer($, name, answer) {
 export async function reportDone($, answer) {
   const reportPath = await saveAnswer($, S.wireName, answer)
   if (!S.leadSession) return
-  const text = doneMessage({ name: S.wireName, ms: pub.ms ?? 0, model: S.worker?.model ?? short(pub.model), effort: S.worker?.effort || pub.effort, tok: pub.tok, answer, reportPath })
+  const text = doneMessage({ name: S.wireName, ms: S.pub.ms ?? 0, model: S.worker?.model ?? short(S.pub.model), effort: S.worker?.effort || S.pub.effort, tok: S.pub.tok, answer, reportPath })
   const r = await $.session.send({ to: { sessionId: S.leadSession }, text }).catch((err) => ({ isDelivered: false, reason: String(err?.message ?? err) }))
-  if (r.isDelivered) logWire(wireLog, { from: shortName(S.wireName), to: 'lead', kind: 'done', summary: parseWire(text)?.summary || 'done', at: Date.now() })
+  if (r.isDelivered) logWire(S.wireLog, { from: shortName(S.wireName), to: 'lead', kind: 'done', summary: parseWire(text)?.summary || 'done', at: Date.now() })
   else $.ui.toast('agt wire: the lead did not get the result (' + String(r.reason).slice(0, 80) + ')')
 }
 
@@ -62,9 +61,9 @@ export async function readWire($) {
   const now = Date.now()
   for (const p of S.panes) {
     const rec = await $.store.get(statusKey(p.name)).catch(() => null)
-    if (freshStatus(rec, p.name, now)) wireStatus.set(p.name, rec)
+    if (freshStatus(rec, p.name, now)) S.wireStatus.set(p.name, rec)
   }
-  for (const k of [...wireStatus.keys()]) if (!S.panes.some((p) => p.name === k)) wireStatus.delete(k)
+  for (const k of [...S.wireStatus.keys()]) if (!S.panes.some((p) => p.name === k)) S.wireStatus.delete(k)
 }
 
 // ── drawing (takes resolved elements, never $) ────────────────────────────────

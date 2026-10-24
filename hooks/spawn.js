@@ -5,7 +5,6 @@
 import { S, isLead } from './state.js'
 import { PROBE, HERDR_START_TIMEOUT, pickTransport, splitName, paneKey, answerFile, advisorEnv, tmuxSplitArgv, tmuxEvenArgv, tmuxTagArgvs, tmuxPaneIdOf, tmuxKillArgv, herdrSplitArgv, herdrPaneIdOf, herdrTabArgv, herdrTabOf, herdrTabListArgv, herdrTabIds, tabsFile, panesFile, startupDialog, dialogKeys, herdrReadArgv, herdrKeysArgv, agentStatusOf, herdrGetArgv, screenLine, codexTask, herdrStartArgv, herdrPromptArgv, herdrCloseArgv, herdrMetaArgv, SPAWN_TOOL, CLOSE_TOOL, OPEN_SESSIONS_TOOL } from './panes.js'
 import { wireEnv, shortName } from './wire.js'
-const { ownedTabs, openedNames } = S
 
 export async function probeOk($, argv) {
   try {
@@ -32,7 +31,7 @@ export async function transportOf($) {
 // only the sweep's reach, so it never blocks.
 export async function saveTabs($) {
   const file = tabsFile(S.home, await $.env.get('HERDR_PANE_ID'))
-  if (file) await $.fs.write(file, [...ownedTabs].map((t) => t + '\n').join('')).catch(() => {})
+  if (file) await $.fs.write(file, [...S.ownedTabs].map((t) => t + '\n').join('')).catch(() => {})
 }
 
 // The lead's pane id in this transport: where its tabs, panes and sessions files are keyed.
@@ -44,24 +43,24 @@ export async function leadPane($) {
 // name (agt-<run>-<role>, the run id is random), so a restarted lead takes its own panes back and no other.
 export async function savePanes($) {
   const file = panesFile(S.home, await leadPane($))
-  if (file) await $.fs.write(file, [...openedNames].map((n) => n + '\n').join('')).catch(() => {})
+  if (file) await $.fs.write(file, [...S.openedNames].map((n) => n + '\n').join('')).catch(() => {})
 }
 
 export async function loadOwned($) {
   const file = panesFile(S.home, await leadPane($))
   if (!file) return
   const text = await $.fs.read(file).catch(() => '')
-  for (const n of String(text ?? '').split('\n')) if (splitName(n)) openedNames.add(n)
+  for (const n of String(text ?? '').split('\n')) if (splitName(n)) S.openedNames.add(n)
 }
 
 // A run tab herdr no longer lists is gone (its last pane closed): forget it.
 export async function pruneTabs($, workspace) {
-  if (!ownedTabs.size || !workspace) return
+  if (!S.ownedTabs.size || !workspace) return
   const r = await $.process.run(herdrTabListArgv(workspace), PROBE).catch(() => null)
   const ids = r?.exitCode === 0 ? herdrTabIds(r.stdout) : null
   if (!ids) return
-  const gone = [...ownedTabs].filter((t) => !ids.includes(t))
-  for (const t of gone) ownedTabs.delete(t)
+  const gone = [...S.ownedTabs].filter((t) => !ids.includes(t))
+  for (const t of gone) S.ownedTabs.delete(t)
   if (gone.length) await saveTabs($)
 }
 
@@ -345,7 +344,7 @@ export async function openPane($, t, o) {
     if (!made) throw new Error('herdr gave no tab id')
     id = made.pane
     tab = made.tab
-    ownedTabs.add(tab)
+    S.ownedTabs.add(tab)
     await saveTabs($)
   } else {
     const pane = o.split?.target ?? lead
@@ -360,7 +359,7 @@ export async function openPane($, t, o) {
   } catch (err) {
     await $.process.run(herdrCloseArgv(id), PROBE).catch(() => {})
     if (o.newTab) {
-      ownedTabs.delete(tab) // a run tab's only pane closing takes the tab with it
+      S.ownedTabs.delete(tab) // a run tab's only pane closing takes the tab with it
       await saveTabs($)
     }
     throw err

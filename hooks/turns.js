@@ -17,7 +17,6 @@ import { ensureTools } from './spawn.js'
 import { refreshAgents, ensureTicker } from './ticker.js'
 import { logWire } from './wire.js'
 import { publish, saveAnswer, reportDone } from './worker.js'
-const { live, paneRoutes, mascot, wireLog, pub } = S
 
 // A typed /agt starts a clean run; the turn's proofs are set or dropped in proofs.js. Returns the event to pass on:
 // the answer style is added to its context when this turn asks for one.
@@ -36,7 +35,7 @@ export async function onPromptSubmit($, e) {
 
 // A turn ended: a main-loop answer (raw copy, run-end tidy, the worker's band and report) or a subagent's.
 export async function onTurnComplete($, e) {
-  const a = e.agentId ? live.get(e.agentId) : undefined
+  const a = e.agentId ? S.live.get(e.agentId) : undefined
   if (!e.agentId) S.leadTurn = false
   if (!e.agentId && e.reason === 'answer' && typeof e.answer === 'string') {
     S.lastAnswer = { text: e.answer, ms: e.durationMs, id: null, shaped: S.shapedTurn, raw: S.rawTurn }
@@ -58,16 +57,16 @@ export async function onTurnComplete($, e) {
     } else if (card && runHeld()) endRun() // a card after the person typed in between still ends the run's guard
 
   }
-  if (!e.agentId && S.worker && mascot.working) {
+  if (!e.agentId && S.worker && S.mascot.working) {
     const now = await $.clock.now()
-    mascot.working = false
-    mascot.ms = now - mascot.start
-    if (e.reason === 'answer') mascot.byeUntil = now + BYE_MS
+    S.mascot.working = false
+    S.mascot.ms = now - S.mascot.start
+    if (e.reason === 'answer') S.mascot.byeUntil = now + BYE_MS
     ensureTicker($)
     $.ui.invalidate('ui.render')
   }
-  if (!e.agentId && S.wireName && pub.state === 'working') {
-    Object.assign(pub, { state: 'done', tool: null, ms: Date.now() - (pub.start ?? Date.now()) })
+  if (!e.agentId && S.wireName && S.pub.state === 'working') {
+    Object.assign(S.pub, { state: 'done', tool: null, ms: Date.now() - (S.pub.start ?? Date.now()) })
     await publish($, true)
     if (e.reason === 'answer') await reportDone($, e.answer)
   } else if (!e.agentId && !S.wireName && S.selfName && e.reason === 'answer') {
@@ -79,12 +78,12 @@ export async function onTurnComplete($, e) {
     a.tool = null
     if (a.routed) addFlag($, flagKey(a.role, a.piece), flagOf(a.role, e.answer))
     a.verdict = verdictChip(a.role, e.answer)
-    if (a.routed && a.run !== 'adhoc') logWire(wireLog, { from: party(a.role, a.piece), to: 'lead', kind: 'done', summary: answerLine(a.role, e.answer), at: Date.now(), via: 'sub' })
+    if (a.routed && a.run !== 'adhoc') logWire(S.wireLog, { from: party(a.role, a.piece), to: 'lead', kind: 'done', summary: answerLine(a.role, e.answer), at: Date.now(), via: 'sub' })
     if (a.role === 'plan-reviewer' && verdictOf(e.answer) === 'REVISE') runState(fileRunOf(a)).revise += 1
     if (a.input + a.output === 0) addUsage(a, e.usage)
     finish(a, Date.now(), e.durationMs)
     await writeReport($, a, e.answer)
-    await writeRunFile($, fileRunOf(a), 'ledger.json', JSON.stringify(ledger(live, fileRunOf(a), paneRoutes), null, 2) + '\n')
+    await writeRunFile($, fileRunOf(a), 'ledger.json', JSON.stringify(ledger(S.live, fileRunOf(a), S.paneRoutes), null, 2) + '\n')
     ensureTicker($)
     void refreshAgents($)
     $.ui.invalidate('ui.render')

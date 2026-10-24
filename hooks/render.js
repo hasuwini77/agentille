@@ -11,7 +11,6 @@ import { ledger, stage } from './live.js'
 import { MASCOT_COLOR, MODEL_COLOR, modelKey, frame, caption, moodAt, agentMood } from './mascot.js'
 import { PROBE, focusArgv } from './panes.js'
 import { nest } from './tree.js'
-const { runs, live, decisions, paneRoutes, mascot, wireLog, wireStatus } = S
 
 export const FOCUS_COLOR = { next: '#3fb950', flag: '#f85149' }
 
@@ -152,8 +151,8 @@ export const rule = (els, label) => els.Text({ dimColor: true, children: ['â”€â”
 // band is short, off a terminal, or nothing is animating.
 export function workerBand(els, e, now) {
   const { Box, Text } = els
-  const mood = moodAt({ ...mascot, now })
-  const cap = caption({ mood, ...S.worker, ms: mood === 'working' ? now - mascot.start : mascot.ms })
+  const mood = moodAt({ ...S.mascot, now })
+  const cap = caption({ mood, ...S.worker, ms: mood === 'working' ? now - S.mascot.start : S.mascot.ms })
   const capText = Text({ color: hex(MODEL_COLOR[modelKey(S.worker.model)]), wrap: 'truncate', children: [cap] })
   if (mood === 'idle' || e.surface !== 'terminal' || (e.props.maxRows ?? 0) < 5) return [capText]
   const [head, body, legs] = frame(mood, S.tick >> 1, S.worker.agent)
@@ -166,9 +165,9 @@ export function workerBand(els, e, now) {
 export async function switchboard($, e, next) {
   if (e.props.hasSurvey) return next(e)
   const now = Date.now()
-  const scene = stage({ agents: live, panes: S.panes, routes: paneRoutes, run: S.lastRun, now })
+  const scene = stage({ agents: S.live, panes: S.panes, routes: S.paneRoutes, run: S.lastRun, now })
   const focus = focusLines(now)
-  const wire = wireRow(wireLog, now)
+  const wire = wireRow(S.wireLog, now)
   if (scene.rows.length === 0 && isLead() && focus.length === 0 && !wire) return next(e)
   const els = $.ui.resolve(e)
   const kids = focus.map((l) => focusRow(els, l))
@@ -178,13 +177,13 @@ export async function switchboard($, e, next) {
   // No agent rows: the newest wire message alone, no frame.
   if (scene.rows.length === 0) return els.Box({ flexDirection: 'column', children: [...kids, ...(wire ? [wireLine(els, wire)] : []), theirs] })
 
-  const rows = nest(linkPieces(cast(scene, live, S.lastRun)))
+  const rows = nest(linkPieces(cast(scene, S.live, S.lastRun)))
   const cols = (e.props.bodyColumns ?? 80) - 4
-  const view = boardRows(rows, { now, tick: S.tick, cols, wire: wireStatus, transport: S.transport, view: e.props.view?.agentId ?? null })
-  const sw = swarm({ agents: live, routes: paneRoutes, run: S.lastRun, tick: S.tick })
+  const view = boardRows(rows, { now, tick: S.tick, cols, wire: S.wireStatus, transport: S.transport, view: e.props.view?.agentId ?? null })
+  const sw = swarm({ agents: S.live, routes: S.paneRoutes, run: S.lastRun, tick: S.tick })
   const room = Math.max(1, (e.props.maxRows ?? 10) - 4 - kids.length - (wire ? 1 : 0) - (sw ? 1 : 0))
   const waiting = rows.filter((r) => r.state === 'working').length
-  const inner = [boardHeader(els, header({ run: S.lastRun, formation: runs.get(S.lastRun)?.formation, squads: S.squads.map((q) => q.name), loops: loopText(runs.get(S.lastRun)) }), S.runningVersion)]
+  const inner = [boardHeader(els, header({ run: S.lastRun, formation: S.runs.get(S.lastRun)?.formation, squads: S.squads.map((q) => q.name), loops: loopText(S.runs.get(S.lastRun)) }), S.runningVersion)]
   if (sw) inner.push(swarmLine(els, sw))
   if (rows.length) inner.push(leadRow(els, leadLine({ model: S.leadModel, busy: e.props.isWorking, waiting })))
   const shown = view.slice(0, room)
@@ -202,12 +201,12 @@ export async function deck($, e) {
   const els = $.ui.resolve(e)
   const { Box, Text } = els
   const now = Date.now()
-  const scene = stage({ agents: live, panes: S.panes, routes: paneRoutes, run: S.lastRun, now })
-  const all = [...scene.rows, ...[...live.values()].filter((a) => a.run === S.lastRun && !scene.rows.includes(a))]
-  const rows = cast({ rows: all.map((r) => (r.kind === 'pane' && !r.model ? { ...r, model: wireStatus.get(r.name)?.model ?? null } : r)), tally: { working: 0 } }, live, S.lastRun)
+  const scene = stage({ agents: S.live, panes: S.panes, routes: S.paneRoutes, run: S.lastRun, now })
+  const all = [...scene.rows, ...[...S.live.values()].filter((a) => a.run === S.lastRun && !scene.rows.includes(a))]
+  const rows = cast({ rows: all.map((r) => (r.kind === 'pane' && !r.model ? { ...r, model: S.wireStatus.get(r.name)?.model ?? null } : r)), tally: { working: 0 } }, S.live, S.lastRun)
   const cols = e.props.bodyColumns ?? 80
-  const kids = [boardHeader(els, header({ run: S.lastRun, formation: runs.get(S.lastRun)?.formation, squads: S.squads.map((q) => q.name), loops: loopText(runs.get(S.lastRun)) }), S.runningVersion)]
-  if (rows.length === 0 && decisions.length === 0 && wireLog.length === 0) {
+  const kids = [boardHeader(els, header({ run: S.lastRun, formation: S.runs.get(S.lastRun)?.formation, squads: S.squads.map((q) => q.name), loops: loopText(S.runs.get(S.lastRun)) }), S.runningVersion)]
+  if (rows.length === 0 && S.decisions.length === 0 && S.wireLog.length === 0) {
     kids.push(Text({ dimColor: true, children: ['No agents yet. Type /agt "task": every dispatch shows up here.'] }))
     return Box({ flexDirection: 'column', children: kids })
   }
@@ -221,15 +220,15 @@ export async function deck($, e) {
     kids.push(line((m) => Box({ width: 14, children: [m.model ? Text({ color: INK, backgroundColor: colorOf(m.model), children: [chip(m.model)] }) : Text({ dimColor: true, children: ['pane'] })] })))
     if (c.more > 0) kids.push(Text({ dimColor: true, children: ['+' + c.more + ' more'] }))
   }
-  if (wireLog.length) {
+  if (S.wireLog.length) {
     kids.push(rule(els, 'conversation'))
-    for (const w of wireLines(wireLog)) kids.push(Text({ wrap: 'truncate', children: [Text({ dimColor: true, children: [w.at + '  '] }), Text({ color: w.sub ? undefined : hex(WIRE_COLOR), children: [w.arrow + ' '] }), Text({ dimColor: true, children: [w.kind + ' '] }), w.text] }))
+    for (const w of wireLines(S.wireLog)) kids.push(Text({ wrap: 'truncate', children: [Text({ dimColor: true, children: [w.at + '  '] }), Text({ color: w.sub ? undefined : hex(WIRE_COLOR), children: [w.arrow + ' '] }), Text({ dimColor: true, children: [w.kind + ' '] }), w.text] }))
   }
-  if (decisions.length) {
+  if (S.decisions.length) {
     kids.push(rule(els, 'routing'))
-    for (const d of routingLines(decisions)) kids.push(Text({ wrap: 'truncate', children: [Text({ dimColor: true, children: [d.at + '  '] }), d.who + '  ', Text({ color: d.color, children: [d.route] }), Text({ color: d.escalated ? colorOf('fable') : d.drift ? 'warning' : undefined, dimColor: !d.escalated && !d.drift, children: [d.reason] })] }))
+    for (const d of routingLines(S.decisions)) kids.push(Text({ wrap: 'truncate', children: [Text({ dimColor: true, children: [d.at + '  '] }), d.who + '  ', Text({ color: d.color, children: [d.route] }), Text({ color: d.escalated ? colorOf('fable') : d.drift ? 'warning' : undefined, dimColor: !d.escalated && !d.drift, children: [d.reason] })] }))
   }
-  const bars = tokenBars(ledger(live, S.lastRun, paneRoutes), Math.max(8, Math.min(30, cols - 30)))
+  const bars = tokenBars(ledger(S.live, S.lastRun, S.paneRoutes), Math.max(8, Math.min(30, cols - 30)))
   if (bars.length) {
     kids.push(rule(els, 'tokens'))
     for (const b of bars) kids.push(Text({ children: [b.name + ' ', Text({ color: hex(ACCENT), children: [b.bar] }), Text({ dimColor: true, children: [' ' + b.tok] })] }))

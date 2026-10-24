@@ -7,7 +7,6 @@ import { isAnswerBlock, panel, parseHighlightArgs, highlightText } from './highl
 import { PROBE } from './panes.js'
 import { cleanDisplay, storedDisplay, resolveDisplay, highlightFlags, withDisplay, profileJson } from './settings.js'
 import { strandedNow } from './panerec.js'
-const { panelMemo, rawIds } = S
 
 export const DECK = 'agt-deck'
 
@@ -109,20 +108,20 @@ export function focusLines(now) {
 // The panel for a message id, once it is known to close the newest answer; kept per id after that.
 export function answerPanel(id, text) {
   if (!id || typeof text !== 'string') return null
-  const hit = panelMemo.get(id)
+  const hit = S.panelMemo.get(id)
   if (hit && hit.text === text) return hit.p
   if (!hit && !(S.lastAnswer && (S.lastAnswer.id === id || (!S.lastAnswer.id && isAnswerBlock(S.lastAnswer.text, text))))) return null
   if (S.lastAnswer && !S.lastAnswer.id && !hit) S.lastAnswer.id = id
   const own = S.lastAnswer?.id === id
   if (own && S.lastAnswer.raw) {
-    rawIds.add(id)
-    if (rawIds.size > 200) rawIds.delete(rawIds.values().next().value)
+    S.rawIds.add(id)
+    if (S.rawIds.size > 200) S.rawIds.delete(S.rawIds.values().next().value)
     return null
   }
   const p = panel(text, { ms: own ? S.lastAnswer.ms : undefined, shaped: own ? S.lastAnswer.shaped : false })
-  panelMemo.delete(id)
-  panelMemo.set(id, { text, p })
-  if (panelMemo.size > 200) panelMemo.delete(panelMemo.keys().next().value)
+  S.panelMemo.delete(id)
+  S.panelMemo.set(id, { text, p })
+  if (S.panelMemo.size > 200) S.panelMemo.delete(S.panelMemo.keys().next().value)
   return p
 }
 

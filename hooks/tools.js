@@ -8,7 +8,7 @@ import { pieceOf, party, taskLine } from './links.js'
 import { PROBE, newRunId, doneFile, paneKey, answerFile, tmuxKillArgv, placePlan, codexNote, herdrCloseArgv, paneRole, spawnToolInput, closeTarget, sessionName, sessionsToolInput, sessionsNote } from './panes.js'
 import { installedSkew } from './profile.js'
 import { pollNow } from './reaper.js'
-import { formationOf, mentionsFable, proveHeader, demoteHeaderText, ladderFixes, decide } from './routing.js'
+import { formationOf, mentionsCodex, mentionsFable, proveHeader, demoteHeaderText, ladderFixes, decide } from './routing.js'
 import { saveSessions, closeSession, openSession } from './sessions.js'
 import { skewMessage } from './skew.js'
 import { transportOf, openPane, savePanes } from './spawn.js'
@@ -31,6 +31,10 @@ export async function spawnPane($, e) {
   if (!S.agtTyped) return { deny: 'spawn_pane opens worker panes only in a session where /agt was typed.' }
   const a = spawnToolInput(e, S.panes)
   if (a.error) return { deny: a.error }
+  // Codex is the person's pick, never the lead's: their /agt prompt or their newest typed prompt names it.
+  const codex = a.vendor === 'codex'
+  if (codex && !mentionsCodex(S.agtPrompt) && !mentionsCodex(S.lastTyped)) return { deny: 'vendor "codex" runs only when the person asked for Codex in their prompt, so run this slice as a Claude pane.' }
+  if (codex && t !== 'herdr') return { deny: 'Codex panes need Herdr; run this slice as a Claude pane or subagent.' }
   const proof = proveHeader(a.hdr, { fableTyped: S.fableTyped })
   if (proof.demoted) {
     a.hdr = proof.hdr
@@ -52,8 +56,6 @@ export async function spawnPane($, e) {
   const fixKey = pieceOf(a.hdr) ?? ''
   const fixes = ladderFixes(run, pieceOf(a.hdr)) + (isFix ? 1 : 0)
   run.fable = Math.max(run.fable, Number((await $.store.get('fable:' + a.run)) ?? 0))
-  const codex = a.vendor === 'codex'
-  if (codex && t !== 'herdr') return { deny: 'Codex panes need Herdr; run this slice as a Claude pane or subagent.' }
   // Codex runs on the person's own config: no routed model or effort, no Fable count.
   const d = codex ? { model: 'codex', effort: '', reason: 'table', fable: false } : decide({ role: a.agent, hdr: a.hdr, run: { ...run, fixes }, depth: S.depth, settings: S.settings, weeklyPct: S.weeklyPct })
   const r = paneRole(a.agent)

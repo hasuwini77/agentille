@@ -821,6 +821,29 @@ describe('pane tools: in the mod', () => {
     expect(seen[seen.length - 1]).toEqual(['herdr', 'pane', 'close', 'w1:p5'])
   })
 
+  test('vendor codex needs the person to name Codex: the lead never picks it on its own', async ($, on) => {
+    const HERDR = { HERDR_ENV: '1', HERDR_PANE_ID: 'w1:p1', HOME: '/h' }
+    const { seen } = setup(on, HERDR, { 'herdr pane split': { stdout: JSON.stringify({ result: { pane: { pane_id: 'w1:p5' } } }) } })
+    const r = await spawn($, { run: 'k7f2ab', role: 'exec-1', task: 'build the filter', vendor: 'codex', ...EXEC })
+    expect(r.deny).toBe('vendor "codex" runs only when the person asked for Codex in their prompt, so run this slice as a Claude pane.')
+    expect(seen.some((a) => a.slice(0, 3).join(' ') === 'herdr pane split')).toBe(false)
+    // "/codex-reviewer" names another tool, not a Codex worker.
+    await typed($, '/agt ship it, then /codex-reviewer the diff')
+    expect((await $.tool.call({ tool: 'mcp__agentille__spawn_pane', run: 'k7f2ab', role: 'exec-1', task: 'build the filter', vendor: 'codex', ...EXEC })).deny).toContain('asked for Codex')
+    await typed($, '/agt heavy ship it, codex builds the API slice')
+    const ok = await $.tool.call({ tool: 'mcp__agentille__spawn_pane', run: 'k7f2ab', role: 'exec-1', task: 'build the filter', vendor: 'codex', ...EXEC })
+    expect(ok.result).toContain('Opened agt-k7f2ab-exec-1 · codex')
+    expect(seen.find((a) => a.slice(0, 3).join(' ') === 'herdr agent start')).toContain('codex')
+  })
+
+  test('vendor codex on tmux: the gate passes on a typed ask, then Herdr is required', async ($, on) => {
+    setup(on, TMUX, { 'tmux split-window': { stdout: '%9\n' } })
+    const r = await spawn($, { run: 'k7f2ab', role: 'exec-1', task: 'build the filter', vendor: 'codex', ...EXEC })
+    expect(r.deny).toContain('asked for Codex')
+    await typed($, '/agt use Codex for the api slice')
+    expect((await $.tool.call({ tool: 'mcp__agentille__spawn_pane', run: 'k7f2ab', role: 'exec-1', task: 'build the filter', vendor: 'codex', ...EXEC })).deny).toContain('Codex panes need Herdr')
+  })
+
   test('no transport: a typed /agt registers none', async ($, on) => {
     const a = setup(on, {})
     await $.session.start({ cwd: '/work/repo', surface: null, isInteractive: false })

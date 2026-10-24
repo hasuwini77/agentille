@@ -161,7 +161,7 @@ export function register(on) {
     if (S.agtTurn) S.flags = []   // a new run starts with a clean slate
     // What the person typed is the only proof the dispatch headers get: a typed /agt unlocks spawn_pane
     // for the session, --fable on it is what makes fable=forced hold, and only a typed ask opens sessions.
-    if (S.agtTurn) { S.agtTyped = true; S.fableTyped = typedFable(e.text) }
+    if (S.agtTurn) { S.agtTyped = true; S.fableTyped = typedFable(e.text); S.agtPrompt = S.lastTyped }
     if (S.agtTurn) await ensureTools($, 'panes')
     // A worker's proof is its first prompt: the lead already rewrote fable=forced there when nobody typed --fable.
     if (S.worker && !S.workerProved) { S.workerProved = true; S.fableTyped = parseHeader(e.text)?.fable === 'forced' || typedFable(e.text) }

@@ -52,7 +52,8 @@ export const S = {
   agtTyped: false,  // the person typed /agt in this session: only then may the lead open worker panes
   fableTyped: false,  // ... and typed --fable on it: only then does a header's fable=forced hold
   sessionsAsked: false,  // the newest typed prompt asked for sessions of the person's own (open_sessions)
-  lastTyped: '',  // the newest typed prompt: a shell session runs only a command that appears in it
+  lastTyped: '',  // the newest typed prompt: a shell session runs only a command it asks for
+  agtPrompt: '',  // the newest typed /agt prompt: a worker pane runs on Codex only when it or lastTyped names Codex
   workerProved: false,  // worker: its first typed prompt decided whether fable=forced holds here
   demotedToasted: new Set(),  // run ids told once that fable=forced was dropped for want of a typed --fable
   leadTurn: false,  // a main-loop turn is running: its idle panes are waiting for review

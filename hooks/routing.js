@@ -82,6 +82,12 @@ export function mentionsFable(text) {
   return /(^|\s)--fable(?=\s|$)/.test(String(text ?? ''))
 }
 
+// The person named Codex in a typed prompt ("codex builds the API slice", "use Codex"): the only proof a worker pane
+// may run on vendor codex. A word on its own: "/codex-reviewer" and "codex-cli" name something else.
+export function mentionsCodex(text) {
+  return /(?<![\w/-])codex(?:es)?(?![\w-])/i.test(String(text ?? ''))
+}
+
 // A header's `fable=forced` holds only with that proof; without it the ladder applies (`fable=auto`)
 // and the caller says so once. `demoted` is true when the header was rewritten.
 export function proveHeader(hdr, { fableTyped = false } = {}) {

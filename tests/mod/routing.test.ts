@@ -1,5 +1,5 @@
 import { describe, expect, mock, test } from 'claude-code/testing'
-import { DEFAULTS, asksSessions, decide, demoteHeaderText, formationOf, ladderFixes, mentionsFable, parseHeader, proveHeader, roleOf, typedFable, verdictOf } from '../../hooks/routing.js'
+import { DEFAULTS, asksSessions, decide, demoteHeaderText, formationOf, ladderFixes, mentionsCodex, mentionsFable, parseHeader, proveHeader, roleOf, typedFable, verdictOf } from '../../hooks/routing.js'
 import { pieceOf } from '../../hooks/links.js'
 
 const fresh = () => ({ revise: 0, fixes: 0, fable: 0 })
@@ -311,6 +311,16 @@ describe('typed proof', () => {
     expect(demoteHeaderText('[agt run=a1 fable=forced piece=x]')).toBe('[agt run=a1 fable=auto piece=x]')
     expect(demoteHeaderText('no header\nfable=forced')).toBe('no header\nfable=forced')
     expect(demoteHeaderText(undefined)).toBe('')
+  })
+
+  test('mentionsCodex: the word on its own, not a tool or flag that contains it', async () => {
+    expect(mentionsCodex('codex builds the API slice')).toBe(true)
+    expect(mentionsCodex('/agt heavy ship it with Codex.')).toBe(true)
+    expect(mentionsCodex('two codexes, one per slice')).toBe(true)
+    expect(mentionsCodex('then run /codex-reviewer on it')).toBe(false)
+    expect(mentionsCodex('bump codex-cli')).toBe(false)
+    expect(mentionsCodex('the codexify helper')).toBe(false)
+    expect(mentionsCodex('')).toBe(false)
   })
 
   test('open_sessions needs a typed ask for sessions', async () => {

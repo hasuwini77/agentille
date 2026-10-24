@@ -2445,7 +2445,7 @@ describe('sessions: the idle sweep', () => {
 })
 
 import { cleanWorkspace } from '../../hooks/reaper.js'
-import { S as modState, Profile, Spawn } from '../../hooks/state.js'
+import { Profile, Spawn, Panes } from '../../hooks/state.js'
 import { seed } from '../../hooks/store.js'
 import { strandedNow } from '../../hooks/panerec.js'
 
@@ -2498,9 +2498,9 @@ describe('/agt-clean: a stranded pane', () => {
   })
 
   test('the tidy without all keeps a stranded pane and says why; with all it closes it', async () => {
-    const saved = { panes: modState.panes }
     let savedProfile = {}
     let savedSpawn = {}
+    let savedPanes = {}
     const runs: string[][] = []
     const fake = {
       process: { run: async (argv: string[]) => { runs.push(argv); return argv.slice(0, 3).join(' ') === 'herdr agent list' ? herdrList().value : { exitCode: 0, stdout: '', stderr: '' } } },
@@ -2510,7 +2510,7 @@ describe('/agt-clean: a stranded pane', () => {
       ui: { invalidate: () => {}, toast: () => {} },
     }
     try {
-      Object.assign(modState, { panes: [{ id: 'w1:p2', name: 'agt-r9-executor', state: 'done' }] })
+      savedPanes = seed(Panes, { panes: [{ id: 'w1:p2', name: 'agt-r9-executor', state: 'done' }] })
       savedProfile = seed(Profile, { home: '/h' })
       savedSpawn = seed(Spawn, { transport: 'herdr' })
       strandedNow.add('agt-r9-executor')
@@ -2522,7 +2522,7 @@ describe('/agt-clean: a stranded pane', () => {
       expect(all.closed).toEqual(['agt-r9-executor'])
       expect(runs).toContainEqual(herdrCloseArgv('w1:p2'))
     } finally {
-      Object.assign(modState, saved)
+      seed(Panes, savedPanes)
       seed(Profile, savedProfile)
       seed(Spawn, savedSpawn)
       strandedNow.clear()

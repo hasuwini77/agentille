@@ -1,7 +1,8 @@
 // agentille reaper: what the lead sees of its panes (herdr or tmux poll), which finished worker is harvested,
 // which closes, which is flagged, the wake it sends itself, and the cleaner behind /agt-clean.
 
-import { S, Profile, Runs, Spawn } from './state.js'
+import { S, Profile, Runs, Spawn, Sessions } from './state.js'
+import { makeStore } from './store.js'
 import { herdrOrphans, tmuxOrphans, orphanPlan, staleTabs, parseWorktrees, worktreePlan, cleanText, FRESH_MS } from './clean.js'
 import { ownedWorktrees, forgetOwned } from './guard.js'
 import { writeRunFile } from './dispatch.js'
@@ -13,10 +14,17 @@ import { wakeDue, wakeMessage } from './wire.js'
 import * as P from './panerec.js'
 const { restingSince, staged, strandedNow } = P
 
+// The pane list's store: the agt-* panes (herdr or tmux) other than this one that this session may act on, as the
+// newest poll saw them. Read through the Panes view; written only by the polls below.
+const { s: my, view } = makeStore('reaper.js', {
+  panes: [],
+})
+export const Panes = view
+
 // Panes that left the stage this poll: end their route and refresh the ledger.
 export async function notePaneExits($) {
   const touched = new Set()
-  for (const name of panesLeft(staged, S.panes)) {
+  for (const name of panesLeft(staged, my.panes)) {
     const r = endRoute(Runs.paneRoutes, name, Date.now())
     if (r) touched.add(r.run)
   }
@@ -44,7 +52,7 @@ export async function answerOf($, p) {
   if (await freshAnswer($, own, p)) return own
   // Known limit: two keyless twins (an older worker's one legacy file) cannot be told apart, so with two panes of the
   // name neither is harvested by it and both stay flagged.
-  if (S.panes.filter((q) => q.name === p.name).length !== 1) return null
+  if (my.panes.filter((q) => q.name === p.name).length !== 1) return null
   const legacy = answerFile(Profile.home, n.run, n.role)
   return (await freshAnswer($, legacy, p)) ? legacy : null
 }
@@ -109,20 +117,20 @@ export async function pollHerdr($) {
   // another session's workers in the same tab. Workers (panes that are themselves agt-*) see their siblings and never reap.
   const real = paneAgents(list, selfPane).filter((p) => !me || p.workspace === me.workspace_id)
   const owned = S.selfName ? real : real.filter((p) => Spawn.openedNames.has(p.name))
-  S.panes = quietSpawn(owned) // the band shows a spawn pane as `open`; the reaper below sees its real state
+  my.panes = quietSpawn(owned) // the band shows a spawn pane as `open`; the reaper below sees its real state
   const now = await $.clock.now()
-  for (const p of S.panes) if (P.get(p.id)?.firstSeen === undefined) P.rec(p.id).firstSeen = now
-  P.forgetGone(S.panes)
+  for (const p of my.panes) if (P.get(p.id)?.firstSeen === undefined) P.rec(p.id).firstSeen = now
+  P.forgetGone(my.panes)
   await notePaneExits($)
   if (me && !S.selfName) {
     await pruneTabs($, me.workspace_id)
     await sweep($, reapPool(owned), now, 'herdr', (p) => $.process.run(herdrCloseArgv(p.id)))
     // A session with no agent listed is a shell or a pane closed by hand: only a gone one is forgotten.
-    for (const s of S.sessions.filter((x) => !list.some((a) => a.name === x.name))) {
+    for (const s of Sessions.sessions.filter((x) => !list.some((a) => a.name === x.name))) {
       const g = await $.process.run(herdrPaneGetArgv(s.id), PROBE).catch(() => null)
       if (g?.exitCode !== 0 || herdrTerminalOf(g.stdout) !== s.terminal) await forgetSession($, s)
     }
-    for (const s of sessionSweep(S.sessions, list, restingSince, now)) {
+    for (const s of sessionSweep(Sessions.sessions, list, restingSince, now)) {
       if ((await closeSession($, 'herdr', s)) === 'closed') $.ui.toast('agt ◆ closed ' + s.name + ': idle ' + SESSION_IDLE_MS / 60_000 + ' min')
     }
   }
@@ -163,7 +171,7 @@ export async function pollTmux($) {
     }
   }
   const real = tmuxPaneAgents(rows, selfPane, done).filter((p) => S.selfName || Spawn.openedNames.has(p.name))
-  S.panes = quietSpawn(real)
+  my.panes = quietSpawn(real)
   await notePaneExits($)
   if (isLead(rows, selfPane)) {
     await sweep($, reapPool(real), now, 'tmux', (p) => $.process.run(tmuxKillArgv(p.id), PROBE))
@@ -218,7 +226,7 @@ export async function cleanWorkspace($, { all = false, auto = false, panesOnly =
     const tabs = new Map()
     for (const k of keys) tabs.set(k, String(await $.fs.read(dir + '/lead-' + k + '.tabs').catch(() => '')).split('\n').filter(Boolean))
     const plan = orphanPlan(herdrOrphans(list, (id) => tabs.get(paneKey(id))))
-    const close = [...(await withAnswer($, plan)), ...(all ? S.panes.filter((p) => strandedNow.has(p.name) && !plan.close.some((c) => c.id === p.id)) : [])]
+    const close = [...(await withAnswer($, plan)), ...(all ? my.panes.filter((p) => strandedNow.has(p.name) && !plan.close.some((c) => c.id === p.id)) : [])]
     for (const p of close) if ((await run(herdrCloseArgv(p.id)))?.exitCode === 0) r.closed.push(p.name)
     r.keep.push(...plan.keep)
     for (const k of staleTabs(keys, list, paneKey)) if ((await run(['rm', '-f', dir + '/lead-' + k + '.tabs']))?.exitCode === 0) r.tabs += 1
@@ -243,11 +251,11 @@ export async function cleanWorkspace($, { all = false, auto = false, panesOnly =
       if (file && (await $.fs.exists(file).catch(() => false))) done.add(row.id)
     }
     const plan = orphanPlan(tmuxOrphans(rows, (row) => done.has(row.id)))
-    const close = [...(await withAnswer($, plan)), ...(all ? S.panes.filter((p) => strandedNow.has(p.name) && !plan.close.some((c) => c.id === p.id)) : [])]
+    const close = [...(await withAnswer($, plan)), ...(all ? my.panes.filter((p) => strandedNow.has(p.name) && !plan.close.some((c) => c.id === p.id)) : [])]
     for (const p of close) if ((await run(tmuxKillArgv(p.id)))?.exitCode === 0) r.closed.push(p.name)
     r.keep.push(...plan.keep)
   }
-  if (!all) for (const p of S.panes) if (strandedNow.has(p.name)) r.keep.push({ what: p.name, why: 'answer not read · /agt-clean closes it' })
+  if (!all) for (const p of my.panes) if (strandedNow.has(p.name)) r.keep.push({ what: p.name, why: 'answer not read · /agt-clean closes it' })
   if (!panesOnly) await cleanGit($, run, r, { sweepEnv: auto || all })
   if (all && !panesOnly) await pruneRuns($, run, r)
   if (r.closed.length) $.ui.invalidate('ui.render')
@@ -263,7 +271,7 @@ export const RUN_TTL_MS = 14 * 24 * 60 * 60_000
 export async function pruneRuns($, run, r) {
   if (!Profile.home) return
   const dir = Profile.home + '/.agentille/state'
-  const keep = new Set([Runs.lastRun, ...Runs.runs.keys(), ...S.panes.map((p) => splitName(p.name)?.run), ...[...Runs.live.values()].map((a) => a.run)])
+  const keep = new Set([Runs.lastRun, ...Runs.runs.keys(), ...my.panes.map((p) => splitName(p.name)?.run), ...[...Runs.live.values()].map((a) => a.run)])
   for (const e of await $.fs.list(dir).catch(() => [])) {
     if (e.kind !== 'dir' || !e.name.startsWith('run-')) continue
     const id = e.name.slice(4)

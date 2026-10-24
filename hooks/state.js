@@ -9,14 +9,14 @@ import { Profile } from './profile.js'
 import { Display } from './display.js'
 import { Runs } from './dispatch.js'
 import { Spawn } from './spawn.js'
+import { Panes } from './reaper.js'
+import { Sessions } from './sessions.js'
 
 // The read views of the stores the owner modules keep (store.js): read through these, written only by their owners.
-export { Timers, Wire, Profile, Display, Runs, Spawn }
+export { Timers, Wire, Profile, Display, Runs, Spawn, Panes, Sessions }
 
 export const S = {
   weeklyPct: null,
-  panes: [],  // agt-* panes (herdr or tmux) other than this one
-  sessions: [],  // { id, name, kind, tab, terminal } of the sessions this lead opened via open_sessions, oldest first
   selfName: null,  // this pane's name when it is an agt-* worker
   worker: null,  // { agent, model, effort } from AGENTILLE_WORKER: this session is a worker pane
   selfTab: null,  // herdr: the lead's own tab, where its workers split
@@ -56,7 +56,7 @@ export const ctx = {
   get live() { return Runs.live },
   get run() { return Runs.lastRun },
   get tick() { return Timers.tick },
-  get panes() { return S.panes },
+  get panes() { return Panes.panes },
   get routes() { return Runs.paneRoutes },
   get isLead() { return isLead() },
   onTick: [], // (io, ctx, now) callbacks the redraw ticker calls each period; a module adds its own while registering

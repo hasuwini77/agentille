@@ -1,7 +1,7 @@
 // agentille timers: the agent list refresh, the 5 s pane poll that runs while panes may exist, and the 300 ms
 // redraw ticker that runs while something works or animates.
 
-import { S, ctx, Display, Runs, Spawn } from './state.js'
+import { S, ctx, Display, Runs, Spawn, Panes, Sessions } from './state.js'
 import { makeStore } from './store.js'
 import { waving } from './live.js'
 import { moodAt } from './mascot.js'
@@ -50,7 +50,7 @@ export async function refreshAgents($, at) {
   }
 }
 
-export const working = () => [...Runs.live.values()].some((a) => a.state === 'working') || S.panes.some((p) => p.state === 'working')
+export const working = () => [...Runs.live.values()].some((a) => a.state === 'working') || Panes.panes.some((p) => p.state === 'working')
 
 // Pane polling starts when panes can exist (an /agt run, a spawn, panes found at start) and
 // stops after a minute with no agt- pane and nothing working.
@@ -59,7 +59,7 @@ export function ensurePolling($) {
   quietPolls = 0
   pollTimer = $.clock.every(5000, () => {
     pollNow($, Spawn.transport).then(() => {
-      if (S.panes.length || S.sessions.length || working()) { quietPolls = 0; ensureTicker($); return }
+      if (Panes.panes.length || Sessions.sessions.length || working()) { quietPolls = 0; ensureTicker($); return }
       if (++quietPolls >= 12) { pollTimer?.cancel(); pollTimer = null }
     })
   })
@@ -92,7 +92,7 @@ export function ensureTicker($) {
       tickTimer = null
     } else my.tick += 1
     await tickModules($, now) // also on the tick that stops the ticker, so the last change is seen
-    if (S.panes.length && my.tick % 3 === 0) await readWire($)
+    if (Panes.panes.length && my.tick % 3 === 0) await readWire($)
     if (my.tick % 4 === 0) void refreshAgents($, now)
     $.ui.invalidate('ui.render')
   })

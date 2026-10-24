@@ -2,7 +2,7 @@
 // band, built from the surface's own elements (`els`) and the state. Nothing here changes state; the one call
 // out is the ↗ button's jump to a pane.
 
-import { S, isLead, Timers, Wire, Profile, Display, Runs, Spawn } from './state.js'
+import { S, isLead, Timers, Wire, Profile, Display, Runs, Spawn, Panes } from './state.js'
 import { ACCENT, FRAME_COLOR, DONE_COLOR, WIRE_COLOR, INK, hex, colorOf, chip, cast, boardRows, header, leadLine, wireRow, castColumns, routingLines, wireLines, tokenBars, swarm } from './board.js'
 import { focusLines } from './display.js'
 import { MARK, SPAN_COLOR, spans, bodyParts } from './highlight.js'
@@ -165,7 +165,7 @@ export function workerBand(els, e, now) {
 export async function switchboard($, e, next) {
   if (e.props.hasSurvey) return next(e)
   const now = Date.now()
-  const scene = stage({ agents: Runs.live, panes: S.panes, routes: Runs.paneRoutes, run: Runs.lastRun, now })
+  const scene = stage({ agents: Runs.live, panes: Panes.panes, routes: Runs.paneRoutes, run: Runs.lastRun, now })
   const focus = focusLines(now)
   const wire = wireRow(Wire.wireLog, now)
   if (scene.rows.length === 0 && isLead() && focus.length === 0 && !wire) return next(e)
@@ -201,7 +201,7 @@ export async function deck($, e) {
   const els = $.ui.resolve(e)
   const { Box, Text } = els
   const now = Date.now()
-  const scene = stage({ agents: Runs.live, panes: S.panes, routes: Runs.paneRoutes, run: Runs.lastRun, now })
+  const scene = stage({ agents: Runs.live, panes: Panes.panes, routes: Runs.paneRoutes, run: Runs.lastRun, now })
   const all = [...scene.rows, ...[...Runs.live.values()].filter((a) => a.run === Runs.lastRun && !scene.rows.includes(a))]
   const rows = cast({ rows: all.map((r) => (r.kind === 'pane' && !r.model ? { ...r, model: Wire.wireStatus.get(r.name)?.model ?? null } : r)), tally: { working: 0 } }, Runs.live, Runs.lastRun)
   const cols = e.props.bodyColumns ?? 80

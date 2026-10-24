@@ -1,7 +1,7 @@
 // agentille display: the three display settings (deck, focus, highlight) read from profile.json or the mod
 // store and written back, the agent flags above the prompt, and the memo of which message closed an answer.
 
-import { S, Profile } from './state.js'
+import { S, Profile, Panes } from './state.js'
 import { makeStore } from './store.js'
 import { mergeFlags, paneFlags, parseFocusArgs, focusText } from './focus.js'
 import { isAnswerBlock, panel, parseHighlightArgs, highlightText } from './highlight.js'
@@ -161,7 +161,7 @@ export function addFlag($, key, text) {
 export function focusLines(now) {
   if (!my.focusOn) return []
   const fresh = [...new Set(my.flags.filter((f) => now - f.at < FLAG_TTL_MS).map((f) => f.text))]
-  return [...fresh, ...paneFlags(S.panes, strandedNow)].slice(0, 5)
+  return [...fresh, ...paneFlags(Panes.panes, strandedNow)].slice(0, 5)
 }
 
 // The panel for a message id, once it is known to close the newest answer; kept per id after that.

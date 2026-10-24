@@ -16,7 +16,7 @@
 //
 // and the gates read them through spawnAllowed, sessionsAllowed, fableProof and runHeld.
 
-import { S, isLead, Display, Runs } from './state.js'
+import { S, isLead, Display, Runs, Panes } from './state.js'
 import { SAFE_RUN } from './panes.js'
 import * as P from './panerec.js'
 import { isRawPrompt } from './highlight.js'
@@ -132,7 +132,7 @@ export const flight = Object.freeze({
   get agtTypedSince() { return S.agtTypedSince },
   get agtBirth() { return S.agtBirth },
   get agtRun() { return S.agtRun },
-  get panes() { return S.panes },
+  get panes() { return Panes.panes },
   get lastRun() { return Runs.lastRun },
   get live() { return Runs.live },
 })

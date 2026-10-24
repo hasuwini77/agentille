@@ -1,7 +1,7 @@
 // agentille mod entry: wires the hooks. The state is in state.js; routing, panes, sessions, the reaper, the
 // timers, the worker's wire, display settings, drawing and run files each have a module beside this one.
 
-import { S, ctx, isLead, Profile, Display, Runs, Spawn } from './state.js'
+import { S, ctx, isLead, Profile, Display, Runs, Spawn, Panes } from './state.js'
 import { registerAutocomplete } from './autocomplete.js'
 import { toolLabel, runPhases } from './board.js'
 import { cleanText } from './clean.js'
@@ -81,9 +81,9 @@ export function register(on) {
       // "not harvested" and left to the person. A session that opened none polls nothing.
       await loadOwned($)
       await pollNow($, Spawn.transport)
-      if (S.panes.length) ensurePolling($)
+      if (Panes.panes.length) ensurePolling($)
       // A lead that died skipped its SessionEnd sweep: close its finished workers now.
-      if (S.panes.length && isLead()) void cleanWorkspace($, { auto: true, panesOnly: true }).catch(() => {})
+      if (Panes.panes.length && isLead()) void cleanWorkspace($, { auto: true, panesOnly: true }).catch(() => {})
     }
     if (working()) ensureTicker($)
     if (S.wireName) await publish($, true)
@@ -102,7 +102,7 @@ export function register(on) {
     if (!['composer', 'bridge'].includes(e.origin?.kind)) return { text: '/agt-tell runs only when typed.' }
     const t = await transportOf($)
     if (t !== 'none') await pollNow($, t)
-    const a = parseTellArgs(e.args, S.panes)
+    const a = parseTellArgs(e.args, Panes.panes)
     if (a.usage || a.error) return { text: a.usage ?? a.error }
     const rec = await $.store.get(statusKey(a.name)).catch(() => null)
     const sid = freshStatus(rec, a.name, Date.now()) ? validLead(rec.session) : null
@@ -178,7 +178,7 @@ export function register(on) {
     if (w) {
       const from = shortName(w.from)
       // Only the pane whose key the message names: a stale list or a respawned role must not harvest the older pane.
-      const hit = w.kind === 'done' && w.key ? S.panes.find((p) => paneKey(p.id) === w.key && p.name === w.from) : null
+      const hit = w.kind === 'done' && w.key ? Panes.panes.find((p) => paneKey(p.id) === w.key && p.name === w.from) : null
       if (hit) { const r = P.rec(hit.id); r.harvested = true; r.wireDone = true }
       const route = w.kind === 'done' ? Runs.paneRoutes.findLast((r) => r.name === w.from) : null
       if (route) route.verdict = verdictChip(route.agent, w.summary)
@@ -303,7 +303,7 @@ export function register(on) {
   on('ui.render', { component: 'Spinner' }, async ($, e, next) => {
     if (Runs.live.has(e.requestId)) return next(e)
     const subs = [...Runs.live.values()].filter((a) => a.state === 'working').length
-    const busy = S.panes.filter((p) => p.state === 'working').length
+    const busy = Panes.panes.filter((p) => p.state === 'working').length
     if (subs + busy === 0) return next(e)
     // In an /agt run the status line holds the counts; the spinner names the phases at work.
     const phases = Runs.lastRun === 'adhoc' ? '' : runPhases(Runs.live, Runs.paneRoutes, Runs.lastRun)

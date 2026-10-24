@@ -109,6 +109,28 @@ export function runInFlight(st, now = Date.now(), restMs = () => null, clockNow 
   return (st.agtTypedSince ?? 0) < AGT_GRACE_TYPED
 }
 
+// The roster runs at most this many executors at once (SKILL.md → "Hard rules"). The mod never refuses a dispatch:
+// the one past the cap is flagged. `agents` is the live map (subagents: working and heard from within AGENT_SILENT_MS,
+// since a cancelled one raises no turn.complete), `routes` the pane routes (an executor pane counts until it leaves the
+// stage). `run` is the run id; `now` is Date.now().
+export const MAX_EXECUTORS_AT_ONCE = 3
+export function executorsWorking(agents, routes, run, now = Date.now()) {
+  const subs = [...(agents?.values() ?? [])].filter((a) => a.run === run && a.role === 'executor' && a.state === 'working' && now - (a.heard ?? a.start ?? 0) < AGENT_SILENT_MS).length
+  const panes = (routes ?? []).filter((r) => r.run === run && r.agent === 'executor' && r.end == null).length
+  return subs + panes
+}
+
+export function ordinal(n) {
+  const t = n % 100
+  if (t >= 11 && t <= 13) return n + 'th'
+  return n + ({ 1: 'st', 2: 'nd', 3: 'rd' }[n % 10] ?? 'th')
+}
+
+// The flag for an executor dispatch that makes `count` executors at once in `run`, or null within the cap.
+export function executorCapFlag(run, count) {
+  return count > MAX_EXECUTORS_AT_ONCE ? 'run ' + run + ': ' + ordinal(count) + ' executor at once; the roster says ' + MAX_EXECUTORS_AT_ONCE : null
+}
+
 // The person named Codex in a typed prompt ("codex builds the API slice", "use Codex"): the only proof a worker pane
 // may run on vendor codex. A word on its own: "/codex-reviewer" and "codex-cli" name something else.
 export function mentionsCodex(text) {

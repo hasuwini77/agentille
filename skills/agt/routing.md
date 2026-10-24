@@ -51,7 +51,7 @@ Only when the level table falls through. One inline Haiku call, never the planne
 - Debug: attempts, the limit and the `mode=diagnose` planner after 2 failed attempts are `factory.md` → "Fix rounds".
 - Squads add payments / SEO / perf reviewers to the review step when the diff touches their domain (`squads.md`). Formations reshape the workers (`formations.md`).
 - Every reviewer column ticked for a slice runs **at once**: one message, parallel background calls (`SKILL.md` → "The contract" step 8).
-- Never more than 3 executors at once; batch the rest in waves.
+- Never more than 3 executors at once; batch the rest in waves. The mod counts a run's working executor subagents and open executor panes when an executor subagent is dispatched, and flags a 4th (`⚑ run <id>: 4th executor at once; the roster says 3` on the band, one toast, a `cap` field on that line of `routing.jsonl`); it never refuses the dispatch.
 
 ## Default routing
 

@@ -1,5 +1,5 @@
 import { describe, expect, mock, test } from 'claude-code/testing'
-import { AGENT_SILENT_MS, AGT_GRACE_TYPED, AGT_INFLIGHT_MAX_MS, PANE_REST_MS, DEFAULTS, asksSessions, decide, demoteHeaderText, formationOf, ladderFixes, mentionsCodex, mentionsFable, parseHeader, proveHeader, roleOf, runInFlight, typedFable, verdictOf } from '../../hooks/routing.js'
+import { AGENT_SILENT_MS, AGT_GRACE_TYPED, AGT_INFLIGHT_MAX_MS, PANE_REST_MS, DEFAULTS, MAX_EXECUTORS_AT_ONCE, asksSessions, decide, executorCapFlag, executorsWorking, ordinal, demoteHeaderText, formationOf, ladderFixes, mentionsCodex, mentionsFable, parseHeader, proveHeader, roleOf, runInFlight, typedFable, verdictOf } from '../../hooks/routing.js'
 import { pieceOf } from '../../hooks/links.js'
 
 const fresh = () => ({ revise: 0, fixes: 0, fable: 0 })
@@ -276,6 +276,78 @@ describe('workflow agents: runs, toast, deny', () => {
     const routing = (await $.command.run({ command: 'agt-info', args: 'routing' })).text
     expect(routing).toContain('planner → claude-fable-5')
     expect(routing).not.toContain('table says')
+  })
+})
+
+describe('executor cap: at most 3 at once', () => {
+  test('counts working executors of one run, subagents heard from lately and open executor panes', async () => {
+    const now = 5_000_000
+    const a = (o: Record<string, unknown>) => ({ run: 'r1', role: 'executor', state: 'working', start: now, heard: now, ...o })
+    const agents = new Map(Object.entries({
+      x1: a({}),
+      x2: a({ state: 'done' }),
+      x3: a({ run: 'r2' }),
+      x4: a({ role: 'code-reviewer' }),
+      x5: a({ heard: now - AGENT_SILENT_MS }), // cancelled: never completes, never counts
+    }))
+    const routes = [{ run: 'r1', agent: 'executor', end: null }, { run: 'r1', agent: 'executor', end: now }, { run: 'r1', agent: 'adversary', end: null }]
+    expect(executorsWorking(agents, routes, 'r1', now)).toBe(2)
+    expect(executorsWorking(new Map(), [], 'r1', now)).toBe(0)
+  })
+
+  test('the flag names the run and the count, only past the cap', async () => {
+    expect(MAX_EXECUTORS_AT_ONCE).toBe(3)
+    expect(executorCapFlag('r1', 3)).toBe(null)
+    expect(executorCapFlag('r1', 4)).toBe('run r1: 4th executor at once; the roster says 3')
+    expect(executorCapFlag('r1', 5)).toContain('5th executor')
+    expect([1, 2, 3, 4, 11, 12, 13, 21, 22, 23].map(ordinal)).toEqual(['1st', '2nd', '3rd', '4th', '11th', '12th', '13th', '21st', '22nd', '23rd'])
+  })
+
+  const boot = (on: any) => {
+    const toasts: string[] = []
+    const writes: Record<string, string> = {}
+    let n = 0
+    on('env.get', async ($: any, e: any) => ({ value: ({ HOME: '/h' } as any)[e.name] }))
+    on('session.start', async ($: any, e: any) => ({ cwd: e.cwd }))
+    on('command.register', async () => ({ value: undefined }))
+    on('fs.read', async () => ({ deny: 'no profile' }))
+    on('fs.write', async ($: any, e: any) => { writes[e.path] = e.text; return { value: undefined } })
+    on('store.get', async () => ({ value: null }))
+    on('store.set', async () => ({ value: undefined }))
+    on('ui.render', async () => ({ type: 'engine', ref: 0 }) as never)
+    on('ui.toast', async ($: any, e: any) => { toasts.push(e.text); return { value: undefined } })
+    on('turn.complete', async ($: any, e: any) => ({ text: e.answer }))
+    on('agent.spawn', async ($: any, e: any) => ({ model: e.model ?? 'sonnet', agentId: 'e' + n++ }))
+    mock.clock(on, { now: Date.now() })
+    return { toasts, writes }
+  }
+  const exec = ($: any, run: string, slice: string) => $.agent.spawn({ prompt: '[agt run=' + run + ' size=small mode=build slice=' + slice + ']\nbuild', subagentType: 'agentille:agentille-executor', model: 'sonnet' })
+  const band = ($: any) => $.ui.mount({ plugin: 'agentille', surface: 'terminal', component: 'AbovePrompt', props: { hasSurvey: false, isWorking: true, maxRows: 10, bodyColumns: 120 } as never })
+  const capToasts = (t: string[]) => t.filter((x) => x.includes('executor at once'))
+
+  test('a 4th executor of one run is dispatched as asked, with a toast, a band flag and a cap line in the routing log', async ($, on) => {
+    const { toasts, writes } = boot(on)
+    await $.session.start({ cwd: '/w', surface: null, isInteractive: false })
+    for (const s of ['a', 'b', 'c']) expect((await exec($, 'cap1', s)).model).toBe('sonnet')
+    expect(capToasts(toasts)).toEqual([])
+    const res = await exec($, 'cap1', 'd')
+    expect(res.agentId).toBe('e3') // never refused
+    expect(capToasts(toasts)).toEqual(['agt ⚑ run cap1: 4th executor at once; the roster says 3'])
+    const log = writes['/h/.agentille/state/run-cap1/routing.jsonl'].trim().split('\n').map((l) => JSON.parse(l))
+    expect(log.map((r) => r.cap ?? null)).toEqual([null, null, null, 'run cap1: 4th executor at once; the roster says 3'])
+    const ui = await band($)
+    expect(await ui.find({ type: 'Text', text: /⚑ run cap1: 4th executor at once/ })).toBeDefined()
+    await ui.unmount()
+  })
+
+  test('a finished executor frees its place, and another run\'s executors never count', async ($, on) => {
+    const { toasts } = boot(on)
+    await $.session.start({ cwd: '/w', surface: null, isInteractive: false })
+    for (const s of ['a', 'b', 'c']) await exec($, 'cap2', s)
+    await $.turn.complete({ agentId: 'e0', answer: 'done', durationMs: 10, isAborted: false, turnId: 'te0', reason: 'answer' } as never)
+    await exec($, 'cap2', 'd') // three at once again
+    await exec($, 'cap3', 'a') // another run
+    expect(capToasts(toasts)).toEqual([])
   })
 })
 

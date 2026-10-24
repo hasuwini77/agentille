@@ -36,12 +36,21 @@ function world() {
 }
 
 const $ = {
-  process: { run: async (argv) => { const r = spawnSync(argv[0], argv.slice(1), { env, encoding: 'utf8' }); if (r.error) throw r.error; return { exitCode: r.status ?? 1, stdout: r.stdout, stderr: r.stderr } } },
+  // As the engine's: the child starts in init.cwd (else the session's), with init.env over the host's.
+  process: { run: async (argv, init = {}) => { const r = spawnSync(argv[0], argv.slice(1), { cwd: init.cwd ?? APP, env: { ...env, ...(init.env ?? {}) }, encoding: 'utf8', timeout: init.timeoutMs ?? 30_000 }); if (r.error) throw r.error; return { exitCode: r.status ?? 1, stdout: r.stdout, stderr: r.stderr } } },
   fs: {
     read: async (p) => fs.readFileSync(p, 'utf8'),
     write: async (p, t) => fs.writeFileSync(p, t),
     list: async (d) => fs.readdirSync(d, { withFileTypes: true }).map((x) => ({ name: x.name, kind: x.isDirectory() ? 'dir' : 'file' })),
-    stat: async (p) => { const s = fs.statSync(p); return { kind: s.isDirectory() ? 'dir' : 'file', mtimeMs: s.mtimeMs } },
+    // As the engine's: isLink for a link itself, and with { resolve: true } realPath, where the path lands.
+    stat: async (p, o = {}) => {
+      const l = fs.lstatSync(p)
+      let s = l
+      try { s = fs.statSync(p) } catch {}
+      let realPath
+      if (o.resolve) try { realPath = fs.realpathSync(p) } catch {}
+      return { kind: s.isDirectory() ? 'dir' : s.isFile() ? 'file' : 'other', size: s.size, mtimeMs: s.mtimeMs, isLink: l.isSymbolicLink(), ...(realPath ? { realPath } : {}) }
+    },
   },
   session: { cwd: async () => APP },
   env: { get: async () => null },
@@ -165,6 +174,18 @@ try {
     check('... origin/main unchanged', refOf('origin.git', 'main') === w.main)
     const b = await run('npm run build')
     check('npm run build: allowed by the guard', !b?.deny, JSON.stringify(b))
+  }
+  {
+    // push.default set for one call would push every matching branch, the base included: a config write.
+    const w = world()
+    sh('git branch -f main agt/x', APP)
+    const r = await run('git -c push.default=matching push -q origin')
+    check('git -c push.default=matching push: denied as a config write', r?.deny?.includes('git config key'), JSON.stringify(r))
+    const c = await run('git config push.default matching')
+    check('git config push.default matching: denied', c?.deny?.includes('git config key'), JSON.stringify(c))
+    const f = await run('git -c core.fsmonitor=./watch.sh status')
+    check('git -c core.fsmonitor: denied', f?.deny?.includes('git config key'), JSON.stringify(f))
+    check('... origin/main unchanged, push.default unset', refOf('origin.git', 'main') === w.main && spawnSync('git', ['-C', APP, 'config', 'push.default'], { env, encoding: 'utf8' }).stdout.trim() === '')
   }
   {
     // Controls below auto: the run's own branch and ordinary writes still pass.

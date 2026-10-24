@@ -31,9 +31,12 @@ export function protectedPath(raw, abs) {
 }
 
 
-// git config keys a run may not set below auto: aliases (rename a step past the reader), the hooks path (run code),
-// a remote's push URL or refspec, URL rewriting, receive.* — anything that changes where or how a push lands.
-const PROTECT_CFG = /^(alias\.|core\.hookspath$|remote\..*\.(push|pushurl)$|url\..*\.(push)?insteadof$|receive\.)/i
+// git config keys a run may not set below auto: aliases (rename a step past the reader), the hooks path, the
+// fsmonitor hook and the ssh command (each runs code), a remote's push URL or refspec, push.default, URL rewriting,
+// receive.* — anything that runs code or changes where or how a push lands.
+const PROTECT_CFG = /^(alias\.|core\.hookspath$|core\.fsmonitor$|core\.sshcommand$|push\.default$|remote\..*\.(push|pushurl)$|url\..*\.(push)?insteadof$|receive\.)/i
+
+const CFG_WHAT = 'a git config key (core.hooksPath, core.fsmonitor, core.sshCommand, push.default, remote push, URL rewriting or receive.*)'
 
 
 // Whether a `git config …` writes a value (as opposed to reading or unsetting one): a `set` verb, `--add`/
@@ -785,9 +788,9 @@ export function commandSteps(line, cwd = null) {
       if (g.sub === 'tag' && !tagListing(g.args)) out.push({ kind: 'step', what: 'git tag', dir, slug: null })
       // An alias or a hooks-path/push-config key set for one call changes a step past this reader.
       if (keys.some((k) => k.startsWith('alias.'))) out.push({ kind: 'step', what: 'git -c alias.*', dir, slug: null })
-      if (keys.some((k) => PROTECT_CFG.test(k) && !k.startsWith('alias.'))) out.push({ kind: 'protected', what: 'a git config key (core.hooksPath, remote push, URL rewriting or receive.*)', dir, slug: null })
+      if (keys.some((k) => PROTECT_CFG.test(k) && !k.startsWith('alias.'))) out.push({ kind: 'protected', what: CFG_WHAT, dir, slug: null })
       // `git config <key> <value>` setting a protected key (the hooks path, a remote's push, URL rewriting, …).
-      if (g.sub === 'config' && gitConfigSets(g.args) && g.args.some((x) => PROTECT_CFG.test(x))) out.push(/^alias\./i.test(g.args.find((x) => PROTECT_CFG.test(x)) ?? '') ? { kind: 'step', what: 'git config alias.*', dir, slug: null } : { kind: 'protected', what: 'a git config key (core.hooksPath, remote push, URL rewriting or receive.*)', dir, slug: null })
+      if (g.sub === 'config' && gitConfigSets(g.args) && g.args.some((x) => PROTECT_CFG.test(x))) out.push(/^alias\./i.test(g.args.find((x) => PROTECT_CFG.test(x)) ?? '') ? { kind: 'step', what: 'git config alias.*', dir, slug: null } : { kind: 'protected', what: CFG_WHAT, dir, slug: null })
       // Plumbing that writes a remote with no `push` in sight.
       if (['send-pack', 'http-push'].includes(g.sub) || (g.sub === 'subtree' && g.args[0] === 'push')) out.push({ kind: 'step', what: 'git ' + g.sub, dir, slug: null })
       const ref = refWrite(g)

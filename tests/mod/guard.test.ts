@@ -970,11 +970,24 @@ describe('guard: the trust root and the repo git state are off-limits below auto
       'git config remote.origin.push +refs/heads/*:refs/heads/*',
       'sed -i s/x/y/ .git/config',
     ]) expect([line, integrationIn(line, onSlice)]).toEqual([line, expect.any(String)])
+    // Config that runs code or moves where a push lands, set for one call or written: refused as a config write.
+    for (const line of [
+      'git -c push.default=upstream push',
+      'git -c push.default=matching push origin',
+      'git config push.default matching',
+      'git config --global push.default current',
+      'git -c core.fsmonitor=./watch.sh status',
+      'git config core.fsmonitor ./watch.sh',
+      'git -c core.sshCommand="sh ./x.sh" fetch',
+      'git --config-env=core.sshCommand=CMD fetch',
+      'GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=push.default GIT_CONFIG_VALUE_0=matching git push',
+    ]) expect([line, integrationIn(line, onSlice)]).toEqual([line, expect.stringContaining('git config key')])
     for (const line of [
       'echo x > notes.md',
       'cp a b',
       'git config user.name me',
       'git config --get remote.origin.url',
+      'git config --get push.default',
     ]) expect([line, integrationIn(line, onSlice)]).toEqual([line, null])
   })
 })

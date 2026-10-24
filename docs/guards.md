@@ -1,10 +1,10 @@
 # Guards: what a run may do to your repo and your panes
 
-The README's Settings and "What it touches" sections give the short version. This page holds the detail of the two things the mod refuses on your behalf: integration steps above your `integration` setting, and pane tools you did not type for.
+The README's Settings and "What it touches" sections give the short version, and [settings.md](./settings.md#integration) the full `integration` rules. This page holds the detail of the two things the mod refuses on your behalf: integration steps above your `integration` setting, and pane tools you did not type for.
 
 ## Merge, tag and push guards
 
-`integration` sets the most a run may do (`auto` → `pr` → `push` → `local`; the README's Settings section says how your profile and the repo decide it). The mode is snapshotted at the typed `/agt`, so a profile a run edits mid-run can lower the ceiling but never raise it.
+`integration` sets the most a run may do (`auto` → `pr` → `push` → `local`; [settings.md](./settings.md#integration) says how your profile and the repo decide it). The mode is snapshotted at the typed `/agt`, so a profile a run edits mid-run can lower the ceiling but never raise it.
 
 ### When it is on
 

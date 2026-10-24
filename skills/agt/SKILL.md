@@ -44,7 +44,7 @@ The first word may force a level; otherwise detect it. First match wins.
 - **heavy**: planner, then one pane per slice through `spawn_pane` (`panes-mode.md`), at most 3 at once like medium. Planners and reviewers stay subagents. Slices merge one at a time.
   Heavy differs from medium by panes, not by width: a real session per slice in its own worktree, the live wire, and resume. A task that asks for Codex workers runs heavy (`panes-mode.md` → "Codex workers").
 - **Risk gate:** auth, money or data work (`routing.md` → "Risk words") never runs solo, and runs the gauntlet when the repo has a test runner (`formations.md`). A screen merely named login or checkout is `risk=none`.
-- `--fable` is the only flag (`routing.md` → "Escalation ladder"). Older flags still work: "Deprecated" at the end.
+- Two flags: `--fable` (`routing.md` → "Escalation ladder") and `--local`, which runs this one /agt as `integration: local` whatever the profile says, `projects[]` entries included: merge locally, push nothing, open no PR. The mod holds it for you and your subagents; say it in each pane worker's task. Older flags still work: "Deprecated" at the end.
 
 Print the recon line before anything else: `recon: <level> · <transport> · <one-clause reason>`, where transport is `solo`, `subagent`, `panes` or `workflow` (`display.md` → "Mid-run lines").
 

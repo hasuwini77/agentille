@@ -17,7 +17,8 @@ The executor already holds the slice in context; a fresh one would re-read the r
 
 - **Subagent executor:** keep its agent id. Send the P0/P1 `FIX:` lines with `SendMessage`, starting with the `[agt … mode=fix …]` header: "fix these in the same worktree, commit, re-verify, reply in your output format". Fallback when the agent is gone: a fresh `mode=fix` executor seeded with its checkpoint, branch and the findings.
 - **Pane executor:** its pane closed on harvest. Open a fresh pane executor with the branch, its answer file path and the findings.
-- At most 2 fix rounds per slice; still blocking → `⚑` on the card, branch kept.
+- **One definition.** A fix attempt is one `mode=fix` executor dispatch for a slice (a `SendMessage` round or a fresh fix executor), counted per `piece=`; a solo run counts its own review-fix rounds the same way. Retries inside one dispatch (the three-miss stop of the executor and of solo), a resume and a `mode=diagnose` planner are not attempts.
+- **Limit: 2 per slice.** Still blocking after the 2nd → a bugfix or debug slice gets one `mode=diagnose` planner (read-only root cause) and a 3rd attempt that implements it; any other slice, or a failed 3rd, → `⚑` on the card, branch kept. The effort ladder reads this same counter (`routing.md` → "Escalation ladder").
 
 ## Early stop — resume once
 

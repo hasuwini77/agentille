@@ -48,7 +48,7 @@ Only when the level table falls through. One inline Haiku call, never the planne
 - Skip the plan-reviewer on `thinkingDepth=quick` and for a ≤3-step fully sequential plan.
 - Design-reviewer viewports: the ones the user names, else `profile.viewports`, else desktop + mobile.
 - Design-reviewer URL: before its dispatch, start the project's dev server in the slice's worktree on a free port (`PORT=<free> <dev command> > ~/.agentille/state/run-<id>/dev-<slice>.log 2>&1 &`), wait for a 2xx, pass `url: http://localhost:<port>`, and stop that server once its verdict is harvested. The reviewer never starts one itself.
-- Debug: each fix attempt is a `mode=fix` executor dispatch. After 3 failed fixes, dispatch the planner with `mode=diagnose` (read-only root cause), then a fresh executor implements it.
+- Debug: attempts, the limit and the `mode=diagnose` planner after 2 failed attempts are `factory.md` → "Fix rounds".
 - Squads add payments / SEO / perf reviewers to the review step when the diff touches their domain (`squads.md`). Formations reshape the workers (`formations.md`).
 - Every reviewer column ticked for a slice runs **at once**: one message, parallel background calls (`SKILL.md` → "The contract" step 8).
 - Never more than 3 executors at once; batch the rest in waves.
@@ -92,7 +92,7 @@ Dispatch with aliases (`fable`/`opus`/`sonnet`/`haiku`), never pinned IDs. A pan
 Evidence is observed by the mod, not claimed by the lead.
 
 - **Plan:** 1st REVISE → next planner runs opus · max. 2nd REVISE → next planner is a Fable candidate.
-- **Fix (per piece):** attempt 2 → executor effort high; attempt ≥3 → max. Rounds are counted per `piece=`, so one slice in fix rounds never raises another's effort. A `mode=diagnose` planner after ≥3 fixes → Fable candidate.
+- **Fix** (attempts per `piece=`, as `factory.md` → "Fix rounds" defines them): attempt 2 → executor effort high; attempt 3, only after a diagnose planner → max. One slice's rounds never raise another's effort. A `mode=diagnose` planner after 2 failed attempts → Fable candidate.
 - **Fable gate** (all must pass, else opus · max with the reason logged): candidate · `profile.routing.autoFable` is `true` (default `false`: Fable costs about twice Opus, so the ladder is opt-in) · fewer than `maxFablePerRun` (default 1) Fable spawns this run · weekly plan usage below `fableWeeklyCeiling` (default 60%).
 
 ### Advisor

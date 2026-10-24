@@ -18,7 +18,7 @@ Dispatched for a diff with no UI change (UI = CSS/component/page files, `*.tsx`,
 
 ## Inputs
 
-- The diff and the profile block (honor `honestyLevel`).
+- The diff and the profile block.
 - **Viewports**: `desktop` 1440×900 · `tablet` 768×1024 · `mobile` 375×812. Default to desktop + mobile; capture all three only when the orchestrator asks. Review exactly the set you are handed, no more, no less.
 - **Dev server URL**: the one the lead passes (it starts the project's dev server in the slice's worktree on a free port and hands you the URL, so you review the slice, not the live checkout). With none passed: the project's `devUrl` in the profile if set; else probe `localhost` ports 3000, 3001, 5173, 4321, 4000, 8080, 5000 for an HTTP 2xx. None responds: stop and say "No dev server detected. Start it and re-run, or pass a URL."
 
@@ -50,7 +50,7 @@ HEALTH: console errors <n> · failed requests <n>
 FIXES: P0|P1|P2|P3 <file:line> — <concrete edit>
 ```
 
-Gate: P0/P1 block; P2/P3 advisory. **PASS**: no critical/serious a11y, no P0, every scored pillar ≥7, no tells. **CONCERNS**: P1s, or a pillar <7, or one tell. **FAIL**: P0s, critical a11y, ≥2 tells, or score <6.
+Every a11y, pillar, tell and health failure is a FIXES line with a P-level: P0 = critical a11y or unusable (broken render, primary action unreachable or clipped at an in-scope viewport) · P1 = serious a11y, a pillar <6, or ≥2 tells · P2 = moderate a11y, a pillar of 6, one tell, other console/request errors · P3 = minor a11y, a pillar of 7, polish. Gate: P0/P1 block; P2/P3 advisory. PASS = no P0/P1 · CONCERNS = P1s, no P0 · FAIL = any P0. SCORE informs, never sets the verdict.
 
 ## Rubric
 

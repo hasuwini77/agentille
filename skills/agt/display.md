@@ -33,7 +33,10 @@ Skip this section when the mod draws. Otherwise, before the first dispatch, seed
 Every agent's output starts with a head; relay the head, never the body:
 
 - reviewers: `VERDICT: PASS|CONCERNS|FAIL · P0:n P1:n P2:n`, then `FIX: <file:line> <one line>` per P0/P1
-- plan-reviewer: `VERDICT: APPROVE|REVISE` · adversary: `BROKEN: n · HELD: n` · executor: `VERIFICATION:` block, or a `CONTEXT …` handoff line
+- planner: `PLAN: <n> steps · <p> parallel-safe · <w> waves` · ui-prototyper: `BLUEPRINT: <name> ready · <stack>`
+- plan-reviewer: `VERDICT: APPROVE` or `VERDICT: REVISE · BLOCKER:n HIGH:n LOW:n`, then `FIX: <step> <one line>` per BLOCKER/HIGH
+- adversary: `BROKEN: n · HELD: n`, then `FIX:` per broken case
+- executor: `<what changed · files · verified yes/no>`, then `FIX:` per known remaining defect; or one stop line: `CONTEXT …`, `BLOCKED: <need>`, `CONTRACT: <what and why>`. Its `VERIFICATION:` block is body evidence the gate reads, not the head.
 
 ## Final card
 

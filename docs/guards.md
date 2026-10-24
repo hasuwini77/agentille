@@ -4,17 +4,29 @@ The README's Settings and "What it touches" sections give the short version. Thi
 
 ## Merge, tag and push guards
 
-`integration` sets the most a run may do (`auto` → `pr` → `push` → `local`; the README's Settings section says how your profile and the repo decide it).
+`integration` sets the most a run may do (`auto` → `pr` → `push` → `local`; the README's Settings section says how your profile and the repo decide it). The mode is snapshotted at the typed `/agt`, so a profile a run edits mid-run can lower the ceiling but never raise it.
 
-- **Below `auto`** the mod refuses merges, tags, releases and API merges from a run.
-  - It catches them however they are spelled: `gh`, `hub`, `git`, `gh api` (REST or GraphQL, from a file too) or `curl`/`wget`, and wrapped in `env`, `timeout`, `xargs`, `sudo`, `script`, `watch`, `flock`, `caffeinate`, `stdbuf`, `arch`, `coproc`, `ssh`, `parallel`, `find -exec`, `bash -c`, `fish -c` or `eval` alike. Below `auto` it also refuses interpreter code (`python -c`, `node -e`, `perl -e`, …) that calls git, gh or curl, and reads a script, a sourced file or a make target before it runs, refusing it when it pushes, merges, tags or releases.
-  - Git and gh aliases defined on the line, `send-pack`, `http-push`, `subtree push`, and `update-ref`/`symbolic-ref` on a tag or the base branch are refused below `auto`.
-  - It judges each line by the repo the write lands in: `cd`, `git -C`, `gh -R`, `GH_REPO`/`GITHUB_REPOSITORY`, `gh repo set-default`, and for a push the URL git would push to (pushurl, insteadOf, a URL or a path), not the directory the session started in. A profile entry with only a name never grants `auto` to a repo that has a remote.
-  - It lets through only a push of the run's own branch: never the base branch, a tag, a force push, a remote branch deletion or a ref it cannot read. A `checkout`, `switch`, `branch -m/-M/-f`, `reset` or `gh pr checkout` earlier on the same line makes HEAD unreadable, so `git checkout main && git push origin HEAD` is refused.
-  - Write branch names and directories out in a push line: a variable the guard cannot expand is refused with a retry hint. When the guard cannot read the repo at all, it refuses rather than letting the command run.
-  - The lead stays guarded from the moment its run names an id until the run's ✓/✗ card, with no time or typed-reply cutoff.
+### What the guard reads
+
+It reads each **Bash** line the way the shell would — words, quotes, `$( )`, backticks, heredocs and here-strings, redirections, the wrappers in front of a command (`env`, `timeout`, `xargs`, `sudo`, `nice`, `script`, `flock`, `caffeinate`, `stdbuf`, `arch`, `coproc`, `ssh`, `parallel`, `find -exec`), `bash -c`/`fish -c`/`eval`, a shell alias defined earlier on the same line, and the variables the line sets. Where it can, it also reads an interpreter's inline code (`python -c`, `node -e`, `perl -e`, …), a script file (with the variables that file sets expanded), a sourced file, a make target, and an `npm`/`pnpm`/`yarn`/`bun run` package script. It never runs the command.
+
+### What it refuses below `auto`, from a run
+
+- A merge, tag, release or GitHub API merge — `gh`, `hub`, `git`, `gh api`/`curl`/`wget` (REST or GraphQL), and git/gh aliases, `send-pack`, `http-push`, `subtree push`, or `update-ref`/`symbolic-ref` on a tag or the base branch.
+- A local `git merge`, `reset --hard`, `rebase` or `branch -f`/`-M` onto the base branch.
+- A push of anything but the run's own branch (`agt/*`, `feat/*`, `fix/*`, `storm/*` or the one checked out): never the base branch, a tag, a force push, a remote branch deletion, every branch, or a bare push whose configured `remote.<name>.push` refspec (or `push.default = matching`) reaches the base or a tag. A `checkout`, `switch`, `branch -m/-M/-f`, `reset` or `gh pr checkout` earlier on the same line makes HEAD unreadable, so `git checkout main && git push origin HEAD` is refused.
+- A write to the trust root (`~/.agentille`, also via `$HOME` or `$GIT_DIR`), `.git/config`, `.git/hooks`, `.git/info`, `.git/refs`, `.git/packed-refs` or the worktree's `.git` file — by a redirect, a `tee`/`cp`/`mv`/`ln`/`sed -i`/`truncate`/`dd` target, interpreter code that names the path, or a `git config` of `alias.*`, `core.hooksPath`, a remote's push URL or refspec, URL rewriting or `receive.*`. The same paths are refused through the **Write, Edit, MultiEdit and NotebookEdit** tools, not just Bash.
+
+It judges each line by the repo the write lands in (`cd`, `git -C`, `gh -R`, `GH_REPO`/`GITHUB_REPOSITORY`, `gh repo set-default`, and for a push the URL git would push to — pushurl, insteadOf, a URL or a path), not the directory the session started in. A profile entry with only a name never grants `auto` to a repo that has a remote.
+
+When it cannot read a word (a subcommand from `$( )` or an unexpandable variable), a source (code piped into a shell, `sh -s`/`python3 -`, a tool fed by `xargs`, or an opener it cannot introspect such as `npx`, `pnpm dlx` or `docker`), or the repo at all, it fails closed and refuses. The lead stays guarded from the moment its run names an id until the run's ✓/✗ card, with no time or typed-reply cutoff.
+
 - **Under `local`** it refuses pushes and PRs too.
-- **Under every setting** a diff that touches auth, payments, deploy, migrations, dependencies or a business assumption stops at the PR, and the card says `⚑ escalated`.
+- **Under every setting** the lead is asked to stop a diff that touches auth, payments, deploy, migrations, dependencies or a business assumption at the PR, with `⚑ escalated` on the card. This rests on the lead model following the factory checklist; no code inspects the diff.
+
+### What the guard is, and is not
+
+The guard is a seatbelt against a cooperative model's honest mistakes, not a sandbox against a model that sets out to evade it. It judges the **Bash** tool and the **Write/Edit/MultiEdit/NotebookEdit** tools; any other tool — a GitHub MCP server's merge, say — is not seen. A Codex worker pane runs on your own Codex config, outside the mod, so the guard does not reach it. What constrains a model that is actually trying to get around the guard is your Claude Code permission rules, your remote's branch protection and Codex's own sandbox.
 
 ## Pane tools
 

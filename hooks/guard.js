@@ -17,6 +17,12 @@
 //                 only those and never another session's fresh checkout.
 //
 // A session where /agt was never typed is untouched: its Bash and writes run as the engine runs them.
+//
+// What it reads: the Bash tool line (wrappers, heredocs/here-strings, interpreters and scripts it can read,
+// package scripts it can read) and the Write/Edit/MultiEdit/NotebookEdit tools. It does not judge any other
+// tool (a GitHub MCP merge, say), and a Codex worker pane runs outside the mod. The guard is a seatbelt against
+// a cooperative model's mistakes, not a sandbox against one that sets out to evade it; it fails closed on what
+// it cannot read. See docs/guards.md.
 
 import { S } from './state.js'
 import { ROLES } from './routing.js'

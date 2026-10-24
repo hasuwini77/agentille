@@ -53,6 +53,7 @@ It fails closed and refuses. That covers:
 - a relative import of a `node` file that it cannot find (in a file a shell script runs, it is skipped);
 - a `python -m` module found nowhere, or a `PYTHONPATH` entry it cannot read before the module is found;
 - a git alias it cannot look up, or one in a repo it cannot place;
+- a line nested deeper than it reads (see the depth limits below), or one it cannot parse at all;
 - the repo itself, when git cannot be asked.
 
 - **Under `local`** it refuses pushes and PRs too.
@@ -70,6 +71,7 @@ What it reads has limits, and these are the known ones:
 - It reads a node file's relative static imports one level deep. An import built at run time is not followed, and neither are a Python file's imports.
 - A git word that is an external `git-<name>` program on your PATH runs that program, which the guard does not read. gh aliases from gh's own config are not looked up.
 - `git submodule foreach` runs its line in a repo the guard cannot place, so a push of HEAD there is refused and only a push with the branch written out can pass.
+- It reads `$( )`, backticks and `<( )` four levels inside one another, and a line run by `eval`, `bash -c`, a wrapper, `find -exec` or `git submodule foreach` three levels inside another. Past either depth it does not read the rest of that part, so it refuses the whole line below `auto` rather than let it through. A command after the deep part on the same line is still read.
 
 ## Pane tools
 

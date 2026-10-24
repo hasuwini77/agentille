@@ -1,6 +1,7 @@
 // agentille mod state: one record, read and written by register.js and the modules it wires. Everything
 // here lives for the session (a reload starts it over); nothing is persisted from here but through $.store
 // and the run files. Fields that are reassigned are read as S.name; the collections are destructured once.
+// What the lead keeps about each pane (harvest, wake, stranded, first seen, stage) is in panerec.js.
 
 import { DEFAULTS } from './routing.js'
 import { resolveDisplay } from './settings.js'
@@ -21,15 +22,6 @@ export const S = {
   opened: [],  // { id, name } of panes this lead opened via spawn_pane, in spawn order
   openedNames: new Set(),  // every pane name this lead opened, kept after the pane closes
   sessions: [],  // { id, name, kind, tab, terminal } of the sessions this lead opened via open_sessions, oldest first
-  restingSince: new Map(),  // session name → when it was first seen idle and unfocused (sessionSweep)
-  staged: new Map(),  // pane name → last pane seen on stage (live.js panesLeft)
-  paneSeen: new Map(),  // reaper bookkeeping
-  harvested: new Set(),  // pane ids whose answer the lead has in hand (a wire done message, a saved answer file, a close_pane)
-  wireDone: new Set(),  // pane ids whose wire done message reached this lead
-  woken: new Set(),  // pane ids the lead already woke itself for
-  strandedNow: new Set(),  // done/idle panes kept open because nothing was harvested from them
-  strandedToasted: new Set(),  // ... pane ids of which the person was told once
-  firstSeen: new Map(),  // pane id → when this session first listed it: a done-file or answer file older than that is a previous pane's
   selfName: null,  // this pane's name when it is an agt-* worker
   worker: null,  // { agent, model, effort } from AGENTILLE_WORKER: this session is a worker pane
   selfTab: null,  // herdr: the lead's own tab, where its workers split

@@ -4,7 +4,7 @@
 import { S } from './state.js'
 import { PROBE, tmuxEvenArgv, tmuxPaneIdOf, tmuxKillArgv, herdrPaneIdOf, herdrTabOf, herdrPromptArgv, herdrCloseArgv, herdrMetaArgv, herdrSessionSplitArgv, herdrSessionTabArgv, herdrSessionStartArgv, herdrRunArgv, herdrPaneGetArgv, herdrTerminalOf, tmuxSessionSplitArgv, tmuxTitleArgvs, tmuxTypeArgvs, sessionsFile } from './panes.js'
 import { runOk, startAgent } from './spawn.js'
-const { restingSince } = S
+import { restingSince } from './panerec.js'
 
 // The Herdr agent sessions this lead has open, one name per line, where the SessionEnd sweep reads them. A failed
 // write loses only the sweep's reach, so it never blocks.

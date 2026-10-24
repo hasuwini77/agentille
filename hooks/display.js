@@ -6,7 +6,8 @@ import { mergeFlags, paneFlags, parseFocusArgs, focusText } from './focus.js'
 import { isAnswerBlock, panel, parseHighlightArgs, highlightText } from './highlight.js'
 import { PROBE } from './panes.js'
 import { cleanDisplay, storedDisplay, resolveDisplay, highlightFlags, withDisplay, profileJson } from './settings.js'
-const { strandedNow, panelMemo, rawIds } = S
+import { strandedNow } from './panerec.js'
+const { panelMemo, rawIds } = S
 
 export const DECK = 'agt-deck'
 

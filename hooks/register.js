@@ -28,7 +28,8 @@ import { registerStatus } from './status.js'
 import { refreshAgents, working, ensurePolling, ensureTicker } from './ticker.js'
 import { statusKey, freshStatus, validLead, parseWire, shortName, logWire, parseTellArgs } from './wire.js'
 import { publish, saveAnswer, reportDone } from './worker.js'
-const { runs, live, decisions, paneRoutes, openedNames, paneSeen, harvested, wireDone, woken, strandedToasted, firstSeen, ownedTabs, mascot, litMemo, hlMemo, rawIds, wireLog, pub } = S
+import * as P from './panerec.js'
+const { runs, live, decisions, paneRoutes, openedNames, ownedTabs, mascot, litMemo, hlMemo, rawIds, wireLog, pub } = S
 
 export function register(on) {
   on('session.start', async ($, e, next) => {
@@ -210,7 +211,7 @@ export function register(on) {
       const from = shortName(w.from)
       // Only the pane whose key the message names: a stale list or a respawned role must not harvest the older pane.
       const hit = w.kind === 'done' && w.key ? S.panes.find((p) => paneKey(p.id) === w.key && p.name === w.from) : null
-      if (hit) { harvested.add(hit.id); wireDone.add(hit.id) }
+      if (hit) { const r = P.rec(hit.id); r.harvested = true; r.wireDone = true }
       const route = w.kind === 'done' ? paneRoutes.findLast((r) => r.name === w.from) : null
       if (route) route.verdict = verdictChip(route.agent, w.summary)
       logWire(wireLog, { from, to: S.wireName ? shortName(S.wireName) : 'lead', kind: w.kind, summary: w.summary, at: Date.now() })

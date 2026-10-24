@@ -205,6 +205,9 @@ describe('guard: the repo a profile entry names', () => {
     expect(integrationOf({ integration: 'auto', projects: [{ name: 'app', integration: 'local' }] }, repo)).toBe('local')
     expect(integrationOf({ integration: 'auto', projects: [{ id: 'other', integration: 'pr' }] }, repo)).toBe('auto')
     expect(integrationOf({ integration: 'auto', projects: [{ id: 'app', integration: 'pr' }, { url: 'github.com/me/app', integration: 'auto' }] }, repo)).toBe('auto')
+    // A repo with no checkout here (gh -R, GH_REPO, a push URL) has only its URL: a name entry grants it nothing.
+    expect(integrationOf({ projects: [{ name: 'api', integration: 'auto' }] }, { url: 'github.com/stranger/api', paths: [], name: 'api' })).toBe('pr')
+    expect(integrationOf({ projects: [{ name: 'api', integration: 'auto' }] }, { url: null, paths: [], name: 'api' })).toBe('pr')
   })
 
   test('CLAUDE.md and AGENTS.md caps: local-only, no-mistakes, as words', async () => {
@@ -256,7 +259,7 @@ describe('guard: worktree adds', () => {
 
 // A run in a session with no pane transport: the ownership list lives in memory.
 // git: per dir, the branch checked out (`current`), its remote URL and its main checkout (default /work/repo).
-type Repo = { current?: string; remote?: string; common?: string }
+type Repo = { current?: string; remote?: string; common?: string; pushurl?: string; upstream?: string }
 const setup = (on: any, o: { profile?: unknown; repoConfig?: unknown; env?: Record<string, string>; files?: Record<string, string>; repos?: Record<string, Repo>; feat?: boolean; broken?: boolean } = {}) => {
   const seen: string[][] = []
   const ran: string[] = []
@@ -308,7 +311,12 @@ const setup = (on: any, o: { profile?: unknown; repoConfig?: unknown; env?: Reco
     }
     const dir = e.argv[1] === '-C' ? e.argv[2] : ''
     if (a.endsWith('symbolic-ref --short -q HEAD')) return repos[dir]?.current ? out(repos[dir].current + '\n') : out('', 1)
-    if (a.includes('config --get-regexp')) return out(repos[dir]?.remote ? 'remote.origin.url ' + repos[dir].remote + '\n' : '', repos[dir]?.remote ? 0 : 1)
+    if (a.includes('config --get-regexp')) {
+      const r = repos[dir] ?? {}
+      const lines = [r.remote && 'remote.origin.url ' + r.remote, r.pushurl && 'remote.origin.pushurl ' + r.pushurl, r.upstream && 'remote.upstream.url ' + r.upstream, r.upstream && 'remote.upstream.gh-resolved base'].filter(Boolean)
+      return out(lines.join('\n') + '\n', lines.length ? 0 : 1)
+    }
+    if (a.includes('remote get-url --push')) return repos[dir]?.pushurl || repos[dir]?.remote ? out((repos[dir].pushurl || repos[dir].remote) + '\n') : out('', 2)
     if (a.includes('@{push}')) return out('', 128)
     if (a.includes('rev-parse --path-format=absolute --git-common-dir') && repos[dir]?.common) return out(repos[dir].common + '\n')
     if (a.includes('symbolic-ref')) return out('', 1)
@@ -612,5 +620,71 @@ describe('guard: the lead stays guarded for the whole run', () => {
     await card($)
     await typed($, 'something else')
     expect((await bash($, 'gh pr merge 9')).result).toBe('ok')
+  })
+})
+
+// The repo a write lands in decides, not the folder the session sits in.
+describe('guard: the target repo is read from the write', () => {
+  const sandbox = { profile: { integration: 'pr', projects: [{ path: '/work/repo', integration: 'auto' }] }, repos: { '/work/repo': { current: 'agt/x', remote: 'git@github.com:me/sandbox.git' } } }
+
+  test('GH_REPO on the line, exported earlier, or in the session names gh\'s repo', async ($, on) => {
+    const { ran } = setup(on, sandbox)
+    await boot($)
+    await typed($)
+    expect((await bash($, 'gh pr merge 7 --merge')).result).toBe('ok')
+    expect((await bash($, 'GH_REPO=victim/prod gh pr merge 7 --merge')).deny).toBe(DENY_INTEGRATION)
+    expect((await bash($, 'export GH_REPO=victim/prod; gh pr merge 7 --merge')).deny).toBe(DENY_INTEGRATION)
+    expect((await bash($, 'GITHUB_REPOSITORY=victim/prod gh release create v1')).deny).toBe(DENY_INTEGRATION)
+    expect((await bash($, 'GH_REPO=me/sandbox gh pr merge 8')).result).toBe('ok')
+    expect(ran).toEqual(['gh pr merge 7 --merge', 'GH_REPO=me/sandbox gh pr merge 8'])
+  })
+
+  test('GH_REPO in the session\'s environment counts too', async ($, on) => {
+    setup(on, { ...sandbox, env: { GH_REPO: 'victim/prod' } })
+    await boot($)
+    await typed($)
+    expect((await bash($, 'gh pr merge 7')).deny).toBe(DENY_INTEGRATION)
+  })
+
+  test('gh repo set-default: the remote it resolved is the target', async ($, on) => {
+    setup(on, { ...sandbox, repos: { '/work/repo': { current: 'agt/x', remote: 'git@github.com:me/sandbox.git', upstream: 'https://github.com/victim/prod.git' } } })
+    await boot($)
+    await typed($)
+    expect((await bash($, 'gh pr merge 7')).deny).toBe(DENY_INTEGRATION)
+    expect((await bash($, 'gh pr merge 7 -R me/sandbox')).result).toBe('ok')
+  })
+
+  test('a push to a URL, a path, an edited remote or a pushurl is judged by where it lands', async ($, on) => {
+    setup(on, sandbox)
+    await boot($)
+    await typed($)
+    expect((await bash($, 'git push origin agt/x:main')).result).toBe('ok')
+    for (const line of [
+      'git push https://github.com/victim/prod.git agt/x:main',
+      'git push /work/prod.git agt/x:main',
+      'git push ../prod.git agt/x:main',
+      'git remote set-url origin https://github.com/victim/prod && git push origin agt/x:main',
+      'git remote add prod https://github.com/victim/prod && git push prod agt/x:main',
+      'git -c remote.origin.pushurl=https://github.com/victim/prod push origin agt/x:main',
+      'git -c url.https://github.com/victim/prod.pushInsteadOf=git@github.com:me/sandbox.git push origin agt/x:main',
+      'GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=remote.origin.pushurl GIT_CONFIG_VALUE_0=x git push origin agt/x:main',
+      'cd "$OTHER" && git push origin agt/x:main',
+    ]) expect([line, (await bash($, line)).deny]).toEqual([line, expect.stringContaining('git push to main')])
+    expect((await bash($, 'git push git@github.com:me/sandbox.git agt/x:main')).result).toBe('ok')
+  })
+
+  test('a pushurl set before the line sends the push elsewhere', async ($, on) => {
+    setup(on, { ...sandbox, repos: { '/work/repo': { current: 'agt/x', remote: 'git@github.com:me/sandbox.git', pushurl: 'https://github.com/victim/prod.git' } } })
+    await boot($)
+    await typed($)
+    expect((await bash($, 'git push origin agt/x:main')).deny).toContain('git push to main')
+    expect((await bash($, 'gh pr merge 7')).result).toBe('ok')
+  })
+
+  test('a name-only profile entry grants a stranger\'s repo of that name nothing', async ($, on) => {
+    setup(on, { profile: { projects: [{ name: 'api', integration: 'auto' }] } })
+    await boot($)
+    await typed($)
+    expect((await bash($, 'gh pr merge 3 -R stranger/api --merge')).deny).toBe(DENY_INTEGRATION)
   })
 })

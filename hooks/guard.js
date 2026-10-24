@@ -173,23 +173,26 @@ const WRAP = {
 }
 const KEYWORDS = new Set(['then', 'do', 'else', 'elif', 'if', 'while', 'until', '!', '{', '}'])
 
-// words → { words, dir, inner }: the program's own words, a directory a wrapper moved to (env -C, sudo -D),
-// and a line a wrapper runs as a shell line (env -S).
+// words → { words, dir, inner, env }: the program's own words, a directory a wrapper moved to (env -C, sudo -D),
+// a line a wrapper runs as a shell line (env -S), and the variables set in front of it (GH_REPO=… gh, env K=V).
 function unwrap(words) {
   let i = 0
   let dir = null
   let inner = null
+  const env = new Map()
   while (i < words.length) {
     const w = words[i]
     const p = base(w)
     if (ASSIGN.test(w) || KEYWORDS.has(w)) {
+      const m = ASSIGN.exec(w)
+      if (m) env.set(m[1], m[2])
       i++
       continue
     }
     const opts = Object.hasOwn(WRAP, p) ? WRAP[p] : null
     if (!opts) break
     i++
-    if (p === 'command' && /^-[a-zA-Z]*[vV]/.test(words[i] ?? '')) return { words: [], dir, inner } // a lookup, not a run
+    if (p === 'command' && /^-[a-zA-Z]*[vV]/.test(words[i] ?? '')) return { words: [], dir, inner, env } // a lookup, not a run
     while (i < words.length && words[i].startsWith('-') && words[i] !== '-') {
       const o = words[i]
       if (o === '--') {
@@ -207,7 +210,7 @@ function unwrap(words) {
     }
     if (p === 'timeout' && i < words.length) i++ // the duration
   }
-  return { words: words.slice(i), dir, inner }
+  return { words: words.slice(i), dir, inner, env }
 }
 
 // A shell that runs a line it is handed: `bash -c '…'`, `eval …`, or a heredoc/here-string fed to a shell.
@@ -223,7 +226,8 @@ function innerLine(words, stdin) {
   return null
 }
 
-// The simple commands of a line, wrappers stripped and variables set earlier in it expanded: [{ words, dir }].
+// The simple commands of a line, wrappers stripped and variables set earlier in it expanded: [{ words, dir, env }],
+// env being what the command sees set on this line (earlier assignments and exports, and its own prefix).
 export function commands(line, depth = 0, vars = new Map()) {
   const out = []
   for (const c of lex(String(line ?? '')).cmds) {
@@ -237,9 +241,10 @@ export function commands(line, depth = 0, vars = new Map()) {
       continue
     }
     const u = unwrap(words)
+    const env = new Map([...vars, ...u.env])
     const inner = depth < 3 ? (u.inner ?? innerLine(u.words, c.stdin)) : null
-    if (inner !== null && inner !== undefined) out.push(...commands(inner, depth + 1, vars))
-    else if (u.words.length) out.push({ words: u.words, dir: u.dir })
+    if (inner !== null && inner !== undefined) out.push(...commands(inner, depth + 1, base(u.words[0]) === 'eval' ? vars : env))
+    else if (u.words.length) out.push({ words: u.words, dir: u.dir, env })
   }
   return out
 }
@@ -249,12 +254,13 @@ export function splitCommands(line) {
 }
 
 // git's own options before the subcommand: -C <dir> is where it runs. `unknown`: a dir it names through a
-// variable, which cannot be read here.
+// variable, which cannot be read here. `cfg`: the config keys -c / --config-env set for this one call.
 const GIT_VALUE_OPTS = new Set(['-C', '-c', '--git-dir', '--work-tree', '--namespace', '--exec-path', '--config-env', '--super-prefix'])
 export function gitCall(words) {
   if (!['git', 'hub'].includes(base(words[0]))) return null
   let dir = null
   let unknown = false
+  const cfg = []
   let i = 1
   while (i < words.length && words[i].startsWith('-')) {
     const w = words[i]
@@ -265,10 +271,11 @@ export function gitCall(words) {
       if (k === '-C') dir = dir ? joinPath(dir, v) : v
       if (k === '--work-tree' || k === '--git-dir') dir = k === '--git-dir' ? v.replace(/\/\.git\/?$/, '') || v : v
       if ((k === '-C' || k === '--work-tree' || k === '--git-dir') && /[$`~]/.test(v)) unknown = true
+      if (k === '-c' || k === '--config-env') cfg.push(v.split('=')[0].toLowerCase())
       i += k === w ? 2 : 1
     } else i++
   }
-  return i < words.length ? { sub: words[i], args: words.slice(i + 1), dir, unknown } : null
+  return i < words.length ? { sub: words[i], args: words.slice(i + 1), dir, unknown, cfg } : null
 }
 
 const TAG_LIST = new Set(['-l', '--list', '-n', '--contains', '--no-contains', '--merged', '--no-merged', '--points-at', '--column', '--no-column', '--format', '--sort', '-i', '--ignore-case', '--omit-empty', '--color'])
@@ -373,9 +380,10 @@ const apiSlug = (path) => {
 }
 const sensitive = (path) => path.split('/').some((s) => API_WRITES.has(s)) || API_WRITE_PATH.test(path)
 
-function ghStep(w, dir) {
+// `env`: what the line set in front of gh; GH_REPO (or GITHUB_REPOSITORY) names its repo as -R does.
+function ghStep(w, dir, env = new Map()) {
   const args = w.slice(1)
-  let slug = null
+  let slug = env.get('GH_REPO') || env.get('GITHUB_REPOSITORY') || null
   const pos = []
   for (let i = 0; i < args.length; i++) {
     const a = args[i]
@@ -476,10 +484,24 @@ function movesHead(g) {
 }
 
 // A line → its integration candidates, each with the dir it runs in (cd, pushd, git -C, env -C followed).
+// Config keys that change where a push goes: a remote's URL, its rewriting, a branch's push remote, an include.
+const REMOTE_CFG = /^(remote|url|branch|include|includeif)\./i
+// GIT_CONFIG_KEY_<n> and GIT_CONFIG_PARAMETERS set config for one call, as -c does.
+function envCfg(env) {
+  const keys = []
+  for (const [k, v] of env ?? []) {
+    if (/^GIT_CONFIG_KEY_\d+$/.test(k)) keys.push(String(v).toLowerCase())
+    if (k === 'GIT_CONFIG_PARAMETERS') for (const m of String(v).matchAll(/'([^'=]+)'?=/g)) keys.push(m[1].toLowerCase())
+  }
+  return keys
+}
+
 export function commandSteps(line, cwd = null) {
   const out = []
   let here = cwd
   let moved = false // a step before this one switched branches, in any dir
+  let edited = false // a step before this one changed a remote or its config: a later push's target is unknown
+  let ghEdited = false // … or gh's default repo: a later gh call's target is unknown
   for (const c of commands(line)) {
     const w = c.words
     const p = base(w[0])
@@ -493,8 +515,9 @@ export function commandSteps(line, cwd = null) {
     }
     const at = c.dir ? (/[$`~]/.test(c.dir) ? null : c.dir.startsWith('/') ? joinPath('/', c.dir) : here && joinPath(here, c.dir)) : here
     if (p === 'gh') {
-      const k = ghStep(w, at)
-      if (k) out.push(k)
+      const k = ghStep(w, at, c.env)
+      if (k) out.push({ ...k, gh: true, slugUnknown: ghEdited })
+      if (w.includes('set-default') && w.includes('repo')) ghEdited = true
       if (w.includes('checkout') && w.includes('pr')) moved = true
     } else if (p === 'curl' || p === 'wget') {
       const k = httpStep(w, at)
@@ -502,10 +525,16 @@ export function commandSteps(line, cwd = null) {
     } else {
       const g = gitCall(w)
       if (!g) continue
-      const dir = g.unknown ? null : g.dir ? (g.dir.startsWith('/') ? joinPath('/', g.dir) : at && joinPath(at, g.dir)) : at
+      // GIT_DIR / GIT_WORK_TREE set on the line name the repo as --git-dir does.
+      const envDir = c.env?.get('GIT_WORK_TREE') || (c.env?.get('GIT_DIR') ?? '').replace(/\/\.git\/?$/, '') || c.env?.get('GIT_DIR') || null
+      const named = g.dir ?? envDir
+      const dir = g.unknown || (named && /[$`~]/.test(named)) ? null : named ? (named.startsWith('/') ? joinPath('/', named) : at && joinPath(at, named)) : at
+      const keys = [...g.cfg, ...envCfg(c.env)]
+      const retarget = keys.some((k) => REMOTE_CFG.test(k))
       if (g.sub === 'tag' && !tagListing(g.args)) out.push({ kind: 'step', what: 'git tag', dir, slug: null })
-      if (g.sub === 'push') out.push({ kind: 'push', what: 'git push', dir, slug: null, push: { ...parsePush(g.args), headMoved: moved } })
+      if (g.sub === 'push') out.push({ kind: 'push', what: 'git push', dir, slug: null, push: { ...parsePush(g.args), headMoved: moved, remoteEdited: edited || retarget } })
       if (movesHead(g)) moved = true
+      if ((g.sub === 'remote' && ['add', 'set-url', 'rename', 'remove', 'rm'].includes(g.args[0])) || (g.sub === 'config' && g.args.some((x) => REMOTE_CFG.test(x)))) edited = true
     }
   }
   return out
@@ -555,15 +584,16 @@ const trimSlash = (p) => (p.length > 1 ? p.replace(/\/+$/, '') : p)
 // The profile's integration for this repo, lowered by the repo's own caps. `repo` is { url, paths, name, home }
 // (a bare list of names is read as names only). projects[] entries match by `url` (the git remote) or `path`
 // (the checkout, or any worktree of it). An entry with neither counts by its exact `name` or `id`, and only for a
-// repo that cannot be told apart otherwise (no remote, or no checkout here): two folders can share a name, and a
-// clone of someone else's repo must not inherit `auto` from it. Repo caps never raise the mode.
+// checkout here with no remote: two folders can share a name, a clone of someone else's repo must not inherit
+// `auto` from it, and a repo the command names with no checkout here (-R, GH_REPO, a push URL) has only its URL
+// to go by. Repo caps never raise the mode.
 export function integrationOf(profile, repo, repoModes = []) {
   const p = profile && typeof profile === 'object' ? profile : {}
   const r = Array.isArray(repo) ? { names: repo } : repo && typeof repo === 'object' ? repo : {}
   const url = r.url ? normUrl(r.url) : null
   const paths = (r.paths ?? []).filter(Boolean).map(trimSlash)
   const names = (r.names ?? [r.name]).filter(Boolean)
-  const nameOk = !url || !paths.length
+  const nameOk = !url && paths.length > 0
   const home = (x) => (r.home && x.startsWith('~/') ? r.home + x.slice(1) : x)
   const located = (x) => (typeof x.url === 'string' && x.url) || (typeof x.path === 'string' && x.path)
   const byName = (x) => !located(x) && names.some((n) => n === x.name || n === x.id)
@@ -603,14 +633,27 @@ const gitOut = async ($, dir, ...a) => {
   if (!r || typeof r.exitCode !== 'number') throw new Error('git did not run')
   return r.exitCode === 0 ? String(r.stdout ?? '').trim() : ''
 }
-const remotesOf = (text) => String(text).split('\n').map((l) => /^remote\.(.+)\.url\s+(\S+)/.exec(l.trim())).filter(Boolean).map((m) => ({ name: m[1], url: m[2] }))
+// `git config --get-regexp` lines → [{ name, url, pushurl, resolved }] per remote (pushurl and gh's default repo, if set).
+const remotesOf = (text) => {
+  const by = new Map()
+  for (const l of String(text).split('\n')) {
+    const m = /^remote\.(.+)\.(url|pushurl|gh-resolved)\s+(\S+)/.exec(l.trim())
+    if (!m) continue
+    const r = by.get(m[1]) ?? { name: m[1], url: null, pushurl: null, resolved: null }
+    if (m[2] === 'url') r.url ??= m[3]
+    else if (m[2] === 'pushurl') r.pushurl ??= m[3]
+    else r.resolved = m[3]
+    by.set(m[1], r)
+  }
+  return [...by.values()].filter((r) => r.url)
+}
 
 // A local dir → its repo: { root (the main checkout), dirs, url (origin's, else the first remote's), remotes, name }.
 async function localRepo($, dir, cache) {
   if (cache.has(dir)) return cache.get(dir)
   const common = await gitOut($, dir, 'rev-parse', '--path-format=absolute', '--git-common-dir')
   const root = common ? trimSlash(common.replace(/\/\.git\/?$/, '')) : null
-  const remotes = remotesOf(await gitOut($, dir, 'config', '--get-regexp', '^remote\\..*\\.url$'))
+  const remotes = remotesOf(await gitOut($, dir, 'config', '--get-regexp', '^remote\\..*\\.(url|pushurl|gh-resolved)$'))
   const url = (remotes.find((x) => x.name === 'origin') ?? remotes[0])?.url ?? null
   const dirs = [...new Set([dir, root].filter(Boolean))]
   const rec = { root, dirs, url, remotes, name: base(root ?? dir) }
@@ -639,15 +682,62 @@ async function repoCaps($, dirs) {
   return caps
 }
 
-// The mode for the repo a candidate targets: its dir's repo, or the repo it names (-R, repos/o/r) when that is
-// not the dir's own. A dir a variable names is read as the session's.
+// The mode for a repo the guard cannot place (a dir or remote a variable names, a target edited earlier on the
+// line): the profile's top-level integration, never a name or path match.
+const topMode = (profile) => integrationOf(profile, { url: null, paths: [], names: [], home: S.home }, [])
+
+// The mode for the repo a candidate targets: its dir's repo, or the repo it names (-R, GH_REPO, repos/o/r) when
+// that is not the dir's own. A dir a variable names cannot be placed: the top-level mode.
 async function modeFor($, profile, c, cwd, cache) {
-  const dir = c.dir ?? cwd
+  if (c.slugUnknown) return topMode(profile)
+  const dir = c.dir
   const local = dir ? await localRepo($, dir, cache) : null
+  if (!local && !c.slug) return topMode(profile)
   const named = c.slug ? normSlug(c.slug) : null
-  const mine = local && (!named || local.remotes.some((x) => sameRepo(normUrl(x.url), named)))
+  // The dir's own repo is its main remote's (origin, else the first): a fork's upstream is another repo.
+  const mine = local && (!named || (!!local.url && sameRepo(normUrl(local.url), named)))
   if (mine) return integrationOf(profile, { url: local.url, paths: local.dirs, name: local.name, home: S.home }, await repoCaps($, local.dirs))
   return integrationOf(profile, { url: named, paths: [], name: named ? base(named) : null, home: S.home }, [])
+}
+
+// gh with no -R or GH_REPO goes to the remote `gh repo set-default` picked (remote.<name>.gh-resolved), if any.
+async function ghDefault($, dir, cache) {
+  if (!dir) return null
+  const r = (await localRepo($, dir, cache)).remotes.find((x) => x.resolved)
+  return r ? (r.resolved === 'base' ? r.url : r.resolved) : null
+}
+
+// A path or file:// remote → its absolute path; null for a URL or scp-style host:path.
+function remotePath(u, dir) {
+  const s = String(u)
+  if (/^file:\/\//i.test(s)) return joinPath('/', s.replace(/^file:\/\/[^/]*/i, ''))
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(s) || /^[^/]+:/.test(s)) return null
+  if (s.startsWith('~/')) return S.home ? joinPath('/', S.home + s.slice(1)) : null
+  return s.startsWith('/') ? joinPath('/', s) : dir ? joinPath(dir, s) : null
+}
+
+// The mode for the repo a push writes to: the URL git itself would push to (a remote's pushurl, insteadOf
+// rewriting), compared with the dir's own repo. Another repo is judged by its URL (or path) alone.
+async function pushMode($, profile, c, cwd, cache) {
+  const r = c.push.remote
+  if (!c.dir || c.push.remoteEdited || (r && /[$`]/.test(r))) return topMode(profile)
+  const local = await localRepo($, c.dir, cache)
+  let url
+  if (r && !/^[\w.-]+$/.test(r)) url = (await gitOut($, c.dir, 'ls-remote', '--get-url', r)) || r
+  else {
+    let name = r
+    if (!name) {
+      const to = await gitOut($, c.dir, 'rev-parse', '--abbrev-ref', '@{push}')
+      name = local.remotes.map((x) => x.name).sort((x, y) => y.length - x.length).find((n) => to.startsWith(n + '/')) ?? 'origin'
+    }
+    url = await gitOut($, c.dir, 'remote', 'get-url', '--push', name)
+  }
+  // No such remote: git refuses the push itself, so the dir's own mode stands.
+  if (!url || (local.url && sameRepo(normUrl(url), normUrl(local.url)))) return modeFor($, profile, { ...c, slug: null }, cwd, cache)
+  const path = remotePath(url, c.dir)
+  const paths = path ? [path.replace(/\/\.git$/, '')] : []
+  if (path && !local.url && local.dirs.includes(paths[0])) return modeFor($, profile, { ...c, slug: null }, cwd, cache)
+  return integrationOf(profile, { url: path ? null : url, paths, names: [], home: S.home }, [])
 }
 
 export async function integrationAllowed($, cwd) {
@@ -684,8 +774,11 @@ export async function guardLine($, line, cwd) {
   if (!cands.length) return null
   const profile = await readProfile($)
   const cache = new Map()
+  // GH_REPO in the session's own environment names gh's repo as one set on the line does.
+  const envRepo = cands.some((c) => c.gh && !c.slug) ? (await $.env.get('GH_REPO').catch(() => null)) || null : null
   for (const c of cands) {
-    const mode = await modeFor($, profile, c, cwd, cache)
+    const slug = c.gh && !c.slug ? envRepo ?? (await ghDefault($, c.dir, cache)) : c.slug
+    const mode = c.kind === 'push' ? await pushMode($, profile, c, cwd, cache) : await modeFor($, profile, { ...c, slug }, cwd, cache)
     if (mode === 'auto') continue
     if (c.kind === 'step') return DENY_INTEGRATION
     if (mode === 'local') return DENY_LOCAL

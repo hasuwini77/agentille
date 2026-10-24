@@ -431,7 +431,7 @@ describe('guard: worktree adds', () => {
 // A run in a session with no pane transport: the ownership list lives in memory.
 // git: per dir, the branch checked out (`current`), its remote URL and its main checkout (default /work/repo).
 type Repo = { current?: string; remote?: string; common?: string; pushurl?: string; upstream?: string }
-const setup = (on: any, o: { profile?: unknown; repoConfig?: unknown; env?: Record<string, string>; files?: Record<string, string>; repos?: Record<string, Repo>; feat?: boolean; broken?: boolean; aliases?: Record<string, string>; aliasBroken?: boolean; pyFind?: Record<string, string>; hooksPath?: string } = {}) => {
+const setup = (on: any, o: { profile?: unknown; repoConfig?: unknown; env?: Record<string, string>; files?: Record<string, string>; repos?: Record<string, Repo>; feat?: boolean; broken?: boolean; aliases?: Record<string, string>; aliasBroken?: boolean; pyFind?: Record<string, string>; hooksPath?: string; remoteHeads?: string[] } = {}) => {
   const seen: string[][] = []
   const ran: string[] = []
   const git = { made: false, committed: false, feat: false }
@@ -504,6 +504,9 @@ const setup = (on: any, o: { profile?: unknown; repoConfig?: unknown; env?: Reco
     }
     if (a.includes('remote get-url --push')) return repos[dir]?.pushurl || repos[dir]?.remote ? out((repos[dir].pushurl || repos[dir].remote) + '\n') : out('', 2)
     if (a.includes('@{push}')) return out('', 128)
+    // The branches the remote has: ls-remote prints the one asked for when it is there.
+    const lr = /ls-remote --heads \S+ refs\/heads\/(\S+)$/.exec(a)
+    if (lr) return out((o.remoteHeads ?? []).includes(lr[1]) ? 'abc\trefs/heads/' + lr[1] + '\n' : '')
     // The hooks folder git runs: core.hooksPath when the test sets one, else the repo's .git/hooks.
     if (a.includes('--git-path hooks')) return out((o.hooksPath ?? '/work/repo/.git/hooks') + '\n')
     if (a.includes('rev-parse --path-format=absolute --git-common-dir') && repos[dir]?.common) return out(repos[dir].common + '\n')
@@ -1527,5 +1530,35 @@ describe('guard: the hooks folder the repo sets is protected like .git/hooks', (
     expect((await $.tool.call({ tool: 'Write', file_path: '/work/repo/.husky-notes.md', content: 'x' } as never))?.deny).toBeUndefined()
     expect((await bash($, 'echo x > tools/hook.md')).result).toBe('ok')
     expect(ran.filter(Boolean)).toEqual(['echo x > tools/hook.md'])
+  })
+})
+
+describe('guard: the run pushes only branches it made or that are new', () => {
+  test('an own-prefix branch the remote already has, not checked out and not the run\'s, is refused', async ($, on) => {
+    const { ran } = setup(on, { profile: { integration: 'pr' }, repos: { '/work/repo': { current: 'agt/x' } }, remoteHeads: ['feat/other', 'fix/theirs', 'agt/x'] })
+    await boot($)
+    await typed($)
+    expect((await bash($, 'git push origin agt/x:feat/other')).deny).toContain('a branch the remote already has that this run did not make')
+    expect((await bash($, 'git push origin HEAD:fix/theirs')).deny).toContain('fix/theirs')
+    // The branch checked out, a new branch, and the run's own: allowed.
+    expect((await bash($, 'git push -u origin agt/x')).result).toBe('ok')
+    expect((await bash($, 'git push origin agt/x:feat/brand-new')).result).toBe('ok')
+    expect(ran).toEqual(['git push -u origin agt/x', 'git push origin agt/x:feat/brand-new'])
+  })
+
+  test('a branch one of the run\'s worktrees was made on stays its own after the first push', async ($, on) => {
+    const { ran } = setup(on, { profile: { integration: 'pr' }, remoteHeads: ['agt/x'] })
+    await boot($)
+    await typed($)
+    expect((await bash($, 'git worktree add ../repo-x -b agt/x')).result).toBe('ok')
+    expect((await bash($, 'git push origin agt/x')).result).toBe('ok')
+    expect(ran).toEqual(['git worktree add ../repo-x -b agt/x', 'git push origin agt/x'])
+  })
+
+  test('judgePush hands an own-prefix branch that is not checked out to the caller', () => {
+    const claims: string[] = []
+    expect(judgePush({ remote: 'origin', specs: ['agt/x:feat/y'], force: false, del: false, bulk: null, dry: false, mergeOpt: false } as any, { current: 'agt/x', claim: (n: string) => claims.push(n) } as any)).toBe(null)
+    expect(judgePush({ remote: 'origin', specs: ['feat/z'], force: false, del: false, bulk: null, dry: false, mergeOpt: false } as any, { current: 'feat/z', claim: (n: string) => claims.push(n) } as any)).toBe(null)
+    expect(claims).toEqual(['feat/y'])
   })
 })

@@ -7,6 +7,7 @@ import { Proofs } from './proofs.js'
 import { PROBE } from './panes.js'
 import { base, commands, commandSteps, joinPath, lineMovesHead, protectedPath, SCRIPT_RISK, MAKE_RISK } from './guard-lex.js'
 import { PLAIN_MODULE, jsCandidates, jsImports, moduleFiles, scriptChain } from './script-refs.js'
+import { ownedWorktrees } from './guard-own.js'
 
 // The gh and curl/wget step readers live in a leaf the lexer shares; the policy keeps carrying their names.
 export { ghStep, httpStep } from './guard-steps.js'
@@ -48,7 +49,9 @@ const CURRENT_SUB = /^\$\(git (branch --show-current|rev-parse --abbrev-ref HEAD
 // bare `git push` goes, or null) and bases (the default branch, main and master). Returns why it is refused.
 // A push after a step that moves HEAD on the same line (p.headMoved) reads HEAD as unknown: the branch read
 // before the line ran is not the one the push sees.
-export function judgePush(p, { current = null, pushDst = null, bases = new Set(['main', 'master']), refspecs = [], pushDefault = null } = {}) {
+// A push to an own-prefix branch (agt/*, feat/*, fix/*, storm/*) that is not the one checked out is let through here
+// and handed to `claim`: guardLine then asks whether the run made it or the remote does not have it yet.
+export function judgePush(p, { current = null, pushDst = null, bases = new Set(['main', 'master']), refspecs = [], pushDefault = null, claim = null } = {}) {
   if (p.dry) return null
   if (p.bulk) return 'git push ' + p.bulk
   if (p.force) return 'git push --force'
@@ -61,7 +64,11 @@ export function judgePush(p, { current = null, pushDst = null, bases = new Set([
     const name = d.replace(/^refs\/heads\//, '')
     if (name.startsWith('refs/')) return 'git push ' + d
     if (bases.has(name)) return 'git push to ' + name
-    if (OWN_BRANCH.test(name) || name === cur) return null
+    if (name === cur) return null
+    if (OWN_BRANCH.test(name)) {
+      claim?.(name)
+      return null
+    }
     return 'git push ' + name + ' (not a branch of this run)'
   }
   if (!p.specs.length) {
@@ -707,6 +714,24 @@ async function pushInfo($, c, cwd, cache) {
 }
 
 
+// An own-prefix branch the push names but does not have checked out: the run's own when one of its worktrees was made
+// on it, or a new branch when the remote does not have it yet. One the remote already has is someone else's (feat/*
+// and fix/* are the person's prefixes too). Returns why it is refused, or null.
+async function othersBranch($, c, name, cwd) {
+  if ((await ownedWorktrees($).catch(() => [])).some((r) => r.branch === name)) return null
+  const at = c.dir ?? cwd
+  if (!at) return 'git push ' + name + ' (a branch this run did not make, in a repo the guard cannot place)'
+  const remote = c.push.remote ?? 'origin'
+  if (/^[\w.-]+$/.test(remote)) {
+    const tracked = await $.process.run(['git', '-C', at, 'rev-parse', '-q', '--verify', 'refs/remotes/' + remote + '/' + name], PROBE).catch(() => null)
+    if (tracked?.exitCode === 0 && String(tracked.stdout ?? '').trim()) return 'git push ' + name + ' (a branch the remote already has that this run did not make)'
+  }
+  const ls = await $.process.run(['git', '-C', at, 'ls-remote', '--heads', remote, 'refs/heads/' + name], PROBE).catch(() => null)
+  if (!ls || ls.exitCode !== 0) return 'git push ' + name + ' (a branch this run did not make, on a remote the guard could not read)'
+  return String(ls.stdout ?? '').trim() ? 'git push ' + name + ' (a branch the remote already has that this run did not make)' : null
+}
+
+
 // How deep an alias may expand into another alias (git itself stops a loop; the guard stops sooner).
 const ALIAS_DEPTH = 5
 
@@ -799,8 +824,13 @@ async function judgeCands($, cands, ctx, depth) {
     }
     if (mode === 'local') return DENY_LOCAL
     if (c.kind === 'push') {
-      const why = judgePush(c.push, await pushInfo($, c, cwd, cache))
+      const claims = []
+      const why = judgePush(c.push, { ...(await pushInfo($, c, cwd, cache)), claim: (n) => claims.push(n) })
       if (why) return DENY_PUSH + ' Refused: ' + why + '.'
+      for (const name of claims) {
+        const other = await othersBranch($, c, name, cwd)
+        if (other) return DENY_PUSH + ' Refused: ' + other + '.'
+      }
     }
   }
   return null

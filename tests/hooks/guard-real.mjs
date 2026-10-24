@@ -423,6 +423,19 @@ try {
     check('... no hook written, origin/main unchanged', !fs.existsSync(APP + '/.husky/post-commit') && refOf('origin.git', 'main') === w.main)
   }
   {
+    // feat/* is the person's prefix too: a push onto a feat/* branch the remote already has, which this run did not
+    // make or check out, is refused. A new branch is fine.
+    const w = world()
+    sh('git branch feat/other main && git push -q origin feat/other', APP)
+    const other = refOf('origin.git', 'feat/other')
+    const a = await run('git push -q origin agt/x:feat/other')
+    check('push agt/x:feat/other (on the remote, not this run\'s): denied', a?.deny?.includes('did not make'), JSON.stringify(a))
+    check('... feat/other unchanged', refOf('origin.git', 'feat/other') === other)
+    const b = await run('git push -q origin agt/x:feat/brand-new')
+    check('push agt/x:feat/brand-new (new): allowed and landed', !b?.deny && refOf('origin.git', 'feat/brand-new') === w.slice, JSON.stringify(b))
+    check('... origin/main unchanged', refOf('origin.git', 'main') === w.main)
+  }
+  {
     // Controls below auto: the run's own branch and ordinary writes still pass.
     world()
     const ok = await run('git push -q -u origin agt/x')

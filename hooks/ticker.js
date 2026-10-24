@@ -6,8 +6,7 @@ import { makeStore } from './store.js'
 import { waving } from './live.js'
 import { moodAt } from './mascot.js'
 import { pollNow } from './reaper.js'
-import { applyStatus, quietWorkflows } from './tree.js'
-import { adoptAgents } from './dispatch.js'
+import { adoptAgents, applyAgentList, quietAgents } from './dispatch.js'
 import { readWire } from './worker.js'
 
 // The redraw count is read by the drawing (Timers.tick, ctx.tick); the timers and the agent-list throttle are this
@@ -33,7 +32,7 @@ export async function refreshAgents($, at) {
   listBusy = true
   listAt = now
   try {
-    if (quietWorkflows(Runs.live, Date.now())) $.ui.invalidate('ui.render')
+    if (quietAgents(Date.now())) $.ui.invalidate('ui.render')
     let list
     try {
       list = await $.agent.list()
@@ -42,7 +41,7 @@ export async function refreshAgents($, at) {
     }
     if (!Array.isArray(list)) return
     const added = adoptAgents(list, now).length > 0
-    const changed = applyStatus(Runs.live, list, now)
+    const changed = applyAgentList(list, now)
     if (working()) ensureTicker($)
     if (added || changed) $.ui.invalidate('ui.render')
   } finally {

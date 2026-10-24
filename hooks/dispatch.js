@@ -5,13 +5,13 @@ import { Profile, Panes, Proofs, Session } from './state.js'
 import { makeStore } from './store.js'
 import { reportRun, reportTail } from './drawing.js'
 import { pieceOf, party, taskLine } from './links.js'
-import { newAgent, short, ledger, ledgerText } from './live.js'
+import { newAgent, short, ledger, ledgerText, addUsage, finish, endRoute } from './live.js'
 import { SAFE_RUN, splitName } from './panes.js'
 import { formationOf, roleOf, parseHeader, proveHeader, demoteHeaderText, ladderFixes, decide, executorsWorking, executorCapFlag, estimateRunUsd, maxRunUsdOf, usd } from './routing.js'
 import { addFlag } from './display.js'
 import { noteWire } from './worker.js'
 import { agtTurnFromDispatch } from './proofs.js'
-import { adopt } from './tree.js'
+import { adopt, applyStatus, quietWorkflows } from './tree.js'
 
 // The run bookkeeping store: the run the band follows, each run's counters and routing log, every agent this session
 // has seen, the dispatch decisions and the pane routes. Read through the Runs view; written only here.
@@ -46,6 +46,75 @@ export function adoptAgents(list, now) {
   return adopt(my.live, list, { run: my.lastRun, now })
 }
 
+// The list's view of each known agent folds into its record (tree.js applyStatus). Returns whether anything changed.
+export function applyAgentList(list, now) {
+  return applyStatus(my.live, list, now)
+}
+
+// Every working workflow agent silent too long is finished (tree.js quietWorkflows). Returns whether any was.
+export function quietAgents(now) {
+  return quietWorkflows(my.live, now)
+}
+
+const agentOf = (id) => (id == null ? undefined : my.live.get(id))
+
+// A subagent called a tool: its band row shows the call, and it was heard from now. False when no agent has the id.
+export function noteAgentTool(id, label) {
+  const a = agentOf(id)
+  if (!a) return false
+  a.tool = label
+  a.heard = Date.now()
+  return true
+}
+
+// A workflow agent inside one long call (a full test suite) is alive: tree.js quietWorkflows skips it while a call
+// is open, and the return counts as heard.
+export function enterAgentCall(id) {
+  const a = agentOf(id)
+  if (a) a.calls = (a.calls ?? 0) + 1
+}
+
+export function leaveAgentCall(id) {
+  const a = agentOf(id)
+  if (!a) return
+  a.calls -= 1
+  a.heard = Date.now()
+}
+
+// A subagent's model step ended: it was heard from, the effort and model it ran on fill in when none was known, and
+// its tokens count. False when no agent has the id.
+export function noteAgentStep(id, { effort, model, usage } = {}) {
+  const a = agentOf(id)
+  if (!a) return false
+  a.heard = Date.now()
+  if (!a.effort && effort) a.effort = String(effort)
+  if (!a.model && model) a.model = model
+  addUsage(a, usage)
+  return true
+}
+
+// A subagent's turn ended: its tool clears, its verdict chip is set, its tokens count if no step counted them, and
+// it is done.
+export function agentDone(id, { verdict, usage, now, durationMs }) {
+  const a = agentOf(id)
+  if (!a) return
+  a.tool = null
+  a.verdict = verdict
+  if (a.input + a.output === 0) addUsage(a, usage)
+  finish(a, now, durationMs)
+}
+
+// A worker pane's done message: its newest route takes the verdict chip.
+export function setRouteVerdict(name, verdict) {
+  const r = my.paneRoutes.findLast((x) => x.name === name)
+  if (r) r.verdict = verdict
+}
+
+// A pane left the stage: its newest open route ends now. Returns that route's run, or null when none was open.
+export function endPaneRoute(name, now) {
+  return endRoute(my.paneRoutes, name, now)?.run ?? null
+}
+
 // A workflow agent is in no agent list, and a cancelled one raises no turn.complete: it is marked,
 // and every event of its loop says it is still alive (tree.js quietWorkflows ends a silent one).
 export function heard(a, e) {
@@ -64,7 +133,8 @@ export function demoteToast($, run) {
 // Once per run: the maxRunUsd ceiling was reached and the first dispatch (subagent or pane) was demoted. One toast and
 // a band ⚑ line that name what was demoted and what follows; every later demotion shows only in the routing log
 // (`capped: true`).
-export function ceilingOnce($, runId, run, spent, role, d) {
+export function ceilingOnce($, runId, spent, role, d) {
+  const run = runRec(runId)
   if (run.ceilingToasted) return
   run.ceilingToasted = true
   addFlag($, 'ceiling|' + runId, 'run ' + runId + ': ~' + usd(spent) + ' spent, past maxRunUsd ' + usd(maxRunUsdOf(Profile.settings)) + '; ' + role + ' ' + (d.from ?? 'opus') + ' → sonnet, and every later Opus or Fable planner, reviewer, ui-prototyper and adversary runs Sonnet (the executor keeps its route)')
@@ -75,9 +145,56 @@ export function runSpend(runId) {
   return maxRunUsdOf(Profile.settings) == null ? null : estimateRunUsd(my.live, runId, my.paneRoutes)
 }
 
-export function runState(id) {
+// A run's counters, made on first use. runRec is this module's writable record; runState is the read view of it.
+function runRec(id) {
   if (!my.runs.has(id)) my.runs.set(id, { revise: 0, fixes: 0, fixesByPiece: {}, fable: 0, formation: null, log: [], reports: {} })
   return my.runs.get(id)
+}
+
+export function runState(id) {
+  runRec(id)
+  return view.runs.get(id)
+}
+
+// The run's formation, when this dispatch's header names one.
+export function noteFormation(id, hdr) {
+  const run = runRec(id)
+  run.formation = formationOf(hdr) ?? run.formation
+}
+
+// A plan-reviewer said REVISE.
+export function countRevise(id) {
+  runRec(id).revise += 1
+}
+
+// One more fix round, for the run and for its piece ('' = no piece): the ladder reads the piece's rounds.
+export function countFix(id, piece) {
+  const run = runRec(id)
+  const key = piece ?? ''
+  run.fixes += 1
+  run.fixesByPiece[key] = (run.fixesByPiece[key] ?? 0) + 1
+}
+
+// The run's Fable count is shared across sessions through $.store: take the higher of the two before a pick,
+// and write the new count back after a Fable dispatch.
+export async function syncFable($, id) {
+  const run = runRec(id)
+  run.fable = Math.max(run.fable, Number((await $.store.get('fable:' + id)) ?? 0))
+  return run.fable
+}
+
+export async function countFable($, id) {
+  const run = runRec(id)
+  run.fable += 1
+  await $.store.set('fable:' + id, run.fable)
+}
+
+// A dispatch decision goes to /agt-info routing and to the run's routing log, which is written out whole.
+export async function logDecision($, id, rec) {
+  my.decisions.push(rec)
+  const run = runRec(id)
+  run.log.push(JSON.stringify(rec))
+  await writeRunFile($, id, 'routing.jsonl', run.log.join('\n') + '\n')
 }
 
 export function shortType(t) {
@@ -108,7 +225,7 @@ export async function writeRunFile($, runId, name, text) {
 // no tokens copying it. n counts per role in the run; a second turn of the same agent overwrites.
 export async function writeReport($, a, answer) {
   if (!a.routed || !answer) return
-  const counts = runState(a.run).reports
+  const counts = runRec(a.run).reports
   a.report ??= a.role + '-' + (counts[a.role] = (counts[a.role] ?? 0) + 1) + '.md'
   await writeRunFile($, a.run, 'agents/' + a.report, answer)
 }
@@ -162,12 +279,11 @@ export async function dispatchAgent($, e, next) {
     // Its files and counters follow the header: a headerless agent files under 'adhoc' (which writes
     // nothing), so the run in progress keeps only its own routing log and ledger.
     const fileRun = named ?? 'adhoc'
-    const run = runState(fileRun)
     const busy = [...my.live.values()].some((a) => a.run === my.lastRun && a.state === 'working') || Panes.panes.some((p) => splitName(p.name)?.run === my.lastRun && p.state === 'working')
     if (named && (my.lastRun === 'adhoc' || !busy)) my.lastRun = named
     agtTurnFromDispatch()
     // The table pick follows the run in progress (its REVISEs); `run` is only where the log goes.
-    const d = decide({ role, hdr, run: { ...runState(runId), fixes: ladderFixes(runState(runId), pieceOf(hdr)) }, depth: Profile.depth, settings: Profile.settings, weeklyPct: Session.weeklyPct })
+    const d = decide({ role, hdr, run: { ...runRec(runId), fixes: ladderFixes(runRec(runId), pieceOf(hdr)) }, depth: Profile.depth, settings: Profile.settings, weeklyPct: Session.weeklyPct })
     const res = await next(e)
     if (res.deny) return res
     const off = short(res.model) !== short(d.model)
@@ -179,9 +295,7 @@ export async function dispatchAgent($, e, next) {
       my.live.set(res.agentId, a)
     }
     const rec = { at: new Date().toISOString(), role, model: res.model, effort: null, reason: drift, asked: e.model ?? null, agentId: res.agentId ?? null, kind: 'workflow' }
-    my.decisions.push(rec)
-    run.log.push(JSON.stringify(rec))
-    await writeRunFile($, fileRun, 'routing.jsonl', run.log.join('\n') + '\n')
+    await logDecision($, fileRun, rec)
     if (off && !wfToasted.has(runId + ':' + role)) {
       wfToasted.add(runId + ':' + role)
       $.ui.toast('agt workflow ' + role + ' runs ' + short(res.model) + ' — table says ' + d.model + ' · ' + d.effort)
@@ -193,15 +307,10 @@ export async function dispatchAgent($, e, next) {
   const runId = SAFE_RUN.test(hdr.run ?? '') ? hdr.run : 'adhoc'
   agtTurnFromDispatch()
   my.lastRun = runId
-  const run = runState(runId)
-  run.formation = formationOf(hdr) ?? run.formation
-  if (role === 'executor' && hdr.mode === 'fix') {
-    const key = pieceOf(hdr) ?? ''
-    run.fixes += 1
-    run.fixesByPiece[key] = (run.fixesByPiece[key] ?? 0) + 1
-  }
-  const shared = Number((await $.store.get('fable:' + runId)) ?? 0)
-  run.fable = Math.max(run.fable, shared)
+  const run = runRec(runId)
+  noteFormation(runId, hdr)
+  if (role === 'executor' && hdr.mode === 'fix') countFix(runId, pieceOf(hdr))
+  await syncFable($, runId)
 
   // The run's spend so far, estimated from its agents' tokens and its panes' minutes, only when a ceiling is set.
   const spent = runSpend(runId)
@@ -209,21 +318,16 @@ export async function dispatchAgent($, e, next) {
   const res = await next({ ...e, model: d.model })
   if (res.deny) return res
 
-  if (d.fable) {
-    run.fable += 1
-    await $.store.set('fable:' + runId, run.fable)
-  }
+  if (d.fable) await countFable($, runId)
   const piece = pieceOf(hdr)
   // At most 3 executors at once: counted before this one joins, subagents and the run's executor panes alike.
   const cap = role === 'executor' && runId !== 'adhoc' && res.agentId ? executorCapFlag(runId, executorsWorking(my.live, my.paneRoutes, runId) + 1) : null
   if (res.agentId) my.live.set(res.agentId, { ...newAgent({ id: res.agentId, role, routed: true, model: res.model, effort: d.effort, reason: d.reason, run: runId, now: Date.now(), parentId: e.parentAgentId ?? null }), piece })
   if (runId !== 'adhoc') noteWire({ from: 'lead', to: party(role, piece), kind: 'task', summary: taskLine(e.prompt) || role, at: Date.now(), via: 'sub' })
   const rec = { at: new Date().toISOString(), role, model: res.model, effort: d.effort, reason: d.reason, asked: e.model ?? null, agentId: res.agentId ?? null, ...(cap && { cap }), ...(d.capped && { capped: true }) }
-  my.decisions.push(rec)
-  run.log.push(JSON.stringify(rec))
-  await writeRunFile($, runId, 'routing.jsonl', run.log.join('\n') + '\n')
+  await logDecision($, runId, rec)
   if (cap) addFlag($, 'cap|' + runId, cap) // the band's ⚑ line and one toast; the dispatch itself goes ahead
-  if (d.capped) ceilingOnce($, runId, run, spent, role, d)
+  if (d.capped) ceilingOnce($, runId, spent, role, d)
   else if (d.reason !== 'table') $.ui.toast('agt ↑ ' + role + ' → ' + short(res.model) + ' · ' + d.effort + ' — ' + d.reason)
   $.ui.invalidate('ui.render')
   return res

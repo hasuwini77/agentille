@@ -3,12 +3,12 @@
 // publish and a subagent's report and ledger all start from these two. The proofs themselves are proofs.js's.
 
 import { isLead, Wire, Display, Runs, Proofs, Session, setLeadTurn } from './state.js'
-import { runState, writeRunFile, writeReport, fileRunOf } from './dispatch.js'
+import { writeRunFile, writeReport, fileRunOf, agentDone, countRevise } from './dispatch.js'
 import { DECK, addFlag, clearFlags, setLastAnswer, mascotRest } from './display.js'
 import { flagOf, flagKey } from './focus.js'
 import { ANSWER_STYLE, RAW_STYLE } from './highlight.js'
 import { verdictChip, party, answerLine } from './links.js'
-import { addUsage, finish, ledger } from './live.js'
+import { ledger } from './live.js'
 import { cleanWorkspace } from './reaper.js'
 import { typedPrompt, agtTurnStart, endRun, rawDone, sessionsAllowed, moment, runHeld } from './proofs.js'
 import { loadRunProfile } from './guard.js'
@@ -74,13 +74,10 @@ export async function onTurnComplete($, e) {
     await saveAnswer($, Session.selfName, e.answer)
   }
   if (a) {
-    a.tool = null
     if (a.routed) addFlag($, flagKey(a.role, a.piece), flagOf(a.role, e.answer))
-    a.verdict = verdictChip(a.role, e.answer)
     if (a.routed && a.run !== 'adhoc') noteWire({ from: party(a.role, a.piece), to: 'lead', kind: 'done', summary: answerLine(a.role, e.answer), at: Date.now(), via: 'sub' })
-    if (a.role === 'plan-reviewer' && verdictOf(e.answer) === 'REVISE') runState(fileRunOf(a)).revise += 1
-    if (a.input + a.output === 0) addUsage(a, e.usage)
-    finish(a, Date.now(), e.durationMs)
+    if (a.role === 'plan-reviewer' && verdictOf(e.answer) === 'REVISE') countRevise(fileRunOf(a))
+    agentDone(e.agentId, { verdict: verdictChip(a.role, e.answer), usage: e.usage, now: Date.now(), durationMs: e.durationMs })
     await writeReport($, a, e.answer)
     await writeRunFile($, fileRunOf(a), 'ledger.json', JSON.stringify(ledger(Runs.live, fileRunOf(a), Runs.paneRoutes), null, 2) + '\n')
     ensureTicker($)

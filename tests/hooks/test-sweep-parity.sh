@@ -82,7 +82,8 @@ printf '%s\t%s\t%s\n' \
   > "$T/known"
 
 # ── the JS side: one node call for every fixture ─────────────────────────────
-export FIX="$T" PANES_URL="file://$PWD/hooks/panes.js" FAKE_HOME="$T/home"
+PANES_URL=$(node -p 'require("node:url").pathToFileURL(process.argv[1]).href' "$PWD/hooks/panes.js")
+export FIX="$T" PANES_URL FAKE_HOME="$T/home"
 node --input-type=module -e '
   const fs = await import("node:fs")
   const { paneKey, splitName, answerFile, doneFile, panesFile, tabsFile, sessionsFile } = await import(process.env.PANES_URL)

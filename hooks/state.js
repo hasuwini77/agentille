@@ -49,6 +49,7 @@ export const S = {
   agtTypedAt: null,  // $.clock.now() of the newest typed /agt (null: unknown): its run is in flight AGT_INFLIGHT_MAX_MS at most
   agtBirth: false,  // this turn is the typed /agt's own: any run id may open a pane, and the first one is the run's
   agtRun: null,  // the run id the typed /agt named first (a pane or a routed dispatch): later turns open panes only for it, and the lead's Bash guard holds until its card
+  agtProfile: null,  // the ~/.agentille/profile.json read at the typed /agt: the guard never lets a later read raise the run's integration ceiling above it (guard.js capMode)
   agtTypedSince: 0,  // typed prompts other than /agt since the newest typed /agt (the run's grace, AGT_GRACE_TYPED)
   sessionsAsked: false,  // this turn's prompt was typed and asked for sessions of the person's own (open_sessions)
   lastTyped: '',  // the newest typed prompt: a shell session runs only a command it asks for

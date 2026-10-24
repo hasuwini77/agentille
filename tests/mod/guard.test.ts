@@ -1,5 +1,5 @@
 import { describe, expect, mock, test } from 'claude-code/testing'
-import { DENY_INTEGRATION, DENY_LOCAL, DENY_PUSH, DENY_UNREAD, capsOf, claimedTrees, integrationIn, integrationOf, joinPath, judgePush, newTrees, normSlug, normUrl, parseOwned, recordTrees, sameRepo, scriptSlugs, scriptTrees, splitCommands, worktreeAdds } from '../../hooks/guard.js'
+import { DENY_INTEGRATION, DENY_LOCAL, DENY_PUSH, DENY_UNREAD, capsOf, claimedTrees, integrationIn, integrationOf, joinPath, judgePush, newTrees, normSlug, normUrl, parseOwned, recordTrees, sameRemote, scriptSlugs, scriptTrees, splitCommands, worktreeAdds } from '../../hooks/guard.js'
 import { parseWorktrees } from '../../hooks/clean.js'
 
 // What the repo looks like to a line read alone: the slice branch is checked out, the base is main.
@@ -98,11 +98,7 @@ describe('guard: which commands integrate', () => {
 
   test('a branch switch earlier on the line makes HEAD unreadable for a later push; a written-out name still goes', async () => {
     for (const line of [
-      'git checkout main && git merge --ff-only agt/x && git push origin HEAD',
-      'git switch main && git merge --ff-only agt/x && git push -u origin HEAD',
       'git checkout -q main; git push',
-      'git branch -m main && git push origin HEAD',
-      'git branch -M agt/x main; git push origin @',
       'git reset --hard main && git push origin HEAD',
       'git symbolic-ref HEAD refs/heads/main && git push origin HEAD',
       'git -C ../app checkout main && cd ../app && git push origin "$(git branch --show-current)"',
@@ -114,6 +110,26 @@ describe('guard: which commands integrate', () => {
       'git checkout -- README.md && git push origin HEAD',
       'git push origin HEAD && git checkout main',
       'git rebase main && git push origin HEAD',
+    ]) expect([line, integrationIn(line, onSlice)]).toEqual([line, null])
+  })
+
+  test('a local merge, reset --hard, rebase or branch -f/-M onto the base branch is caught below auto', async () => {
+    for (const line of [
+      'git checkout main && git merge --ff-only agt/x && git push origin HEAD',
+      'git switch main && git merge --ff-only agt/x && git push -u origin HEAD',
+      'git checkout main && git reset --hard agt/x',
+      'git checkout main && git rebase agt/x',
+      'git branch -m main',
+      'git branch -M agt/x main',
+      'git branch -f master agt/x',
+      'git rebase upstream master',
+    ]) expect([line, integrationIn(line, onSlice)]).toEqual([line, expect.stringContaining('base branch')])
+    // Merging or rewriting the slice branch itself is fine; so is a merge with no branch switch on agt/x.
+    for (const line of [
+      'git merge --no-ff agt/feature',
+      'git rebase main',
+      'git checkout -b agt/y && git merge agt/x',
+      'git branch -f agt/y main',
     ]) expect([line, integrationIn(line, onSlice)]).toEqual([line, null])
   })
 
@@ -259,8 +275,8 @@ describe('guard: the repo a profile entry names', () => {
     expect(normUrl('https://github.com/me/app.git/')).toBe('github.com/me/app')
     expect(normUrl('ssh://git@github.com:22/me/app')).toBe('github.com/me/app')
     expect(normSlug('me/app')).toBe('github.com/me/app')
-    expect(sameRepo('github.com/me/app', 'me/app')).toBe(true)
-    expect(sameRepo('github.com/me/app', 'github.com/other/app')).toBe(false)
+    expect(sameRemote('github.com/me/app', 'me/app')).toBe(true)
+    expect(sameRemote('github.com/me/app', 'github.com/other/app')).toBe(false)
   })
 
   test('the profile decides; a repo config lowers it and never raises it', async () => {
@@ -510,7 +526,7 @@ describe('guard: integration in the mod', () => {
     expect((await bash($, 'cd /work/repo-x && git push -u origin HEAD')).result).toBe('ok')
     expect((await bash($, 'git -C /work/repo-x push')).result).toBe('ok')
     expect((await bash($, 'git push -u origin agt/x')).result).toBe('ok')
-    const main = await bash($, 'git merge --no-ff agt/x && git push origin main')
+    const main = await bash($, 'git push origin agt/x:main')
     expect(main.deny).toContain(DENY_PUSH)
     expect(main.deny).toContain('git push to main')
     expect((await bash($, 'git push')).deny).toContain('git push to main')
@@ -911,5 +927,86 @@ describe('guard: scripts are read before they run', () => {
     expect((await bash($, './ship.sh')).result).toBe('ok')
     expect((await bash($, 'python3 -c "import os; os.system(\'git push origin main\')"')).result).toBe('ok')
     expect(ran).toHaveLength(3)
+  })
+})
+
+describe('guard: unreadable words and sources fail closed', () => {
+  test('a substitution, a pipe into a shell, xargs, an interpreter spawn, awk, an opaque runner or an inline alias is refused', async () => {
+    for (const line of [
+      'git $(echo push) origin HEAD:main',
+      'git ${X:-push} origin HEAD:main',
+      'gh $(echo pr) merge 1',
+      "echo 'git push origin main' | bash",
+      "printf '%s\\n' push origin main | xargs git",
+      'python3 - <<EOF\nimport subprocess\nsubprocess.run(["git", "push"])\nEOF',
+      'python3 -c "import subprocess as s; s.run([\'g\'+\'it\', \'push\'])"',
+      "awk 'BEGIN{system(\"git push origin main\")}'",
+      'npx release-it',
+      'docker run --rm alpine/git push origin main',
+      'shopt -s expand_aliases\nalias g=git\ng push origin main',
+    ]) expect([line, integrationIn(line, onSlice)]).toEqual([line, expect.any(String)])
+  })
+
+  test('ordinary interpreter, package and container commands are left alone', async () => {
+    for (const line of [
+      'npm test',
+      'node -e "console.log(require(\'./package.json\').version)"',
+      'python3 -c "print(1)"',
+      'docker ps',
+      'git log | grep fix',
+    ]) expect([line, integrationIn(line, onSlice)]).toEqual([line, null])
+  })
+})
+
+describe('guard: the trust root and the repo git state are off-limits below auto', () => {
+  test('a redirect, copy, tee, sed -i or git config that writes them is refused; an ordinary write is not', async () => {
+    for (const line of [
+      'printf x > ~/.agentille/profile.json',
+      'echo x >> "$HOME/.agentille/profile.json"',
+      'echo x >> .git/config',
+      'cp hook .git/hooks/post-commit',
+      'tee .git/hooks/pre-push < h',
+      'git config core.hooksPath .h',
+      'git config remote.origin.push +refs/heads/*:refs/heads/*',
+      'sed -i s/x/y/ .git/config',
+    ]) expect([line, integrationIn(line, onSlice)]).toEqual([line, expect.any(String)])
+    for (const line of [
+      'echo x > notes.md',
+      'cp a b',
+      'git config user.name me',
+      'git config --get remote.origin.url',
+    ]) expect([line, integrationIn(line, onSlice)]).toEqual([line, null])
+  })
+})
+
+describe('guard: protected writes and package scripts in the mod', () => {
+  test('a run below auto cannot rewrite the profile or .git/config by Bash or by the Write/Edit tool', async ($, on) => {
+    setup(on)
+    await boot($)
+    await typed($)
+    expect((await bash($, 'printf \'{"integration":"auto"}\' > "$HOME/.agentille/profile.json"')).deny).toContain('may not write')
+    expect((await bash($, 'printf "[alias]\\n\\tp = push\\n" >> .git/config')).deny).toContain('may not write')
+    expect((await $.tool.call({ tool: 'Write', file_path: '/h/.agentille/profile.json', content: 'x' } as never)).deny).toContain('may not write')
+    expect((await $.tool.call({ tool: 'Edit', file_path: '/work/repo/.git/config', old_string: 'a', new_string: 'b' } as never)).deny).toContain('may not write')
+    expect((await $.tool.call({ tool: 'Write', file_path: '/work/repo/notes.md', content: 'x' } as never))?.deny).toBeUndefined()
+  })
+
+  test('under auto the profile and config are writable again', async ($, on) => {
+    setup(on, { profile: { integration: 'auto' } })
+    await boot($)
+    await typed($)
+    expect((await bash($, 'echo x > ~/.agentille/profile.json'))?.deny).toBeUndefined()
+    expect((await $.tool.call({ tool: 'Write', file_path: '/h/.agentille/profile.json', content: 'x' } as never))?.deny).toBeUndefined()
+  })
+
+  test('an npm/pnpm run script is read from package.json; a plain script and npm test run, an opaque runner is refused', async ($, on) => {
+    setup(on, { files: { '/work/repo/package.json': JSON.stringify({ scripts: { ship: 'git push origin main', build: 'tsc' } }) } })
+    await boot($)
+    await typed($)
+    expect((await bash($, 'npm run ship')).deny).toContain('package script that calls git push')
+    expect((await bash($, 'pnpm run -s ship')).deny).toContain('package script')
+    expect((await bash($, 'npm run build')).result).toBe('ok')
+    expect((await bash($, 'npm test')).result).toBe('ok')
+    expect((await bash($, 'npx release-it')).deny).toContain('cannot read')
   })
 })

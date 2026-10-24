@@ -33,10 +33,26 @@ Also in the box, each covered below: `/storm` researches what to build next and 
 
 ## Contents
 
-- [When to use it](#when-to-use-it) · [Glossary](#glossary) · [Options](#options) · [Settings](#settings)
+- [First 15 minutes](#first-15-minutes) · [When to use it](#when-to-use-it) · [Glossary](#glossary) · [Options](#options) · [Settings](#settings)
 - [Storm](#storm) · [Sessions](#sessions) · [How it decides](#how-it-decides) · [Routing](#routing)
 - [When something goes wrong](#when-something-goes-wrong) · [Requirements](#requirements) · [Releases](#releases) · [What it touches](#what-it-touches)
 - Reference pages: [guards](./docs/guards.md) · [sessions](./docs/sessions.md) · [what you see](./docs/display.md) · [settings detail](./docs/settings.md) · [routing cost](./docs/routing-cost.md) · [releasing](./docs/releasing.md)
+
+## First 15 minutes
+
+1. **Install** with the two lines above, then start a new Claude Code session so the plugin and its mod load.
+2. **Check that the mod loaded:** type `/agt-info`. It prints the display settings in effect and the last run's routing. Every `/agt-*` command comes from the module `hooks/hooks.json` loads, so if Claude Code does not know `/agt-info`, the mod did not load.
+   - `/agt` still works without the mod; its recon line then ends in `[agentille v<version>]`, and you get the plain subagent tree instead of the band.
+3. **Run a small task:** `/agt "fix the typo in the footer"` prints `recon: low · solo · <reason>`, then Claude does it: no agents, no card.
+4. **Run a bigger one:** `/agt "add a CSV export endpoint and a download button on the reports page"`. The recon line names the level it picked (`medium · subagent`, say), the band above your prompt fills with the planner, executors and reviewers, and the run ends on a card like the one above.
+5. **Find your settings** in `~/.agentille/profile.json`. Every key is optional ([Settings](#settings)). `/agentille-init` adds your voice; `/agentille-project` adds a repo's entry.
+6. **Turn a surface off:**
+   - the deck: `display.deck: "off"` (the default);
+   - the flags above the prompt: `display.focus: false`;
+   - reply highlighting: `display.highlight: "off"` (the default);
+   - the daily version check: `AGENTILLE_UPDATE_CHECK=0` in your environment;
+   - pushes and PRs: `integration: "local"`, so runs merge locally and push nothing;
+   - the band, the status line and the pane mascot have no switch of their own: `claude plugin disable agentille@hasuwini77-agentille` turns the whole plugin off, `/agt` included, and `claude plugin enable agentille@hasuwini77-agentille` brings it back.
 
 ## When to use it
 

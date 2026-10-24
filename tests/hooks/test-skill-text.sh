@@ -66,6 +66,12 @@ check "display.md points at no-mod.md and no longer seeds TodoWrite" 'has skills
 check "panes-mode.md points at no-mod.md and carries no manual spawn" 'has skills/agt/panes-mode.md "no-mod.md" && ! has skills/agt/panes-mode.md "herdr pane split" && ! has skills/agt/panes-mode.md "tmux split-window -d"'
 check "SKILL.md names no-mod.md in its hard rules" 'grep -F "Mods off still works" skills/agt/SKILL.md | grep -qF "no-mod.md"'
 
+# every coined term the prompt files use is defined in SKILL.md's Words section, in one bolded entry
+words() { awk '/^## Words/ { on = 1; next } on && /^## / { on = 0 } on' skills/agt/SKILL.md; }
+for t in mod band wire card formation squad gauntlet ladder harvest B0 ⚑ slice level transport recon; do
+  check "SKILL.md's Words section defines $t" 'words | grep -qiE "\*\*(the )?$t[^*]*:\*\*"'
+done
+
 # worktrees: one script, no inline recipe for the two files to drift apart on
 for f in skills/agt/factory.md agents/agentille-executor.md; do
   check "$f makes worktrees with agt-worktree.sh" 'has "$f" "agt-worktree.sh"'

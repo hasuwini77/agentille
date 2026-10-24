@@ -13,12 +13,17 @@ One command. Do it yourself when it is small, fan out when it is not, merge or e
 
 - **The lead:** you, the session that runs `/agt`. The agents and panes you dispatch are workers.
 - **Slice:** one file-disjoint part of the task, built by one executor on its own branch and worktree.
+- **Level:** how big the crew is: low, medium or heavy ("Levels"). **Transport:** how its workers run: `solo`, `subagent`, `panes` or `workflow`. **Recon:** the run's first line, which names both.
 - **The mod:** agentille's code that runs inside Claude Code. It routes models, draws the live views, carries messages between panes and closes finished panes. `/agt` works without it.
 - **Band:** the mod's live status block above the prompt: one row per agent of the run, and `⚑` flags.
 - **Wire:** the mod's messages between panes. A pane worker that finishes sends its result to the lead as a message.
+- **Harvest:** reading a finished worker's answer (its wire message or answer file); its pane closes right after.
 - **Card:** the run's final summary, at most 8 lines (`display.md` → "Final card").
-- **Formation:** an optional run shape that changes how workers relate: gauntlet, duel or relay (`formations.md`).
+- **⚑:** a flag for something that needs the person: on the band as it happens (a REVISE, a FAIL, a blocked pane) and on the card's `⚑` line (escalated, PR ready, a P0/P1 left).
+- **Formation:** an optional run shape that changes how workers relate: gauntlet, duel or relay (`formations.md`). **Gauntlet:** the formation where an adversary writes tests that try to break a slice before it integrates.
 - **Squad:** a group of extra specialist reviewers that joins when the repo matches its signals (`squads.md`).
+- **Ladder:** the escalation ladder: a role's model or effort climbs after a REVISE or a failed fix (`routing.md` → "Escalation ladder").
+- **B0:** the planner's first, sequential step that lands the files ≥2 slices share (a lockfile, schema, types) before any parallel slice; frozen like a relay contract.
 
 ## Levels
 

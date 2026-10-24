@@ -84,4 +84,9 @@ check "the re-entry rule names ledger.json and context-pack.md" 'reentry | grep 
 check "SKILL.md never re-dispatches a finished slice" 'has skills/agt/SKILL.md "Never re-dispatch a finished slice"'
 check "a SessionStart hook fires on compact" 'grep -qE "\"matcher\": *\"[^\"]*compact" hooks/hooks.json'
 
+# setup skills that say "typed only" disable model invocation
+for f in skills/agentille-init/SKILL.md skills/agentille-project/SKILL.md; do
+  check "$f disables model invocation" 'grep -qE "^disable-model-invocation: true$" "$f"'
+done
+
 [ "$bad" = 0 ] && echo "skill-text: $n checks pass" || { echo "skill-text: $bad of $n checks fail"; exit 1; }

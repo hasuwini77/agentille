@@ -99,4 +99,19 @@ out=$(run AGENTILLE_VALIDATE_README="$T/readme-bad.md"); rc=$?
 check "README with a drifted row: run fails" '[ "$rc" != 0 ]'
 check "README with a drifted row: shows the diff" 'printf "%s" "$out" | grep -q "sonnet · low"'
 
+# the failed-fix count before Fable must agree across README.md, routing.md and routing.js
+out=$(run); rc=$?
+check "failed-fix count: the real README agrees" 'printf "%s" "$out" | grep -q "PASS.*fable-fixes: README.md, routing.md and routing.js agree"'
+sed 's/two failed fixes/three failed fixes/g' README.md > "$T/readme-fix3.md"
+out=$(run AGENTILLE_VALIDATE_README="$T/readme-fix3.md"); rc=$?
+check "README says three failed fixes: run fails" '[ "$rc" != 0 ]'
+check "README says three failed fixes: names both counts" 'printf "%s" "$out" | grep -q "FAIL.*fable-fixes: .*says 3 failed fixes, hooks/routing.js moves the diagnose planner to Fable at 2"'
+sed 's/two failed fixes/2 failed fixes/g' README.md > "$T/readme-fix2.md"
+out=$(run AGENTILLE_VALIDATE_README="$T/readme-fix2.md"); rc=$?
+check "README says 2 failed fixes (digit): agrees" 'printf "%s" "$out" | grep -q "PASS.*fable-fixes: README.md, routing.md and routing.js agree: Fable after 2"'
+awk '!d && /two failed fixes/{sub(/two failed fixes/, "three failed fixes"); d=1} {print}' README.md > "$T/readme-fixmix.md"
+out=$(run AGENTILLE_VALIDATE_README="$T/readme-fixmix.md"); rc=$?
+check "README names two different counts: run fails" '[ "$rc" != 0 ]'
+check "README names two different counts: says so" 'printf "%s" "$out" | grep -q "FAIL.*fable-fixes: .*names different counts"'
+
 [ "$bad" = 0 ] && echo "validate-gate: $n checks pass" || { echo "validate-gate: $bad of $n checks fail"; exit 1; }

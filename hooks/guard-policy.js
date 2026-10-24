@@ -591,13 +591,14 @@ async function existingDir($, abs) {
 // Config git reads that no fixed name gives: the files an include.path or includeIf.*.path pulls in (from the
 // global config, the repo's, or a file they include), and the folder a global core.hooksPath names. Asked of git
 // from the write's folder, with where each value was set, so a relative include is read against the file that set
-// it. Returns the protected label, or null.
+// it. git saying no match (exit 1) is no such file; git that cannot be run or asked refuses the write. Returns the
+// protected label, or null.
 async function configFileOf($, abs, real, memo) {
   const d = await existingDir($, abs)
   if (!d) return null
   if (!memo.has(d)) {
     const r = await $.process.run(['git', '-C', d, 'config', '--show-origin', '--show-scope', '--get-regexp', '^(include|includeif\\..*)\\.path$|^core\\.hookspath$'], PROBE).catch(() => null)
-    const out = { files: [], hooks: [] }
+    const out = { files: [], hooks: [], unread: !r || (r.exitCode !== 0 && r.exitCode !== 1) }
     for (const l of r && r.exitCode === 0 ? String(r.stdout ?? '').split('\n') : []) {
       const m = /^(\S+)\tfile:(.*?)\t(\S+) (.+)$/.exec(l.replace(/\r$/, '')) ?? /^(\S+)\tfile:(.*?)\t(\S+)\t?(.*)$/.exec(l)
       if (!m) continue
@@ -612,7 +613,8 @@ async function configFileOf($, abs, real, memo) {
     }
     memo.set(d, out)
   }
-  const { files, hooks } = memo.get(d)
+  const { files, hooks, unread } = memo.get(d)
+  if (unread) return 'a file git config may include, in config the guard could not read'
   const lc = (p) => String(p ?? '').toLowerCase().replace(/\/+$/, '')
   const hits = (p) => !!p && files.some((f) => lc(f) === lc(p))
   if (hits(abs) || hits(real)) return 'a git config file an include pulls in (include.path)'

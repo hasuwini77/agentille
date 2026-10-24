@@ -435,7 +435,7 @@ describe('guard: worktree adds', () => {
 // A run in a session with no pane transport: the ownership list lives in memory.
 // git: per dir, the branch checked out (`current`), its remote URL and its main checkout (default /work/repo).
 type Repo = { current?: string; remote?: string; common?: string; pushurl?: string; upstream?: string; tracking?: string; gitDir?: string }
-const setup = (on: any, o: { profile?: unknown; repoConfig?: unknown; env?: Record<string, string>; files?: Record<string, string>; repos?: Record<string, Repo>; feat?: boolean; broken?: boolean; aliases?: Record<string, string>; aliasBroken?: boolean; pyFind?: Record<string, string>; hooksPath?: string; remoteHeads?: string[]; originHead?: string; followTags?: boolean; tags?: string[]; remoteTags?: string[]; localTags?: string[]; gitConfigFiles?: string; cwd?: string } = {}) => {
+const setup = (on: any, o: { profile?: unknown; repoConfig?: unknown; env?: Record<string, string>; files?: Record<string, string>; repos?: Record<string, Repo>; feat?: boolean; broken?: boolean; aliases?: Record<string, string>; aliasBroken?: boolean; pyFind?: Record<string, string>; hooksPath?: string; remoteHeads?: string[]; originHead?: string; followTags?: boolean; tags?: string[]; remoteTags?: string[]; localTags?: string[]; gitConfigFiles?: string; gitConfigBroken?: boolean; cwd?: string } = {}) => {
   const seen: string[][] = []
   const ran: string[] = []
   const git = { made: false, committed: false, feat: false }
@@ -515,7 +515,7 @@ const setup = (on: any, o: { profile?: unknown; repoConfig?: unknown; env?: Reco
     if (/ls-remote --heads \S+$/.test(a)) return out((o.remoteHeads ?? []).map((h) => 'abc\trefs/heads/' + h + '\n').join(''))
     if (a.endsWith('symbolic-ref --short refs/remotes/origin/HEAD')) return o.originHead ? out('origin/' + o.originHead + '\n') : out('', 1)
     // The includes and hooks folder git config names, with where each was set (`git config --show-origin --show-scope`).
-    if (a.includes('config --show-origin --show-scope --get-regexp')) return out(o.gitConfigFiles ?? '', o.gitConfigFiles ? 0 : 1)
+    if (a.includes('config --show-origin --show-scope --get-regexp')) return o.gitConfigBroken ? out('', 128) : out(o.gitConfigFiles ?? '', o.gitConfigFiles ? 0 : 1)
     // A tag of that name, asked of git as refs/tags/<name>.
     const tg = /rev-parse -q --verify refs\/tags\/(\S+)$/.exec(a)
     if (tg) return (o.localTags ?? []).includes(tg[1]) ? out('abc\n') : out('', 1)
@@ -1944,6 +1944,17 @@ describe('guard: shell startup files, ssh, npm and MCP config, include targets a
     expect((await $.tool.call({ tool: 'Write', file_path: '/h/.githooks/post-commit', content: 'x' } as never)).deny).toContain('the global hooks folder')
     expect((await bash($, 'echo x > /h/notes.cfg')).result).toBe('ok')
     expect(ran).toEqual(['echo x > /h/notes.cfg'])
+  })
+})
+
+describe('guard: a write when git cannot say what its config includes', () => {
+  test('is refused, as an unreadable include would be; a write with no includes at all is not', async ($, on) => {
+    const { ran } = setup(on, { profile: { integration: 'pr' }, gitConfigBroken: true })
+    await boot($)
+    await typed($)
+    expect((await bash($, 'echo x > /work/repo/notes.md')).deny).toContain('config the guard could not read')
+    expect((await bash($, 'echo x')).result).toBe('ok')
+    expect(ran).toEqual(['echo x'])
   })
 })
 

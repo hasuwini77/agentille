@@ -23,7 +23,7 @@ It reads each **Bash** line the way the shell would: words, quotes, `$( )`, back
 - the package's own lifecycle scripts that `install`, `i`, `ci`, `add`, `rebuild`, `pack`, `publish` and `version <x>` run (`preinstall` through `postprepare`, `prepack` and `postpack`, `preversion` through `postversion`), for npm, pnpm, yarn and bun, by the same rules as `run`. `--ignore-scripts` and a global install run none;
 - a local bin a package script or recipe names by path (`node_modules/.bin/x`, `$(npm bin)/x`, `./bin/x`), read where its link lands, with its own package's relative imports one level deep;
 - a `python -m pkg.mod` module, looked for in the command's folder and then each `PYTHONPATH` entry, with its parent packages' `__init__.py`;
-- a `node` (or `bun`) file and the files it imports with a relative static import, one level deep, and the test files `node --test` runs: the files, folders or globs it is given, or with none the files node's own patterns find (up to 200);
+- a `node` (or `bun`) file and the files it imports with a relative static import, one level deep, and the test files `node --test` runs: the files, folders or globs it is given, or with none the files node's own patterns find (up to 200 test files, in a folder of up to 4,000 files);
 - a `python3 <file>` script and the modules beside it that it imports, one level deep;
 - a git alias from your git config, for any word after `git` that is not one of git's own commands, looked up in the repo the command targets and with the config variables the line sets (`HOME`, `XDG_CONFIG_HOME`, `GIT_CONFIG_GLOBAL`, `GIT_CONFIG_SYSTEM`, `GIT_CONFIG_NOSYSTEM`, `GIT_CONFIG_PARAMETERS`, `GIT_CONFIG_COUNT`/`KEY_<n>`/`VALUE_<n>`);
 - the line `git submodule foreach` runs;
@@ -58,7 +58,8 @@ It fails closed and refuses. That covers:
 - a source it cannot read: code piped into a shell, `sh -s` or `python3 -`, a tool fed by `xargs`, or an opener it cannot look into such as `npx`, `pnpm dlx` or `docker`;
 - a package script run pointed at another package folder (`--prefix`, `--filter`, `-w`, `-r`, `--workspaces`), since it cannot tell which `package.json` is read;
 - a `package.json` that does not parse, or a `run x` with no script `x`; an install, `ci`, `pack` or `version` pointed at another package folder, as for `run`;
-- a local bin a package script or recipe names that is not a readable script (a compiled binary, a link that leads nowhere), or `node --test` past 200 test files;
+- a local bin a package script or recipe names that is not a readable script (a compiled binary, a link that leads nowhere), or `node --test` past 200 test files or a folder of more than 4,000 files;
+- a write when git cannot be asked which files its config includes (git missing, or a config it cannot parse);
 - inside a package script's own text, a step it cannot place, find or read, or a chain more than five hops deep;
 - inside a package script or a script file, a git or gh subcommand built from a variable or a substitution (`git pu${X:-sh}`), or a program word built that way with a git or gh word after it (`c=$(printf gi)t; $c push`): it does not run `$( )` to learn the word, so it refuses the step. In a script's text a variable program with no git or gh word after it (`exec "$@"`, `"$NODE" x.js`) is how scripts name their neighbours and is not refused;
 - a relative import of a `node` file that it cannot find (in a file a shell script runs, it is skipped);

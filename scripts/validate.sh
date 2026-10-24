@@ -271,6 +271,36 @@ PY
   printf '%s\n' "$rr_out" | grep -qE '^(PASS|FAIL)' || fail "readme-routing: comparison produced no result"
 fi
 
+# ── 6b-fable. Failed-fix count before Fable agrees across the docs ──────────
+# hooks/routing.js makes a mode=diagnose planner a Fable candidate after N failed fixes. README.md
+# (every "<N> failed fixes"), skills/agt/routing.md ("diagnose planner after <N> failed attempts")
+# and the /agt-info rung label in hooks/info.js ("diagnose, <N> failed fixes") must name the same N.
+# Number words one..five and digits compare equal. A phrase that vanished from README.md,
+# routing.md or routing.js is a FAIL (reword the check with it); info.js disagreeing is a WARN.
+hdr "Fable failed-fix count"
+ff_num() { tr 'A-Z' 'a-z' | sed -E 's/(^|[^a-z])one([^a-z]|$)/\11\2/; s/(^|[^a-z])two([^a-z]|$)/\12\2/; s/(^|[^a-z])three([^a-z]|$)/\13\2/; s/(^|[^a-z])four([^a-z]|$)/\14\2/; s/(^|[^a-z])five([^a-z]|$)/\15\2/' | grep -oE '[0-9]+' | head -1; }
+ff_n='([0-9]+|[Oo]ne|[Tt]wo|[Tt]hree|[Ff]our|[Ff]ive)'
+ff_readme="${AGENTILLE_VALIDATE_README:-README.md}"
+ff_js=$(grep -oE "hdr\.mode === 'diagnose' && run\.fixes >= [0-9]+" hooks/routing.js 2>/dev/null | head -1 | grep -oE '[0-9]+$')
+ff_md_all=$(grep -oE "mode=diagnose\`? planner after $ff_n failed (attempts?|fix(es)?)" skills/agt/routing.md 2>/dev/null)
+ff_md=$(printf '%s\n' "$ff_md_all" | grep -oE "after $ff_n failed" | sed 's/^after //; s/ failed$//' | sort -u | while IFS= read -r w; do [ -n "$w" ] && printf '%s\n' "$w" | ff_num; done | sort -u)
+ff_rd=$(grep -oE "(^|[^A-Za-z0-9])$ff_n failed fix(es)?" "$ff_readme" 2>/dev/null | sed -E 's/ failed fix(es)?$//' | while IFS= read -r w; do printf '%s\n' "$w" | ff_num; done | sort -u)
+ff_info=$(grep -oE "diagnose, $ff_n failed fix(es)?" hooks/info.js 2>/dev/null | sed -E 's/^diagnose, //; s/ failed fix(es)?$//' | while IFS= read -r w; do printf '%s\n' "$w" | ff_num; done | sort -u)
+ff_bad=0
+if [ -z "$ff_js" ]; then fail "fable-fixes: hooks/routing.js has no \"hdr.mode === 'diagnose' && run.fixes >= N\" rule (reword this check with it)"; ff_bad=1; fi
+if [ -z "$ff_md" ]; then fail "fable-fixes: skills/agt/routing.md has no \"mode=diagnose planner after N failed attempts\" rule"; ff_bad=1
+elif [ "$(printf '%s\n' "$ff_md" | wc -l | tr -d ' ')" != 1 ]; then fail "fable-fixes: skills/agt/routing.md names more than one count: $(printf '%s' "$ff_md" | tr '\n' ' ')"; ff_bad=1; fi
+if [ -z "$ff_rd" ]; then fail "fable-fixes: $ff_readme names no \"N failed fixes\" count"; ff_bad=1
+elif [ "$(printf '%s\n' "$ff_rd" | wc -l | tr -d ' ')" != 1 ]; then fail "fable-fixes: $ff_readme names different counts: $(printf '%s' "$ff_rd" | tr '\n' ' ')"; ff_bad=1; fi
+if [ "$ff_bad" = 0 ]; then
+  if [ "$ff_md" != "$ff_js" ]; then fail "fable-fixes: skills/agt/routing.md says $ff_md failed attempts, hooks/routing.js moves the diagnose planner to Fable at $ff_js"; ff_bad=1; fi
+  if [ "$ff_rd" != "$ff_js" ]; then fail "fable-fixes: $ff_readme says $ff_rd failed fixes, hooks/routing.js moves the diagnose planner to Fable at $ff_js"; ff_bad=1; fi
+  [ "$ff_bad" = 0 ] && pass "fable-fixes: README.md, routing.md and routing.js agree: Fable after $ff_js failed fixes"
+fi
+if [ -z "$ff_info" ]; then warn "fable-fixes: hooks/info.js has no \"diagnose, N failed fixes\" rung label"
+elif [ -n "$ff_js" ] && [ "$ff_info" != "$ff_js" ]; then warn "fable-fixes: hooks/info.js labels the rung \"$ff_info failed fixes\", hooks/routing.js says $ff_js"
+elif [ -n "$ff_js" ]; then pass "fable-fixes: hooks/info.js rung label agrees ($ff_info failed fixes)"; fi
+
 # ── 6b'. Role parity (agents/ ↔ routing.js TABLE ↔ routing.md ↔ hooks.json) ───
 # A role added in one place and forgotten in another fails at runtime (an
 # unrouted agent, a doc row the mod ignores). The mirror check above compares

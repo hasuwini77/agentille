@@ -44,3 +44,7 @@ A plain session has no pane tools.
 - Worker panes close when harvested.
 - When your session ends (never on `/clear`), the sweep closes only the worker panes this session opened (listed in `~/.agentille/state/lead-<pane>.panes`), and of those only the idle or done ones whose answer is saved. A session that opened none closes nothing.
 - Your own sessions close only when idle (Herdr) or when you close them (tmux): [sessions.md](./sessions.md).
+
+## The run's own branch
+
+The push guard lets a run push only its own branch: a branch named `agt/…`, `feat/…`, `fix/…` or `storm/…`, or the one checked out in the repo the push lands in. It refuses the base branch, a tag, every branch at once (`--all`, `--branches`, `--mirror`, `--tags`), a force push and a ref it cannot read.

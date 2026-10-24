@@ -7,14 +7,14 @@ import { Proofs } from './proofs.js'
 import { PROBE } from './panes.js'
 import { base, commands, commandSteps, joinPath, lineMovesHead, protectedPath, SCRIPT_RISK, MAKE_RISK } from './guard-lex.js'
 import { PLAIN_MODULE, jsCandidates, jsImports, moduleFiles, scriptChain } from './script-refs.js'
-import { ownedWorktrees } from './guard-own.js'
+import { Worktrees, ownedBranches } from './guard-own.js'
 
 // The gh and curl/wget step readers live in a leaf the lexer shares; the policy keeps carrying their names.
 export { ghStep, httpStep } from './guard-steps.js'
 
 export const DENY_INTEGRATION = 'integration auto is not set in your profile for this repo; the run stops at the PR.'
 
-export const DENY_PUSH = 'integration auto is not set in your profile for this repo: a run pushes only its own branch (the one checked out, or an agt/*, feat/*, fix/* or storm/* branch it made or that the remote does not have yet), never the base branch, a tag, a force push, a branch deletion or every branch. Write the branch name and the directory out (no variables) and push again.'
+export const DENY_PUSH = 'integration auto is not set in your profile for this repo: a run pushes only its own branch (one it made a worktree on or created on the remote, its agt/* slice branch, or the branch checked out where /agt was typed), never the base branch (main, master, the remote default, the checkout upstream), a tag, a force push (--force-with-lease only on its own agt/* branch), a branch deletion or every branch. Write the branch name and the directory out (no variables) and push again.'
 
 export const DENY_LOCAL = 'integration is local for this repo: the run pushes nothing and opens no PR.'
 
@@ -49,8 +49,9 @@ const CURRENT_SUB = /^\$\(git (branch --show-current|rev-parse --abbrev-ref HEAD
 // bare `git push` goes, or null) and bases (the default branch, main and master). Returns why it is refused.
 // A push after a step that moves HEAD on the same line (p.headMoved) reads HEAD as unknown: the branch read
 // before the line ran is not the one the push sees.
-// A push to an own-prefix branch (agt/*, feat/*, fix/*, storm/*) that is not the one checked out is let through here
-// and handed to `claim`: guardLine then asks whether the run made it or the remote does not have it yet.
+// A push to the branch checked out, or to an own-prefix branch (agt/*, feat/*, fix/*, storm/*), is let through here
+// and handed to `claim` (name, whether it is the one checked out): guardLine then asks whether it is the run's own.
+// `bases` is every base-like branch (guardLine baseLike): never pushed below auto, checked out or not.
 export function judgePush(p, { current = null, pushDst = null, bases = new Set(['main', 'master']), refspecs = [], pushDefault = null, claim = null } = {}) {
   if (p.dry) return null
   if (p.bulk) return 'git push ' + p.bulk
@@ -64,9 +65,8 @@ export function judgePush(p, { current = null, pushDst = null, bases = new Set([
     const name = d.replace(/^refs\/heads\//, '')
     if (name.startsWith('refs/')) return 'git push ' + d
     if (bases.has(name)) return 'git push to ' + name
-    if (name === cur) return null
-    if (OWN_BRANCH.test(name)) {
-      claim?.(name)
+    if (name === cur || OWN_BRANCH.test(name)) {
+      claim?.(name, name === cur)
       return null
     }
     return 'git push ' + name + ' (not a branch of this run)'
@@ -675,27 +675,85 @@ async function pushMode($, profile, c, cwd, cache) {
 }
 
 
+// The branch checked out at `cwd` and its repo's main checkout: { root, branch }, or null (none, or git not there).
+export async function checkoutOf($, cwd) {
+  if (!cwd) return null
+  const branch = (await gitOutOrThrow($, cwd, 'symbolic-ref', '--short', '-q', 'HEAD')) || null
+  const root = await repoRoot($, cwd, new Map())
+  return branch && root ? { root, branch } : null
+}
+
 export async function integrationAllowed($, cwd) {
   return modeFor($, await readProfile($), { dir: cwd, slug: null }, cwd, new Map())
 }
 
 
-// The bases of the repo at `at`: main, master and the remote's default branch.
-async function basesOf($, at, remote = 'origin') {
-  const bases = new Set(['main', 'master'])
+// The remote's default branch (its HEAD as the remote-tracking ref records it), or '' when that is not set.
+async function remoteHead($, at, remote) {
   const head = at ? await gitOutOrThrow($, at, 'symbolic-ref', '--short', 'refs/remotes/' + remote + '/HEAD') : ''
-  if (head) bases.add(head.startsWith(remote + '/') ? head.slice(remote.length + 1) : head.slice(head.indexOf('/') + 1))
-  return bases
+  return head ? (head.startsWith(remote + '/') ? head.slice(remote.length + 1) : head.slice(head.indexOf('/') + 1)) : ''
 }
 
+// The branches a remote has: its remote-tracking refs and what ls-remote lists. `unread` when the remote could not
+// be asked (then only the tracking refs are known).
+async function remoteBranches($, at, remote) {
+  const names = new Set()
+  if (!/^[\w.-]+$/.test(remote)) return { names, unread: true }
+  for (const l of (await gitOutOrThrow($, at, 'for-each-ref', '--format=%(refname)', 'refs/remotes/' + remote + '/')).split('\n')) {
+    const n = l.trim().slice(('refs/remotes/' + remote + '/').length)
+    if (l.trim() && n && n !== 'HEAD') names.add(n)
+  }
+  const ls = await $.process.run(['git', '-C', at, 'ls-remote', '--heads', remote], PROBE).catch(() => null)
+  if (!ls || ls.exitCode !== 0) return { names, unread: true }
+  for (const l of String(ls.stdout ?? '').split('\n')) {
+    const m = /\trefs\/heads\/(\S+)$/.exec(l.trim())
+    if (m) names.add(m[1])
+  }
+  return { names, unread: false }
+}
+
+// The main checkout of the repo at `at` (its common git dir's parent), or null.
+async function repoRoot($, at, cache) {
+  return at ? (await localRepo($, at, cache)).root : null
+}
+
+// Whether a branch is the run's own in the repo at `at`: one of its worktrees was made on it, or one of its pushes
+// created it on the remote.
+async function madeByRun($, at, name, cache) {
+  const root = await repoRoot($, at, cache).catch(() => null)
+  return (await ownedBranches($).catch(() => [])).some((r) => r.branch === name && (r.root === null || r.root === root))
+}
+
+// The base-like branches of the repo at `at`, which a run below auto never pushes or merges into: main, master,
+// the remote's default branch, the upstream of the branch checked out (when it names another branch), and, when
+// the remote's default is not recorded (no origin/HEAD), every branch the remote has that the run did not make. An
+// agt/* branch is a run's, never base-like. { bases, guessed } — guessed: the default was not recorded, so the
+// branch checked out at the typed /agt is not taken on trust either.
+async function baseLike($, at, remote, current, cache) {
+  const bases = new Set(['main', 'master'])
+  if (!at) return { bases, guessed: true }
+  const head = await remoteHead($, at, remote)
+  if (head) bases.add(head)
+  if (current) {
+    const up = await gitOutOrThrow($, at, 'rev-parse', '--abbrev-ref', '--symbolic-full-name', current + '@{upstream}')
+    const names = [...new Set([...(await localRepo($, at, cache)).remotes.map((x) => x.name), remote])]
+    const r = names.sort((x, y) => y.length - x.length).find((n) => up.startsWith(n + '/'))
+    const name = r ? up.slice(r.length + 1) : ''
+    if (name && name !== current) bases.add(name)
+  }
+  if (head) return { bases, guessed: false }
+  const { names } = await remoteBranches($, at, remote)
+  for (const n of names) if (!n.startsWith('agt/') && !(await madeByRun($, at, n, cache))) bases.add(n)
+  return { bases, guessed: true }
+}
 
 // What a push is judged against: the branch checked out in its dir, where a bare `git push` goes, the bases.
 async function pushInfo($, c, cwd, cache) {
   const dir = c.dir
   const at = dir ?? cwd
   const remote = c.push.remote && /^[\w.-]+$/.test(c.push.remote) ? c.push.remote : 'origin'
-  const bases = await basesOf($, at, remote)
   const current = dir ? (await gitOutOrThrow($, dir, 'symbolic-ref', '--short', '-q', 'HEAD')) || null : null
+  const { bases, guessed } = await baseLike($, at, remote, c.push.headMoved ? null : current, cache)
   let pushDst = null
   let refspecs = []
   let pushDefault = null
@@ -710,25 +768,58 @@ async function pushInfo($, c, cwd, cache) {
     const r = names.find((n) => to.startsWith(n + '/'))
     if (to && r) pushDst = to.slice(r.length + 1)
   }
-  return { current, pushDst, bases, refspecs, pushDefault }
+  return { current, pushDst, bases, guessed, refspecs, pushDefault }
 }
 
 
-// An own-prefix branch the push names but does not have checked out: the run's own when one of its worktrees was made
-// on it, or a new branch when the remote does not have it yet. One the remote already has is someone else's (feat/*
-// and fix/* are the person's prefixes too). Returns why it is refused, or null.
-async function othersBranch($, c, name, cwd) {
-  if ((await ownedWorktrees($).catch(() => [])).some((r) => r.branch === name)) return null
-  const at = c.dir ?? cwd
-  if (!at) return 'git push ' + name + ' (a branch this run did not make, in a repo the guard cannot place)'
-  const remote = c.push.remote ?? 'origin'
+// Whether the remote has a branch: 'yes', 'no', or 'unread' when it could not be asked. The remote-tracking ref is
+// asked first, then ls-remote.
+async function remoteHas($, at, remote, name) {
   if (/^[\w.-]+$/.test(remote)) {
     const tracked = await $.process.run(['git', '-C', at, 'rev-parse', '-q', '--verify', 'refs/remotes/' + remote + '/' + name], PROBE).catch(() => null)
-    if (tracked?.exitCode === 0 && String(tracked.stdout ?? '').trim()) return 'git push ' + name + ' (a branch the remote already has that this run did not make)'
+    if (tracked?.exitCode === 0 && String(tracked.stdout ?? '').trim()) return 'yes'
   }
   const ls = await $.process.run(['git', '-C', at, 'ls-remote', '--heads', remote, 'refs/heads/' + name], PROBE).catch(() => null)
-  if (!ls || ls.exitCode !== 0) return 'git push ' + name + ' (a branch this run did not make, on a remote the guard could not read)'
-  return String(ls.stdout ?? '').trim() ? 'git push ' + name + ' (a branch the remote already has that this run did not make)' : null
+  if (!ls || ls.exitCode !== 0) return 'unread'
+  return String(ls.stdout ?? '').trim() ? 'yes' : 'no'
+}
+
+// A branch the push names that is not base-like: the run's own when it is the agt/* slice branch checked out here,
+// one of its worktrees was made on it, one of its pushes created it, it is the branch checked out where /agt was
+// typed (and the remote's default is recorded, so that branch is known not to be the base), or the remote does not
+// have it yet (then it is noted in `made`, for bashCall to record once the push ran). One the remote already has
+// is someone else's (feat/* and fix/* are the person's prefixes too). Returns why it is refused, or null.
+async function othersBranch($, c, name, cwd, { current = false, guessed = true, made = [], cache = new Map() } = {}) {
+  const at = c.dir ?? cwd
+  if (current && name.startsWith('agt/')) return null
+  if (!at) return 'git push ' + name + ' (a branch this run did not make, in a repo the guard cannot place)'
+  if (await madeByRun($, at, name, cache)) return null
+  const root = await repoRoot($, at, cache)
+  const co = Worktrees.checkout
+  const typed = current && !guessed && !!co && co.branch === name && co.root === root
+  const has = await remoteHas($, at, c.push.remote ?? 'origin', name)
+  if (has === 'no') {
+    if (root) made.push({ root, branch: name })
+    return null
+  }
+  if (typed) return null
+  if (has === 'unread') return 'git push ' + name + ' (a branch this run did not make, on a remote the guard could not read)'
+  return 'git push ' + name + ' (a branch the remote already has that this run did not make)'
+}
+
+// A merge into a branch below auto (and above local, where nothing leaves the machine): only into one the run made.
+// Merging into a branch the remote has and the run did not make, then pushing it, is the integrate step `auto`
+// owns. A merge of the branch's own upstream (`git merge origin/<branch>`, `@{u}`) only catches up. Returns why it
+// is refused, or null.
+async function mergeInto($, c, target, current, cache) {
+  if (!target || /[$`]/.test(target) || !c.dir) return null
+  if (target.startsWith('agt/') && target === current) return null
+  const catchUp = (x) => x === '@{u}' || x === '@{upstream}' || x === 'origin/' + target || x === 'refs/remotes/origin/' + target
+  if (c.from?.length && c.from.every(catchUp)) return null
+  if (await madeByRun($, c.dir, target, cache)) return null
+  const has = await remoteHas($, c.dir, 'origin', target)
+  if (has === 'no') return null
+  return 'a merge into ' + target + ', a branch this run did not make (merging into it is the integrate step, which needs auto)'
 }
 
 
@@ -822,7 +913,7 @@ async function aliasLine($, c) {
 // a blank or comment-only line, which runs nothing, gets through. A line that was read and named nothing to judge
 // (`echo hi`, `npm test`) has no candidates and runs; a part the lexer did not read (past its depth caps) is a
 // candidate of its own, so it never leaves the list empty.
-export async function guardLine($, line, cwd) {
+export async function guardLine($, line, cwd, out = {}) {
   let cands
   try {
     cands = commandSteps(line, cwd, 0, await homes($))
@@ -831,7 +922,8 @@ export async function guardLine($, line, cwd) {
   }
   if (!cands.length) return null
   const profile = await readProfile($)
-  return judgeCands($, cands, { profile, cwd, cache: new Map(), envRepo: undefined }, 0)
+  out.made = []
+  return judgeCands($, cands, { profile, cwd, cache: new Map(), envRepo: undefined, made: out.made }, 0)
 }
 
 // Whether a line holds anything but blanks and comments.
@@ -888,23 +980,27 @@ async function judgeCands($, cands, ctx, depth) {
     }
     if (c.kind === 'ref') {
       const current = c.dir ? (await gitOutOrThrow($, c.dir, 'symbolic-ref', '--short', '-q', 'HEAD')) || null : null
-      const why = judgeRef(c.ref, { current, bases: await basesOf($, c.dir) })
+      const why = judgeRef(c.ref, { current, bases: (await baseLike($, c.dir, 'origin', current, cache)).bases })
       if (why) return DENY_INTEGRATION + ' Refused: ' + why + '.'
       continue
     }
     if (c.kind === 'local') {
-      const current = c.branch ? null : c.dir ? (await gitOutOrThrow($, c.dir, 'symbolic-ref', '--short', '-q', 'HEAD')) || null : null
-      const why = judgeLocal(c.branch, { current, bases: await basesOf($, c.dir) })
+      const here = c.dir ? (await gitOutOrThrow($, c.dir, 'symbolic-ref', '--short', '-q', 'HEAD')) || null : null
+      const current = c.branch ? null : here
+      const why = judgeLocal(c.branch, { current, bases: (await baseLike($, c.dir, 'origin', here, cache)).bases })
       if (why) return DENY_INTEGRATION + ' Refused: ' + why + '.'
+      const into = c.merge && mode !== 'local' ? await mergeInto($, c, c.branch ?? here, here, cache) : null
+      if (into) return DENY_INTEGRATION + ' Refused: ' + into + '.'
       continue
     }
     if (mode === 'local') return DENY_LOCAL
     if (c.kind === 'push') {
       const claims = []
-      const why = judgePush(c.push, { ...(await pushInfo($, c, cwd, cache)), claim: (n) => claims.push(n) })
+      const info = await pushInfo($, c, cwd, cache)
+      const why = judgePush(c.push, { ...info, claim: (n, current) => claims.push({ n, current }) })
       if (why) return DENY_PUSH + ' Refused: ' + why + '.'
-      for (const name of claims) {
-        const other = await othersBranch($, c, name, cwd)
+      for (const { n, current } of claims) {
+        const other = await othersBranch($, c, n, cwd, { current, guessed: info.guessed, made: ctx.made, cache })
         if (other) return DENY_PUSH + ' Refused: ' + other + '.'
       }
     }

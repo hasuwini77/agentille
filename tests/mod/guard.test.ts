@@ -431,8 +431,8 @@ describe('guard: worktree adds', () => {
 
 // A run in a session with no pane transport: the ownership list lives in memory.
 // git: per dir, the branch checked out (`current`), its remote URL and its main checkout (default /work/repo).
-type Repo = { current?: string; remote?: string; common?: string; pushurl?: string; upstream?: string }
-const setup = (on: any, o: { profile?: unknown; repoConfig?: unknown; env?: Record<string, string>; files?: Record<string, string>; repos?: Record<string, Repo>; feat?: boolean; broken?: boolean; aliases?: Record<string, string>; aliasBroken?: boolean; pyFind?: Record<string, string>; hooksPath?: string; remoteHeads?: string[] } = {}) => {
+type Repo = { current?: string; remote?: string; common?: string; pushurl?: string; upstream?: string; tracking?: string }
+const setup = (on: any, o: { profile?: unknown; repoConfig?: unknown; env?: Record<string, string>; files?: Record<string, string>; repos?: Record<string, Repo>; feat?: boolean; broken?: boolean; aliases?: Record<string, string>; aliasBroken?: boolean; pyFind?: Record<string, string>; hooksPath?: string; remoteHeads?: string[]; originHead?: string } = {}) => {
   const seen: string[][] = []
   const ran: string[] = []
   const git = { made: false, committed: false, feat: false }
@@ -508,6 +508,11 @@ const setup = (on: any, o: { profile?: unknown; repoConfig?: unknown; env?: Reco
     // The branches the remote has: ls-remote prints the one asked for when it is there.
     const lr = /ls-remote --heads \S+ refs\/heads\/(\S+)$/.exec(a)
     if (lr) return out((o.remoteHeads ?? []).includes(lr[1]) ? 'abc\trefs/heads/' + lr[1] + '\n' : '')
+    // Every branch the remote has, and the remote's default as origin/HEAD records it (none unless the test sets one).
+    if (/ls-remote --heads \S+$/.test(a)) return out((o.remoteHeads ?? []).map((h) => 'abc\trefs/heads/' + h + '\n').join(''))
+    if (a.endsWith('symbolic-ref --short refs/remotes/origin/HEAD')) return o.originHead ? out('origin/' + o.originHead + '\n') : out('', 1)
+    // The upstream of the branch checked out: what the test sets as `tracking`.
+    if (a.includes('@{upstream}')) return repos[dir]?.tracking ? out(repos[dir].tracking + '\n') : out('', 128)
     // The hooks folder git runs: core.hooksPath when the test sets one, else the repo's .git/hooks.
     if (a.includes('--git-path hooks')) return out((o.hooksPath ?? '/work/repo/.git/hooks') + '\n')
     if (a.includes('rev-parse --path-format=absolute --git-common-dir') && repos[dir]?.common) return out(repos[dir].common + '\n')
@@ -1571,7 +1576,7 @@ describe('guard: the hooks folder the repo sets is protected like .git/hooks', (
 
 describe('guard: the run pushes only branches it made or that are new', () => {
   test('an own-prefix branch the remote already has, not checked out and not the run\'s, is refused', async ($, on) => {
-    const { ran } = setup(on, { profile: { integration: 'pr' }, repos: { '/work/repo': { current: 'agt/x' } }, remoteHeads: ['feat/other', 'fix/theirs', 'agt/x'] })
+    const { ran } = setup(on, { profile: { integration: 'pr' }, originHead: 'main', repos: { '/work/repo': { current: 'agt/x' } }, remoteHeads: ['feat/other', 'fix/theirs', 'agt/x'] })
     await boot($)
     await typed($)
     expect((await bash($, 'git push origin agt/x:feat/other')).deny).toContain('a branch the remote already has that this run did not make')
@@ -1591,11 +1596,73 @@ describe('guard: the run pushes only branches it made or that are new', () => {
     expect(ran).toEqual(['git worktree add ../repo-x -b agt/x', 'git push origin agt/x'])
   })
 
-  test('judgePush hands an own-prefix branch that is not checked out to the caller', () => {
-    const claims: string[] = []
-    expect(judgePush({ remote: 'origin', specs: ['agt/x:feat/y'], force: false, del: false, bulk: null, dry: false, mergeOpt: false } as any, { current: 'agt/x', claim: (n: string) => claims.push(n) } as any)).toBe(null)
-    expect(judgePush({ remote: 'origin', specs: ['feat/z'], force: false, del: false, bulk: null, dry: false, mergeOpt: false } as any, { current: 'feat/z', claim: (n: string) => claims.push(n) } as any)).toBe(null)
-    expect(claims).toEqual(['feat/y'])
+  test('judgePush hands the branch checked out and an own-prefix branch to the caller, saying which is which', () => {
+    const claims: unknown[] = []
+    expect(judgePush({ remote: 'origin', specs: ['agt/x:feat/y'], force: false, del: false, bulk: null, dry: false, mergeOpt: false } as any, { current: 'agt/x', claim: (n: string, cur: boolean) => claims.push([n, cur]) } as any)).toBe(null)
+    expect(judgePush({ remote: 'origin', specs: ['feat/z'], force: false, del: false, bulk: null, dry: false, mergeOpt: false } as any, { current: 'feat/z', claim: (n: string, cur: boolean) => claims.push([n, cur]) } as any)).toBe(null)
+    // A base-like branch is refused checked out or not: develop, when the guard read it as the base.
+    expect(judgePush({ remote: 'origin', specs: ['develop'], force: false, del: false, bulk: null, dry: false, mergeOpt: false } as any, { current: 'develop', bases: new Set(['main', 'master', 'develop']), claim: (n: string) => claims.push(n) } as any)).toBe('git push to develop')
+    expect(claims).toEqual([['feat/y', false], ['feat/z', true]])
+  })
+})
+
+describe('guard: the run\'s own branches and the base-like ones', () => {
+  test('the branch checked out at /agt is pushed as itself, but nothing is merged into it below auto', async ($, on) => {
+    const { ran } = setup(on, { profile: { integration: 'pr' }, originHead: 'main', repos: { '/work/repo': { current: 'feat/big' } }, remoteHeads: ['main', 'feat/big', 'feat/other'] })
+    await boot($)
+    await typed($)
+    expect((await bash($, 'git push origin feat/big')).result).toBe('ok')
+    expect((await bash($, 'git push')).result).toBe('ok')
+    const m = await bash($, 'git merge --no-ff agt/slice && git push origin feat/big')
+    expect(m.deny).toContain('a merge into feat/big, a branch this run did not make')
+    expect((await bash($, 'git merge agt/slice')).deny).toContain('a merge into feat/big')
+    expect((await bash($, 'git pull origin agt/slice')).deny).toContain('a merge into feat/big')
+    // Catching up with its own upstream is no integration.
+    expect((await bash($, 'git merge --ff-only origin/feat/big')).result).toBe('ok')
+    expect((await bash($, 'git pull --ff-only')).result).toBe('ok')
+    // Another branch the remote has, checked out later: not the run's.
+    expect((await bash($, 'git checkout feat/other && git push origin feat/other')).deny).toContain('a branch the remote already has that this run did not make')
+    expect(ran).toEqual(['git push origin feat/big', 'git push', 'git merge --ff-only origin/feat/big', 'git pull --ff-only'])
+  })
+
+  test('under local nothing leaves the machine: the merge into the checkout is the local flow', async ($, on) => {
+    const { ran } = setup(on, { profile: { integration: 'local' }, originHead: 'main', repos: { '/work/repo': { current: 'feat/big' } }, remoteHeads: ['main', 'feat/big'] })
+    await boot($)
+    await typed($)
+    expect((await bash($, 'git merge --no-ff agt/slice')).result).toBe('ok')
+    expect((await bash($, 'git push origin feat/big')).deny).toBe(DENY_LOCAL)
+    expect(ran).toEqual(['git merge --no-ff agt/slice'])
+  })
+
+  test('a branch the run created on the remote stays its own: pushed again, and merged into', async ($, on) => {
+    const heads = ['main']
+    const { ran } = setup(on, { profile: { integration: 'pr' }, originHead: 'main', repos: { '/work/repo': { current: 'feat/slug' } }, remoteHeads: heads })
+    await boot($)
+    await typed($)
+    expect((await bash($, 'git push -u origin feat/slug')).result).toBe('ok')
+    heads.push('feat/slug') // the remote has it now
+    expect((await bash($, 'git push origin feat/slug')).result).toBe('ok')
+    expect((await bash($, 'git merge --no-ff agt/two && git push')).result).toBe('ok')
+    expect(ran).toEqual(['git push -u origin feat/slug', 'git push origin feat/slug', 'git merge --no-ff agt/two && git push'])
+  })
+
+  test('with no origin/HEAD every branch the remote has that the run did not make is base-like; agt/* never is', async ($, on) => {
+    const { ran } = setup(on, { profile: { integration: 'pr' }, repos: { '/work/repo': { current: 'develop' }, '/work/repo-x': { current: 'agt/x' } }, remoteHeads: ['develop', 'agt/x'] })
+    await boot($)
+    await typed($)
+    expect((await bash($, 'git push origin develop')).deny).toContain('git push to develop')
+    expect((await bash($, 'git merge agt/x')).deny).toContain('the base branch develop')
+    expect((await bash($, 'cd /work/repo-x && git push origin agt/x')).result).toBe('ok')
+    expect(ran).toEqual(['cd /work/repo-x && git push origin agt/x'])
+  })
+
+  test('the upstream of the branch checked out is base-like when it names another branch', async ($, on) => {
+    const { ran } = setup(on, { profile: { integration: 'pr' }, originHead: 'main', repos: { '/work/repo': { current: 'feat/slug', tracking: 'origin/develop' } }, remoteHeads: ['main', 'develop'] })
+    await boot($)
+    await typed($)
+    expect((await bash($, 'git push origin HEAD:develop')).deny).toContain('git push to develop')
+    expect((await bash($, 'git push -u origin feat/slug')).result).toBe('ok')
+    expect(ran).toEqual(['git push -u origin feat/slug'])
   })
 })
 

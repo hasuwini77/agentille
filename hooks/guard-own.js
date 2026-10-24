@@ -166,7 +166,10 @@ export function parseOwned(text, now = Date.now()) {
 
 // The worktrees this session's runs made ({ path, branch, head, run, at, src }), saved to lead-<pane>.worktrees.
 // Read through the Worktrees view (guard.js and state.js re-export it); written only here.
-const { s: my, view } = makeStore('guard-own.js', { worktrees: [] })
+// `branches`: the branches a run's push created on a remote that did not have them ({ root, branch, at }), so a
+// later push or merge of one still counts as the run's own once the remote has it. `checkout`: the branch checked
+// out where the person typed /agt ({ root, branch }), whose own pushes count as the run's.
+const { s: my, view } = makeStore('guard-own.js', { worktrees: [], branches: [], checkout: null })
 export const Worktrees = view
 
 export function worktreesFile(home, pane) {
@@ -235,4 +238,49 @@ export async function listTrees($, cwd) {
 export const runOf = (e) => {
   const a = e.agentId ? Runs.live.get(e.agentId) : null
   return a?.run ?? splitName(Session.wireName ?? Session.selfName)?.run ?? Runs.lastRun
+}
+
+
+// ── the run's own branches ───────────────────────────────────────────────────
+// The branch checked out at the typed /agt (guard.js loadRunProfile): { root, branch }, or null when none is.
+export function noteCheckout(rec) {
+  my.checkout = rec && typeof rec.root === 'string' && typeof rec.branch === 'string' ? { root: rec.root, branch: rec.branch } : null
+}
+
+const branchRec = (r) => r && typeof r.root === 'string' && r.root.startsWith('/') && typeof r.branch === 'string' && r.branch
+
+export function branchesFile(home, pane) {
+  const key = paneKey(pane)
+  return home && key ? home + '/.agentille/state/lead-' + key + '.branches' : null
+}
+
+// Branches a push the guard let through created on the remote ({ root, branch }): kept in memory and, for the
+// lead, in lead-<pane>.branches, so a restart still knows them. What the file holds already is read in first.
+export async function noteBranches($, made = []) {
+  const at = Date.now()
+  const add = (r) => { if (branchRec(r) && !my.branches.some((b) => b.root === r.root && b.branch === r.branch)) my.branches.push({ root: r.root, branch: r.branch, at: r.at ?? at }) }
+  const self = splitName(Session.wireName ?? Session.selfName)
+  const file = !self && Profile.home ? branchesFile(Profile.home, await leadPane($).catch(() => null)) : null
+  if (file) for (const r of parseBranches(await $.fs.read(file).catch(() => ''))) add(r)
+  for (const r of made) add(r)
+  if (file && made.length) await $.fs.write(file, JSON.stringify(my.branches, null, 2) + '\n').catch(() => {})
+}
+
+export function parseBranches(text, now = Date.now()) {
+  try {
+    const list = JSON.parse(String(text ?? ''))
+    return Array.isArray(list) ? list.filter((r) => branchRec(r) && !(now - (r.at ?? 0) > OWNED_TTL_MS)) : []
+  } catch {
+    return []
+  }
+}
+
+// The branches the run made, by repo: worktree branches (any repo, as recorded) and the branches its pushes
+// created. Each { root, branch }; a worktree record's root is null (its repo is the tree's own).
+export async function ownedBranches($) {
+  const out = (await ownedWorktrees($).catch(() => [])).filter((r) => r.branch).map((r) => ({ root: null, branch: r.branch }))
+  out.push(...my.branches.map((r) => ({ root: r.root, branch: r.branch })))
+  const file = Profile.home ? branchesFile(Profile.home, await leadPane($).catch(() => null)) : null
+  if (file) out.push(...parseBranches(await $.fs.read(file).catch(() => '')).map((r) => ({ root: r.root, branch: r.branch })))
+  return out
 }

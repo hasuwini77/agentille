@@ -685,6 +685,17 @@ function localWrite(g, curBranch) {
 }
 
 
+// The branches a `git merge` merges in: its positionals, an option's value left out.
+function mergeSources(args) {
+  const out = []
+  for (let i = 0; i < args.length; i++) {
+    if (['-m', '-F', '-s', '-X', '--file', '--strategy', '--strategy-option', '--into-name'].includes(args[i])) i++
+    else if (!args[i].startsWith('-')) out.push(args[i])
+  }
+  return out
+}
+
+
 // The branch a `git checkout`/`switch` on the line leaves checked out (so a later merge/reset here is judged
 // against it): its first positional, null when a variable names it, undefined when it moves no branch.
 function checkoutTarget(g) {
@@ -1090,7 +1101,12 @@ export function commandSteps(line, cwd = null, depth = 0, homes = [], { strict =
       if (g.sub === 'push') out.push({ kind: 'push', what: 'git push', dir, slug: null, push: { ...parsePush(g.args), headMoved: moved, remoteEdited: edited || retarget } })
       // A merge, reset --hard, rebase or branch -f/-M onto the base branch, judged where it runs.
       const lw = localWrite(g, curBranch)
-      if (lw !== undefined) out.push({ kind: 'local', what: 'git ' + g.sub, dir, slug: null, branch: lw })
+      if (lw !== undefined) out.push({ kind: 'local', what: 'git ' + g.sub, dir, slug: null, branch: lw, ...(g.sub === 'merge' ? { merge: true, from: mergeSources(g.args) } : {}) })
+      // `git pull <remote> <branch>` merges that branch into the one checked out: a merge, unless it is its own.
+      if (g.sub === 'pull') {
+        const pos = g.args.filter((x) => !x.startsWith('-'))
+        if (pos.length > 1) out.push({ kind: 'local', what: 'git pull', dir, slug: null, branch: curBranch, merge: true, from: pos.slice(1).map((r) => (pos[0] === 'origin' ? 'origin/' : pos[0] + '/') + r.replace(/^refs\/heads\//, '').replace(/:.*$/, '')) })
+      }
       if (movesHead(g)) moved = true
       const co = checkoutTarget(g)
       if (co !== undefined) curBranch = co

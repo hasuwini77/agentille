@@ -9,7 +9,7 @@ import os from 'node:os'
 const root = process.argv[2]
 const { Profile, Spawn, Session } = await import(root + '/hooks/state.js')
 const { seed } = await import(root + '/hooks/store.js')
-const { bashCall, loadRunProfile, DENY_INTEGRATION } = await import(root + '/hooks/guard.js')
+const { bashCall, loadRunProfile, DENY_INTEGRATION, DENY_LOCAL } = await import(root + '/hooks/guard.js')
 const { agtTurnStart } = await import(root + '/hooks/proofs.js')
 const { sameConfig } = await import(root + '/hooks/trust.js')
 
@@ -499,6 +499,54 @@ try {
     const ok = await run("c='git status --short'; $c")
     check("control: c='git status'; $c runs", !ok?.deny && ok.exit === 0, JSON.stringify(ok))
     check('... origin/main unchanged', refOf('origin.git', 'main') === w.main)
+  }
+  {
+    // The branch checked out at the typed /agt (feat/big, which the remote has) is pushed as itself; merging a slice
+    // into it, then pushing, is the integrate step auto owns.
+    world()
+    sh('git checkout -q -b feat/big main && echo f > f && git add f && git commit -qm f && git push -q origin feat/big && git checkout -q -b agt/slice && echo s > s && git add s && git commit -qm s && git checkout -q feat/big', APP)
+    await loadRunProfile($)
+    const big = refOf('origin.git', 'feat/big')
+    const m = await run('git merge -q --no-edit agt/slice && git push -q origin feat/big')
+    check('merge agt/slice into the checked-out feat/big, then push: denied', m?.deny?.includes('a merge into feat/big'), JSON.stringify(m))
+    check('... origin feat/big unchanged', refOf('origin.git', 'feat/big') === big)
+    sh('echo g > g && git add g && git commit -qm g', APP)
+    const own = await run('git push -q origin feat/big')
+    check('control: a commit on feat/big itself is pushed', !own?.deny && refOf('origin.git', 'feat/big') === sh('git rev-parse feat/big', APP), JSON.stringify(own))
+    fs.writeFileSync(HOME + '/.agentille/profile.json', JSON.stringify({ integration: 'local' }))
+    await loadRunProfile($)
+    const loc = await run('git merge -q --no-edit agt/slice')
+    check('control: under local the merge into the checkout runs', !loc?.deny && loc.exit === 0, JSON.stringify(loc))
+    const lp = await run('git push -q origin feat/big')
+    check('... and its push is refused', lp?.deny === DENY_LOCAL, JSON.stringify(lp))
+    fs.writeFileSync(HOME + '/.agentille/profile.json', JSON.stringify({ integration: 'pr' }))
+  }
+  {
+    // The remote's default is develop and origin/HEAD is not recorded: every branch the remote has that the run did
+    // not make is base-like, the checkout included.
+    world()
+    sh('git checkout -q -b develop main && echo d > d && git add d && git commit -qm d && git push -q origin develop && git remote set-head origin -d', APP)
+    sh('git symbolic-ref HEAD refs/heads/develop', T + '/origin.git')
+    await loadRunProfile($)
+    sh('echo e > e && git add e && git commit -qm e', APP)
+    const dev = refOf('origin.git', 'develop')
+    const p = await run('git push -q origin develop')
+    check('no origin/HEAD, push the checked-out develop: denied as the base', p?.deny?.includes('git push to develop'), JSON.stringify(p))
+    check('... origin develop unchanged', refOf('origin.git', 'develop') === dev)
+    const x = await run('git push -q origin agt/x')
+    check('control: the agt/x slice branch still goes', !x?.deny && refOf('origin.git', 'agt/x') === sh('git rev-parse agt/x', APP), JSON.stringify(x))
+  }
+  {
+    // A branch the run creates on the remote stays its own: pushed again, and merged into.
+    world()
+    await loadRunProfile($)
+    sh('git checkout -q -b feat/slug main', APP)
+    const a = await run('git push -q -u origin feat/slug')
+    check('git push -u origin feat/slug (new): allowed and landed', !a?.deny && refOf('origin.git', 'feat/slug') !== null, JSON.stringify(a))
+    const b = await run('git merge -q --no-edit agt/x && git push -q origin feat/slug')
+    check('merge agt/x into it, push again: allowed and landed', !b?.deny && refOf('origin.git', 'feat/slug') === sh('git rev-parse feat/slug', APP), JSON.stringify(b))
+    sh('git checkout -q agt/x', APP)
+    await loadRunProfile($)
   }
   {
     // Controls below auto: the run's own branch and ordinary writes still pass.

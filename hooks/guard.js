@@ -33,14 +33,14 @@ import { Proofs, moment, inFlight, runHeld, flight, setRunProfile } from './proo
 import { reportRun } from './drawing.js'
 import { Runs, completeReport } from './dispatch.js'
 import { joinPath } from './guard-lex.js'
-import { DENY_UNREAD, denyProtected, guardLine, integrationAllowed, readProfile, resolvedProtected } from './guard-policy.js'
-import { WT_SCRIPT, listTrees, newTrees, claimedTrees, scriptTrees, scriptSlugs, worktreeAdds, saveOwned, runOf } from './guard-own.js'
+import { DENY_UNREAD, checkoutOf, denyProtected, guardLine, integrationAllowed, readProfile, resolvedProtected } from './guard-policy.js'
+import { WT_SCRIPT, listTrees, newTrees, claimedTrees, scriptTrees, scriptSlugs, worktreeAdds, saveOwned, runOf, noteBranches, noteCheckout } from './guard-own.js'
 
 // Re-exports: every name ./guard.js used to carry still resolves here.
 export { protectedPath, SHELLS, commands, splitCommands, gitCall, commandSteps, lineMovesHead, joinPath, MENTIONS_TOOL, SCRIPT_RISK, MAKE_RISK } from './guard-lex.js'
 export { ghStep, httpStep } from './guard-steps.js'
 export { DENY_INTEGRATION, DENY_PUSH, DENY_LOCAL, DENY_UNREAD, denyHidden, denyProtected, judgePush, judgeRef, judgeLocal, resolvedProtected, integrationIn, integrationOf, integrationAllowed, guardLine, makeRecipe, normUrl, normSlug, sameRemote, capsOf } from './guard-policy.js'
-export { OWNED_TTL_MS, worktreeAdds, newTrees, WT_SCRIPT, scriptTrees, scriptSlugs, claimedTrees, recordTrees, parseOwned, Worktrees, worktreesFile, saveOwned, ownedWorktrees, forgetOwned } from './guard-own.js'
+export { OWNED_TTL_MS, worktreeAdds, newTrees, WT_SCRIPT, scriptTrees, scriptSlugs, claimedTrees, recordTrees, parseOwned, Worktrees, worktreesFile, saveOwned, ownedWorktrees, forgetOwned, branchesFile, parseBranches, ownedBranches } from './guard-own.js'
 
 // ── who is a run ─────────────────────────────────────────────────────────────
 // An agentille subagent, a worker pane (not a /agt-spawn pane: that is the person's own task), or the lead from
@@ -64,13 +64,21 @@ export async function bashCall($, e, next) {
   if (!fromRun(e, await moment($))) return next(e)
   const cwd = await $.session.cwd().catch(() => null)
   // Probing that throws is no answer: the command does not run unread.
-  const deny = await guardLine($, line, cwd).catch(() => DENY_UNREAD)
+  const seen = {}
+  const deny = await guardLine($, line, cwd, seen).catch(() => DENY_UNREAD)
   if (deny) return { deny }
+  // A branch the push creates on the remote stays the run's own once the remote has it.
+  const created = seen.made ?? []
   const script = WT_SCRIPT.test(line)
-  if (!script && !/\bworktree\s+add\b/.test(line)) return next(e)
+  if (!script && !/\bworktree\s+add\b/.test(line)) {
+    const res = await next(e)
+    if (created.length && !res?.deny) await noteBranches($, created).catch(() => {})
+    return res
+  }
   const before = cwd ? await listTrees($, cwd) : null
   const res = await next(e)
   if (res?.deny) return res
+  if (created.length) await noteBranches($, created).catch(() => {})
   const after = before ? await listTrees($, cwd) : null
   const at = Date.now()
   const run = runOf(e)
@@ -91,8 +99,14 @@ export async function bashCall($, e, next) {
 // With no profile (or one that does not parse) the run's ceiling is the default, `pr`, never a live read: a profile
 // the run writes itself cannot lift it.
 export const DEFAULT_PROFILE = Object.freeze({ integration: 'pr' })
+// The branch checked out where /agt was typed is snapshotted with it: pushes of that branch count as the run's own.
 export async function loadRunProfile($) {
   setRunProfile((await readProfile($)) ?? DEFAULT_PROFILE)
+  try {
+    noteCheckout(await checkoutOf($, await $.session.cwd()))
+  } catch {
+    noteCheckout(null) // no session folder, or no git there: no branch is taken on trust
+  }
 }
 
 // ── the non-Bash write hooks ─────────────────────────────────────────────────

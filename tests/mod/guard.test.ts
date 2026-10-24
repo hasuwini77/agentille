@@ -96,6 +96,27 @@ describe('guard: which commands integrate', () => {
     expect(integrationIn('git push origin HEAD', { current: 'storm/2026-10-24-x' })).toBeNull()
   })
 
+  test('a branch switch earlier on the line makes HEAD unreadable for a later push; a written-out name still goes', async () => {
+    for (const line of [
+      'git checkout main && git merge --ff-only agt/x && git push origin HEAD',
+      'git switch main && git merge --ff-only agt/x && git push -u origin HEAD',
+      'git checkout -q main; git push',
+      'git branch -m main && git push origin HEAD',
+      'git branch -M agt/x main; git push origin @',
+      'git reset --hard main && git push origin HEAD',
+      'git symbolic-ref HEAD refs/heads/main && git push origin HEAD',
+      'git -C ../app checkout main && cd ../app && git push origin "$(git branch --show-current)"',
+      'gh pr checkout 12 && git push origin HEAD',
+      'git rebase main agt/y && git push origin HEAD',
+    ]) expect([line, integrationIn(line, onSlice)]).toEqual([line, expect.stringContaining('switches branches')])
+    for (const line of [
+      'git checkout -b agt/y && git push -u origin agt/y',
+      'git checkout -- README.md && git push origin HEAD',
+      'git push origin HEAD && git checkout main',
+      'git rebase main && git push origin HEAD',
+    ]) expect([line, integrationIn(line, onSlice)]).toEqual([line, null])
+  })
+
   test('the slice\'s own pushes, PRs, tag listing, API reads and quoted text are left alone', async () => {
     for (const line of [
       'git push -u origin agt/filter',

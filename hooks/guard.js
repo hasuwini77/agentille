@@ -323,14 +323,17 @@ const CURRENT_SUB = /^\$\(git (branch --show-current|rev-parse --abbrev-ref HEAD
 
 // One push, judged against the repo it runs in: current (the branch checked out, or null), pushDst (where a
 // bare `git push` goes, or null) and bases (the default branch, main and master). Returns why it is refused.
+// A push after a step that moves HEAD on the same line (p.headMoved) reads HEAD as unknown: the branch read
+// before the line ran is not the one the push sees.
 export function judgePush(p, { current = null, pushDst = null, bases = new Set(['main', 'master']) } = {}) {
   if (p.dry) return null
   if (p.bulk) return 'git push ' + p.bulk
   if (p.force) return 'git push --force'
   if (p.mergeOpt) return 'git push -o merge'
-  const cur = current || null
+  const cur = p.headMoved ? null : current || null
+  if (p.headMoved) pushDst = null
   const dst = (d) => {
-    if (!d) return 'git push of a branch that cannot be read here'
+    if (!d) return p.headMoved ? 'git push of HEAD after the same line switches branches' : 'git push of a branch that cannot be read here'
     if (/[$`]/.test(d)) return 'git push ' + d + ' (a variable)'
     const name = d.replace(/^refs\/heads\//, '')
     if (name.startsWith('refs/')) return 'git push ' + d
@@ -458,10 +461,25 @@ function cdTo(here, args) {
   return here ? joinPath(here, a) : null
 }
 
+// A git step that moves HEAD (or the branch it names): a later push on the same line cannot read HEAD from
+// the repo as it was before the line ran. `git checkout <ref> -- <paths>` restores files and moves nothing.
+const MOVES_BRANCH = /^-[a-zA-Z]*[fmM]|^--(force|move)$/
+function movesHead(g) {
+  const a = g.args
+  const pos = a.filter((x) => !x.startsWith('-'))
+  if (g.sub === 'checkout') return !a.includes('--')
+  if (g.sub === 'switch' || g.sub === 'reset' || g.sub === 'bisect') return true
+  if (g.sub === 'branch') return a.some((x) => MOVES_BRANCH.test(x))
+  if (g.sub === 'symbolic-ref' || g.sub === 'update-ref') return pos[0] === 'HEAD' && (pos.length > 1 || a.includes('--stdin'))
+  if (g.sub === 'rebase') return pos.length > 1
+  return false
+}
+
 // A line → its integration candidates, each with the dir it runs in (cd, pushd, git -C, env -C followed).
 export function commandSteps(line, cwd = null) {
   const out = []
   let here = cwd
+  let moved = false // a step before this one switched branches, in any dir
   for (const c of commands(line)) {
     const w = c.words
     const p = base(w[0])
@@ -477,6 +495,7 @@ export function commandSteps(line, cwd = null) {
     if (p === 'gh') {
       const k = ghStep(w, at)
       if (k) out.push(k)
+      if (w.includes('checkout') && w.includes('pr')) moved = true
     } else if (p === 'curl' || p === 'wget') {
       const k = httpStep(w, at)
       if (k) out.push(k)
@@ -485,7 +504,8 @@ export function commandSteps(line, cwd = null) {
       if (!g) continue
       const dir = g.unknown ? null : g.dir ? (g.dir.startsWith('/') ? joinPath('/', g.dir) : at && joinPath(at, g.dir)) : at
       if (g.sub === 'tag' && !tagListing(g.args)) out.push({ kind: 'step', what: 'git tag', dir, slug: null })
-      if (g.sub === 'push') out.push({ kind: 'push', what: 'git push', dir, slug: null, push: parsePush(g.args) })
+      if (g.sub === 'push') out.push({ kind: 'push', what: 'git push', dir, slug: null, push: { ...parsePush(g.args), headMoved: moved } })
+      if (movesHead(g)) moved = true
     }
   }
   return out

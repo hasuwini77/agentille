@@ -546,16 +546,24 @@ export function integrationOf(profile, repo, repoModes = []) {
   const names = (r.names ?? [r.name]).filter(Boolean)
   const nameOk = !url || !paths.length
   const home = (x) => (r.home && x.startsWith('~/') ? r.home + x.slice(1) : x)
+  const located = (x) => (typeof x.url === 'string' && x.url) || (typeof x.path === 'string' && x.path)
+  const byName = (x) => !located(x) && names.some((n) => n === x.name || n === x.id)
   const hit = (x) => {
     if (!x || typeof x !== 'object') return false
-    const xu = typeof x.url === 'string' && x.url ? normUrl(x.url) : null
-    const xp = typeof x.path === 'string' && x.path ? trimSlash(home(x.path)) : null
-    if (xu || xp) return (!!xu && sameRepo(xu, url)) || (!!xp && paths.includes(xp))
-    return nameOk && names.some((n) => n === x.name || n === x.id)
+    if (located(x)) {
+      const xu = typeof x.url === 'string' && x.url ? normUrl(x.url) : null
+      const xp = typeof x.path === 'string' && x.path ? trimSlash(home(x.path)) : null
+      return (!!xu && sameRepo(xu, url)) || (!!xp && paths.includes(xp))
+    }
+    return nameOk && byName(x)
   }
-  const proj = Array.isArray(p.projects) ? p.projects.find(hit) : null
+  const list = Array.isArray(p.projects) ? p.projects.filter((x) => x && typeof x === 'object') : []
+  const proj = list.find(hit)
   let mode = valid(proj?.integration) ?? valid(p.integration) ?? 'pr'
-  for (const m of repoModes.map(valid).filter(Boolean)) if (MODES.indexOf(m) < MODES.indexOf(mode)) mode = m
+  // A name-only entry this repo cannot be held to still lowers it: a name never grants `auto`, but a person who
+  // set `auto` at the top and `pr` for a repo by name keeps that `pr`.
+  const caps = proj ? [] : list.filter(byName).map((x) => x.integration)
+  for (const m of [...caps, ...repoModes].map(valid).filter(Boolean)) if (MODES.indexOf(m) < MODES.indexOf(mode)) mode = m
   return mode
 }
 const valid = (m) => (MODES.includes(m) ? m : null)

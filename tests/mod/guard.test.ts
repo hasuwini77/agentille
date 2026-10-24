@@ -177,6 +177,11 @@ describe('guard: the repo a profile entry names', () => {
     expect(integrationOf({ projects: [{ id: 'app', integration: 'auto' }] }, repo)).toBe('pr')
     expect(integrationOf({ projects: [{ id: 'app', integration: 'auto' }] }, { ...repo, url: null })).toBe('auto')
     expect(integrationOf({ projects: [{ id: 'app', url: 'github.com/me/other', integration: 'auto' }] }, { ...repo, url: null })).toBe('pr')
+    // ...yet a name-only entry still lowers: auto at the top, pr for this repo by name, stays pr.
+    expect(integrationOf({ integration: 'auto', projects: [{ id: 'app', integration: 'pr' }] }, repo)).toBe('pr')
+    expect(integrationOf({ integration: 'auto', projects: [{ name: 'app', integration: 'local' }] }, repo)).toBe('local')
+    expect(integrationOf({ integration: 'auto', projects: [{ id: 'other', integration: 'pr' }] }, repo)).toBe('auto')
+    expect(integrationOf({ integration: 'auto', projects: [{ id: 'app', integration: 'pr' }, { url: 'github.com/me/app', integration: 'auto' }] }, repo)).toBe('auto')
   })
 
   test('CLAUDE.md and AGENTS.md caps: local-only, no-mistakes, as words', async () => {
@@ -385,6 +390,13 @@ describe('guard: integration in the mod', () => {
 
   test('a profile entry with only a name does not match a repo with a remote', async ($, on) => {
     setup(on, { profile: { projects: [{ id: 'repo', integration: 'auto' }] }, repos: { '/work/repo': { current: 'main', remote: 'git@github.com:someone/repo.git' } } })
+    await boot($)
+    await typed($)
+    expect((await bash($, 'gh pr merge 3')).deny).toBe(DENY_INTEGRATION)
+  })
+
+  test('auto at the top, pr for this repo by name: a repo with a remote keeps its pr', async ($, on) => {
+    setup(on, { profile: { integration: 'auto', projects: [{ id: 'repo', integration: 'pr' }] }, repos: { '/work/repo': { current: 'main', remote: 'git@github.com:me/repo.git' } } })
     await boot($)
     await typed($)
     expect((await bash($, 'gh pr merge 3')).deny).toBe(DENY_INTEGRATION)

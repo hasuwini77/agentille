@@ -434,7 +434,9 @@ describe('maxRunUsd: a per-run cost ceiling', () => {
   test('a ladder Fable past the ceiling runs Sonnet and is not counted; a typed --fable is the person\'s and holds', async () => {
     const d = decide({ role: 'planner', hdr: {}, run: { ...over, revise: 2 }, settings: { ...C, autoFable: true } })
     expect(d).toMatchObject({ model: 'sonnet', fable: false, capped: true })
-    expect(decide({ role: 'planner', hdr: { fable: 'forced' }, run: over, settings: C })).toEqual({ model: 'fable', effort: 'high', reason: '--fable typed', fable: true })
+    expect(decide({ role: 'planner', hdr: { fable: 'forced' }, run: over, settings: C })).toEqual({ model: 'fable', effort: 'high', reason: '--fable typed', fable: true, pastCeiling: true })
+    expect(decide({ role: 'planner', hdr: { fable: 'forced' }, run: under, settings: C })).toEqual({ model: 'fable', effort: 'high', reason: '--fable typed', fable: true })
+    expect(decide({ role: 'planner', hdr: { fable: 'forced' }, run: { ...fresh(), usd: 1e6 }, settings: { ...C, maxRunUsd: null } as never }).pastCeiling).toBe(undefined)
   })
 
   const boot = (on: any, routing: object) => {
@@ -700,6 +702,25 @@ describe('maxRunUsd: a per-run cost ceiling', () => {
     }
   })
 
+  test('in the mod: a typed --fable past the ceiling keeps Fable, and the once-per-run ceiling toast says the typed flag passed it', async ($, on) => {
+    const { seen, toasts, writes } = boot(on, { maxRunUsd: 1 })
+    on('prompt.submit', async ($: any, e: any) => ({ text: e.text }))
+    await $.session.start({ cwd: '/w', surface: null, isInteractive: false })
+    await $.prompt.submit({ text: '/agt --fable ship it', origin: { kind: 'composer' } } as never)
+    await plan($, 'fb1') // c0 on opus: its header asks for no Fable
+    await spend($, 'c0', 50_000) // $1.00: at the ceiling
+    const forced = () => $.agent.spawn({ prompt: '[agt run=fb1 size=small mode=build fable=forced]\nplan', subagentType: 'agentille:agentille-planner', model: 'opus' })
+    await forced()
+    await forced()
+    expect(seen).toEqual(['opus', 'fable', 'fable'])
+    expect(ceilingToasts(toasts)).toEqual(['agt ⚑ run fb1: ~$1.00 spent, past maxRunUsd $1.00; planner runs Fable anyway, since a typed --fable passes the ceiling'])
+    const log = writes['/h/.agentille/state/run-fb1/routing.jsonl'].trim().split('\n').map((l) => JSON.parse(l))
+    expect(log.map((r) => r.pastCeiling ?? false)).toEqual([false, true, true])
+    // A demotion in the same run still gets its own once-per-run toast.
+    await review($, 'fb1')
+    expect(ceilingToasts(toasts)).toHaveLength(2)
+    expect(ceilingToasts(toasts)[1]).toContain('code-reviewer opus → sonnet')
+  })
 })
 
 describe('typed proof', () => {

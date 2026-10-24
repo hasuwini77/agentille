@@ -45,8 +45,12 @@ Minutes run from the pane's start to its end (or now), at most 60 per pane. That
 
 Once the estimate is at or over `maxRunUsd`, one of two things happens to every later dispatch of the run, subagent, pane or workflow agent:
 
-- **Demotion (the default).** A role the table or the ladder puts on Opus, or a ladder Fable, runs Sonnet at the same effort. That covers the planner, the plan-reviewer, every reviewer (code, design, security, payments, perf, seo), the ui-prototyper and the adversary. The executor keeps its route, since it is on Sonnet already, and so does a typed `--fable`. A workflow agent cannot be demoted: Claude Code ignores a model rewrite for a workflow script's agents, so it runs the model the script names, and the mod logs it and toasts the mismatch with the demoted pick.
+- **Demotion (the default).** A role the table or the ladder puts on Opus, or a ladder Fable, runs Sonnet at the same effort. That covers the planner, the plan-reviewer, every reviewer (code, design, security, payments, perf, seo), the ui-prototyper and the adversary. The executor keeps its route, since it is on Sonnet already. A workflow agent cannot be demoted: Claude Code ignores a model rewrite for a workflow script's agents, so it runs the model the script names, and the mod logs it and toasts the mismatch with the demoted pick.
 - **Stop.** With `profile.routing.stopAtCeiling: true` (default `false`), the dispatch is denied instead. The stop covers every role, the executor and a typed `--fable` included, every pane, a Codex one included, and every workflow agent. The deny is one line that names the ceiling and the estimate, and says to raise `routing.maxRunUsd` in `~/.agentille/profile.json` (or turn `stopAtCeiling` off) to go on.
+
+### A typed `--fable` passes the ceiling
+
+`--fable` typed on the `/agt` line is your own choice, so demotion leaves it alone: past the ceiling, a role you forced onto Fable still runs Fable. The run says so. The first such subagent dispatch in a run gets one toast and one band `⚑` line (`planner runs Fable anyway, since a typed --fable passes the ceiling`), and every such dispatch carries `"pastCeiling": true` in the run's `routing.jsonl`. The stop does not make this exception: with `stopAtCeiling` on, a typed `--fable` past the ceiling is denied like any other dispatch.
 
 ## The weekly gate: `stopAtWeeklyPct`
 

@@ -296,7 +296,8 @@ export function ladderFixes(run, slice) {
 
 // run: { revise, fixes, fable, usd? } observed so far (usd: estimateRunUsd, for the maxRunUsd ceiling) · settings:
 // profile.routing merged over DEFAULTS · weeklyPct: seven_day percent used, or null when unknown. A typed --fable is
-// the person's choice and passes the ceiling; every other pick goes through runCeiling last.
+// the person's choice and passes the ceiling (marked `pastCeiling`, so the caller can say so); every other pick goes
+// through runCeiling last.
 // `stop` is the line a dispatch is denied with; every role (the executor and a typed --fable included) gets it:
 // - With `stopAtCeiling: true`, a run at or past maxRunUsd dispatches nothing more. Off (the default), runCeiling demotes.
 // - With `stopAtWeeklyPct` 1–100, nothing more is dispatched once the subscription's seven-day usage percent is at or
@@ -320,7 +321,9 @@ export function decide(o) {
   const settings = o.settings ?? DEFAULTS
   const stop = runStop(o.run ?? {}, settings, o.weeklyPct ?? null)
   if (stop) return { ...d, fable: false, stop }
-  return forced ? d : runCeiling(d, o.role, o.run ?? {}, settings)
+  if (!forced) return runCeiling(d, o.role, o.run ?? {}, settings)
+  const max = maxRunUsdOf(settings)
+  return max != null && typeof o.run?.usd === 'number' && o.run.usd >= max ? { ...d, pastCeiling: true } : d
 }
 
 function pick({ role, hdr = {}, run = { revise: 0, fixes: 0, fable: 0 }, depth, settings = DEFAULTS, weeklyPct = null }) {

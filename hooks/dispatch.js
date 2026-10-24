@@ -138,12 +138,21 @@ export function demoteToast($, run) {
 
 // Once per run: the maxRunUsd ceiling was reached and the first dispatch (subagent or pane) was demoted. One toast and
 // a band ⚑ line that name what was demoted and what follows; every later demotion shows only in the routing log
-// (`capped: true`).
+// (`capped: true`). A typed --fable passes the ceiling (`pastCeiling`): the first one past it in a run gets its own
+// toast and ⚑ line saying so, every later one shows in the routing log (`pastCeiling: true`). Returns whether it told.
 export function ceilingOnce($, runId, spent, role, d) {
   const run = runRec(runId)
-  if (run.ceilingToasted) return
+  const max = usd(maxRunUsdOf(Profile.settings))
+  if (d.pastCeiling) {
+    if (run.fableCeilingToasted) return false
+    run.fableCeilingToasted = true
+    addFlag($, 'ceiling-fable|' + runId, 'run ' + runId + ': ~' + usd(spent) + ' spent, past maxRunUsd ' + max + '; ' + role + ' runs Fable anyway, since a typed --fable passes the ceiling')
+    return true
+  }
+  if (run.ceilingToasted) return false
   run.ceilingToasted = true
-  addFlag($, 'ceiling|' + runId, 'run ' + runId + ': ~' + usd(spent) + ' spent, past maxRunUsd ' + usd(maxRunUsdOf(Profile.settings)) + '; ' + role + ' ' + (d.from ?? 'opus') + ' → sonnet, and every later Opus or Fable planner, reviewer, ui-prototyper and adversary runs Sonnet (the executor keeps its route)')
+  addFlag($, 'ceiling|' + runId, 'run ' + runId + ': ~' + usd(spent) + ' spent, past maxRunUsd ' + max + '; ' + role + ' ' + (d.from ?? 'opus') + ' → sonnet, and every later Opus or Fable planner, reviewer, ui-prototyper and adversary runs Sonnet (the executor keeps its route)')
+  return true
 }
 
 // One main-loop step of the lead (turn.step with no agentId): its tokens count toward the run it works on. Only a
@@ -385,12 +394,13 @@ export async function dispatchAgent($, e, next) {
   const cap = role === 'executor' && runId !== 'adhoc' && res.agentId ? executorCapFlag(runId, executorsWorking(my.live, my.paneRoutes, runId) + 1) : null
   if (res.agentId) my.live.set(res.agentId, { ...newAgent({ id: res.agentId, role, routed: true, model: res.model, effort: d.effort, reason: d.reason, run: runId, now: Date.now(), parentId: e.parentAgentId ?? null }), slice })
   if (runId !== 'adhoc') noteWire({ from: 'lead', to: party(role, slice), kind: 'task', summary: taskLine(e.prompt) || role, at: Date.now(), via: 'sub' })
-  const rec = { at: new Date().toISOString(), role, model: res.model, effort: d.effort, reason: d.reason, asked: e.model ?? null, agentId: res.agentId ?? null, ...(cap && { cap }), ...(d.capped && { capped: true }) }
+  const rec = { at: new Date().toISOString(), role, model: res.model, effort: d.effort, reason: d.reason, asked: e.model ?? null, agentId: res.agentId ?? null, ...(cap && { cap }), ...(d.capped && { capped: true }), ...(d.pastCeiling && { pastCeiling: true }) }
   await logDecision($, runId, rec)
   await markRun($, runId)
   if (cap) addFlag($, 'cap|' + runId, cap) // the band's ⚑ line and one toast; the dispatch itself goes ahead
-  if (d.capped) ceilingOnce($, runId, spent, role, d)
-  else if (d.reason !== 'table') $.ui.toast('agt ↑ ' + role + ' → ' + short(res.model) + ' · ' + d.effort + ' — ' + d.reason)
+  // A demotion or a typed --fable past the ceiling is told once per run; a later typed --fable toasts like any pick.
+  const told = d.capped || d.pastCeiling ? ceilingOnce($, runId, spent, role, d) : false
+  if (!told && !d.capped && d.reason !== 'table') $.ui.toast('agt ↑ ' + role + ' → ' + short(res.model) + ' · ' + d.effort + ' — ' + d.reason)
   $.ui.invalidate('ui.render')
   return res
 }

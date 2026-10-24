@@ -125,7 +125,7 @@ export function register(on) {
     if (a.view === 'route') return { text: routeText({ ...a, depth: a.depth ?? Profile.depth }, Profile.settings, Session.weeklyPct) }
     await loadSquads($)
     const log = Runs.runs.get(Runs.lastRun)?.log ?? []
-    return { text: overviewText({ display: Display.display, squads: squadsSummary(Profile.squadRows), routing: routingSummary(log), ledger: ledgerSummary(ledger(Runs.live, Runs.lastRun, Runs.paneRoutes)) }) }
+    return { text: overviewText({ display: Display.display, sessions: Profile.sessions, squads: squadsSummary(Profile.squadRows), routing: routingSummary(log), ledger: ledgerSummary(ledger(Runs.live, Runs.lastRun, Runs.paneRoutes)) }) }
   })
 
   // Typed only: a plugin, a scheduled task or a notification never opens a pane.
@@ -290,9 +290,9 @@ export function register(on) {
     return els.Box({ flexDirection: 'column', children: h.card.length ? [cardBox(els, h.card), body] : [body] })
   })
 
-  // Main-session spinner: how many subagents (◇) and pane sessions (▣) work behind it.
+  // Main-session spinner: how many subagents (◇) and pane sessions (▣) work behind it. display.spinner off adds nothing.
   on('ui.render', { component: 'Spinner' }, async ($, e, next) => {
-    if (Runs.live.has(e.requestId)) return next(e)
+    if (!Display.spinnerOn || Runs.live.has(e.requestId)) return next(e)
     const subs = [...Runs.live.values()].filter((a) => a.state === 'working').length
     const busy = Panes.panes.filter((p) => p.state === 'working').length
     if (subs + busy === 0) return next(e)

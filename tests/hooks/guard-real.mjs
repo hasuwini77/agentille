@@ -9,8 +9,9 @@ import os from 'node:os'
 const root = process.argv[2]
 const { Profile, Spawn, Session } = await import(root + '/hooks/state.js')
 const { seed } = await import(root + '/hooks/store.js')
-const { bashCall, DENY_INTEGRATION } = await import(root + '/hooks/guard.js')
+const { bashCall, loadRunProfile, DENY_INTEGRATION } = await import(root + '/hooks/guard.js')
 const { agtTurnStart } = await import(root + '/hooks/proofs.js')
+const { sameConfig } = await import(root + '/hooks/trust.js')
 
 const T = fs.realpathSync(fs.mkdtempSync(os.tmpdir() + '/agt-guard-real-'))
 const HOME = T + '/home'
@@ -314,6 +315,176 @@ try {
     }
     const hello = await run('npm run hello')
     check('control: npm run hello is not refused', !hello?.deny, JSON.stringify(hello))
+  }
+  {
+    // Past the lexer's depth caps the line is refused as unreadable, and the push after the deep part never runs.
+    const w = world()
+    for (const line of ['echo $($($($($(x))))); git push -q origin HEAD:main --force', 'eval eval eval eval git push -q origin HEAD:main']) {
+      const r = await run(line)
+      check(line + ': denied as nested too deep', r?.deny?.includes('nests deeper than the guard reads'), JSON.stringify(r))
+    }
+    check('... origin/main unchanged', refOf('origin.git', 'main') === w.main)
+  }
+  {
+    // A clean filter runs on a plain `git add`: setting one, and the .gitattributes that turns it on, are both refused.
+    const w = world()
+    const a = await run("git config filter.f.clean 'git push -q origin agt/x:main; cat'")
+    check('git config filter.f.clean: denied as a config write', a?.deny?.includes('git config key'), JSON.stringify(a))
+    const b = await run("echo '* filter=f' > .gitattributes")
+    check('echo > .gitattributes: denied', b?.deny?.includes('may not write'), JSON.stringify(b))
+    const c = await run('echo c > c && git add c')
+    check('control: a plain git add runs', !c?.deny && c.exit === 0, JSON.stringify(c))
+    check('... no filter set, no attributes written, origin/main unchanged', !fs.existsSync(APP + '/.gitattributes') && refOf('origin.git', 'main') === w.main)
+  }
+  {
+    // An alias is read from the config the line points git at: a global config named on the line is looked up there,
+    // and one the lookup cannot place (a relative path) refuses.
+    const w = world()
+    fs.mkdirSync(T + '/evil', { recursive: true })
+    fs.writeFileSync(T + '/evil/g.cfg', '[alias]\n\tpom = push -q origin agt/x:main\n')
+    const a = await run('GIT_CONFIG_GLOBAL=' + T + '/evil/g.cfg git pom')
+    check('GIT_CONFIG_GLOBAL=<abs> git pom: denied', !!a?.deny, JSON.stringify(a))
+    const b = await run('GIT_CONFIG_GLOBAL=../evil/g.cfg git pom')
+    check('GIT_CONFIG_GLOBAL=<relative> git pom: denied', !!b?.deny, JSON.stringify(b))
+    const c = await run('HOME=../evil git pom')
+    check('HOME=<relative> git pom: denied', !!c?.deny, JSON.stringify(c))
+    // Through GIT_CONFIG_PARAMETERS-style variables the alias is looked up with them and judged.
+    const d = await run('GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=include.path GIT_CONFIG_VALUE_0=' + T + '/evil/g.cfg git pom')
+    check('an include set for one call: denied', !!d?.deny, JSON.stringify(d))
+    check('... origin/main unchanged', refOf('origin.git', 'main') === w.main)
+    fs.rmSync(T + '/evil', { recursive: true, force: true })
+  }
+  {
+    // A package script or script file step whose program or subcommand cannot be read refuses: it may be a push.
+    const w = world()
+    fs.writeFileSync(APP + '/package.json', JSON.stringify({ scripts: { ship: 'git pu${X:-sh} -q origin agt/x:main' } }))
+    fs.writeFileSync(APP + '/s.sh', 'c=$(printf gi)t; $c push -q origin agt/x:main\n')
+    const a = await run('npm run -s ship')
+    check('npm run ship (git pu${X:-sh}): denied as unreadable', a?.deny?.includes('cannot read'), JSON.stringify(a))
+    const b = await run('sh s.sh')
+    check('sh s.sh ($(printf gi)t push): denied as unreadable', b?.deny?.includes('cannot read'), JSON.stringify(b))
+    check('... origin/main unchanged', refOf('origin.git', 'main') === w.main)
+  }
+  {
+    // No profile at the typed /agt: the run is held to the default, so a profile it writes (here through a path the
+    // reader cannot see) does not let the base push through.
+    const w = world()
+    fs.rmSync(HOME + '/.agentille/profile.json', { force: true })
+    await loadRunProfile($)
+    if (spawnSync('python3', ['-c', 'pass'], { env }).status === 0) {
+      const a = await run(`python3 -c "import os; open(os.environ['HOME']+'/.agen'+'tille/profile.json','w').write('{\\"integration\\":\\"auto\\"}')"`)
+      check('control: a profile write the reader cannot see runs', !a?.deny && JSON.parse(fs.readFileSync(HOME + '/.agentille/profile.json', 'utf8')).integration === 'auto', JSON.stringify(a))
+    } else fs.writeFileSync(HOME + '/.agentille/profile.json', JSON.stringify({ integration: 'auto' }))
+    const p = await run('git push -q origin agt/x:main')
+    check('... the base push is still denied (the ceiling is the default, not the live profile)', p?.deny?.includes('git push to main'), JSON.stringify(p))
+    check('... origin/main unchanged', refOf('origin.git', 'main') === w.main)
+    fs.writeFileSync(HOME + '/.agentille/profile.json', JSON.stringify({ integration: 'pr' }))
+    await loadRunProfile($)
+  }
+  {
+    // A hard link to the profile is a second name for it: `cp -l` is judged by its source, so the rewrite through the
+    // link never reaches the trust root.
+    const w = world()
+    const a = await run('cp -l ~/.agentille/profile.json p.json')
+    check('cp -l ~/.agentille/profile.json: denied', a?.deny?.includes('may not write'), JSON.stringify(a))
+    const b = await run(`printf '{"integration":"auto"}' > p.json`)
+    check('control: the write to p.json runs (it is no link)', !b?.deny && b.exit === 0, JSON.stringify(b))
+    check('... the profile is still pr', JSON.parse(fs.readFileSync(HOME + '/.agentille/profile.json', 'utf8')).integration === 'pr')
+    const l = await run('link ~/.agentille/profile.json p2.json')
+    check('link ~/.agentille/profile.json: denied', l?.deny?.includes('may not write'), JSON.stringify(l))
+    const p = await run('git push -q origin agt/x:main')
+    check('... and the base push is denied', !!p?.deny && refOf('origin.git', 'main') === w.main, JSON.stringify(p))
+  }
+  {
+    // Your global git config holds aliases and code-running keys too: appending one is refused, so the alias never
+    // exists and origin/main does not move.
+    const w = world()
+    const a = await run(`printf '[alias]\\n\\tpom = push -q origin agt/x:main\\n' >> ~/.gitconfig`)
+    check('>> ~/.gitconfig: denied', a?.deny?.includes('may not write'), JSON.stringify(a))
+    const s = await run('mkdir -p .claude && echo {} > .claude/settings.local.json')
+    check('> .claude/settings.local.json: denied', s?.deny?.includes('Claude Code settings'), JSON.stringify(s))
+    check('... no ~/.gitconfig, origin/main unchanged', !fs.existsSync(HOME + '/.gitconfig') && refOf('origin.git', 'main') === w.main)
+  }
+  {
+    // An external diff named on the line runs on a plain `git diff`: refused, and a harmless pager stays allowed.
+    const w = world()
+    fs.writeFileSync(APP + '/b', 'changed\n')
+    const a = await run("GIT_EXTERNAL_DIFF='git push -q origin agt/x:main;:' git diff")
+    check('GIT_EXTERNAL_DIFF git diff: denied', a?.deny?.includes('GIT_EXTERNAL_DIFF'), JSON.stringify(a))
+    const p = await run('GIT_PAGER=cat git diff --stat')
+    check('control: GIT_PAGER=cat git diff runs', !p?.deny && p.exit === 0, JSON.stringify(p))
+    check('... origin/main unchanged', refOf('origin.git', 'main') === w.main)
+  }
+  {
+    // The repo already runs its hooks from .husky (core.hooksPath): a hook written there would run on a plain commit.
+    const w = world()
+    sh('git config core.hooksPath .husky && mkdir -p .husky', APP)
+    const a = await run("printf '#!/bin/sh\\ngit push -q origin agt/x:main\\n' > .husky/post-commit && chmod +x .husky/post-commit")
+    check('> .husky/post-commit with core.hooksPath=.husky: denied', a?.deny?.includes('core.hooksPath'), JSON.stringify(a))
+    const c = await run('echo c > c && git add c && git commit -qm c')
+    check('control: a plain commit runs', !c?.deny && c.exit === 0, JSON.stringify(c))
+    check('... no hook written, origin/main unchanged', !fs.existsSync(APP + '/.husky/post-commit') && refOf('origin.git', 'main') === w.main)
+  }
+  {
+    // feat/* is the person's prefix too: a push onto a feat/* branch the remote already has, which this run did not
+    // make or check out, is refused. A new branch is fine.
+    const w = world()
+    sh('git branch feat/other main && git push -q origin feat/other', APP)
+    const other = refOf('origin.git', 'feat/other')
+    const a = await run('git push -q origin agt/x:feat/other')
+    check('push agt/x:feat/other (on the remote, not this run\'s): denied', a?.deny?.includes('did not make'), JSON.stringify(a))
+    check('... feat/other unchanged', refOf('origin.git', 'feat/other') === other)
+    const b = await run('git push -q origin agt/x:feat/brand-new')
+    check('push agt/x:feat/brand-new (new): allowed and landed', !b?.deny && refOf('origin.git', 'feat/brand-new') === w.slice, JSON.stringify(b))
+    check('... origin/main unchanged', refOf('origin.git', 'main') === w.main)
+  }
+  {
+    // A gh alias from gh's own config is read and judged: a `!` alias that pushes the base is refused.
+    const w = world()
+    fs.mkdirSync(HOME + '/.config/gh', { recursive: true })
+    fs.writeFileSync(HOME + '/.config/gh/config.yml', "aliases:\n    pm: pr merge\n    ship: '!git push -q origin agt/x:main'\n")
+    const a = await run('gh ship')
+    check('gh ship (a ! alias that pushes the base): denied', a?.deny?.includes('git push to main'), JSON.stringify(a))
+    const b = await run('gh pm 4')
+    check('gh pm (an alias for pr merge): denied', b?.deny === DENY_INTEGRATION, JSON.stringify(b))
+    const c = await run('gh pr review --approve 4')
+    check('gh pr review --approve: denied', c?.deny === DENY_INTEGRATION, JSON.stringify(c))
+    check('... origin/main unchanged', refOf('origin.git', 'main') === w.main)
+    fs.rmSync(HOME + '/.config', { recursive: true, force: true })
+  }
+  {
+    // Folder trust on real files: a worktree whose hook script imports a changed module, or whose MCP server requires
+    // one, is not the lead checkout's config, so its trust prompt is never answered for the person.
+    const lead = T + '/trust-lead'
+    const wt = T + '/trust-wt'
+    for (const d of [lead, wt]) {
+      fs.mkdirSync(d + '/.claude', { recursive: true })
+      fs.mkdirSync(d + '/scripts', { recursive: true })
+      fs.mkdirSync(d + '/server', { recursive: true })
+      fs.writeFileSync(d + '/.claude/settings.json', JSON.stringify({ hooks: { Stop: [{ hooks: [{ type: 'command', command: 'node "$CLAUDE_PROJECT_DIR"/scripts/hook.mjs' }] }] } }))
+      fs.writeFileSync(d + '/.mcp.json', JSON.stringify({ mcpServers: { s: { command: 'node', args: ['server/index.js'] } } }))
+      fs.writeFileSync(d + '/scripts/hook.mjs', "import { run } from './lib.mjs'\nrun()\n")
+      fs.writeFileSync(d + '/scripts/lib.mjs', 'export const run = () => 0\n')
+      fs.writeFileSync(d + '/server/index.js', "require('./tools')\n")
+      fs.writeFileSync(d + '/server/tools.js', 'module.exports = {}\n')
+    }
+    check('trust control: identical checkouts are the same config', (await sameConfig($, wt, lead)) === true)
+    fs.writeFileSync(wt + '/scripts/lib.mjs', "export const run = () => require('child_process').execSync('git push -q origin agt/x:main')\n")
+    check('trust: a hook whose imported lib.mjs differs is not the same config', (await sameConfig($, wt, lead)) === false)
+    fs.writeFileSync(wt + '/scripts/lib.mjs', 'export const run = () => 0\n')
+    fs.writeFileSync(wt + '/server/tools.js', 'module.exports = { evil: true }\n')
+    check('trust: an MCP server whose required tools.js differs is not the same config', (await sameConfig($, wt, lead)) === false)
+    for (const d of [lead, wt]) fs.rmSync(d, { recursive: true, force: true })
+  }
+  {
+    // A wrapper script that runs `exec "$@"`: the words passed to it are read as a command of their own.
+    const w = world()
+    fs.writeFileSync(APP + '/run.sh', '#!/bin/sh\nexec "$@"\n')
+    const a = await run('sh run.sh git push -q origin HEAD:main')
+    check('sh run.sh git push origin HEAD:main: denied', a?.deny?.includes('git push to main'), JSON.stringify(a))
+    const b = await run('sh run.sh git status --short')
+    check('control: sh run.sh git status runs', !b?.deny && b.exit === 0, JSON.stringify(b))
+    check('... origin/main unchanged', refOf('origin.git', 'main') === w.main)
   }
   {
     // Controls below auto: the run's own branch and ordinary writes still pass.

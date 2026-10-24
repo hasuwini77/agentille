@@ -42,7 +42,7 @@ export function parseInfoArgs(args) {
   return { view: 'route', role, hdr, depth }
 }
 
-const pick = (d) => (d.stop ? 'denied (routing.stopAtCeiling)' : d.model + (d.effort ? ' · ' + d.effort : '') + ' · ' + d.reason)
+const pick = (d) => (d.stop ? 'denied (' + (/seven-day/.test(d.stop) ? 'routing.stopAtWeeklyPct' : 'routing.stopAtCeiling') + ')' : d.model + (d.effort ? ' · ' + d.effort : '') + ' · ' + d.reason)
 
 // Dry-run of decide() with fresh run state under the person's routing settings, then each escalation
 // rung that changes the pick. Nothing here touches a live run.
@@ -92,6 +92,11 @@ export function squadsSummary(rows) {
   return 'squads: ' + (active.length ? active.join(', ') : 'none active') + ' (/agt-info squads)'
 }
 
-export function overviewText({ display, squads, routing, ledger }) {
-  return ['display (profile.json → display):', displayText(display), squads, routing, ledger, 'more: /agt-info routing | ledger | squads | route <role>'].join('\n')
+// profile.json → sessions as one line: null is unset, which reads as on.
+export function sessionsLine(v) {
+  return 'sessions: ' + (v ?? 'on') + (v ? ' (profile)' : ' (default)') + (v === 'off' ? ' · a plain prompt opens no sessions' : '')
+}
+
+export function overviewText({ display, sessions, squads, routing, ledger }) {
+  return ['display (profile.json → display):', displayText(display), sessionsLine(sessions), squads, routing, ledger, 'more: /agt-info routing | ledger | squads | route <role>'].join('\n')
 }

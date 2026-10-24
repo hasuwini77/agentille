@@ -63,3 +63,26 @@ export function jsCandidates(spec) {
   const exts = ['.js', '.mjs', '.cjs', '.ts', '.mts', '.cts', '.jsx', '.tsx', '.json']
   return [s, ...exts.map((e) => s + e), ...exts.map((e) => s + '/index' + e)]
 }
+
+// The modules a Python file imports: [{ level, mod, names }]. `level` counts the leading dots of a relative import
+// (0 for an absolute one), `mod` is the dotted name after them ('' for `from . import x`), `names` what a
+// `from … import` names (a submodule or an attribute). Parenthesised and backslash-continued lists are read.
+export function pyImports(text) {
+  const out = []
+  const s = String(text ?? '').replace(/\\\r?\n/g, ' ').replace(/\(([^()]*)\)/g, (m, inner) => inner.replace(/\s*\n\s*/g, ' '))
+  for (const line of s.split(/\r?\n/)) {
+    const code = line.replace(/#.*$/, '')
+    const from = /^\s*from\s+(\.*)([\w.]*)\s+import\s+(.+)$/.exec(code)
+    if (from) {
+      const names = from[3].split(',').map((x) => x.trim().split(/\s+as\s+/)[0].trim()).filter((x) => /^\w+$/.test(x))
+      out.push({ level: from[1].length, mod: from[2], names })
+      continue
+    }
+    const imp = /^\s*import\s+(.+)$/.exec(code)
+    if (imp) for (const part of imp[1].split(',')) {
+      const mod = part.trim().split(/\s+as\s+/)[0].trim()
+      if (/^[A-Za-z_][\w.]*$/.test(mod)) out.push({ level: 0, mod, names: [] })
+    }
+  }
+  return out
+}

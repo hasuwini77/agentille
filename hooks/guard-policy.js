@@ -7,13 +7,14 @@ import { Proofs } from './proofs.js'
 import { PROBE } from './panes.js'
 import { base, commands, commandSteps, joinPath, lineMovesHead, protectedPath, SCRIPT_RISK, MAKE_RISK } from './guard-lex.js'
 import { PLAIN_MODULE, jsCandidates, jsImports, moduleFiles, scriptChain } from './script-refs.js'
+import { ownedWorktrees } from './guard-own.js'
 
 // The gh and curl/wget step readers live in a leaf the lexer shares; the policy keeps carrying their names.
 export { ghStep, httpStep } from './guard-steps.js'
 
 export const DENY_INTEGRATION = 'integration auto is not set in your profile for this repo; the run stops at the PR.'
 
-export const DENY_PUSH = 'integration auto is not set in your profile for this repo: a run pushes only its own branch (agt/*, feat/*, fix/* or the one checked out), never the base branch, a tag, a force push, a branch deletion or every branch. Write the branch name and the directory out (no variables) and push again.'
+export const DENY_PUSH = 'integration auto is not set in your profile for this repo: a run pushes only its own branch (the one checked out, or an agt/*, feat/*, fix/* or storm/* branch it made or that the remote does not have yet), never the base branch, a tag, a force push, a branch deletion or every branch. Write the branch name and the directory out (no variables) and push again.'
 
 export const DENY_LOCAL = 'integration is local for this repo: the run pushes nothing and opens no PR.'
 
@@ -21,7 +22,7 @@ export const denyHidden = (what) => 'integration auto is not set in your profile
 
 export const DENY_UNREAD = 'The guard could not read the repo this command targets; retry, or run the command yourself.'
 
-export const denyProtected = (what) => 'integration auto is not set in your profile for this repo: below auto a run may not write ' + what + ' (the trust root ~/.agentille, the repo config, hooks, info, refs or a push-related git config), which a run could use to lift its own ceiling. Make that change yourself, or raise integration in your profile.'
+export const denyProtected = (what) => 'integration auto is not set in your profile for this repo: below auto a run may not write ' + what + ' (the trust root ~/.agentille, Claude Code settings, your git or gh config, the repo git state and hooks, or a git config key that runs code or moves a push), which a run could use to lift its own ceiling. Make that change yourself, or raise integration in your profile.'
 
 const MODES = ['local', 'push', 'pr', 'auto'] // least to most autonomy
 
@@ -48,7 +49,9 @@ const CURRENT_SUB = /^\$\(git (branch --show-current|rev-parse --abbrev-ref HEAD
 // bare `git push` goes, or null) and bases (the default branch, main and master). Returns why it is refused.
 // A push after a step that moves HEAD on the same line (p.headMoved) reads HEAD as unknown: the branch read
 // before the line ran is not the one the push sees.
-export function judgePush(p, { current = null, pushDst = null, bases = new Set(['main', 'master']), refspecs = [], pushDefault = null } = {}) {
+// A push to an own-prefix branch (agt/*, feat/*, fix/*, storm/*) that is not the one checked out is let through here
+// and handed to `claim`: guardLine then asks whether the run made it or the remote does not have it yet.
+export function judgePush(p, { current = null, pushDst = null, bases = new Set(['main', 'master']), refspecs = [], pushDefault = null, claim = null } = {}) {
   if (p.dry) return null
   if (p.bulk) return 'git push ' + p.bulk
   if (p.force) return 'git push --force'
@@ -61,7 +64,11 @@ export function judgePush(p, { current = null, pushDst = null, bases = new Set([
     const name = d.replace(/^refs\/heads\//, '')
     if (name.startsWith('refs/')) return 'git push ' + d
     if (bases.has(name)) return 'git push to ' + name
-    if (OWN_BRANCH.test(name) || name === cur) return null
+    if (name === cur) return null
+    if (OWN_BRANCH.test(name)) {
+      claim?.(name)
+      return null
+    }
     return 'git push ' + name + ' (not a branch of this run)'
   }
   if (!p.specs.length) {
@@ -120,7 +127,7 @@ export function judgeLocal(branch, { current = null, bases = new Set(['main', 'm
 // current branch, base, mode. Merges and tags need `auto`; pushes are judged; `local` refuses pushes and PRs.
 export function integrationIn(line, { cwd = null, current = null, pushDst = null, base: b = null, mode = 'pr' } = {}) {
   if (mode === 'auto') return null
-  for (const c of commandSteps(line, cwd)) {
+  for (const c of commandSteps(line, cwd, 0, Profile.home ? [Profile.home] : [])) {
     if (c.kind === 'protected') return c.what
     if (c.kind === 'step') return c.what
     if (c.kind === 'ref') {
@@ -134,7 +141,7 @@ export function integrationIn(line, { cwd = null, current = null, pushDst = null
       continue
     }
     if (c.kind === 'hidden') return c.what
-    if (c.kind === 'file' || c.kind === 'write' || c.kind === 'alias') continue // read in guardLine: a line alone has no files or config
+    if (c.kind === 'file' || c.kind === 'write' || c.kind === 'alias' || c.kind === 'ghalias') continue // read in guardLine: a line alone has no files or config
     if (mode === 'local') return c.what
     if (c.kind === 'push') {
       const why = judgePush(c.push, { current, pushDst, bases: new Set(['main', 'master', b].filter(Boolean)) })
@@ -232,12 +239,15 @@ async function textRisk($, text, dir, what, label, depth, seen, lang = 'sh') {
   const from = label === 'package script' ? 'pkg' : 'shell'
   let steps
   try {
-    steps = commandSteps(text, dir, 1)
+    steps = commandSteps(text, dir, 1, await homes($))
   } catch {
     return what + ' runs a ' + label + ' the guard cannot read'
   }
   for (const s of steps) {
     if (s.kind === 'protected') return what + ' runs a ' + label + ' that writes ' + s.what
+    // A step the reader could not read at all (an unresolved program or subcommand, nesting past the caps): the
+    // script may push through it, so it refuses whatever the label.
+    if (s.kind === 'hidden' && s.unread) return what + ' runs a ' + label + ' where ' + s.what
     if (s.kind === 'alias') {
       // A git alias the script runs (`git pom`): its expansion is read as the script's own text, one hop on.
       if (depth + 1 > READ_DEPTH) {
@@ -426,7 +436,27 @@ export async function resolvedProtected($, raw, abs) {
   if (spelled || !abs) return spelled
   const real = await landing($, abs)
   if (real === DANGLING) return 'a link that leads nowhere (' + raw + ')'
-  return real && real !== abs ? protectedPath('', real, hs) : null
+  const landed = real && real !== abs ? protectedPath('', real, hs) : null
+  if (landed) return landed
+  return (await inHooksDir($, abs, typeof real === 'string' ? real : null)) ? 'the hooks folder git runs (core.hooksPath)' : null
+}
+
+// Whether a write lands in the hooks folder git runs for the repo it is in: core.hooksPath when the repo sets one
+// (`.husky`, as husky does), else .git/hooks (protected by name already). Asked of git from the nearest folder that
+// exists; a folder in no repo has no hooks.
+async function inHooksDir($, abs, real) {
+  let d = abs.slice(0, abs.lastIndexOf('/')) || '/'
+  for (let i = 0; i < 16; i++) {
+    if ((await $.fs.stat(d).catch(() => null))?.kind === 'dir') break
+    if (d === '/') return false
+    d = d.slice(0, d.lastIndexOf('/')) || '/'
+  }
+  const r = await $.process.run(['git', '-C', d, 'rev-parse', '--path-format=absolute', '--git-path', 'hooks'], PROBE).catch(() => null)
+  const hooks = r && r.exitCode === 0 ? String(r.stdout ?? '').trim().replace(/\/+$/, '').toLowerCase() : ''
+  if (!hooks.startsWith('/')) return false
+  const under = (p) => !!p && (p.toLowerCase() === hooks || p.toLowerCase().startsWith(hooks + '/'))
+  const realD = (await $.fs.stat(d, { resolve: true }).catch(() => null))?.realPath
+  return under(abs) || under(real) || under(realD ? realD.replace(/\/+$/, '') + abs.slice(d.length) : null)
 }
 
 
@@ -684,6 +714,89 @@ async function pushInfo($, c, cwd, cache) {
 }
 
 
+// An own-prefix branch the push names but does not have checked out: the run's own when one of its worktrees was made
+// on it, or a new branch when the remote does not have it yet. One the remote already has is someone else's (feat/*
+// and fix/* are the person's prefixes too). Returns why it is refused, or null.
+async function othersBranch($, c, name, cwd) {
+  if ((await ownedWorktrees($).catch(() => [])).some((r) => r.branch === name)) return null
+  const at = c.dir ?? cwd
+  if (!at) return 'git push ' + name + ' (a branch this run did not make, in a repo the guard cannot place)'
+  const remote = c.push.remote ?? 'origin'
+  if (/^[\w.-]+$/.test(remote)) {
+    const tracked = await $.process.run(['git', '-C', at, 'rev-parse', '-q', '--verify', 'refs/remotes/' + remote + '/' + name], PROBE).catch(() => null)
+    if (tracked?.exitCode === 0 && String(tracked.stdout ?? '').trim()) return 'git push ' + name + ' (a branch the remote already has that this run did not make)'
+  }
+  const ls = await $.process.run(['git', '-C', at, 'ls-remote', '--heads', remote, 'refs/heads/' + name], PROBE).catch(() => null)
+  if (!ls || ls.exitCode !== 0) return 'git push ' + name + ' (a branch this run did not make, on a remote the guard could not read)'
+  return String(ls.stdout ?? '').trim() ? 'git push ' + name + ' (a branch the remote already has that this run did not make)' : null
+}
+
+
+// gh's config file, where its aliases live: $GH_CONFIG_DIR, else $XDG_CONFIG_HOME/gh, else ~/.config/gh. The line's
+// own variables count first, then the session's.
+async function ghConfigFile($, env) {
+  const dir = (env?.has?.('GH_CONFIG_DIR') ? env.get('GH_CONFIG_DIR') : await $.env.get('GH_CONFIG_DIR').catch(() => null)) || null
+  if (dir) return /[$`~]/.test(dir) || !dir.startsWith('/') ? null : dir.replace(/\/+$/, '') + '/config.yml'
+  const xdg = (env?.has?.('XDG_CONFIG_HOME') ? env.get('XDG_CONFIG_HOME') : await $.env.get('XDG_CONFIG_HOME').catch(() => null)) || null
+  if (xdg) return /[$`~]/.test(xdg) || !xdg.startsWith('/') ? null : xdg.replace(/\/+$/, '') + '/gh/config.yml'
+  return Profile.home ? Profile.home + '/.config/gh/config.yml' : null
+}
+
+// The `aliases:` map of a gh config.yml → Map(name → expansion), or null when it cannot be read as one.
+export function ghAliases(text) {
+  const lines = String(text ?? '').split(/\r?\n/)
+  const at = lines.findIndex((l) => /^aliases:/.test(l))
+  const out = new Map()
+  if (at < 0) return out
+  const head = lines[at].slice('aliases:'.length).trim()
+  if (head === '{}') return out
+  if (head && !head.startsWith('#')) return null
+  const unq = (v) => {
+    const s = v.trim()
+    if (/^'.*'$/s.test(s)) return s.slice(1, -1).replace(/''/g, "'")
+    if (/^".*"$/s.test(s)) return s.slice(1, -1).replace(/\\(["\\])/g, '$1')
+    return s.replace(/\s+#.*$/, '')
+  }
+  for (let i = at + 1; i < lines.length; i++) {
+    const l = lines[i]
+    if (!l.trim() || /^\s*#/.test(l)) continue
+    if (!/^\s/.test(l)) break
+    const m = /^(\s+)(['"]?)([^'":]+)\2:\s*(.*)$/.exec(l)
+    if (!m) return null
+    let v = m[4]
+    if (/^[|>][-+]?\s*$/.test(v)) {
+      // A block scalar: the more-indented lines after it.
+      const body = []
+      while (i + 1 < lines.length && (!lines[i + 1].trim() || lines[i + 1].match(/^\s*/)[0].length > m[1].length)) body.push(lines[++i].trim())
+      v = body.join(v.startsWith('>') ? ' ' : '\n').trim()
+    } else v = unq(v)
+    out.set(m[3].trim(), v)
+  }
+  return out
+}
+
+// `gh <word>` where the word is none of gh's commands → the line it runs: { line } for an alias (a `!` alias is a
+// shell line), { none } when gh's config has no such alias (an extension, or a word gh refuses), { why } when the
+// config cannot be found or read.
+async function ghAliasLine($, c) {
+  const file = await ghConfigFile($, c.env)
+  if (!file) return { why: c.what + ' may be an alias, in a gh config the guard cannot place' }
+  const text = await $.fs.read(file).catch(() => null)
+  if (text === null) {
+    // No config file at all: gh has no aliases.
+    const there = await $.fs.stat(file).then(() => true, () => false)
+    return there ? { why: c.what + ' may be an alias in ' + file + ', which the guard could not read' } : { none: true }
+  }
+  const map = ghAliases(text)
+  if (!map) return { why: c.what + ' may be an alias in ' + file + ', which the guard could not read' }
+  const value = map.get(c.sub)
+  if (value === undefined) return { none: true }
+  const args = c.args.map(shq).join(' ')
+  if (value.startsWith('!')) return { line: value.slice(1) + (args ? ' ' + args : '') }
+  return { line: 'gh ' + value + (args ? ' ' + args : '') }
+}
+
+
 // How deep an alias may expand into another alias (git itself stops a loop; the guard stops sooner).
 const ALIAS_DEPTH = 5
 
@@ -705,18 +818,24 @@ async function aliasLine($, c) {
   return { line: ['git', ...c.loc.map(shq), value, args].filter(Boolean).join(' ') }
 }
 
-// A line → the deny text, or null. A line the reader cannot parse falls back to the plain words.
+// A line → the deny text, or null. A line the reader cannot parse is refused below auto, whatever its words: only
+// a blank or comment-only line, which runs nothing, gets through. A line that was read and named nothing to judge
+// (`echo hi`, `npm test`) has no candidates and runs; a part the lexer did not read (past its depth caps) is a
+// candidate of its own, so it never leaves the list empty.
 export async function guardLine($, line, cwd) {
   let cands
   try {
-    cands = commandSteps(line, cwd)
+    cands = commandSteps(line, cwd, 0, await homes($))
   } catch {
-    cands = /\b(pr\s+merge|release\s+create|git\s+tag\s+\S|push\b.*(\b(main|master)\b|--tags|--force|\s-f\b))/.test(line) ? [{ kind: 'step', what: 'unreadable', dir: cwd, slug: null }] : []
+    cands = runsSomething(line) ? [{ kind: 'hidden', what: 'the guard could not parse this line', dir: cwd, slug: null }] : []
   }
   if (!cands.length) return null
   const profile = await readProfile($)
   return judgeCands($, cands, { profile, cwd, cache: new Map(), envRepo: undefined }, 0)
 }
+
+// Whether a line holds anything but blanks and comments.
+const runsSomething = (line) => /\S/.test(String(line ?? '').replace(/^\s*#.*$/gm, ''))
 
 // The candidates of one line (or of an alias's expansion), judged in order: the first refusal, or null.
 async function judgeCands($, cands, ctx, depth) {
@@ -742,10 +861,21 @@ async function judgeCands($, cands, ctx, depth) {
       const a = await aliasLine($, c)
       if (a.why) return denyHidden(a.why)
       if (a.none) continue
-      const inner = commandSteps(a.line, c.at).map((x) => (x.kind === 'push' ? { ...x, push: { ...x.push, headMoved: x.push.headMoved || c.headMoved || aliasMoved, remoteEdited: x.push.remoteEdited || c.remoteEdited } } : x))
+      const inner = commandSteps(a.line, c.at, 0, await homes($)).map((x) => (x.kind === 'push' ? { ...x, push: { ...x.push, headMoved: x.push.headMoved || c.headMoved || aliasMoved, remoteEdited: x.push.remoteEdited || c.remoteEdited } } : x))
       const why = await judgeCands($, inner, ctx, depth + 1)
       if (why) return why
       if (lineMovesHead(a.line)) aliasMoved = true
+      continue
+    }
+    if (c.kind === 'ghalias') {
+      // Below auto a gh alias is read from gh's config and its expansion judged like the line; one that cannot be
+      // read refuses.
+      if (depth >= ALIAS_DEPTH) return denyHidden(c.what + ' expands through more aliases than the guard follows')
+      const a = await ghAliasLine($, c)
+      if (a.why) return denyHidden(a.why)
+      if (a.none) continue
+      const why = await judgeCands($, commandSteps(a.line, c.dir ?? cwd, 0, await homes($)), ctx, depth + 1)
+      if (why) return why
       continue
     }
     if (c.kind === 'protected') return denyProtected(c.what)
@@ -770,8 +900,13 @@ async function judgeCands($, cands, ctx, depth) {
     }
     if (mode === 'local') return DENY_LOCAL
     if (c.kind === 'push') {
-      const why = judgePush(c.push, await pushInfo($, c, cwd, cache))
+      const claims = []
+      const why = judgePush(c.push, { ...(await pushInfo($, c, cwd, cache)), claim: (n) => claims.push(n) })
       if (why) return DENY_PUSH + ' Refused: ' + why + '.'
+      for (const name of claims) {
+        const other = await othersBranch($, c, name, cwd)
+        if (other) return DENY_PUSH + ' Refused: ' + other + '.'
+      }
     }
   }
   return null

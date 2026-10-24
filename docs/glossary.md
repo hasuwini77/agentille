@@ -3,8 +3,10 @@
 The words the README and the reference pages use, one meaning each.
 
 - **Level:** how big the crew is. low (solo or one builder), medium (parallel subagents), heavy (panes). You force one with `/agt low|medium|heavy "task"`.
-- **Transport:** how a run's workers execute: `solo` (Claude does it itself), `subagent`, `panes` (Herdr or tmux) or `workflow`. The recon line names it.
-- **Mode:** the integration mode, set by `integration` in your profile: `pr` (default), `auto`, `push` or `local`. It decides what a finished slice becomes, and a repo can only lower it. Three names keep the word for other things, and none of them is a mode in this sense: the dispatch header's `mode=` field holds the work type (`build`, `fix`, `diagnose`, `review`, `research`), the deprecated `--mode` flag picks a level, and `panes-mode.md` and `workflow-mode.md` in `skills/agt/` describe two transports.
+- **Transport:** how a run's workers execute: `solo` (Claude does it itself), `subagent`, `panes` (Herdr or tmux) or `workflow`. The recon line names it. `panes-mode.md` and `workflow-mode.md` in `skills/agt/` describe two of them.
+- **Integration:** what a finished slice becomes, set by `integration` in your profile: `pr` (default), `auto`, `push` or `local`. A repo can only lower it.
+- **Work type:** what one dispatch is for, written in the dispatch header as `mode=`: `build`, `fix`, `diagnose`, `review` or `research`.
+- **Mode:** the deprecated `--mode` flag's name for a level: `solo` (low), `subagent` (medium), `panes` or `herdr` (heavy). It goes away in v4; type the level instead.
 - **Slice:** one file-disjoint part of the task, built by one executor on its own branch. The dispatch header carries its slug as `slice=` (`piece=` is still read for one release).
 - **Executor, planner, reviewers, adversary:** the agent roles in `agents/`. Reviewers read and run tests; they never edit. The adversary writes tests that try to break a slice.
 - **Pane / worker:** a real Claude (or Codex) session in a Herdr or tmux pane, named `agt-<run>-<role>`, doing one slice. **Session:** a pane that is yours, opened with "open two sessions".

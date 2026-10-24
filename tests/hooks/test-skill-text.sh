@@ -50,9 +50,13 @@ for f in skills/agt/factory.md agents/agentille-executor.md; do
 done
 check "the worktree script exists and is executable" '[ -x scripts/agt-worktree.sh ]'
 
-# 4. one vocabulary: "slice" in prose; "piece" only as the header key
+# 4. one vocabulary: "slice" in prose; "piece" only as the header key, never "chunk" or "bucket"
 for f in skills/agt/*.md agents/agentille-*.md README.md; do
   check "$f says slice, not piece (except piece=)" '! grep -v "piece=" "$f" | grep -qiE "\bpieces?\b"'
+done
+# "chunk" and "bucket" were two more names for the same unit (a plan step is a different unit and keeps its name)
+for f in skills/agt/*.md agents/agentille-*.md; do
+  check "$f says slice, not chunk or bucket" '! grep -qiE "\b(chunks?|buckets?)\b" "$f"'
 done
 
 # 5. agreement, not only presence: the files that hand a value over and the files that use it say the same
@@ -89,9 +93,37 @@ check "the compact hook runs the re-entry script" 'matcher_block compact | grep 
 check "the re-entry script exists and is executable" '[ -x hooks/agentille-compact.sh ]'
 check "the update check still runs at startup and resume" 'matcher_block "startup|resume" | grep -qF "hooks/agentille-update-check.sh"'
 
+# the design-reviewer's hard rule and the cost ceiling agree: the ceiling demotes it (hooks/routing.js CEILING_ROLES),
+# so the hard rule names the ceiling as its second exception, and the ceiling bullet still lists the design-reviewer
+dr_rule() { grep -F "Never downgrade the design-reviewer" skills/agt/routing.md; }
+check "routing.md's design-reviewer rule names quick and the ceiling" 'dr_rule | grep -qF "thinkingDepth=quick" && dr_rule | grep -qiF "cost ceiling"'
+check "routing.md's ceiling bullet includes the design-reviewer" 'grep -F "Past the ceiling," skills/agt/routing.md | grep -qF "design-reviewer"'
+
+# solo is the lead alone: no agents, no reviewer agent, and its own review of the diff before the push
+check "routing.md's solo lines never name the code-reviewer" '! grep -i "solo" skills/agt/routing.md | grep -qF "code-reviewer"'
+check "routing.md says a solo run dispatches no role in the roster" 'grep -F "solo run dispatches no role" skills/agt/routing.md | grep -qF "reviews its own diff"'
+check "SKILL.md's solo step has no reviewer agent and a self-review before the push" 'grep -F "Solo steps aside" skills/agt/SKILL.md | grep -qF "no reviewer" && has skills/agt/SKILL.md "Before the push (under \`local\`, before you report), review your own full diff"'
+check "factory.md gives a solo run no fix attempts" '! has skills/agt/factory.md "solo run counts its own review-fix rounds" && grep -F "solo run dispatches no executor" skills/agt/factory.md | grep -qF "reviews its own diff"'
+
+# the init skill's `display` row says what hooks/settings.js defaults to: every key, and each key's default, in order
+# (the Default cell is DISPLAY_DEFAULTS with the quotes dropped), so the table cannot drift from the code again
+display_defaults() { sed -n 's/^export const DISPLAY_DEFAULTS = \({.*}\)$/\1/p' hooks/settings.js | tr -d "'" | sed 's/^{ /{/; s/ }$/}/'; }
+init_display_row() { grep -E '^\| `display` \|' skills/agentille-init/SKILL.md; }
+init_display_values() { init_display_row | sed 's/^| `display` | `\([^`]*\)`.*/\1/'; }
+check "hooks/settings.js declares DISPLAY_DEFAULTS on one line" '[ -n "$(display_defaults)" ]'
+check "the init skill's display default is hooks/settings.js's DISPLAY_DEFAULTS" '[ "$(init_display_row | awk -F"|" "{ print \$(NF-1) }" | sed "s/^ *\`//; s/\` *$//")" = "$(display_defaults)" ]'
+for k in $(display_defaults | tr -d '{}' | tr ',' '\n' | sed 's/:.*//; s/ //g'); do
+  check "the init skill's display row lists the values $k takes" 'init_display_values | grep -qE "[{ ]$k: [^,}]+[,}]"'
+done
+
 # setup skills that say "typed only" disable model invocation
-for f in skills/agentille-init/SKILL.md skills/agentille-project/SKILL.md; do
+for f in skills/agentille-init/SKILL.md skills/agentille-project/SKILL.md skills/agentille-claude-md/SKILL.md; do
   check "$f disables model invocation" 'grep -qE "^disable-model-invocation: true$" "$f"'
+done
+# a typed-only skill never describes itself as one the model picks up from what the user says or asks
+for f in skills/*/SKILL.md; do
+  grep -qE "^disable-model-invocation: true$" "$f" || continue
+  check "$f is typed only and its description says so" '! grep -E "^description:" "$f" | grep -qiE "use when the user says|when the user asks"'
 done
 
 [ "$bad" = 0 ] && echo "skill-text: $n checks pass" || { echo "skill-text: $bad of $n checks fail"; exit 1; }

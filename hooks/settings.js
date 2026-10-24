@@ -2,10 +2,10 @@
 // ~/.agentille/profile.json and the older per-key store values, and writes the block back.
 //
 // Precedence per key: profile.display → the $.store value an old /agt-focus, /agt-highlight or
-// /agt-deck left behind → the default. Junk in any of them reads as "not set". band, statusLine and
-// mascot never had a command, so only the profile sets them.
+// /agt-deck left behind → the default. Junk in any of them reads as "not set". band, statusLine, mascot,
+// rows and spinner never had a command, so only the profile sets them.
 
-export const DISPLAY_DEFAULTS = { deck: 'off', focus: true, highlight: 'off', band: 'on', statusLine: 'on', mascot: 'on' }
+export const DISPLAY_DEFAULTS = { deck: 'off', focus: true, highlight: 'off', band: 'on', statusLine: 'on', mascot: 'on', rows: 'on', spinner: 'on' }
 export const DISPLAY_KEYS = Object.keys(DISPLAY_DEFAULTS)
 
 const VALID = {
@@ -15,6 +15,8 @@ const VALID = {
   band: (v) => v === 'on' || v === 'off',
   statusLine: (v) => v === 'on' || v === 'off',
   mascot: (v) => v === 'on' || v === 'off',
+  rows: (v) => v === 'on' || v === 'off',
+  spinner: (v) => v === 'on' || v === 'off',
 }
 
 // profile.display with every invalid key dropped; anything but an object reads as empty.
@@ -69,6 +71,12 @@ export function profileJson(profile) {
 export function displayText({ values, from }) {
   const word = (k) => from[k] === 'default' ? 'default' : from[k]
   return DISPLAY_KEYS.map((k) => '  ' + k.padEnd(12) + String(values[k]).padEnd(6) + word(k)).join('\n')
+}
+
+// The top-level `sessions` key: 'on' | 'off' when the profile sets it, null when it does not (or holds junk). Off,
+// a plain prompt never unlocks open_sessions (proofs.js typedPrompt); null reads as on.
+export function cleanSessions(v) {
+  return v === 'on' || v === 'off' ? v : null
 }
 
 // Keys that make a profile a voice (what /agentille-init writes). A file holding only `display` or

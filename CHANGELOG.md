@@ -9,6 +9,74 @@ next minor, `docs/releasing.md`).
 
 ### Added
 
+- **The guard fails closed at its own depth caps.** A `$( )` nested past
+  depth 4, an `eval`/`bash -c` line past depth 3, a `submodule foreach`
+  past its cap, or a line the lexer could not parse at all now adds an
+  unreadable candidate and is refused, and the lexer resumes at the closer
+  so siblings after it (`; gh pr merge 4`) are still read. The limits are
+  listed in `docs/guards.md`.
+- **More of what runs code is protected during a run.** Git config keys
+  `filter.*`, `diff.external`, `diff.*.textconv`/`command`, `core.editor`,
+  `core.pager`, `sequence.editor`, `credential.helper`, `gpg.program`,
+  `include.path`/`includeIf.*.path`, through `git config`, `-c`,
+  `GIT_CONFIG_PARAMETERS` and `GIT_CONFIG_COUNT`; `.gitattributes` and
+  `.git/info/attributes` writes; `GIT_EXTERNAL_DIFF`, `GIT_SSH_COMMAND`,
+  `GIT_ASKPASS`, `GIT_EDITOR`, `GIT_SEQUENCE_EDITOR`, `GIT_PAGER`, `HOME`,
+  `XDG_CONFIG_HOME` and `GIT_CONFIG_GLOBAL`/`SYSTEM` set on a git line;
+  the folder `core.hooksPath` names; and the files that hold the
+  backstop: `~/.claude/settings*.json`, `.claude/settings*.json`,
+  `~/.gitconfig`, the gh config, `.git/HEAD` and `config.worktree`.
+  Safe values (`cat`, `true`, `less`, plain `ssh`, `/dev/null`) pass.
+- **Links to the trust root are judged by their source.** `cp -l`,
+  `cp -s`, `link`, and `os.link`/`fs.linkSync` calls that name
+  `~/.agentille` are refused like `ln` and `mv` already were.
+- **A run with no profile is held to `pr`.** The snapshot taken at the
+  typed `/agt` defaults to `pr` instead of reading the live mode, so a
+  profile written during the run cannot raise the ceiling.
+- **The run's own branch is the one it made.** A push to an existing
+  `feat/*`, `fix/*` or `storm/*` branch the run did not create is refused
+  below `auto`; a brand-new branch and the run's recorded worktree
+  branches still pass. The deny line says which branches count.
+- **More GitHub write paths are modelled.** `gh repo sync -b <base>`,
+  `gh api POST …/dispatches`, `gh pr review --approve`, `gh pr edit
+  --add-label` with an auto-merge label, gh aliases (expanded from the gh
+  config, refused when it cannot be read) and httpie/xh writes to the
+  API paths curl is refused on.
+- **Scripts read deeper.** A package-script or script-file step whose
+  program or subcommand is built from an unreadable word (`git
+  pu${X:-sh}`, `$c push`) is refused, and the words a script is passed
+  (`exec "$@"`) are read as a command of their own. Folder trust
+  (`trust.js`) now follows a hook's or MCP server's relative imports, so
+  a changed helper file is no longer "the same config".
+- **`display.rows` and `display.spinner` switches** (`"on"` or `"off"`,
+  default `"on"`): `rows` off leaves every `Agent` call as Claude Code's
+  own transcript row, `spinner` off adds no count or phase names to the
+  spinner. A top-level **`sessions`** key (`"on"`/`"off"`, default
+  `"on"`): off, a plain prompt never unlocks `open_sessions`; a typed
+  `/storm` still opens its hand-off session.
+- **The cost ceiling reaches every transport.** The workflow branch now
+  computes the run's spend and refuses a workflow agent at the ceiling
+  under `routing.stopAtCeiling` (it cannot rewrite the model there, so
+  `workflow-mode.md` says the lead names the routed model). A typed
+  `--fable` past the ceiling says so in one toast and `pastCeiling` in
+  the routing log, on subagent and pane dispatches alike.
+- **`routing.stopAtWeeklyPct`** (default `0`, off): a number from 1 to
+  100 refuses every later dispatch once the subscription's seven-day
+  usage percent is at or above it. `maxRunUsd` stays an API-list-price
+  estimate; this is the quota gate. `/agt-info route` names which gate
+  refused.
+- **A budget-capped eval workflow.** `.github/workflows/evals.yml` runs
+  the dispatch-decision evals weekly, on release tags and by hand, with
+  `--max-cost-usd 2`, `--no-publish` and `--trust-plugin`, only when an
+  `ANTHROPIC_API_KEY` secret exists, and uploads `evals/results/` as an
+  artifact. `docs/testing.md` explains the three verification layers.
+- **Validator checks:** the guard's imports run one way (`guard.js` →
+  `guard-policy.js` → `guard-lex.js` → `guard-steps.js`, none back); every
+  workflow file under `.github/workflows/` parses with an `on:` and a
+  `jobs:` key; the init skill's `display` row equals `DISPLAY_DEFAULTS`
+  in `hooks/settings.js`, key by key; `routing.md`'s design-reviewer rule
+  and its ceiling bullet agree; no solo line names the code-reviewer; a
+  typed-only skill never says "use when the user says".
 - **Per-surface display switches.** `display.band`, `display.statusLine`
   and `display.mascot` (`"on"` or `"off"`, default `"on"`) in
   `~/.agentille/profile.json` turn the switchboard band, the pinned
@@ -34,6 +102,33 @@ next minor, `docs/releasing.md`).
 
 ### Changed
 
+- **The README is a short path.** Install, the `/agt-info` check, a solo
+  smoke test under `integration: "local"` (one line says the default is
+  `pr`), then a bigger run and its card. The full command list moved to
+  `docs/commands.md` and every profile key, the voice keys included, to
+  `docs/settings.md`; the README keeps a 4-row Commands table, the
+  `integration` paragraph, Routing (the validator pins it) and "What it
+  touches".
+- **A solo run is the lead alone.** No agents, no code-reviewer, no run
+  dir, no card, no fix attempts; before the push (under `local`, before
+  it reports) the lead reviews its own full diff. `SKILL.md`,
+  `routing.md` and `factory.md` now say the same thing.
+- **The design-reviewer's hard rule names both exceptions:**
+  `thinkingDepth=quick` and the cost ceiling, which demotes it to Sonnet
+  like every other Opus role (`CEILING_ROLES` was already that; the text
+  now matches).
+- **One word for the unit of work.** `chunk` and `bucket` are now
+  `slice` in the planner, executor, plan-reviewer and `workflow-mode.md`
+  (`BUCKET-GRAPH` is `SLICE-GRAPH`); the glossary gives `mode` one
+  meaning (the deprecated `--mode` flag's level name) and names
+  integration, transport and work type by their own words.
+- **`/agentille-claude-md`** describes itself as typed-only, like the
+  other setup skills. `agents/agentille-executor.md` opens with a
+  plain-language paragraph before its contract.
+- `reaper.js` imports worktree ownership from `guard-own.js` instead of
+  `guard.js`, and `guard-lex.js` no longer imports `profile.js` (the
+  policy passes the home spellings in), so the guard chain sits outside
+  every import cycle.
 - **The cost estimate counts the lead.** `estimateRunUsd` now prices the
   lead session's own tokens on the run (input, output and cache reads,
   at the lead's model) next to the agents' tokens and pane minutes, and
@@ -75,6 +170,13 @@ next minor, `docs/releasing.md`).
 
 ### Fixed
 
+- `docs/settings.md` claimed to cover every profile key while the voice
+  keys lived only in the init skill, and gave the display fallback order
+  wrong (profile value, then the value an older command stored, then the
+  default). The init skill's display table listed three of the keys with
+  a stale default.
+- `docs/routing-cost.md` and the README said the past-ceiling toast
+  covered subagent dispatches only; pane dispatches get it too.
 - **The guard reads the indirection it used to pass.** Below `auto`, a
   package script's `pre`/`post` scripts and the `npm run`, `sh`, `node`
   and `python` steps inside it are read in turn, five hops deep;

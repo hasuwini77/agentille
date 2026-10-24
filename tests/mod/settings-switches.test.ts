@@ -8,6 +8,7 @@ const PROFILE = '/h/.agentille/profile.json'
 
 const boot = async ($: any, on: any, display: object | null, env: Record<string, string> = {}) => {
   const lines: (string | undefined)[] = []
+  const rendered: any[] = []
   let n = 0
   on('env.get', async ($: any, e: any) => ({ value: ({ HOME: '/h', ...env } as any)[e.name] }))
   on('session.start', async ($: any, e: any) => ({ cwd: e.cwd }))
@@ -19,13 +20,13 @@ const boot = async ($: any, on: any, display: object | null, env: Record<string,
   on('agent.spawn', async () => ({ model: 'claude-opus-5-5', agentId: 'sw' + ++n }))
   on('turn.start', async ($: any, e: any) => ({ turnId: e.turnId }))
   on('turn.complete', async ($: any, e: any) => ({ text: e.answer }) as never)
-  on('ui.render', async () => ({ type: 'engine', ref: 0 }) as never)
+  on('ui.render', async ($: any, e: any) => { rendered.push(e); return { type: 'engine', ref: 0 } as never })
   on('ui.toast', async () => ({ value: undefined }))
   on('session.measure', async ($: any, e: any) => ({ changed: e.changed }) as never)
   on('ui.status', async ($: any, e: any) => { lines.push(e.text); return { value: undefined } })
   const clock = mock.clock(on, { now: 1_000_000 })
   await $.session.start({ cwd: '/w', surface: null, isInteractive: false })
-  return { lines, clock }
+  return { lines, clock, rendered }
 }
 const review = ($: any, run: string, role = 'code-reviewer') => $.agent.spawn({ prompt: '[agt run=' + run + ' size=large mode=review]\nreview', subagentType: 'agentille:agentille-' + role })
 const fail = ($: any, agentId: string) => $.turn.complete({ agentId, answer: 'VERDICT: FAIL\nP0: token logged', durationMs: 10, isAborted: false, turnId: 't' + agentId, reason: 'answer' } as never)
@@ -115,5 +116,57 @@ describe('display.mascot', () => {
     expect(await has(ui, /planner/)).toBe(true)
     expect(await has(ui, /▝▜█████▛▘/)).toBe(false)
     await ui.unmount()
+  })
+})
+
+describe('display.rows', () => {
+  const plain = ($: any) => $.agent.spawn({ prompt: 'look around the repo', subagentType: 'Explore' })
+  const row = async ($: any, agentId: string, re: RegExp) => {
+    const props = { tool: 'Agent', tool_use_id: 'tu-' + agentId, input: { description: 'a call' }, output: { agentId }, isRunning: false, isErrored: false, isInterrupted: false }
+    const ui = await $.ui.mount({ plugin: 'agentille', surface: 'terminal', component: 'ToolUse', requestId: 'tu-' + agentId, props: props as never })
+    const drawn = await has(ui, re)
+    await ui.unmount()
+    return drawn
+  }
+
+  test('on by default: a plain subagent and an /agt agent both draw as live rows', { timeoutMs: 20_000 }, async ($, on) => {
+    await boot($, on, null)
+    await plain($)
+    await review($, 'rowson')
+    expect(await row($, 'sw1', /Explore/)).toBe(true)
+    expect(await row($, 'sw2', /code-reviewer/)).toBe(true)
+  })
+
+  test('off: every Agent row is the engine row, a plain subagent and the run\'s own alike', { timeoutMs: 20_000 }, async ($, on) => {
+    await boot($, on, { rows: 'off' })
+    await plain($)
+    await review($, 'rowsoff')
+    expect(await row($, 'sw1', /Explore/)).toBe(false)
+    expect(await row($, 'sw2', /code-reviewer/)).toBe(false)
+    expect(await info($)).toMatch(/rows\s+off\s+profile/)
+    expect(await info($)).toContain('routing: 1 dispatch')
+  })
+})
+
+describe('display.spinner', () => {
+  const spin = async ($: any, rendered: any[]) => {
+    const props = { word: 'Working', message: null, suffix: '…', mode: 'responding' }
+    const ui = await $.ui.mount({ plugin: 'agentille', surface: 'terminal', component: 'Spinner', requestId: 'main', props: props as never })
+    await ui.unmount()
+    return rendered.filter((e) => e.component === 'Spinner').at(-1).props.suffix
+  }
+
+  test('on by default: a plain subagent at work adds its count to the main spinner', { timeoutMs: 20_000 }, async ($, on) => {
+    const { rendered } = await boot($, on, null)
+    await $.agent.spawn({ prompt: 'look around the repo', subagentType: 'Explore' })
+    expect(await spin($, rendered)).toBe('… · ◇1 working')
+  })
+
+  test('off: the main spinner keeps its own suffix', { timeoutMs: 20_000 }, async ($, on) => {
+    const { rendered } = await boot($, on, { spinner: 'off' })
+    await $.agent.spawn({ prompt: 'look around the repo', subagentType: 'Explore' })
+    await review($, 'spinoff')
+    expect(await spin($, rendered)).toBe('…')
+    expect(await info($)).toMatch(/spinner\s+off\s+profile/)
   })
 })

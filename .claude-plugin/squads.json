@@ -2,7 +2,7 @@
   "squads": [
     {
       "name": "saas",
-      "label": "Micro SaaS",
+      "label": "SaaS",
       "minScore": 2,
       "signals": {
         "deps": ["stripe", "@stripe/stripe-js", "@supabase/supabase-js", "@supabase/ssr", "next-auth", "@auth/core", "@clerk/nextjs", "@lemonsqueezy/lemonsqueezy.js", "resend"],

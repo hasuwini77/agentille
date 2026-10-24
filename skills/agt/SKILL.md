@@ -26,7 +26,7 @@ The first word may force a level; otherwise detect it. First match wins.
 
 - **low**: solo, or one executor plus the reviewers its diff needs. A forced `low` on a multi-slice task builds the slices one after another with one executor.
 - **medium**: planner, then up to 3 executor subagents at once (each in its own worktree), then the review fan-out.
-- **heavy**: planner, then one pane per slice through `spawn_pane` (`panes-mode.md`); planners and reviewers stay subagents; serial merge. A task that asks for Codex workers runs heavy (`panes-mode.md` → "Codex workers").
+- **heavy**: planner, then one pane per slice through `spawn_pane` (`panes-mode.md`), at most 3 at once like medium; planners and reviewers stay subagents; serial merge. Heavy differs from medium by panes (a real session per slice in its own worktree, the live wire, resume), not by width. A task that asks for Codex workers runs heavy (`panes-mode.md` → "Codex workers").
 - **Risk gate:** auth, money or data work (`routing.md` → "Risk words") never runs solo, and runs the gauntlet when the repo has a test runner (`formations.md`). A screen merely named login or checkout is `risk=none`.
 - `--fable` is the only flag (`routing.md` → "Escalation ladder"). Deprecated, still honored, never suggested, removed in v4: `--mode solo|subagent|panes|herdr` (= low|medium|heavy|heavy), `--plan` (stop after the plan review; "go" resumes it), `--formation <f>` (that formation).
 
@@ -42,7 +42,7 @@ Print the recon line before anything else: `recon: <level> · <transport> · <on
 6. **Run dir.** Create `~/.agentille/state/run-<id>/` and keep it. When a planner ran, write its CONTEXT-PACK to `context-pack.md` there and give each executor only its slice plus `checkpoint: ~/.agentille/state/run-<id>/checkpoint-<name>.md`.
 7. **Scout, plan, then review it.** Scouts are optional, medium and heavy only: when the task names no files and the planner would have to map unfamiliar ground in ≥3 areas, first send ≤3 `Explore` subagents with `model: haiku` as one message of background calls, one question each ("which files wire X?"), each answering in ≤15 lines of paths and facts, and hand the answers to the planner under `SCOUTS:`. The plan carries numbered ACCEPTANCE criteria. REVISE → re-plan → review again; a second REVISE → re-plan once more and go on.
 8. **Build, then review**, in dependency order, pipelined: review each finished slice while the others build. Every reviewer a slice needs goes out in ONE message as parallel background `Agent` calls. Fix rounds resume the same executor (`factory.md` → "Fix rounds").
-9. **Gate and integrate.** P0/P1 block. Then the escalate checklist decides merge or ⚑ (`factory.md` → "Gate" and "Integrate").
+9. **Gate and integrate.** P0/P1 block. Then the escalate checklist decides merge or ⚑ (`factory.md` → "Gate" and "Integrate"). The profile sets `integration`; a repo can only lower it. The lead removes each slice's worktree once the gate decides (`factory.md` → "Worktree lifecycle").
 10. **Close everything.** Close each `agt-<run>-*` pane the moment its answer is harvested, then confirm the run lists zero panes (`panes-mode.md` → "Harvest, then close"). Stop every background subagent once its handoff is used.
 11. **Report, then the card.** Write `report.md` once, never print it, then print the final card (`display.md`). That card is the only end-of-run output.
 
@@ -50,13 +50,13 @@ Print the recon line before anything else: `recon: <level> · <transport> · <on
 
 Every `agentille:agentille-*` dispatch prompt starts with one line:
 
-`[agt run=<id> size=<small|large> risk=<none|auth|money|data> mode=<build|fix|diagnose|review|research> fable=<auto|forced> formation=<none|duel|gauntlet|relay> piece=<slug>]`
+`[agt run=<id> size=<small|large> risk=<none|auth|money|data> mode=<build|fix|diagnose|review|research> fable=<auto|forced> formation=<none|duel|gauntlet|relay> slice=<slug>]`
 
 - `size=large`: plan ≥6 steps or a shared contract, or a diff with logic in >1 file, >~150 LoC, or a public API/schema change.
 - `risk`: `routing.md` → "Risk words" (sessions, tokens, guards → `auth`; payments, webhooks → `money`; migrations → `data`; a form or page with no such logic → `none`).
 - `mode=fix` on every fix round, including a resumed executor's message; `diagnose` for the read-only root-cause planner.
 - `fable=forced` only when the user typed `--fable`.
-- `piece=<slug>` (lowercase, ≤24 chars) names the slice: its executor, adversary and reviewers share it. Omit it for planning roles and single-slice runs. (The key is spelled `piece` for compatibility; the docs say slice.)
+- `slice=<slug>` (lowercase, ≤24 chars) names the slice: its executor, adversary and reviewers share it. Omit it for planning roles and single-slice runs. The mod accepts the older `piece=` too for one release; write `slice=`.
 
 With the mod loaded it routes model + effort from this line. Still pass `model:` every time: the skill must work with mods off.
 

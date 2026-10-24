@@ -51,7 +51,7 @@ Acceptance criteria are what `/agt`'s planner turns into its own ACCEPTANCE list
 ## agt task line
 
 ```
-/agt heavy "Build the <k> picks in docs/storm/<date>.md, one slice per pick, in this order: 1) <title> 2) <title> 3) <title>. Scope and acceptance criteria are in the doc under each pick; do not widen them. Integrate per the repo's integration setting (default: one PR per slice, nothing merged)."
+/agt heavy "Build the <k> picks in docs/storm/<date>.md, one slice per pick, in this order: 1) <title> 2) <title> 3) <title>. Scope and acceptance criteria are in the doc under each pick; do not widen them. Integrate per the profile's integration setting, which the repo can only lower (default: one PR per slice, nothing merged)."
 ```
 
 `quick` → `/agt medium "…"`. The line goes into `open_sessions` → `tasks[0]` verbatim, and is printed under the final card as the paste fallback.
@@ -69,8 +69,10 @@ Same picks, built with what every Claude Code has. The storm session is the lead
 Executor dispatch (one `general-purpose` Sonnet per pick, at most 3 at once, one message, background):
 
 ```
-Build pick <n> from docs/storm/<date>.md in this worktree only: <root>/.worktrees/storm-<date>-<slug> on branch storm/<date>-<slug> (create both with git worktree add -b). Scope and Acceptance under the pick are the contract: build every acceptance line, nothing outside Scope. Copy .env* from the root. Run the repo's test and build commands; fix until green. Commit in small logical steps. Reply with: VERIFICATION: <commands run and results>, then FILES: <paths>, then OPEN: <anything you could not do>.
+Build pick <n> from docs/storm/<date>.md in this worktree only: <root>/.worktrees/storm-<date>-<slug> on branch storm/<date>-<slug> (create both with git worktree add -b). Scope and Acceptance under the pick are the contract: build every acceptance line, nothing outside Scope. Copy .env* from the root, and on every exit, done or failed, delete those copies first with git clean -fqx -- '.env*' in the worktree. Run the repo's test and build commands; fix until green. Commit in small logical steps. Reply with: VERIFICATION: <commands run and results>, then FILES: <paths>, then OPEN: <anything you could not do>.
 ```
+
+The `.env*` clean is the agentille executor's own rule (its step 8, Cleanup, on every exit): secrets live in a sibling worktree only while an agent works in it. The prompt carries the command itself, since a plain-build executor cannot read agentille's files.
 
 Then one `general-purpose` Sonnet reviewer per finished pick (read-only, foreground): the diff against the acceptance list, `VERDICT: PASS|FAIL` plus `FIX:` lines. A FAIL goes back to the same executor once via SendMessage; still failing → `⚑` on the card, branch kept.
 

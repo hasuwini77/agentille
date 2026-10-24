@@ -23,8 +23,9 @@ import { moment, inFlight } from './proofs.js'
 import { leadPane } from './spawn.js'
 
 export const DENY_INTEGRATION = 'integration auto is not set in your profile for this repo; the run stops at the PR.'
-export const DENY_PUSH = 'integration auto is not set in your profile for this repo: a run pushes only its own branch (agt/*, feat/*, fix/* or the one checked out), never the base branch, a tag, a force push or every branch. Write the branch name and the directory out (no variables) and push again.'
+export const DENY_PUSH = 'integration auto is not set in your profile for this repo: a run pushes only its own branch (agt/*, feat/*, fix/* or the one checked out), never the base branch, a tag, a force push, a branch deletion or every branch. Write the branch name and the directory out (no variables) and push again.'
 export const DENY_LOCAL = 'integration is local for this repo: the run pushes nothing and opens no PR.'
+export const DENY_UNREAD = 'The guard could not read the repo this command targets; retry, or run the command yourself.'
 export const OWNED_TTL_MS = 14 * 24 * 60 * 60_000
 const MODES = ['local', 'push', 'pr', 'auto'] // least to most autonomy
 const OWN_BRANCH = /^(agt|feat|fix|storm)\//
@@ -347,11 +348,8 @@ export function judgePush(p, { current = null, pushDst = null, bases = new Set([
     if (CURRENT_SUB.test(src)) src = 'HEAD'
     if (CURRENT_SUB.test(to)) to = cur
     if (/(^|\/)refs\/tags\//.test(src) || /^refs\/tags\//.test(to ?? '')) return 'git push <tag>'
-    if (p.del || (k === 0 && to)) {
-      const why = dst(to)
-      if (why) return why.replace('git push', 'git push --delete')
-      continue
-    }
+    // A deletion is never a run's own push: a branch it did not make (feat/* is the person's prefix too) goes with it.
+    if (p.del || (k === 0 && to)) return 'git push --delete ' + (to || src || 'a branch')
     if (k < 0 && (src === 'HEAD' || src === '@')) to = cur
     else if (k < 0 && /[$`]/.test(src)) to = src
     const why = dst(to)
@@ -579,9 +577,11 @@ export function capsOf(text) {
   return out
 }
 
+// git said no (a nonzero exit): ''. git could not be run at all: the call throws, and the guard fails closed.
 const gitOut = async ($, dir, ...a) => {
-  const r = await $.process.run(['git', '-C', dir, ...a], PROBE).catch(() => null)
-  return r?.exitCode === 0 ? String(r.stdout ?? '').trim() : ''
+  const r = await $.process.run(['git', '-C', dir, ...a], PROBE)
+  if (!r || typeof r.exitCode !== 'number') throw new Error('git did not run')
+  return r.exitCode === 0 ? String(r.stdout ?? '').trim() : ''
 }
 const remotesOf = (text) => String(text).split('\n').map((l) => /^remote\.(.+)\.url\s+(\S+)/.exec(l.trim())).filter(Boolean).map((m) => ({ name: m[1], url: m[2] }))
 
@@ -837,7 +837,8 @@ export async function bashCall($, e, next) {
   const line = String(e.command ?? '')
   if (!fromRun(e, await moment($))) return next(e)
   const cwd = await $.session.cwd().catch(() => null)
-  const deny = await guardLine($, line, cwd).catch(() => null)
+  // Probing that throws is no answer: the command does not run unread.
+  const deny = await guardLine($, line, cwd).catch(() => DENY_UNREAD)
   if (deny) return { deny }
   if (!/\bworktree\s+add\b/.test(line)) return next(e)
   const before = cwd ? await listTrees($, cwd) : null

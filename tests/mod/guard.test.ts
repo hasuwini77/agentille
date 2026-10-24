@@ -1,5 +1,5 @@
 import { describe, expect, mock, test } from 'claude-code/testing'
-import { DENY_INTEGRATION, DENY_LOCAL, DENY_PUSH, capsOf, integrationIn, integrationOf, joinPath, judgePush, newTrees, normSlug, normUrl, parseOwned, sameRepo, splitCommands, worktreeAdds } from '../../hooks/guard.js'
+import { DENY_INTEGRATION, DENY_LOCAL, DENY_PUSH, DENY_UNREAD, capsOf, integrationIn, integrationOf, joinPath, judgePush, newTrees, normSlug, normUrl, parseOwned, sameRepo, splitCommands, worktreeAdds } from '../../hooks/guard.js'
 import { parseWorktrees } from '../../hooks/clean.js'
 
 // What the repo looks like to a line read alone: the slice branch is checked out, the base is main.
@@ -80,6 +80,9 @@ describe('guard: which commands integrate', () => {
       '(cd ../app && git push origin main)',
       'git -C ../app push origin HEAD:main',
       'git push origin release/1.0',
+      'git push origin --delete agt/x',
+      'git push origin :feat/other',
+      'git push -d origin fix/y',
     ]) expect([line, integrationIn(line, onSlice)]).toEqual([line, expect.any(String)])
   })
 
@@ -102,7 +105,6 @@ describe('guard: which commands integrate', () => {
       'git push',
       'git push -u origin "$(git branch --show-current)"',
       'SLUG=filter; git push -u origin "agt/$SLUG"',
-      'git push origin --delete agt/x',
       'git push -n origin main',
       'git push -u origin agt/x 2>&1 | tail -3',
       'git push origin agt/x > /dev/null 2>&1',
@@ -234,7 +236,7 @@ describe('guard: worktree adds', () => {
 // A run in a session with no pane transport: the ownership list lives in memory.
 // git: per dir, the branch checked out (`current`), its remote URL and its main checkout (default /work/repo).
 type Repo = { current?: string; remote?: string; common?: string }
-const setup = (on: any, o: { profile?: unknown; repoConfig?: unknown; env?: Record<string, string>; files?: Record<string, string>; repos?: Record<string, Repo>; feat?: boolean } = {}) => {
+const setup = (on: any, o: { profile?: unknown; repoConfig?: unknown; env?: Record<string, string>; files?: Record<string, string>; repos?: Record<string, Repo>; feat?: boolean; broken?: boolean } = {}) => {
   const seen: string[][] = []
   const ran: string[] = []
   const git = { made: false, committed: false, feat: false }
@@ -273,6 +275,7 @@ const setup = (on: any, o: { profile?: unknown; repoConfig?: unknown; env?: Reco
   on('process.run', async ($: any, e: any) => {
     seen.push(e.argv)
     const a = e.argv.join(' ')
+    if (o.broken && e.argv[0] === 'git' && !a.includes('worktree list')) return { deny: 'git could not be run' }
     const out = (stdout: string, exitCode = 0) => ({ value: { exitCode, stdout, stderr: '' } })
     if (a === 'git -C /work/repo worktree list --porcelain') {
       return out([
@@ -510,5 +513,25 @@ describe('guard: worktree ownership and the run-end tidy', () => {
     const r = await $.command.run({ command: 'agt-clean', args: '', origin: { kind: 'composer' } } as never)
     expect(r.text).toContain('agt/x (not opened by this session)')
     expect(seen.some((a) => a.includes('remove'))).toBe(false)
+  })
+})
+
+describe('guard: it fails closed', () => {
+  test('a repo probe that throws denies the command in one sentence', async ($, on) => {
+    const { ran } = setup(on, { broken: true, profile: { projects: [{ id: 'repo', integration: 'auto' }] } })
+    await boot($)
+    await typed($)
+    expect((await bash($, 'git push -u origin agt/x')).deny).toBe(DENY_UNREAD)
+    expect((await bash($, 'gh pr merge 3')).deny).toBe(DENY_UNREAD)
+    expect((await bash($, 'npm test')).result).toBe('ok')
+    expect(ran).toEqual(['npm test'])
+  })
+
+  test('below auto no branch is deleted on the remote, an own-prefix one included', async ($, on) => {
+    setup(on)
+    await boot($)
+    await typed($)
+    for (const line of ['git push origin :feat/someone-else', 'git push origin --delete agt/x', 'git push -d origin fix/y']) expect((await bash($, line)).deny).toContain('git push --delete')
+    expect((await bash($, 'git push -u origin agt/x')).result).toBe('ok')
   })
 })

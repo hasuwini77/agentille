@@ -44,16 +44,19 @@ export function register(on) {
     } catch {
       setRunningVersion(null)
     }
+    // The session-start toasts belong to the band: display.band off → none. The profile's band is in effect now (it
+    // has no stored value); applyDisplay runs again below once the old store toggles are read.
+    applyDisplay()
     const skew = await installedSkew($)
     if (skew) {
       markSkewToasted()
-      $.ui.toast('agt ⚑ ' + skewMessage(skew, Session.runningVersion))
+      if (Display.bandOn) $.ui.toast('agt ⚑ ' + skewMessage(skew, Session.runningVersion))
     }
     // The host's own version: too old for the mod's pane tools → one toast, and ensureTools registers none.
     setHostVersion(hostVersionOf(await Promise.resolve().then(() => $.session.version()).catch(() => null)))
     if (Session.hostVersion && hostTooOld(Session.hostVersion)) {
       markHostOld()
-      $.ui.toast('agt ⚑ ' + hostMessage(Session.hostVersion))
+      if (Display.bandOn) $.ui.toast('agt ⚑ ' + hostMessage(Session.hostVersion))
     }
     await probeTransport($)
     const worker = parseWorker(await $.env.get('AGENTILLE_WORKER'))

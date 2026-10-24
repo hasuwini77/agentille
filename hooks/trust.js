@@ -2,6 +2,9 @@
 // with the lead checkout. spawn.js decides which folders are asked (trustable); this module answers whether the
 // config they load, run or import is the lead checkout's, following the commands that run files without naming them
 // (package-manager scripts, npx, python -m, CLAUDE.md @imports). Reads only through $.fs (read, stat, list).
+// The names a command runs without naming them (script chains, python -m files) come from script-refs.js, which
+// the guard reads them with too.
+import { ELSEWHERE, NPM_SCRIPT_ALIASES, PLAIN_MODULE, moduleFiles, pythonModule, scriptChain } from './script-refs.js'
 
 // Absent in the worktree is fine for these (settings.local.json and CLAUDE.local.md are gitignored, so a fresh
 // worktree has none); present, they must be the lead checkout's byte for byte.
@@ -261,10 +264,7 @@ async function followCommands($, ctx, cmds, base, depth) {
   return true
 }
 
-const NPM_SCRIPT_ALIASES = { test: 'test', t: 'test', tst: 'test', start: 'start', stop: 'stop', restart: 'restart' }
 const INSTALLS = new Set(['install', 'i', 'ci', 'add', 'isntall', 'in'])
-// Flags that read another package.json: the mod cannot tell which, so the command refuses.
-const ELSEWHERE = new Set(['--prefix', '-C', '--dir', '--cwd', '--filter', '-F', '--workspace', '-w', '--workspaces', '-ws', '-r', '--recursive', '--workspace-root', '--global', '-g', '--location'])
 // Flags that take a value before the subcommand (`npm --loglevel silent run x`): the value is not the subcommand.
 const VALUE_FLAGS = new Set(['--loglevel', '--registry', '--userconfig', '--globalconfig', '--cache', '--scope', '--tag', '--otp', '--reporter', '--color', '--network-concurrency', '--mutex', '--cache-folder', '--modules-folder', '--config'])
 
@@ -347,7 +347,7 @@ async function followScript($, ctx, script, base, depth) {
   if (rel == null) return unresolved(ctx, 'run ' + script, 'its package folder is not known')
   const pkg = await bothJson($, ctx, rel)
   if (!pkg) return unresolved(ctx, 'run ' + script, rel + ' does not parse')
-  for (const k of ['pre' + script, script, 'post' + script]) {
+  for (const k of scriptChain(script)) {
     const x = pkg.a?.scripts?.[k]
     const y = pkg.b?.scripts?.[k]
     if (x !== y) return false
@@ -476,32 +476,15 @@ async function followPackage($, ctx, spec, base, depth) {
 // then pkg/mod.py, pkg/mod/__init__.py and pkg/mod/__main__.py. Absent on both sides is a module from outside the
 // checkout (the standard library, an installed package), the same for both.
 async function followPython($, ctx, args, base) {
-  let mod = null
-  for (let i = 0; i < args.length; i++) {
-    const a = args[i]
-    if (a === '-m') {
-      mod = args[i + 1] ?? null
-      break
-    }
-    if (/^-m\S/.test(a)) {
-      mod = a.slice(2)
-      break
-    }
-    if (a === '-c' || !a.startsWith('-')) return true // inline code or a script path, which commandPaths compared
-    if (a === '-X' || a === '-W') i++
-  }
-  if (mod == null) return true
+  const mod = pythonModule(args)
+  if (mod == null) return true // inline code or a script path, which commandPaths compared
   return followModule($, ctx, mod, base)
 }
 async function followModule($, ctx, mod, base) {
-  if (!/^[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*$/.test(mod)) return unresolved(ctx, 'python -m ' + mod, 'the module name is not plain')
+  if (!PLAIN_MODULE.test(mod)) return unresolved(ctx, 'python -m ' + mod, 'the module name is not plain')
   if (base == null) return unresolved(ctx, 'python -m ' + mod, 'its folder is not known')
-  const parts = mod.split('.')
-  const files = []
-  for (let k = 1; k < parts.length; k++) files.push(parts.slice(0, k).join('/') + '/__init__.py')
-  const p = parts.join('/')
-  files.push(p + '.py', p + '/__init__.py', p + '/__main__.py')
-  for (const f of files) if (!(await sameAt($, ctx, joinRel(base, f)))) return false
+  const { parents, own } = moduleFiles(mod)
+  for (const f of [...parents, ...own]) if (!(await sameAt($, ctx, joinRel(base, f)))) return false
   return true
 }
 

@@ -1030,6 +1030,96 @@ describe('pane tools: in the mod', () => {
   })
 })
 
+// The folder-trust prompt is accepted for a worktree of the lead's repo only when the lead made it: an agt/*, feat/*
+// or fix/* branch on the lead's lead-<pane>.worktrees list, or, with no list, one that brings no settings of its own.
+describe('pane tools: folder trust', () => {
+  const trust = ' Do you trust the files in this folder?\n\n /work/wt\n\n ❯ 1. Yes, proceed\n   2. No, exit'
+  const setup = (on: any, { branch = 'agt/k7f2ab-exec-1', files = {} as Record<string, string> } = {}) => {
+    const seen: string[][] = []
+    const vars: Record<string, string> = { HERDR_ENV: '1', HERDR_PANE_ID: 'w1:p1', HOME: '/h' }
+    on('env.get', async ($: any, e: any) => ({ value: vars[e.name] }))
+    on('session.cwd', async () => ({ value: '/work/repo' }))
+    on('session.start', async ($: any, e: any) => ({ cwd: e.cwd }))
+    on('command.register', async () => ({ value: undefined }))
+    on('tool.register', async ($: any, e: any) => ({ value: { tool: 'mcp__agentille__' + e.name } }))
+    on('fs.read', async ($: any, e: any) => (e.path in files ? { value: files[e.path] } : { deny: 'ENOENT' }))
+    on('fs.write', async () => ({ value: undefined }))
+    on('fs.exists', async () => ({ value: false }))
+    on('fs.stat', async ($: any, e: any) => (e.path.startsWith('/work/') ? { value: { kind: 'dir', size: 0, mtimeMs: 0, isLink: false } } : { deny: 'ENOENT' }))
+    on('store.get', async () => ({ value: undefined }))
+    on('store.set', async () => ({ value: undefined }))
+    on('ui.panes', async () => ({ value: [] }))
+    on('prompt.submit', async ($: any, e: any) => ({ text: e.text }))
+    const table: Record<string, any> = {
+      'herdr pane split': { stdout: JSON.stringify({ result: { pane: { pane_id: 'w1:p5' } } }) },
+      'herdr agent start': { exitCode: 1, stderr: 'agent_not_ready' },
+      'herdr agent read': { stdout: trust },
+      'herdr agent get': { stdout: JSON.stringify({ result: { agent: { agent_status: 'idle' } } }) },
+      'git -C /work/wt rev-parse --path-format=absolute --git-common-dir': { stdout: '/work/repo/.git\n' },
+      'git -C /work/repo rev-parse --path-format=absolute --git-common-dir': { stdout: '/work/repo/.git\n' },
+      'git -C /work/wt rev-parse --show-toplevel': { stdout: '/work/wt\n' },
+      'git -C /work/repo rev-parse --show-toplevel': { stdout: '/work/repo\n' },
+      'git -C /work/wt symbolic-ref --short HEAD': { stdout: branch + '\n' },
+    }
+    on('process.run', async ($: any, e: any) => {
+      seen.push(e.argv)
+      const key = Object.keys(table).find((k) => e.argv.join(' ').startsWith(k))
+      return { value: { exitCode: 0, stdout: '', stderr: '', ...(key === undefined ? {} : table[key]) } }
+    })
+    const clock = mock.clock(on, { now: 1_000_000 })
+    return { seen, clock }
+  }
+  const EXEC = { agent: 'executor', header: '[agt run=k7f2ab size=small mode=build]' }
+  // The keys go out 300 ms apart and the cleared screen is polled every 500 ms: the clock runs until the call settles.
+  const spawn = async ($: any, clock: any) => {
+    await $.session.start({ cwd: '/work/repo', surface: null, isInteractive: false })
+    await $.prompt.submit({ text: '/agt ship it', origin: { kind: 'composer' } } as never)
+    let out: any
+    const call = $.tool.call({ tool: 'mcp__agentille__spawn_pane', run: 'k7f2ab', role: 'exec-1', task: 'build the filter', cwd: '/work/wt', ...EXEC }).then((r: any) => (out = r))
+    for (let n = 0; n < 200 && out === undefined; n++) await clock.advance(250)
+    await call
+    return out
+  }
+  const accepted = (seen: string[][]) => seen.some((a) => a.slice(0, 3).join(' ') === 'herdr agent send-keys')
+  const LIST = '/h/.agentille/state/lead-w1-p1.worktrees'
+
+  test('an agt/* worktree on the lead\'s list is trusted', async ($, on) => {
+    const { seen, clock } = setup(on, { files: { [LIST]: '/work/wt\tagt/k7f2ab-exec-1\n' } })
+    expect((await spawn($, clock)).result).toContain('Opened agt-k7f2ab-exec-1')
+    expect(accepted(seen)).toBe(true)
+  })
+
+  test('a feat/* worktree the list does not name is refused', async ($, on) => {
+    const { seen, clock } = setup(on, { branch: 'feat/other', files: { [LIST]: '/work/elsewhere\nagt/k7f2ab-exec-2\n' } })
+    expect(JSON.stringify(await spawn($, clock))).toContain('needs a one-time trust')
+    expect(accepted(seen)).toBe(false)
+  })
+
+  test('a contributor branch of the same repo is refused, list or not', async ($, on) => {
+    const { seen, clock } = setup(on, { branch: 'contrib-change', files: { [LIST]: '/work/wt\n' } })
+    expect(JSON.stringify(await spawn($, clock))).toContain('needs a one-time trust')
+    expect(accepted(seen)).toBe(false)
+  })
+
+  test('no list: a fix/* worktree with no settings of its own is trusted', async ($, on) => {
+    const { seen, clock } = setup(on, { branch: 'fix/login', files: { '/work/repo/.claude/settings.json': '{}' } })
+    expect((await spawn($, clock)).result).toContain('Opened agt-k7f2ab-exec-1')
+    expect(accepted(seen)).toBe(true)
+  })
+
+  test('no list: settings that match the lead checkout\'s are trusted', async ($, on) => {
+    const same = setup(on, { files: { '/work/repo/.claude/settings.json': '{"a":1}', '/work/wt/.claude/settings.json': '{"a":1}' } })
+    expect((await spawn($, same.clock)).result).toContain('Opened agt-k7f2ab-exec-1')
+    expect(accepted(same.seen)).toBe(true)
+  })
+
+  test('no list: a worktree whose own settings.local.json adds a hook is refused', async ($, on) => {
+    const { seen, clock } = setup(on, { files: { '/work/wt/.claude/settings.local.json': '{"hooks":{"SessionStart":[]}}' } })
+    expect(JSON.stringify(await spawn($, clock))).toContain('needs a one-time trust')
+    expect(accepted(seen)).toBe(false)
+  })
+})
+
 describe('herdr reaper', () => {
   const FRESH = Number.MAX_SAFE_INTEGER
   const LEAD = { name: 'lead', pane_id: 'w1:p1', agent: 'claude', agent_status: 'working', state_change_seq: 1, tab_id: 'w1:t1', workspace_id: 'w1' }

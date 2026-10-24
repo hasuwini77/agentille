@@ -47,7 +47,7 @@ Only when the level table falls through. One inline Haiku call, never the planne
 | review | — | — | — | — | ✓ | if UI code | if auth/money/data |
 
 - The ui-prototyper runs **before** the executor; pass its Blueprint into the executor prompt as the design contract.
-- Skip the plan-reviewer on `thinkingDepth=quick` and for a ≤3-step fully sequential plan.
+- Skip the plan-reviewer on `thinkingDepth=quick` and for a ≤3-step fully sequential plan. Its `quick` cell in "Default routing" is the route a plan-reviewer still dispatched under `quick` gets.
 - Design-reviewer viewports: the ones the user names, else `profile.viewports`, else desktop + mobile.
 - Design-reviewer URL: before its dispatch, start the project's dev server in the slice's worktree (it lives until the gate; re-attach it if it is gone: `factory.md` → "Worktree lifecycle") on a free port (`PORT=<free> <dev command> > ~/.agentille/state/run-<id>/dev-<slice>.log 2>&1 &`), wait for a 2xx, pass `url: http://localhost:<port>`, and stop that server once its verdict is harvested. The reviewer never starts one itself.
 - Debug: attempts, the limit and the `mode=diagnose` planner after 2 failed attempts are `factory.md` → "Fix rounds".
@@ -62,7 +62,7 @@ Model · effort per role. Size, risk and mode come from the dispatch header; the
 | role | default | size=large | risk auth/money | thinkingDepth=quick |
 |---|---|---|---|---|
 | planner | opus · high | opus · xhigh | — | sonnet · medium |
-| plan-reviewer | sonnet · medium | opus · high | — | skipped |
+| plan-reviewer | sonnet · medium | opus · high | — | sonnet · medium |
 | ui-prototyper | opus · high | opus · high | — | sonnet · medium |
 | executor | sonnet · medium | sonnet · high | sonnet · high | sonnet · medium |
 | code-reviewer | sonnet · medium | opus · high | opus · high | sonnet · medium |

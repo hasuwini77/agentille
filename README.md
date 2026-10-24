@@ -172,7 +172,7 @@ Each role gets a model and an effort. The mod picks them from the dispatch heade
 | role | default | size=large | risk auth/money | thinkingDepth=quick |
 |---|---|---|---|---|
 | planner | opus · high | opus · xhigh | — | sonnet · medium |
-| plan-reviewer | sonnet · medium | opus · high | — | skipped |
+| plan-reviewer | sonnet · medium | opus · high | — | sonnet · medium |
 | ui-prototyper | opus · high | opus · high | — | sonnet · medium |
 | executor | sonnet · medium | sonnet · high | sonnet · high | sonnet · medium |
 | code-reviewer | sonnet · medium | opus · high | opus · high | sonnet · medium |
@@ -184,6 +184,7 @@ Each role gets a model and an effort. The mod picks them from the dispatch heade
 | adversary | sonnet · high | sonnet · high | opus · high | sonnet · medium |
 
 - **Small UI work stays cheap:** a one-screen UI feature or fix with `size=small` and `risk=none` gets one executor and the Sonnet code-reviewer. The ui-prototyper and design-reviewer join when the change spans more than one screen, at `size=large`, or when you ask for design work (`routing.md` → "Roster").
+- **The plan-reviewer under `quick`:** the lead skips it (see Settings); its `quick` cell is the route one still gets if it is dispatched, and what `/agt-info route plan-reviewer depth=quick` prints.
 - **Haiku never writes:** it only classifies a task the level table cannot place and runs read-only scouts.
 - **The executor never leaves Sonnet;** only its effort moves (and on fix rounds: attempt 2 → high, attempt 3 and later → max).
 - **Escalation:** a plan REVISE puts the next planner on opus · max. Fable (about twice the cost of Opus) runs only when you type `--fable`, or with `routing.autoFable: true` after two REVISEs, or for the diagnose planner after two failed fixes, within `maxFablePerRun` and `fableWeeklyCeiling`.

@@ -5,6 +5,7 @@ import { Session, ctx } from './session.js'
 import { Profile } from './profile.js'
 import { Spawn } from './spawn.js'
 import { makeStore } from './store.js'
+import { on } from './bus.js'
 import { writeRunFile } from './dispatch.js'
 import { short, elapsed } from './live.js'
 import { PROBE, splitName, paneKey, answerFile, herdrMetaArgv } from './panes.js'
@@ -24,6 +25,8 @@ let lastMeta = ''  // worker: the last Herdr sidebar title it reported
 export function noteWire(entry) {
   logWire(my.wireLog, entry)
 }
+// dispatch.js notes the task it routes through the bus: this file imports dispatch.js for writeRunFile.
+on('wire.note', noteWire)
 
 // Worker: what it publishes about itself, one transition per event of its main loop.
 export function pubRoute(model, effort) {

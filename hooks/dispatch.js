@@ -10,7 +10,7 @@ import { newAgent, short, ledger, ledgerText, addUsage, finish, endRoute } from 
 import { SAFE_RUN, splitName } from './panes.js'
 import { formationOf, roleOf, parseHeader, proveHeader, demoteHeaderText, ladderFixes, decide, executorsWorking, executorCapFlag, estimateRunUsd, leadUsd, maxRunUsdOf, usd } from './routing.js'
 import { addFlag } from './display.js'
-import { noteWire } from './worker.js'
+import { emit } from './bus.js'
 import { Proofs, agtTurnFromDispatch } from './proofs.js'
 import { adopt, applyStatus, quietWorkflows } from './tree.js'
 
@@ -393,7 +393,7 @@ export async function dispatchAgent($, e, next) {
   // At most 3 executors at once: counted before this one joins, subagents and the run's executor panes alike.
   const cap = role === 'executor' && runId !== 'adhoc' && res.agentId ? executorCapFlag(runId, executorsWorking(my.live, my.paneRoutes, runId) + 1) : null
   if (res.agentId) my.live.set(res.agentId, { ...newAgent({ id: res.agentId, role, routed: true, model: res.model, effort: d.effort, reason: d.reason, run: runId, now: Date.now(), parentId: e.parentAgentId ?? null }), slice })
-  if (runId !== 'adhoc') noteWire({ from: 'lead', to: party(role, slice), kind: 'task', summary: taskLine(e.prompt) || role, at: Date.now(), via: 'sub' })
+  if (runId !== 'adhoc') emit('wire.note', { from: 'lead', to: party(role, slice), kind: 'task', summary: taskLine(e.prompt) || role, at: Date.now(), via: 'sub' })
   const rec = { at: new Date().toISOString(), role, model: res.model, effort: d.effort, reason: d.reason, asked: e.model ?? null, agentId: res.agentId ?? null, ...(cap && { cap }), ...(d.capped && { capped: true }), ...(d.pastCeiling && { pastCeiling: true }) }
   await logDecision($, runId, rec)
   await markRun($, runId)

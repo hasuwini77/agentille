@@ -1,5 +1,5 @@
 import { describe, expect, mock, test } from 'claude-code/testing'
-import { AGENT_SILENT_MS, AGT_GRACE_TYPED, AGT_INFLIGHT_MAX_MS, PANE_REST_MS, PANE_EST_MAX_MS, PANE_TOKENS_PER_MIN, CEILING_ROLES, ROLES, paneUsd, DEFAULTS, MAX_EXECUTORS_AT_ONCE, PRICES, asksSessions, decide, estimateRunUsd, executorCapFlag, executorsWorking, ordinal, demoteHeaderText, formationOf, ladderFixes, mentionsCodex, mentionsFable, parseHeader, proveHeader, roleOf, runInFlight, typedFable, verdictOf, leadUsd, runStop } from '../../hooks/routing.js'
+import { AGENT_SILENT_MS, AGT_GRACE_TYPED, AGT_INFLIGHT_MAX_MS, PANE_REST_MS, PANE_EST_MAX_MS, PANE_TOKENS_PER_MIN, CEILING_ROLES, ROLES, paneUsd, DEFAULTS, MAX_EXECUTORS_AT_ONCE, PRICES, asksSessions, decide, estimateRunUsd, executorCapDeny, executorCapFlag, executorsWorking, ordinal, demoteHeaderText, formationOf, ladderFixes, mentionsCodex, mentionsFable, parseHeader, proveHeader, roleOf, runInFlight, typedFable, verdictOf, leadUsd, runStop } from '../../hooks/routing.js'
 import { sliceOf } from '../../hooks/links.js'
 import { addLeadUsage } from '../../hooks/dispatch.js'
 import { Runs } from '../../hooks/state.js'
@@ -376,10 +376,13 @@ describe('executor cap: at most 3 at once', () => {
     expect(executorCapFlag('r1', 3)).toBe(null)
     expect(executorCapFlag('r1', 4)).toBe('run r1: 4th executor at once; the roster says 3')
     expect(executorCapFlag('r1', 5)).toContain('5th executor')
+    expect(executorCapDeny('r1', 3)).toBe(null)
+    expect(executorCapDeny('r1', 4)).toBe('agt ✗ run r1: a 4th executor at once is refused; the roster runs at most 3. Dispatch it again once one of them is done, and batch the rest in waves.')
     expect([1, 2, 3, 4, 11, 12, 13, 21, 22, 23].map(ordinal)).toEqual(['1st', '2nd', '3rd', '4th', '11th', '12th', '13th', '21st', '22nd', '23rd'])
   })
 
-  const boot = (on: any) => {
+  // `deny`: a lower hook that refuses the dispatches it matches.
+  const boot = (on: any, deny: (e: any) => string | null = () => null) => {
     const toasts: string[] = []
     const writes: Record<string, string> = {}
     let n = 0
@@ -393,7 +396,7 @@ describe('executor cap: at most 3 at once', () => {
     on('ui.render', async () => ({ type: 'engine', ref: 0 }) as never)
     on('ui.toast', async ($: any, e: any) => { toasts.push(e.text); return { value: undefined } })
     on('turn.complete', async ($: any, e: any) => ({ text: e.answer }))
-    on('agent.spawn', async ($: any, e: any) => ({ model: e.model ?? 'sonnet', agentId: 'e' + n++ }))
+    on('agent.spawn', async ($: any, e: any) => deny(e) ? { deny: deny(e) } : { model: e.model ?? 'sonnet', agentId: 'e' + n++ })
     mock.clock(on, { now: Date.now() })
     return { toasts, writes }
   }
@@ -401,19 +404,54 @@ describe('executor cap: at most 3 at once', () => {
   const band = ($: any) => $.ui.mount({ plugin: 'agentille', surface: 'terminal', component: 'AbovePrompt', props: { hasSurvey: false, isWorking: true, maxRows: 10, bodyColumns: 120 } as never })
   const capToasts = (t: string[]) => t.filter((x) => x.includes('executor at once'))
 
-  test('a 4th executor of one run is dispatched as asked, with a toast, a band flag and a cap line in the routing log', async ($, on) => {
+  const CAP_DENY = 'agt ✗ run cap1: a 4th executor at once is refused; the roster runs at most 3. Dispatch it again once one of them is done, and batch the rest in waves.'
+
+  test('a 4th executor of one run is refused in one line, with a toast and a band flag, and never reaches the engine or the log', async ($, on) => {
     const { toasts, writes } = boot(on)
     await $.session.start({ cwd: '/w', surface: null, isInteractive: false })
     for (const s of ['a', 'b', 'c']) expect((await exec($, 'cap1', s)).model).toBe('sonnet')
     expect(capToasts(toasts)).toEqual([])
-    const res = await exec($, 'cap1', 'd')
-    expect(res.agentId).toBe('e3') // never refused
+    const res = await exec($, 'cap1', 'd') as any
+    expect(res.deny).toBe(CAP_DENY)
+    expect(res.agentId).toBe(undefined)
     expect(capToasts(toasts)).toEqual(['agt ⚑ run cap1: 4th executor at once; the roster says 3'])
     const log = writes['/h/.agentille/state/run-cap1/routing.jsonl'].trim().split('\n').map((l) => JSON.parse(l))
-    expect(log.map((r) => r.cap ?? null)).toEqual([null, null, null, 'run cap1: 4th executor at once; the roster says 3'])
+    expect(log).toHaveLength(3)
+    expect(log.map((r) => r.cap ?? null)).toEqual([null, null, null])
     const ui = await band($)
     expect(await ui.find({ type: 'Text', text: /⚑ run cap1: 4th executor at once/ })).toBeDefined()
     await ui.unmount()
+  })
+
+  test('four executors sent at once in parallel: exactly one is refused', async ($, on) => {
+    const { toasts } = boot(on)
+    await $.session.start({ cwd: '/w', surface: null, isInteractive: false })
+    const res = await Promise.all(['a', 'b', 'c', 'd'].map((s) => exec($, 'cap1', s))) as any[]
+    expect(res.filter((r) => r.deny)).toEqual([{ deny: CAP_DENY }])
+    expect(res.filter((r) => r.agentId)).toHaveLength(3)
+    expect(capToasts(toasts)).toHaveLength(1)
+  })
+
+  test('a refused fix round counts no fix attempt; a reviewer is never capped', async ($, on) => {
+    const { writes } = boot(on)
+    await $.session.start({ cwd: '/w', surface: null, isInteractive: false })
+    for (const s of ['a', 'b', 'c']) await exec($, 'cap4', s)
+    const fix = () => $.agent.spawn({ prompt: '[agt run=cap4 size=small mode=fix slice=a]\nfix', subagentType: 'agentille:agentille-executor', model: 'sonnet' }) as any
+    for (let i = 0; i < 3; i++) expect((await fix()).deny).toContain('4th executor at once is refused')
+    expect(((await $.agent.spawn({ prompt: '[agt run=cap4 size=small mode=review slice=a]\nreview', subagentType: 'agentille:agentille-code-reviewer' })) as any).deny).toBe(undefined)
+    await $.turn.complete({ agentId: 'e0', answer: 'done', durationMs: 10, isAborted: false, turnId: 'te0', reason: 'answer' } as never)
+    expect((await fix()).deny).toBe(undefined) // a place freed: the first fix attempt, at the table's effort
+    const log = writes['/h/.agentille/state/run-cap4/routing.jsonl'].trim().split('\n').map((l) => JSON.parse(l))
+    expect(log.at(-1)).toMatchObject({ role: 'executor', reason: 'table' })
+  })
+
+  test('a dispatch a lower hook denies frees its place', async ($, on) => {
+    const { toasts } = boot(on, (e) => e.prompt.includes('slice=z') ? 'not now' : null)
+    await $.session.start({ cwd: '/w', surface: null, isInteractive: false })
+    for (const s of ['a', 'b']) await exec($, 'cap5', s)
+    expect(((await exec($, 'cap5', 'z')) as any).deny).toBe('not now')
+    expect(((await exec($, 'cap5', 'c')) as any).deny).toBe(undefined) // the denied one holds no place
+    expect(capToasts(toasts)).toEqual([])
   })
 
   test('a finished executor frees its place, and another run\'s executors never count', async ($, on) => {

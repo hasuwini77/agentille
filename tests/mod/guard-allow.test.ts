@@ -88,8 +88,10 @@ describe('guard allow: merge and rebase settle flags on the base branch', () => 
 
 // These commands are not exemptions: the guard never judges them as a history rewrite at all, so they are allowed by
 // omission, on the base branch too. Pinned so a change that starts judging them is a deliberate one.
+// `git commit --amend` on the base is left out on purpose: it rewrites the base and is unjudged today, which is a
+// gap, not a policy to pin. The amend this pins is the slice's own unpushed commit, below.
 describe('guard allow: commands the guard does not judge as a base rewrite', () => {
-  test('cherry-pick, revert and am settle flags, stash and commit --amend are allowed on the base below auto', async () => {
+  test('cherry-pick, revert and am settle flags and stash are allowed on the base below auto', async () => {
     for (const mode of MODES) {
       for (const line of [
         'git cherry-pick --abort',
@@ -99,7 +101,6 @@ describe('guard allow: commands the guard does not judge as a base rewrite', () 
         'git stash',
         'git stash push -m wip',
         'git stash pop',
-        'git commit --amend --no-edit',
       ]) {
         expect([mode, line, integrationIn(line, { ...onBase, mode })]).toEqual([mode, line, null])
         expect([line, localSteps(line)]).toEqual([line, []])

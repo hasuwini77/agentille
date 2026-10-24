@@ -316,6 +316,15 @@ try {
     check('control: npm run hello is not refused', !hello?.deny, JSON.stringify(hello))
   }
   {
+    // Past the lexer's depth caps the line is refused as unreadable, and the push after the deep part never runs.
+    const w = world()
+    for (const line of ['echo $($($($($(x))))); git push -q origin HEAD:main --force', 'eval eval eval eval git push -q origin HEAD:main']) {
+      const r = await run(line)
+      check(line + ': denied as nested too deep', r?.deny?.includes('nests deeper than the guard reads'), JSON.stringify(r))
+    }
+    check('... origin/main unchanged', refOf('origin.git', 'main') === w.main)
+  }
+  {
     // Controls below auto: the run's own branch and ordinary writes still pass.
     world()
     const ok = await run('git push -q -u origin agt/x')

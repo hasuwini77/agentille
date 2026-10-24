@@ -705,18 +705,24 @@ async function aliasLine($, c) {
   return { line: ['git', ...c.loc.map(shq), value, args].filter(Boolean).join(' ') }
 }
 
-// A line → the deny text, or null. A line the reader cannot parse falls back to the plain words.
+// A line → the deny text, or null. A line the reader cannot parse is refused below auto, whatever its words: only
+// a blank or comment-only line, which runs nothing, gets through. A line that was read and named nothing to judge
+// (`echo hi`, `npm test`) has no candidates and runs; a part the lexer did not read (past its depth caps) is a
+// candidate of its own, so it never leaves the list empty.
 export async function guardLine($, line, cwd) {
   let cands
   try {
     cands = commandSteps(line, cwd)
   } catch {
-    cands = /\b(pr\s+merge|release\s+create|git\s+tag\s+\S|push\b.*(\b(main|master)\b|--tags|--force|\s-f\b))/.test(line) ? [{ kind: 'step', what: 'unreadable', dir: cwd, slug: null }] : []
+    cands = runsSomething(line) ? [{ kind: 'hidden', what: 'the guard could not parse this line', dir: cwd, slug: null }] : []
   }
   if (!cands.length) return null
   const profile = await readProfile($)
   return judgeCands($, cands, { profile, cwd, cache: new Map(), envRepo: undefined }, 0)
 }
+
+// Whether a line holds anything but blanks and comments.
+const runsSomething = (line) => /\S/.test(String(line ?? '').replace(/^\s*#.*$/gm, ''))
 
 // The candidates of one line (or of an alias's expansion), judged in order: the first refusal, or null.
 async function judgeCands($, cands, ctx, depth) {

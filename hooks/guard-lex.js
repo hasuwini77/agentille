@@ -136,6 +136,46 @@ function linkSources(words) {
 
 
 // ── the command line ─────────────────────────────────────────────────────────
+// How deep `$( )`, backticks and `<( )` are read inside one another, and how deep a line run by `eval`, `bash -c`,
+// a wrapper or `find -exec` is read inside another. Past either cap nothing is dropped: the part not read becomes
+// an unreadable command, which the policy refuses below auto (docs/guards.md, "Known limits").
+export const LEX_DEPTH = 4
+export const LINE_DEPTH = 3
+const SUB_TOO_DEEP = 'a $( ) or backtick substitution nests deeper than the guard reads'
+const LINE_TOO_DEEP = 'a line run by eval, sh -c or a wrapper nests deeper than the guard reads'
+const EXEC_TOO_DEEP = 'a find -exec command nests deeper than the guard reads'
+
+// A command the lexer did not read: commands() passes it on and commandSteps turns it into a refusal.
+const unreadable = (why) => ({ words: [], stdin: null, redirects: [], piped: false, unreadable: why })
+
+// The index of the `)` that closes a `$(`/`<(` whose text starts at j, read without lexing it: quotes, backslashes,
+// backticks and nested parens are skipped. s.length when nothing closes it (the shell refuses such a line).
+function closeOf(s, j) {
+  let d = 0
+  for (let i = j; i < s.length; i++) {
+    const c = s[i]
+    if (c === '\\') i++
+    else if (c === "'") {
+      const k = s.indexOf("'", i + 1)
+      i = k < 0 ? s.length : k
+    } else if (c === '`') {
+      let k = i + 1
+      while (k < s.length && s[k] !== '`') k += s[k] === '\\' ? 2 : 1
+      i = k
+    } else if (c === '"') {
+      let k = i + 1
+      while (k < s.length && s[k] !== '"') {
+        if (s[k] === '\\') k += 2
+        else if (s[k] === '$' && s[k + 1] === '(') k = closeOf(s, k + 2) + 1
+        else k++
+      }
+      i = k
+    } else if (c === '(') d++
+    else if (c === ')' && d-- === 0) return i
+  }
+  return s.length
+}
+
 // A shell line → its simple commands in the order they run: { words, stdin }. && || ; | & and newlines
 // split; `$( )`, backticks and `<( )` are commands of their own and leave a `$(…)` word behind; a heredoc or
 // here-string body becomes the command's stdin (so a PR body is text, never commands); redirections drop.
@@ -161,7 +201,9 @@ function lex(s, at = 0, closer = null, depth = 0) {
     cmd = { words: [], stdin: null, redirects: [], piped: false }
   }
   const nested = (j, close) => {
-    const r = depth < 4 ? lex(s, j, close, depth + 1) : { cmds: [], end: s.length }
+    // Past LEX_DEPTH the inner text is not read: it becomes an unreadable command (the policy refuses it below
+    // auto) and lexing resumes after its closer, so a command after it on the line is still read.
+    const r = depth < LEX_DEPTH ? lex(s, j, close, depth + 1) : { cmds: [unreadable(SUB_TOO_DEEP)], end: closeOf(s, j) }
     cmds.push(...r.cmds)
     tok = (tok ?? '') + '$(' + r.cmds.map((c) => c.words.join(' ')).join('; ') + ')'
     return r.end
@@ -170,7 +212,7 @@ function lex(s, at = 0, closer = null, depth = 0) {
     let k = j + 1
     while (k < s.length && s[k] !== '`') k += s[k] === '\\' ? 2 : 1
     const inner = s.slice(j + 1, k).replace(/\\`/g, '`')
-    const r = depth < 4 ? lex(inner, 0, null, depth + 1) : { cmds: [] }
+    const r = depth < LEX_DEPTH ? lex(inner, 0, null, depth + 1) : { cmds: [unreadable(SUB_TOO_DEEP)] }
     cmds.push(...r.cmds)
     tok = (tok ?? '') + '$(' + r.cmds.map((c) => c.words.join(' ')).join('; ') + ')'
     return Math.min(k, s.length)
@@ -391,6 +433,10 @@ function innerLine(words, stdin) {
 export function commands(line, depth = 0, vars = new Map()) {
   const out = []
   for (const c of lex(String(line ?? '')).cmds) {
+    if (c.unreadable) {
+      out.push(unreadCmd(c.unreadable))
+      continue
+    }
     const words = c.words.map((w) => expand(w, vars))
     const lead = words[0] === 'export' || words[0] === 'local' || words[0] === 'declare' || words[0] === 'readonly' ? 1 : 0
     if (words.length > lead && words.slice(lead).every((w) => ASSIGN.test(w) || (lead && /^-/.test(w)))) {
@@ -406,10 +452,12 @@ export function commands(line, depth = 0, vars = new Map()) {
   function take(words, stdin, redirects = [], piped = false) {
     const u = unwrap(words)
     const env = new Map([...vars, ...u.env])
-    const inner = depth < 3 ? (u.inner ?? innerLine(u.words, stdin)) : null
-    if (inner !== null && inner !== undefined) out.push(...commands(inner, depth + 1, base(u.words[0]) === 'eval' ? vars : env))
+    const inner = u.inner ?? innerLine(u.words, stdin)
+    if (inner !== null && inner !== undefined && depth >= LINE_DEPTH) out.push(unreadCmd(LINE_TOO_DEEP, u.dir, env))
+    else if (inner !== null && inner !== undefined) out.push(...commands(inner, depth + 1, base(u.words[0]) === 'eval' ? vars : env))
     else if (u.words.length) out.push({ words: u.words, dir: u.dir, env, stdin, redirects, piped, viaXargs: u.viaXargs })
-    if (base(u.words[0]) === 'find' && depth < 3) {
+    if (base(u.words[0]) === 'find' && depth >= LINE_DEPTH && u.words.some((x) => ['-exec', '-execdir', '-ok', '-okdir'].includes(x))) out.push(unreadCmd(EXEC_TOO_DEEP, u.dir, env))
+    else if (base(u.words[0]) === 'find') {
       for (let k = 1; k < u.words.length; k++) {
         if (!['-exec', '-execdir', '-ok', '-okdir'].includes(u.words[k])) continue
         const end = u.words.findIndex((x, n) => n > k && (x === ';' || x === '+'))
@@ -421,6 +469,10 @@ export function commands(line, depth = 0, vars = new Map()) {
   }
   return out
 }
+
+
+// A command commands() could not read (a cap above): no words, and why. commandSteps refuses it.
+const unreadCmd = (why, dir = null, env = new Map()) => ({ words: [], dir, env, stdin: null, redirects: [], piped: false, viaXargs: false, unreadable: why })
 
 
 export function splitCommands(line) {
@@ -821,6 +873,10 @@ export function commandSteps(line, cwd = null, depth = 0) {
   let curBranch = null // the branch a checkout/switch on the line left behind: what a later merge/reset writes
   const aliases = new Map() // shell aliases defined earlier on the line (alias g=git): the program word is expanded
   for (const c of commands(line)) {
+    if (c.unreadable) {
+      out.push({ kind: 'hidden', what: c.unreadable, dir: here, slug: null })
+      continue
+    }
     let w = c.words
     let p = base(w[0])
     if (p === 'alias') {

@@ -778,6 +778,35 @@ describe('guard: it fails closed', () => {
     expect(ran).toEqual(['echo done'])
   })
 
+  test('past the depth caps a line is refused as unreadable, and a command after the deep part is still read', async ($, on) => {
+    const { ran } = setup(on, { profile: { integration: 'pr' } })
+    await boot($)
+    await typed($)
+    const deep = 'echo $($($($($(x)))))'
+    for (const line of ['eval eval eval eval gh pr merge 4', deep + '; gh pr merge 4', deep + '; git push origin HEAD:main --force', 'eval eval eval eval git push origin HEAD:main --force']) {
+      expect([line, (await bash($, line)).deny]).toEqual([line, expect.stringContaining('nests deeper than the guard reads')])
+    }
+    // Nothing to judge but the deep part: still refused, never let through unread.
+    expect((await bash($, deep + '; echo hi')).deny).toContain('substitution nests deeper than the guard reads')
+    expect((await bash($, 'echo $($($($(x))))')).result).toBe('ok')
+    // Within the caps the normal path still judges the line.
+    expect((await bash($, 'echo $($(x)); gh pr merge 4')).deny).toBe(DENY_INTEGRATION)
+    expect((await bash($, 'eval eval eval gh pr merge 4')).deny).toBe(DENY_INTEGRATION)
+    // The lexer resumes after the deep part's closer: what follows it is read as its own command.
+    expect(splitCommands(deep + '; gh pr merge 4').at(-1)).toEqual(['gh', 'pr', 'merge', '4'])
+    expect((await bash($, '')).result).toBe('ok')
+    expect((await bash($, '# a note')).result).toBe('ok')
+    expect(ran).toEqual(['echo $($($($(x))))', '', '# a note'])
+  })
+
+  test('under auto the depth caps refuse nothing', async ($, on) => {
+    const { ran } = setup(on, { profile: { projects: [{ id: 'repo', integration: 'auto' }] } })
+    await boot($)
+    await typed($)
+    expect((await bash($, 'eval eval eval eval gh pr merge 4')).result).toBe('ok')
+    expect(ran).toEqual(['eval eval eval eval gh pr merge 4'])
+  })
+
   test('below auto no branch is deleted on the remote, an own-prefix one included', async ($, on) => {
     setup(on)
     await boot($)

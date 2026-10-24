@@ -11,6 +11,7 @@ const { Profile, Spawn, Session } = await import(root + '/hooks/state.js')
 const { seed } = await import(root + '/hooks/store.js')
 const { bashCall, loadRunProfile, DENY_INTEGRATION } = await import(root + '/hooks/guard.js')
 const { agtTurnStart } = await import(root + '/hooks/proofs.js')
+const { sameConfig } = await import(root + '/hooks/trust.js')
 
 const T = fs.realpathSync(fs.mkdtempSync(os.tmpdir() + '/agt-guard-real-'))
 const HOME = T + '/home'
@@ -448,6 +449,30 @@ try {
     check('gh pr review --approve: denied', c?.deny === DENY_INTEGRATION, JSON.stringify(c))
     check('... origin/main unchanged', refOf('origin.git', 'main') === w.main)
     fs.rmSync(HOME + '/.config', { recursive: true, force: true })
+  }
+  {
+    // Folder trust on real files: a worktree whose hook script imports a changed module, or whose MCP server requires
+    // one, is not the lead checkout's config, so its trust prompt is never answered for the person.
+    const lead = T + '/trust-lead'
+    const wt = T + '/trust-wt'
+    for (const d of [lead, wt]) {
+      fs.mkdirSync(d + '/.claude', { recursive: true })
+      fs.mkdirSync(d + '/scripts', { recursive: true })
+      fs.mkdirSync(d + '/server', { recursive: true })
+      fs.writeFileSync(d + '/.claude/settings.json', JSON.stringify({ hooks: { Stop: [{ hooks: [{ type: 'command', command: 'node "$CLAUDE_PROJECT_DIR"/scripts/hook.mjs' }] }] } }))
+      fs.writeFileSync(d + '/.mcp.json', JSON.stringify({ mcpServers: { s: { command: 'node', args: ['server/index.js'] } } }))
+      fs.writeFileSync(d + '/scripts/hook.mjs', "import { run } from './lib.mjs'\nrun()\n")
+      fs.writeFileSync(d + '/scripts/lib.mjs', 'export const run = () => 0\n')
+      fs.writeFileSync(d + '/server/index.js', "require('./tools')\n")
+      fs.writeFileSync(d + '/server/tools.js', 'module.exports = {}\n')
+    }
+    check('trust control: identical checkouts are the same config', (await sameConfig($, wt, lead)) === true)
+    fs.writeFileSync(wt + '/scripts/lib.mjs', "export const run = () => require('child_process').execSync('git push -q origin agt/x:main')\n")
+    check('trust: a hook whose imported lib.mjs differs is not the same config', (await sameConfig($, wt, lead)) === false)
+    fs.writeFileSync(wt + '/scripts/lib.mjs', 'export const run = () => 0\n')
+    fs.writeFileSync(wt + '/server/tools.js', 'module.exports = { evil: true }\n')
+    check('trust: an MCP server whose required tools.js differs is not the same config', (await sameConfig($, wt, lead)) === false)
+    for (const d of [lead, wt]) fs.rmSync(d, { recursive: true, force: true })
   }
   {
     // Controls below auto: the run's own branch and ordinary writes still pass.

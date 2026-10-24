@@ -59,12 +59,41 @@ describe('clean: worktrees', () => {
     const t = parseWorktrees(porcelain)
     expect(t.map((x) => x.branch)).toEqual(['main', 'agt/a', 'agt/b', 'agt/c', 'feat/x', 'agt/g'])
     expect(t[5].prunable).toBe(true)
+    expect(t[1].head).toBe('2')
+  })
+
+  test('with no ownership nothing goes: every agt tree is kept as not opened by this session', async () => {
+    const trees = parseWorktrees(porcelain)
+    const plan = worktreePlan(trees, new Set(['agt/a', 'agt/z']), new Set(), ['agt/a', 'agt/z'])
+    expect(plan.remove).toEqual([])
+    expect(plan.deleteBranches).toEqual([])
+    expect(plan.keep.map((k) => k.why)).toEqual(['not opened by this session', 'not opened by this session', 'not opened by this session'])
+  })
+
+  test('only owned trees and branches go; another session\'s merged tree stays and holds its branch', async () => {
+    const trees = parseWorktrees(porcelain)
+    const merged = new Set(['agt/a', 'agt/b', 'agt/z', 'agt/w'])
+    const owned = (t: any) => t.path === '/r/app-a' || t.branch === 'agt/z'
+    const plan = worktreePlan(trees, merged, new Set(), ['agt/a', 'agt/b', 'agt/z', 'agt/w'], { owned })
+    expect(plan.remove.map((t) => t.path)).toEqual(['/r/app-a'])
+    expect(plan.keep).toContainEqual({ what: 'agt/b', why: 'not opened by this session' })
+    // agt/w is merged and loose, but nobody here opened it
+    expect(plan.deleteBranches).toEqual(['agt/z'])
+  })
+
+  test('an owned merged tree with no commits of its own or made minutes ago stays, and so does its branch', async () => {
+    const trees = parseWorktrees(porcelain)
+    const merged = new Set(['agt/a', 'agt/b', 'agt/c'])
+    const plan = worktreePlan(trees, merged, new Set(), ['agt/a', 'agt/b', 'agt/c'], { owned: () => true, empty: new Set(['/r/app-a']), fresh: new Set(['/r/app-a', '/r/app-b']) })
+    expect(plan.remove.map((t) => t.path)).toEqual(['/r/app-c'])
+    expect(plan.keep).toEqual([{ what: 'agt/a', why: 'no commits of its own' }, { what: 'agt/b', why: 'opened under 10 min ago' }])
+    expect(plan.deleteBranches).toEqual(['agt/c'])
   })
 
   test('removes merged clean agt worktrees only, keeps unmerged and dirty, deletes merged loose branches', async () => {
     const trees = parseWorktrees(porcelain)
     const merged = new Set(['agt/a', 'agt/b', 'agt/z', 'agt/g'])
-    const plan = worktreePlan(trees, merged, new Set(['/r/app-b']), ['agt/a', 'agt/b', 'agt/c', 'agt/z', 'agt/g', 'agt/y'])
+    const plan = worktreePlan(trees, merged, new Set(['/r/app-b']), ['agt/a', 'agt/b', 'agt/c', 'agt/z', 'agt/g', 'agt/y'], { owned: () => true })
     expect(plan.remove.map((t) => t.path)).toEqual(['/r/app-a'])
     expect(plan.keep).toEqual([{ what: 'agt/b', why: 'uncommitted changes' }, { what: 'agt/c', why: 'not merged' }])
     expect(plan.deleteBranches).toEqual(['agt/a', 'agt/z'])
@@ -73,7 +102,7 @@ describe('clean: worktrees', () => {
 
   test('the main checkout is never touched', async () => {
     const trees = parseWorktrees('worktree /r/app\nbranch refs/heads/agt/main-ish\n')
-    const plan = worktreePlan(trees, new Set(['agt/main-ish']), new Set(), ['agt/main-ish'])
+    const plan = worktreePlan(trees, new Set(['agt/main-ish']), new Set(), ['agt/main-ish'], { owned: () => true })
     expect(plan.remove).toEqual([])
     expect(plan.deleteBranches).toEqual([])
   })

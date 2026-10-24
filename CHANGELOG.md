@@ -75,6 +75,37 @@ next minor, `docs/releasing.md`).
 
 ### Fixed
 
+- **The guard reads the indirection it used to pass.** Below `auto`, a
+  package script's `pre`/`post` scripts and the `npm run`, `sh`, `node`
+  and `python` steps inside it are read in turn, five hops deep;
+  `python -m pkg.mod` is resolved to a file in the command's folder and
+  `PYTHONPATH` (found nowhere: refused, where it used to pass); a `node`
+  or `bun` file's relative imports are read one level deep; any word after
+  `git` that is not one of git's commands is looked up with
+  `git config --get alias.<word>` in the repo the command targets, so a
+  `pom = push origin HEAD:main` alias is judged as the push it runs;
+  `push.default`, `core.fsmonitor` and `core.sshCommand` join the
+  protected config keys (`-c`, `--config-env`, `GIT_CONFIG_KEY_n` and
+  `git config` alike); write targets are matched case-insensitively and
+  after following links, so `.git/CONFIG` and a symlink made on an earlier
+  line land where they land; a submodule's config, hooks and refs under
+  `.git/modules/` are protected; writes to branch protection, rulesets,
+  `default_branch`, `gh workflow run|enable|disable` and
+  `gh repo edit --default-branch` are refused; the line
+  `git submodule foreach` runs is judged. What the guard cannot read, it
+  refuses. `docs/guards.md` lists exactly what is read, what is refused
+  and what is left out. `tests/hooks/test-guard-real.sh` grows from 36 to
+  84 checks on a real repo and bare origin.
+- **A Write or Edit the guard cannot judge is refused inside a run.** The
+  Write/Edit path used to let a write through when the judgement threw.
+- **The lead stays guarded until the card when its run names no id.** A
+  solo or inline run used to drop the guard after three typed replies.
+- **Imports run one way in the guard.** `guard.js` → `guard-policy.js` →
+  `guard-lex.js` → `guard-steps.js` (the gh and curl step readers), never
+  back; `script-refs.js` is a leaf shared with `trust.js` for the scripts
+  `run x` runs, the files `python -m` runs and a JavaScript file's
+  relative imports.
+
 - **tmux listings parse in any locale.** Every tmux call the mod makes
   runs with `LC_ALL=C.UTF-8` (`hooks/tmux-env.js`): without a UTF-8
   locale tmux printed `_` for the tab that separates `list-panes -F`

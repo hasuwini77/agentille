@@ -364,8 +364,9 @@ else
     else
       fail "hooks/register.js failed to import:"; printf '%s\n' "$imp" | head -8 | sed 's/^/    /'
     fi
-    # Each owner module makes its store at load time and the modules import one another in a cycle, so a module
-    # that reads another's store at top level breaks only when it happens to load first. Import each one alone.
+    # Each owner module makes its store at load time. state.js is out of every cycle (checked under "Mod stores"),
+    # but owners still import one another (dispatch.js and worker.js, for one), so a module that read another's
+    # store at top level would break only when it happened to load first. Import each one alone.
     mod_bad=0
     for m in hooks/*.js; do
       imp=$(node -e "import(process.argv[1]).then(()=>{},e=>{console.error(e&&e.message||e);process.exit(1)})" "./$m" 2>&1) || { fail "$m failed to import on its own: $(printf '%s' "$imp" | head -1)"; mod_bad=1; }
@@ -380,6 +381,45 @@ hdr "Mod stores"
 seeded=$(grep -lE '\bseed\(' hooks/*.js 2>/dev/null | grep -v '^hooks/store\.js$')
 if [ -n "$seeded" ]; then fail "store.js seed() is for tests only; called in: $(printf '%s' "$seeded" | tr '\n' ' ')"
 else pass "no hooks module writes a store through store.js seed()"; fi
+
+# state.js is an index only the reading modules import. Nothing it imports may reach it again, directly or through
+# another hooks module: an owner imports session.js and the owners it reads from, so state.js stays out of every cycle.
+if ! command -v python3 >/dev/null 2>&1; then
+  skip_or_fail "stores: python3 not found, state.js cycle check skipped"
+else
+  cyc_out=$(python3 - <<'PY'
+import os, re
+d = 'hooks'
+# import/export … from './x.js' (one line or several), import './x.js', and import('./x.js').
+spec = re.compile(r"^\s*(?:import|export)\b[^;'\"]*?\bfrom\s*['\"]\./([^'\"]+)['\"]|^\s*import\s*['\"]\./([^'\"]+)['\"]|\bimport\s*\(\s*['\"]\./([^'\"]+)['\"]", re.M)
+def deps(f):
+    try: t = open(os.path.join(d, f)).read()
+    except OSError: return []
+    t = re.sub(r'^\s*//.*$', '', t, flags=re.M)
+    return [next(x for x in m if x) for m in spec.findall(t)]
+g = {f: deps(f) for f in os.listdir(d) if f.endswith('.js')}
+bad = []
+for top in g.get('state.js', []):
+    path = {top: [top]}
+    todo = [top]
+    while todo:
+        m = todo.pop()
+        for n in g.get(m, []):
+            if n == 'state.js': bad.append(' > '.join(['state.js'] + path[m] + ['state.js']))
+            elif n not in path:
+                path[n] = path[m] + [n]
+                todo.append(n)
+if not g.get('state.js'): print('FAIL hooks/state.js imports nothing: is it still the index?')
+if g.get('session.js', []) != ['store.js']: print('FAIL hooks/session.js must import store.js and nothing else (it imports: %s)' % (', '.join(g.get('session.js', [])) or 'nothing'))
+for b in sorted(set(bad)): print('FAIL state.js cycle: ' + b)
+if g.get('state.js') and not bad and g.get('session.js', []) == ['store.js']: print('PASS no module hooks/state.js imports reaches it again (%d modules)' % len(g['state.js']))
+PY
+)
+  while IFS= read -r line; do
+    case "$line" in PASS*) pass "stores: ${line#PASS }";; FAIL*) fail "stores: ${line#FAIL }";; esac
+  done <<< "$cyc_out"
+  printf '%s\n' "$cyc_out" | grep -qE '^(PASS|FAIL)' || fail "stores: the state.js cycle check produced no result"
+fi
 
 # ── 6c. The mod: Claude Code's own validator + its tests ────────────────────
 # WARN where the claude CLI is absent on a developer machine; in CI (CI=true) its absence is a

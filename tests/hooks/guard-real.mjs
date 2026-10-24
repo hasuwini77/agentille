@@ -474,6 +474,16 @@ try {
     fs.writeFileSync(wt + '/scripts/lib.mjs', 'export const run = () => 0\n')
     fs.writeFileSync(wt + '/server/tools.js', 'module.exports = { evil: true }\n')
     check('trust: an MCP server whose required tools.js differs is not the same config', (await sameConfig($, wt, lead)) === false)
+    // A server that names its module at run time cannot be compared: refused even when both sides are identical.
+    for (const d of [lead, wt]) {
+      fs.writeFileSync(d + '/server/index.js', "const name = 'tools'\nrequire('./' + name)\n")
+      fs.writeFileSync(d + '/server/tools.js', 'module.exports = {}\n')
+    }
+    const why = {}
+    check('trust: a dynamic require is refused, unchanged sides included', (await sameConfig($, wt, lead, why)) === false && /named at run time/.test(String(why.unresolved)), JSON.stringify(why))
+    for (const d of [lead, wt]) fs.writeFileSync(d + '/.claude/settings.json', JSON.stringify({ env: { NODE_OPTIONS: '--require ./x.js' } }))
+    for (const d of [lead, wt]) fs.writeFileSync(d + '/server/index.js', "require('./tools')\n")
+    check('trust: settings env NODE_OPTIONS is refused', (await sameConfig($, wt, lead)) === false)
     for (const d of [lead, wt]) fs.rmSync(d, { recursive: true, force: true })
   }
   {

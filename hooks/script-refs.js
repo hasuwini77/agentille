@@ -105,3 +105,43 @@ export function pyCandidates(imp) {
 // The test files `node --test` runs when it is given no file: node's default patterns, matched against a path
 // relative to the folder it searches (node_modules is never searched).
 export const NODE_TEST_FILE = /(^|\/)(test\/.*\.[cm]?[jt]s|[^/]*[.\-_]test\.[cm]?[jt]s|test-[^/]*\.[cm]?[jt]s|test\.[cm]?[jt]s)$/
+
+// A JavaScript file that loads a module named at run time: `require(x)` or `import(x)` whose argument is not one
+// plain string (a variable, a template, a concatenation). What it loads cannot be listed from the text.
+export function jsDynamic(text) {
+  const s = String(text ?? '')
+  return /\brequire\s*\(\s*(?!['"][^'"\n]*['"]\s*\))/.test(s) || /(?<![\w.$])import\s*\(\s*(?!['"][^'"\n]*['"]\s*[,)])/.test(s)
+}
+
+// The bare package names a JavaScript file loads with a plain string (`import x from 'pkg'`, `require('@s/pkg/sub')`
+// → `pkg`, `@s/pkg`), node's own modules left out.
+export function jsPackages(text) {
+  const out = new Set()
+  const s = String(text ?? '')
+  const forms = [
+    /\bimport\s+(?:[\w*{}\s,$]+\s+from\s+)?(['"])([^'"\n]+)\1/g,
+    /\bexport\s+(?:[\w*{}\s,$]+\s+)?from\s+(['"])([^'"\n]+)\1/g,
+    /\b(?:require|import)\s*\(\s*(['"])([^'"\n]+)\1\s*[,)]/g,
+  ]
+  for (const re of forms) {
+    for (const m of s.matchAll(re)) {
+      const spec = m[2]
+      if (/^(\.{1,2}\/|\/|node:|data:|file:|https?:)/.test(spec) || spec === '.' || spec === '..') continue
+      const name = spec.startsWith('@') ? spec.split('/').slice(0, 2).join('/') : spec.split('/')[0]
+      if (!NODE_BUILTINS.has(name)) out.add(name)
+    }
+  }
+  return [...out]
+}
+
+// node's own modules, importable without `node:` (and `node:test`, `node:sqlite` and the like only with it).
+export const NODE_BUILTINS = new Set(('assert async_hooks buffer child_process cluster console constants crypto dgram diagnostics_channel dns ' +
+  'domain events fs http http2 https inspector module net os path perf_hooks process punycode querystring readline repl stream ' +
+  'string_decoder sys timers tls trace_events tty url util v8 vm wasi worker_threads zlib').split(' '))
+
+// A Python file that loads code named at run time: importlib, __import__, exec of a file, runpy.
+export const PY_DYNAMIC = /\bimportlib\.import_module\s*\(|\b__import__\s*\(|\bexec\s*\(\s*(open|compile)\s*\(|\brunpy\.run_(path|module)\s*\(|\bimportlib\.machinery\b|\bspec_from_file_location\s*\(/
+
+// Variables that make an interpreter or the loader run code no command names: preloaded modules, an extra
+// module path, a startup file, a preloaded library.
+export const CODE_ENV = /^(NODE_OPTIONS|NODE_PATH|PYTHONPATH|PYTHONSTARTUP|PYTHONHOME|PYTHONUSERBASE|LD_PRELOAD|LD_LIBRARY_PATH|LD_AUDIT|DYLD_.*|BASH_ENV|ENV|ZDOTDIR|PERL5OPT|PERL5LIB|RUBYOPT|RUBYLIB)$/

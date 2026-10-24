@@ -4,7 +4,7 @@
 // (package-manager scripts, npx, python -m, CLAUDE.md @imports). Reads only through $.fs (read, stat, list).
 // The names a command runs without naming them (script chains, python -m files) come from script-refs.js, which
 // the guard reads them with too.
-import { ELSEWHERE, NPM_SCRIPT_ALIASES, PLAIN_MODULE, VALUE_FLAGS, jsCandidates, jsImports, moduleFiles, pyImports, pythonModule, scriptChain } from './script-refs.js'
+import { CODE_ENV, ELSEWHERE, NPM_SCRIPT_ALIASES, PLAIN_MODULE, PY_DYNAMIC, VALUE_FLAGS, jsCandidates, jsDynamic, jsImports, jsPackages, moduleFiles, pyImports, pythonModule, scriptChain } from './script-refs.js'
 
 // Absent in the worktree is fine for these (settings.local.json and CLAUDE.local.md are gitignored, so a fresh
 // worktree has none); present, they must be the lead checkout's byte for byte.
@@ -94,7 +94,7 @@ function mcpServers(json) {
   if (!servers || typeof servers !== 'object') return []
   return Object.values(servers)
     .filter((v) => v && typeof v === 'object' && typeof v.command === 'string')
-    .map((v) => ({ argv: [v.command, ...(Array.isArray(v.args) ? v.args.filter((x) => typeof x === 'string') : [])], cwd: typeof v.cwd === 'string' ? v.cwd : null }))
+    .map((v) => ({ argv: [v.command, ...(Array.isArray(v.args) ? v.args.filter((x) => typeof x === 'string') : [])], cwd: typeof v.cwd === 'string' ? v.cwd : null, env: v.env && typeof v.env === 'object' ? Object.keys(v.env) : [] }))
 }
 
 // The commands a file under .claude/agents, commands, skills or hooks runs: the `command:` lines of its frontmatter
@@ -539,6 +539,41 @@ async function firstFile($, ctx, cands) {
 
 const JS_FILE = /\.(?:[cm]?[jt]sx?)$/i
 const PY_FILE = /\.py$/i
+const SH_FILE = /\.(?:sh|bash|zsh|ksh|dash)$/i
+const SH_BANG = /^#!.*\b(ba|z|da|k)?sh\b/
+
+// A package a file loads by name, from node_modules: the first node_modules/<name> folder up from the file inside
+// the checkout must be the lead checkout's, file by file. One resolved from outside the checkout (or nowhere)
+// cannot be compared.
+async function samePackage($, ctx, dir, name, rel) {
+  for (let d = dir; d != null; d = d === '' ? null : joinRel(d, '..')) {
+    const at = joinRel(d, 'node_modules/' + name)
+    const [a, b] = await Promise.all([sideOf($, ctx.top + '/' + at), sideOf($, ctx.leadTop + '/' + at)])
+    if (a === ABSENT && b === ABSENT) continue
+    return entryAt($, ctx, at)
+  }
+  return unresolved(ctx, name + ' in ' + rel, 'it loads a package from outside the checkout')
+}
+
+// The files a shell script runs or sources by path: `source x`, `. x`, `bash x` (or sh, zsh, …), and a program
+// named by a path (`./x`, `scripts/x`). Each is read against the checkout's root (hooks start there) and the
+// script's own folder.
+const SHELL_RUNNERS = new Set(['bash', 'sh', 'zsh', 'dash', 'ksh'])
+function shellRefs(text) {
+  const out = []
+  for (const raw of simpleCommands(text)) {
+    const w = fromProgram(raw)
+    if (!w.length) continue
+    const prog = w[0]
+    const runner = SHELL_RUNNERS.has(prog.split('/').pop())
+    if (prog === 'source' || prog === '.' || runner) {
+      const f = w.slice(1).find((x) => !x.startsWith('-'))
+      if (f && !(runner && w.slice(1).some((x) => /^-[a-z]*c/.test(x)))) out.push(f)
+    }
+    if (prog.includes('/') && !runner) out.push(prog)
+  }
+  return out
+}
 
 // An entry file a command runs (a hook script, an MCP server), and what it imports: each relative JavaScript import
 // and each Python import that resolves inside the checkout must be the lead checkout's byte for byte, followed
@@ -556,6 +591,8 @@ async function followCode($, ctx, rel, depth, seen) {
     return followCode($, ctx, hit.rel, depth + 1, seen)
   }
   if (JS_FILE.test(rel)) {
+    if (jsDynamic(text)) return unresolved(ctx, rel, 'it loads a module named at run time')
+    for (const name of jsPackages(text)) if (!(await samePackage($, ctx, dir, name, rel))) return false
     for (const spec of jsImports(text)) {
       const cands = jsCandidates(spec).map((c) => joinRel(dir, c))
       if (cands.some((c) => c == null)) return unresolved(ctx, 'import ' + spec + ' in ' + rel, 'it is outside the checkout')
@@ -564,7 +601,23 @@ async function followCode($, ctx, rel, depth, seen) {
       if (!(await next(hit))) return false
     }
   }
+  if (!JS_FILE.test(rel) && !PY_FILE.test(rel) && (SH_FILE.test(rel) || SH_BANG.test(text))) {
+    for (const ref of shellRefs(text)) {
+      if (/[$`]/.test(ref)) return unresolved(ctx, ref + ' in ' + rel, 'it runs a file named through a variable')
+      if (ref.startsWith('~') || (ref.startsWith('/') && !ref.startsWith(ctx.top + '/'))) continue
+      const cands = ref.startsWith('/') ? [joinRel('', ref.slice(ctx.top.length))] : [joinRel('', ref), joinRel(dir, ref)]
+      if (cands.some((c) => c == null)) return unresolved(ctx, ref + ' in ' + rel, 'it is outside the checkout')
+      for (const c of new Set(cands)) {
+        if (!(await entryAt($, ctx, c))) return false
+        if (!seen.has(c)) {
+          seen.add(c)
+          if (!(await followCode($, ctx, c, depth + 1, seen))) return false
+        }
+      }
+    }
+  }
   if (PY_FILE.test(rel)) {
+    if (PY_DYNAMIC.test(text)) return unresolved(ctx, rel, 'it loads code named at run time')
     for (const imp of pyImports(text)) {
       let from = dir
       for (let k = 1; k < imp.level && from != null; k++) from = joinRel(from, '..')
@@ -662,12 +715,20 @@ export async function sameConfig($, top, leadTop, why = {}) {
     }
   }
   let servers = []
+  const envKeys = []
   try {
-    for (const f of ['.claude/settings.json', '.claude/settings.local.json']) if (mine.has(f)) commands.push(...settingsCommands(JSON.parse(mine.get(f))))
+    for (const f of ['.claude/settings.json', '.claude/settings.local.json']) {
+      if (!mine.has(f)) continue
+      const json = JSON.parse(mine.get(f))
+      commands.push(...settingsCommands(json))
+      if (json?.env && typeof json.env === 'object') envKeys.push(...Object.keys(json.env))
+    }
     if (mine.has('.mcp.json')) servers = mcpServers(JSON.parse(mine.get('.mcp.json')))
   } catch {
     return false
   }
+  // A preload, module path or startup file in the environment loads code no command names: not compared.
+  for (const k of [...envKeys, ...servers.flatMap((x) => x.env)]) if (CODE_ENV.test(k)) return unresolved({ why }, 'env ' + k, 'it loads code the mod cannot follow')
   const words = [...commands, ...servers.flatMap((s) => s.argv)]
   const refs = [...new Set(words.flatMap((c) => commandPaths(c, top)))]
   if (refs.length > REFS_MAX) return false

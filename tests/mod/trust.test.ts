@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'claude-code/testing'
 import { sameConfig } from '../../hooks/trust.js'
-import { pyImports } from '../../hooks/script-refs.js'
+import { jsDynamic, jsPackages, pyImports } from '../../hooks/script-refs.js'
 
 // A host whose files are the map: the lead checkout at /lead, the worktree at /wt.
 const host = (files: Record<string, string>) => {
@@ -58,5 +58,51 @@ describe('trust: an entry file\'s imports must match too', () => {
       { level: 0, mod: 'os', names: [] }, { level: 0, mod: 'a.b', names: [] },
       { level: 1, mod: 'x', names: ['y', 'z'] }, { level: 2, mod: '', names: ['w'] }, { level: 0, mod: 'm', names: ['n'] },
     ])
+  })
+})
+
+describe('trust: what a file loads that its text does not name is refused unless it can be followed', () => {
+  const hook = (cmd: string) => JSON.stringify({ hooks: { Stop: [{ hooks: [{ type: 'command', command: cmd }] }] } })
+  // Each case: the files both checkouts hold, the one the worktree changes, and whether the identical pair can be
+  // followed (then it is trusted until that file differs) or not (then it is refused even unchanged).
+  const CASES: [string, Record<string, string>, string, boolean][] = [
+    ['require(variable)', { '.mcp.json': MCP, 'server/index.js': "const m = process.env.M || './tools'\nrequire(m)\n", 'server/tools.js': 'module.exports = {}\n' }, 'server/tools.js', false],
+    ['import(variable)', { '.mcp.json': MCP, 'server/index.js': "const m = './tools.js'\nawait import(m)\n", 'server/tools.js': 'export {}\n' }, 'server/tools.js', false],
+    ["require('./' + name)", { '.mcp.json': MCP, 'server/index.js': "const name = 'tools'\nrequire('./' + name)\n", 'server/tools.js': 'module.exports = {}\n' }, 'server/tools.js', false],
+    ['import(`./${x}`)', { '.mcp.json': MCP, 'server/index.js': "const x = 'tools.js'\nawait import(`./${x}`)\n", 'server/tools.js': 'export {}\n' }, 'server/tools.js', false],
+    ['a bare package from node_modules', { '.mcp.json': MCP, 'server/index.js': "require('helper-pkg')\n", 'node_modules/helper-pkg/package.json': '{"name":"helper-pkg"}', 'node_modules/helper-pkg/index.js': 'module.exports = {}\n' }, 'node_modules/helper-pkg/index.js', true],
+    ['bash source', { '.claude/settings.json': hook('bash scripts/hook.sh'), 'scripts/hook.sh': '#!/bin/bash\nsource scripts/lib.sh\nrun\n', 'scripts/lib.sh': 'run() { :; }\n' }, 'scripts/lib.sh', true],
+    ['bash .', { '.claude/settings.json': hook('bash scripts/hook.sh'), 'scripts/hook.sh': '#!/bin/bash\n. ./scripts/lib.sh\nrun\n', 'scripts/lib.sh': 'run() { :; }\n' }, 'scripts/lib.sh', true],
+    ['./script and bash <file>', { '.claude/settings.json': hook('bash scripts/hook.sh'), 'scripts/hook.sh': '#!/bin/bash\n./scripts/helper.sh\nbash scripts/other.sh\n', 'scripts/helper.sh': 'true\n', 'scripts/other.sh': 'true\n' }, 'scripts/other.sh', true],
+    ['importlib.import_module', { '.claude/settings.json': hook('python3 hooks/stop.py'), 'hooks/stop.py': "import importlib\nm = importlib.import_module('lib.' + 'x')\n", 'hooks/lib/__init__.py': '', 'hooks/lib/x.py': 'X = 1\n' }, 'hooks/lib/x.py', false],
+    ['__import__ and exec(open', { '.claude/settings.json': hook('python3 hooks/stop.py'), 'hooks/stop.py': "__import__('os')\nexec(open('hooks/extra.py').read())\n", 'hooks/extra.py': 'X = 1\n' }, 'hooks/extra.py', false],
+    ['env NODE_OPTIONS, PYTHONPATH or DYLD_*', { '.claude/settings.json': JSON.stringify({ env: { NODE_OPTIONS: '--require ./preload.js' }, hooks: { Stop: [{ hooks: [{ type: 'command', command: 'node scripts/hook.mjs' }] }] } }), 'scripts/hook.mjs': 'export {}\n', 'preload.js': 'module.exports = {}\n' }, 'preload.js', false],
+  ]
+
+  for (const [name, rel, changed, followable] of CASES) {
+    test(name + (followable ? ': compared, and refused once it differs' : ': refused, even unchanged'), async () => {
+      const files = both(rel)
+      const why: any = {}
+      expect(await sameConfig(host(files), '/wt', '/lead', why)).toBe(followable)
+      if (!followable) expect(why.unresolved?.length).toBeGreaterThan(0)
+      expect(await sameConfig(host({ ...files, ['/wt/' + changed]: files['/wt/' + changed] + '\nevil()\n' }), '/wt', '/lead')).toBe(false)
+    })
+  }
+
+  test('an MCP server env, a package found only outside the checkout, or a sourced file through a variable refuses', async () => {
+    const env = JSON.stringify({ mcpServers: { s: { command: 'node', args: ['server/index.js'], env: { PYTHONPATH: 'x', DYLD_INSERT_LIBRARIES: 'y' } } } })
+    expect(await sameConfig(host(both({ '.mcp.json': env, 'server/index.js': 'module.exports = {}\n' })), '/wt', '/lead')).toBe(false)
+    const why: any = {}
+    expect(await sameConfig(host(both({ '.mcp.json': MCP, 'server/index.js': "require('not-installed-here')\n" })), '/wt', '/lead', why)).toBe(false)
+    expect(why.unresolved?.[0]).toContain('outside the checkout')
+    expect(await sameConfig(host(both({ '.claude/settings.json': hook('bash scripts/hook.sh'), 'scripts/hook.sh': '#!/bin/bash\nsource "$(dirname "$0")/lib.sh"\n' })), '/wt', '/lead')).toBe(false)
+  })
+
+  test('node\'s own modules and plain relative imports stay trusted', async () => {
+    const files = both({ '.mcp.json': MCP, 'server/index.js': "const fs = require('fs')\nconst cp = require('node:child_process')\nimport('./tools.js')\nrequire('path')\n", 'server/tools.js': 'export {}\n' })
+    expect(await sameConfig(host(files), '/wt', '/lead')).toBe(true)
+    expect(jsDynamic("require('./a')\nimport('./b', { with: {} })\nrequire.resolve(x)")).toBe(false)
+    expect(jsDynamic('require(name)')).toBe(true)
+    expect(jsPackages("import a from 'pkg/sub'\nimport b from '@s/p/x'\nrequire('fs')\nrequire('node:os')\nimport c from './c'")).toEqual(['pkg', '@s/p'])
   })
 })

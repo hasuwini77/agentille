@@ -42,6 +42,13 @@ for tok in "CONTEXT" "BLOCKED:" "CONTRACT:" "STUCK:" "RESUME:"; do
 done
 check "Codex workers get the STUCK: line" 'has skills/agt/panes-mode.md "STUCK:"'
 
+# worktrees: one script, no inline recipe for the two files to drift apart on
+for f in skills/agt/factory.md agents/agentille-executor.md; do
+  check "$f makes worktrees with agt-worktree.sh" 'has "$f" "agt-worktree.sh"'
+  check "$f has no inline worktree recipe" '! has "$f" "BRANCH_INPUT" && ! has "$f" "git worktree add"'
+done
+check "the worktree script exists and is executable" '[ -x scripts/agt-worktree.sh ]'
+
 # 4. one vocabulary: "slice" in prose; "piece" only as the header key
 for f in skills/agt/*.md agents/agentille-*.md README.md; do
   check "$f says slice, not piece (except piece=)" '! grep -v "piece=" "$f" | grep -qiE "\bpieces?\b"'

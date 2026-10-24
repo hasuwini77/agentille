@@ -1,7 +1,7 @@
 // agentille run bookkeeping: per-run counters, the routing log and ledger under ~/.agentille/state/run-<id>/,
 // each subagent's raw report, and the Agents section the mod adds to a finished report.md.
 
-import { Profile, Panes, Proofs, Session } from './state.js'
+import { Profile, Panes, Proofs, Session, isLead } from './state.js'
 import { makeStore } from './store.js'
 import { reportRun, reportTail } from './drawing.js'
 import { sliceOf, party, taskLine } from './links.js'
@@ -21,6 +21,7 @@ const { s: my, view } = makeStore('dispatch.js', {
   live: new Map(),  // agentId → live agent (live.js)
   decisions: [],  // this session, for /agt-info routing
   paneRoutes: [],  // PaneRoute[], append-only: how each worker this lead opened was routed
+  sessionRun: null,  // the run session-<session id>.run names (markRun)
 })
 export const Runs = view
 const wfToasted = new Set()  // run:role pairs whose drift the person was told once
@@ -101,6 +102,21 @@ export async function writeRunFile($, runId, name, text) {
     await $.fs.write(Profile.home + '/.agentille/state/run-' + runId + '/' + name, text)
   } catch {
     // the run dir is the orchestrator's; logging never blocks a dispatch
+  }
+}
+
+// A lead names the run it dispatches for in ~/.agentille/state/session-<session id>.run, written once per run, and
+// refreshes the run's ledger.json, so the ledger lists each slice from its first dispatch. The SessionStart hook for
+// a compaction (agentille-compact.sh) reads both to print where the run stands.
+export async function markRun($, runId) {
+  if (!isLead() || !Profile.home || !SAFE_RUN.test(runId) || runId === 'adhoc') return
+  await writeRunFile($, runId, 'ledger.json', JSON.stringify(ledger(my.live, runId, my.paneRoutes), null, 2) + '\n')
+  if (!Session.sessionId || my.sessionRun === runId) return
+  try {
+    await $.fs.write(Profile.home + '/.agentille/state/session-' + Session.sessionId + '.run', runId + '\n')
+    my.sessionRun = runId
+  } catch {
+    // the hook then prints nothing; a dispatch never waits on it
   }
 }
 
@@ -222,6 +238,7 @@ export async function dispatchAgent($, e, next) {
   my.decisions.push(rec)
   run.log.push(JSON.stringify(rec))
   await writeRunFile($, runId, 'routing.jsonl', run.log.join('\n') + '\n')
+  await markRun($, runId)
   if (cap) addFlag($, 'cap|' + runId, cap) // the band's ⚑ line and one toast; the dispatch itself goes ahead
   if (d.capped) ceilingOnce($, runId, run, spent, role, d)
   else if (d.reason !== 'table') $.ui.toast('agt ↑ ' + role + ' → ' + short(res.model) + ' · ' + d.effort + ' — ' + d.reason)

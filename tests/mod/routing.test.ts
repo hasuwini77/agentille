@@ -245,6 +245,21 @@ describe('workflow agents: runs, toast, deny', () => {
     await ui.unmount()
   })
 
+  test('a lead names its run in session-<id>.run, and the ledger lists each slice from its first dispatch', async ($, on) => {
+    const { writes } = setup(on)
+    on('session.id', async () => ({ value: 'lead-sid' }))
+    await $.session.start({ cwd: '/w', surface: null, isInteractive: false })
+    await $.agent.spawn({ prompt: '[agt run=runS1 size=small mode=build slice=api]\nbuild the api', subagentType: 'agentille:agentille-executor' } as never) // w0
+    expect(writes['/h/.agentille/state/session-lead-sid.run']).toBe('runS1\n')
+    const slices = () => JSON.parse(writes['/h/.agentille/state/run-runS1/ledger.json']).slices
+    expect(slices()).toEqual({ api: { executor: 'working' } })
+    await $.agent.spawn({ prompt: '[agt run=runS1 size=small mode=review slice=api]\nreview the api diff', subagentType: 'agentille:agentille-code-reviewer' } as never) // w1
+    await finish($, 'w0')
+    expect(slices()).toEqual({ api: { executor: 'done', 'code-reviewer': 'working' } })
+    await $.agent.spawn({ prompt: 'no header', subagentType: 'Explore' } as never) // an ad hoc agent names no run
+    expect(writes['/h/.agentille/state/session-lead-sid.run']).toBe('runS1\n')
+  })
+
   test('a headerless workflow agent files its routing line and tokens under adhoc, not the band run', async ($, on) => {
     const { writes } = setup(on)
     await $.session.start({ cwd: '/w', surface: null, isInteractive: false })

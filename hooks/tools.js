@@ -3,7 +3,7 @@
 // register.js only wires them to tool.call.
 
 import { isLead, Profile, Spawn, Panes, Sessions, Proofs, Session, markSkewToasted } from './state.js'
-import { demoteToast, runState, writeRunFile, runSpend, ceilingOnce, setLastRun, addRoute, addDecision } from './dispatch.js'
+import { demoteToast, runState, writeRunFile, runSpend, ceilingOnce, setLastRun, addRoute, addDecision, markRun } from './dispatch.js'
 import { sliceOf, party, taskLine } from './links.js'
 import { PROBE, newRunId, doneFile, paneKey, answerFile, tmuxKillArgv, placePlan, codexNote, herdrCloseArgv, paneRole, spawnToolInput, closeTarget, sessionName, sessionsToolInput, sessionsNote, droppedNote } from './panes.js'
 import { installedSkew } from './profile.js'
@@ -115,6 +115,7 @@ export async function spawnPane($, e) {
   addDecision(rec)
   run.log.push(JSON.stringify(rec))
   await writeRunFile($, a.run, 'routing.jsonl', run.log.join('\n') + '\n')
+  await markRun($, a.run)
   await pollNow($, t)
   ensurePolling($)
   ensureTicker($)

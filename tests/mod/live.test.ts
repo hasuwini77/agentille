@@ -369,6 +369,8 @@ describe('leaves the band', () => {
     expect(l.panes).toEqual({ executor: { agents: 3, ms: 1500 } })
     expect(ledger(new Map(), 'r1', [r({ agent: null, end: 10 })]).panes).toEqual({ 'exec-1': { agents: 1, ms: 10 } })
     expect(ledger(new Map(), 'r1').panes).toEqual({})
+    // per slice, the newest state of each role on it: a pane is working until its route ends
+    expect(ledger(new Map(), 'r1', [r({ slice: 'api', end: null }), r({ slice: 'web', end: 10 })]).slices).toEqual({ api: { executor: 'working' }, web: { executor: 'done' } })
     const m = new Map([['a', sub('a', 'r1', 'working')]])
     expect(ledger(m, 'r1', routes).roles).toEqual(ledger(m, 'r1').roles)
     expect(ledger(m, 'r1', routes).total).toEqual(ledger(m, 'r1').total)

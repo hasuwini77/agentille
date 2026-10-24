@@ -35,6 +35,11 @@ done
 check "planner writes ACCEPTANCE" 'has agents/agentille-planner.md "ACCEPTANCE"'
 check "SKILL.md reads ACCEPTANCE" 'has skills/agt/SKILL.md "ACCEPTANCE"'
 check "SKILL.md prints the recon line" 'has skills/agt/SKILL.md "recon: <level>"'
+# the plan-review skip reads the same where the plan review is described (SKILL.md step 7) and in the roster
+plan_skip() { grep -F "$2" "$1" | grep -F "plan-reviewer" | grep -qF "thinkingDepth=quick"; }
+for f in skills/agt/SKILL.md skills/agt/routing.md; do
+  check "$f skips the plan-reviewer on quick and for a ≤3-step fully sequential plan" 'plan_skip "$f" "for a ≤3-step fully sequential plan"'
+done
 # every stop head factory.md routes is listed in display.md and written by the executor
 for tok in "CONTEXT" "BLOCKED:" "CONTRACT:" "STUCK:" "RESUME:"; do
   check "factory.md routes $tok" 'has skills/agt/factory.md "$tok"'

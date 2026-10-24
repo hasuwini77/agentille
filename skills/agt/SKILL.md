@@ -61,7 +61,7 @@ Print the recon line before anything else: `recon: <level> · <transport> · <on
 7. **Scout, plan, then review it.**
    - Scouts are optional, on medium and heavy only. Send them when the task names no files and the planner would have to map unfamiliar ground in ≥3 areas.
    - Send at most 3 `Explore` subagents with `model: haiku`, as one message of background calls. Each gets one question ("which files wire X?") and answers in ≤15 lines of paths and facts. Hand their answers to the planner under `SCOUTS:`.
-   - The plan carries numbered ACCEPTANCE criteria. APPROVE → build.
+   - The plan carries numbered ACCEPTANCE criteria. The plan-reviewer is skipped on `thinkingDepth=quick` and for a ≤3-step fully sequential plan (`routing.md` → "Roster"), and that plan builds as written. APPROVE → build.
    - A first REVISE → re-plan, then review again.
    - A second REVISE → re-plan once more. Send that third plan to the plan-reviewer one last time on Opus: one call, with `size=large` in its header (so the mod routes it to Opus) and `model: opus`.
    - A third REVISE stops the run before any build. The card's first line is `✗ plan not approved after 3 reviews`. Its `⚑` line is `⚑ plan not approved: <reason 1> · <reason 2> · <reason 3>`, one clause per REVISE.

@@ -74,6 +74,7 @@ What it reads has limits, and these are the known ones:
 - It does not read installed code: anything under `node_modules`, a bare package import, or a module in the standard library or site-packages.
 - It reads a node file's relative static imports one level deep. An import built at run time is not followed, and neither are a Python file's imports.
 - A git word that is an external `git-<name>` program on your PATH runs that program, which the guard does not read; so does a gh word that is a gh extension.
+- It refuses a write to the trust root only where the line names it in a way it can read. Interpreter code that builds the path at run time (`'.agen' + 'tille'`) can still rewrite your profile. The run that does so stays held to the ceiling it started with, but the next typed `/agt` reads the rewritten profile, so check `~/.agentille/profile.json` if a run touched it.
 - `git submodule foreach` runs its line in a repo the guard cannot place, so a push of HEAD there is refused and only a push with the branch written out can pass.
 - It reads `$( )`, backticks and `<( )` four levels inside one another, and a line run by `eval`, `bash -c`, a wrapper, `find -exec` or `git submodule foreach` three levels inside another. Past either depth it does not read the rest of that part, so it refuses the whole line below `auto` rather than let it through. A command after the deep part on the same line is still read.
 

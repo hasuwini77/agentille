@@ -81,7 +81,7 @@ Each surface the mod draws has its own key in the `display` block. An invalid va
 { "display": { "band": "off", "statusLine": "on", "mascot": "off" } }
 ```
 
-The daily version check is not a display key: set `AGENTILLE_UPDATE_CHECK=0` in your environment to turn it off.
+The daily version check is not a display key: set `AGENTILLE_UPDATE_CHECK=0` in your environment to turn it off. It also stays off when Claude Code's own `DISABLE_TELEMETRY` or `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC` is set to `1` or `true` (no fetch and no cache write).
 
 ## `display.highlight`
 

@@ -157,7 +157,7 @@ Everything else waits for a typed `/agt`, `/storm` or a session ask. When you do
   - The run-end tidy and `/agt-clean` remove only merged, clean `agt/*` worktrees this session's runs made, and never one made under 10 minutes ago or with no commits of its own.
   - Copied `.env*` files are deleted from every worktree the run made when it ends, whatever the branch; only untracked copies git ignores go, a tracked or un-ignored `.env.example` stays.
 - **In your home:** `~/.agentille/state/run-<id>/` (plan, checkpoints, every agent's report, `report.md`), `~/.agentille/profile.json` when you save a setting, and `~/.agentille/.update-check.json`.
-- **Network:** the hook runs at session start and after a compaction, and at most once a day it fetches this repo's `plugin.json` from GitHub to compare versions (3 s timeout, nothing sent). `AGENTILLE_UPDATE_CHECK=0` turns it off.
+- **Network:** the hook runs at session start and after a compaction, and at most once a day it fetches this repo's `plugin.json` from GitHub to compare versions (3 s timeout, nothing sent). `AGENTILLE_UPDATE_CHECK=0` turns it off, and so does Claude Code's own `DISABLE_TELEMETRY` or `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC` set to `1` or `true`.
   - Research agents (`/storm`) read the web.
   - An executor whose worktree has no `node_modules` to copy runs the project's own install, and the security reviewer runs `npm audit`; both reach the package registry.
   - Nothing else goes out.

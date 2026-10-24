@@ -1372,6 +1372,20 @@ describe('pane tools: folder trust', () => {
     expect(accepted(seen)).toBe(true)
   })
 
+  test('an .mcp.json server folder in the repo is compared file by file', async ($, on) => {
+    const mcp = JSON.stringify({ mcpServers: { py: { command: 'uv', args: ['run', '--directory', 'tools/mcp', 'server.py'] } } })
+    const same = setup(on, { files: both({ '.mcp.json': mcp, 'tools/mcp/server.py': 'serve()' }) })
+    expect((await spawn($, same.clock)).result).toContain('Opened agt-k7f2ab-exec-1')
+    expect(accepted(same.seen)).toBe(true)
+  })
+
+  test('a changed file in an .mcp.json server folder is refused', async ($, on) => {
+    const mcp = JSON.stringify({ mcpServers: { py: { command: 'uv', args: ['run', '--directory', 'tools/mcp', 'server.py'] } } })
+    const { seen, clock } = setup(on, { files: { ...both({ '.mcp.json': mcp, 'tools/mcp/server.py': 'serve()' }), '/work/wt/tools/mcp/server.py': 'steal()' } })
+    expect(JSON.stringify(await spawn($, clock))).toContain('needs a one-time trust')
+    expect(accepted(seen)).toBe(false)
+  })
+
   test('a settings.json that does not parse is refused', async ($, on) => {
     const { seen, clock } = setup(on, { files: both({ '.claude/settings.json': '{"hooks":' }) })
     expect(JSON.stringify(await spawn($, clock))).toContain('needs a one-time trust')

@@ -188,6 +188,18 @@ async function sameText($, a, b) {
   const [x, y] = await Promise.all([configFile($, a), configFile($, b)])
   return x !== UNREADABLE && y !== UNREADABLE && x === y
 }
+// A file a command names, or a folder (`--directory tools/mcp`, `cd apps/web`): a folder is compared file by file,
+// and one too big to compare refuses.
+async function sameEntry($, a, b) {
+  const [x, y] = await Promise.all([configFile($, a), configFile($, b)])
+  if (x !== UNREADABLE && y !== UNREADABLE) return x === y
+  const [sa, sb] = await Promise.all([$.fs.stat(a).catch(() => null), $.fs.stat(b).catch(() => null)])
+  if (sa?.kind !== 'dir' || sb?.kind !== 'dir') return false
+  const [ta, tb] = await Promise.all([configTree($, a), configTree($, b)])
+  if (!ta || !tb || ta.size !== tb.size) return false
+  for (const [k, v] of ta) if (tb.get(k) !== v) return false
+  return true
+}
 
 // The worktree brings no project config of its own: what it has is the lead checkout's, byte for byte. That is the
 // .mcp.json, settings and local files (CONFIG_FILES, absent in the worktree is fine), CLAUDE.md, AGENTS.md and
@@ -218,7 +230,7 @@ export async function sameConfig($, top, leadTop) {
   }
   const refs = [...new Set(commands.flatMap((c) => commandPaths(c, top)))]
   if (refs.length > REFS_MAX) return false
-  for (const r of refs) if (!(await sameText($, top + '/' + r, leadTop + '/' + r))) return false
+  for (const r of refs) if (!(await sameEntry($, top + '/' + r, leadTop + '/' + r))) return false
   return true
 }
 

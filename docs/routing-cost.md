@@ -1,6 +1,6 @@
 # Routing cost: the `maxRunUsd` estimate
 
-`profile.routing.maxRunUsd` (default `15`; `null` turns it off) is a per-run cost ceiling in US dollars. The README's Settings section and `skills/agt/routing.md` → "Cost ceiling" say what happens once a run reaches it. This page holds how the mod estimates a run's spend.
+`profile.routing.maxRunUsd` (default `15`; `null` turns it off) is a per-run cost ceiling in US dollars. [settings.md](./settings.md#routing) and `skills/agt/routing.md` → "Cost ceiling" say what happens once a run reaches it. This page holds how the mod estimates a run's spend.
 
 ## The estimate
 

@@ -81,49 +81,9 @@ Every command and its arguments (`--fable`, `/agt-spawn`, `/agt-clean`, `/agt-te
 
 ## Settings
 
-Everything lives in `~/.agentille/profile.json`. Every key is optional, and a missing one takes its default.
+Everything lives in `~/.agentille/profile.json`. Every key is optional and no profile file is needed. The key most people set first is `integration`, what a finished slice becomes: `pr` (the default) pushes a branch and opens a PR per slice, `auto` also merges each PR on green and pushes a version tag, `push` pushes the branch only, `local` pushes nothing. A repo can only lower it, and a risky diff (auth, payments, deploy, migrations, dependencies) stops at the PR under every setting. `/agt-info` shows what is in effect.
 
-- **What is checked:** an invalid `display.*` value is ignored and falls back to the value an older command left behind, then to the default. An invalid `integration` value is ignored too, and the next rule below decides.
-- **What is not:** `thinkingDepth` and `routing.*` are read as written. A mistyped value is not replaced by its default, so a `thinkingDepth` other than `quick` routes as the default table, and the escalation ladder reaches Fable only when `routing.autoFable` is exactly `true` (`--fable` works either way).
-- **See it:** `/agt-info` shows the `display` values in effect and where each came from; `/agt-info route <role>` shows what your `thinkingDepth` and `routing.*` do to that role's route.
-
-```json
-{
-  "integration": "pr",
-  "thinkingDepth": "complex-only",
-  "projects": [{ "url": "https://github.com/you/my-app", "integration": "auto" }],
-  "routing": { "autoFable": false, "maxFablePerRun": 1, "fableWeeklyCeiling": 60, "advisorOnOpus": true, "maxRunUsd": 15 },
-  "display": { "deck": "off", "focus": true, "highlight": "off", "band": "on", "statusLine": "on", "mascot": "on" }
-}
-```
-
-- `integration`: what a finished slice becomes.
-  - **Values:**
-    - `pr` (default) pushes a branch and opens a PR per slice.
-    - `auto` merges each PR on green with a merge commit, deletes the branch and pushes a version tag.
-    - `push` pushes each slice branch, no PR, no merge.
-    - `local` merges locally and pushes nothing.
-    - Without `gh`, `pr` behaves as `push`.
-  - **Your profile decides:** that repo's `projects[].integration` entry (matched by `url`, the `origin` remote, or `path`; `/agentille-project` writes both), then the top-level `integration`, then `pr`.
-    - An entry with only an `id` matches a repo with no remote and can only lower the integration mode, so a clone of someone else's repo with the same folder name never inherits `auto`.
-  - **A repo can only lower it** (auto → pr → push → local): its `.agentille/config.json` `{"integration": …}` (`/agentille-project` writes it), a CLAUDE.md or AGENTS.md saying `no-mistakes` (at most `pr`) or `local-only` (`local`).
-  - **Guards:** below `auto` the mod refuses merges, tags, releases and API merges from a run, and lets through only a push of the run's own branch. Under `local` it refuses pushes and PRs too. How it reads a command: [docs/guards.md](./docs/guards.md).
-  - **Risky diffs stop at the PR** under every setting: a diff that touches auth, payments, deploy, migrations, dependencies or a business assumption, and the card says `⚑ escalated`.
-- `thinkingDepth` (default `complex-only`; set it by hand): `complex-only` and `always` route by the table in Routing, and `always` also asks the planner for a reasoning note per step.
-  `quick` trades depth for cost: the planner, ui-prototyper, code- and perf-reviewer and the adversary run sonnet · medium, the security, payments and design reviewers sonnet · high, the SEO reviewer sonnet · low, the plan-reviewer and formations are skipped and the plan stays at 5 steps or fewer.
-  The design-reviewer keeps opus · high under `complex-only` and `always`, and the executor stays on Sonnet either way.
-- `routing.autoFable`: `true` lets the escalation ladder reach Fable (about twice the cost of Opus) after two plan REVISEs, or for the diagnose planner after two failed fixes, at most `maxFablePerRun` times and only under `fableWeeklyCeiling` percent of your weekly plan. Default `false`: Fable only when you type `--fable`.
-  The mod holds the model to that: a dispatch header claiming `fable=forced` in a session where you did not type `--fable` is rewritten to `fable=auto`, with a toast.
-- `routing.advisorOnOpus` (default `true`): `false` starts Opus and Fable pane workers without Claude Code's advisor tool; Sonnet workers keep it.
-- `routing.maxRunUsd` (default `15`; `null` turns it off): a per-run cost ceiling in US dollars, estimated from the agents' tokens, the lead's own tokens on the run and pane minutes. Past it, every later role but the executor that would run Opus runs Sonnet, with one toast and a band flag. How the estimate works and what it demotes: [docs/routing-cost.md](./docs/routing-cost.md) and [Routing](#routing).
-- `routing.stopAtCeiling` (default `false`): `true` refuses every dispatch, subagent or pane and whatever the role, once the run's estimate reaches `maxRunUsd`, instead of moving later roles to Sonnet. The deny line names the estimate and the ceiling.
-- `display.band` (default `on`): `off` draws nothing above the prompt, the run's tree, its `⚑` flags and a worker's own band included.
-- `display.statusLine` (default `on`): `off` pins no status line under the prompt.
-- `display.mascot` (default `on`): `off` drops the figure from worker panes and the deck; a worker keeps its one-line caption.
-- `display.deck`: `auto` opens the deck on every `/agt`, `off` only when you type `/agt-deck`.
-- `display.focus`: agent flags (a REVISE, a FAIL, a blocked pane) in the band.
-- `display.highlight` (default `off`): `on` lights `/agt` replies, `all` every reply, `off` none. The mod adds text to a prompt only under `all` and for text to paste; the answer frame, the answer-shape note, plain-text answers and the older commands that write this block: [docs/settings.md](./docs/settings.md).
-- Every switch off leaves `/agt` working the same: it only stops drawing.
+Every key, its default and what is checked (`integration`, `thinkingDepth`, `projects[]`, `routing.*`, `display.*`, the voice keys, `viewports`): [docs/settings.md](./docs/settings.md).
 
 ## Storm
 
@@ -158,7 +118,7 @@ Kinds, follow-ups, which ones close on their own and how to get one back: [docs/
 - **Review is a gate**: P0/P1 findings get fixed before the card says ✓.
 - **Squads**: in a saas, ecommerce, content or immersive repo, payments, SEO and performance specialists join the review when the diff touches their area.
 - **Type less**: the first word after `/agt` completes to a level (`low`, `medium`, `heavy`, `next`), and a dash completes to `--fable`.
-- **What you see:** the switchboard (a live dispatch tree above your prompt), a live row per `Agent` call in the transcript, a pinned status line under the prompt, and a small mascot in each worker pane, all drawn by the mod for zero model tokens: [docs/display.md](./docs/display.md). Each has its own switch in Settings.
+- **What you see:** the switchboard (a live dispatch tree above your prompt), a live row per `Agent` call in the transcript, a pinned status line under the prompt, and a small mascot in each worker pane, all drawn by the mod for zero model tokens: [docs/display.md](./docs/display.md). Each has its own switch in the profile's `display` block ([docs/settings.md](./docs/settings.md#display-switches)).
 - **Pane workers report back over the wire**, and a pane is closed only once its answer is saved or read.
 - **Best with Herdr:** workers are labeled in its sidebar and a run with 3+ pane workers gets its own tab; ask for Codex in the task ("codex builds the API slice") and that slice runs as a Codex pane. tmux works with the same band; without a multiplexer you get the subagent tree.
 
@@ -218,7 +178,7 @@ Everything else waits for a typed `/agt`, `/storm` or a session ask. When you do
   - The mod registers them only on a turn where you typed `/agt` or asked for sessions, panes or terminals, and each tool checks that proof again when called.
   - Worker panes close when harvested; at session end the sweep closes only the idle or done worker panes this session opened whose answer is saved.
   - When the proof lapses, and how shells and folder trust work: [docs/guards.md](./docs/guards.md#pane-tools).
-- **Models and cost:** every non-solo run costs more than a plain prompt. Opus runs the judgment roles, Sonnet the executor and the cheaper reviews, Haiku only classifies and scouts, and Fable runs only with `--fable` or `routing.autoFable: true`. `routing.maxRunUsd` (default $15) moves later Opus roles to Sonnet once a run passes it. Every cell: [Routing](#routing).
+- **Models and cost:** every non-solo run costs more than a plain prompt. Opus runs the judgment roles, Sonnet the executor and the cheaper reviews, Haiku only classifies and scouts, and Fable runs only with `--fable` or with `routing.autoFable: true` (after two plan REVISEs, or for the diagnose planner after two failed fixes). `routing.maxRunUsd` (default $15) moves later Opus roles to Sonnet once a run passes it. Every cell: [Routing](#routing).
 
 ## Routing
 
@@ -240,7 +200,7 @@ A `—` means that column changes nothing for the role, and `risk=data` changes 
 | adversary | sonnet · high | sonnet · high | opus · high | sonnet · medium |
 
 - **Small UI work stays cheap:** a one-screen UI feature or fix with `size=small` and `risk=none` gets one executor and the Sonnet code-reviewer. The ui-prototyper and design-reviewer join when the change spans more than one screen, at `size=large`, or when you ask for design work (`routing.md` → "Roster").
-- **The plan-reviewer under `quick`:** the lead skips it (see Settings); its `quick` cell is the route one still gets if it is dispatched, and what `/agt-info route plan-reviewer depth=quick` prints.
+- **The plan-reviewer under `quick`:** the lead skips it ([docs/settings.md](./docs/settings.md#thinkingdepth)); its `quick` cell is the route one still gets if it is dispatched, and what `/agt-info route plan-reviewer depth=quick` prints.
 - **Haiku never writes:** it only classifies a task the level table cannot place and runs read-only scouts.
 - **The executor never leaves Sonnet;** only its effort moves (and on fix rounds: attempt 2 → high, attempt 3 and later → max).
 - **Escalation:** a plan REVISE puts the next planner on opus · max. Fable (about twice the cost of Opus) runs only when you type `--fable`, or with `routing.autoFable: true` after two REVISEs, or for the diagnose planner after two failed fixes, within `maxFablePerRun` and `fableWeeklyCeiling`.

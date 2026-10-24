@@ -2040,6 +2040,13 @@ describe('sessions: helpers', () => {
     expect(take('git push --force', 'open a session and tell it why `git push --force` is risky')).toBe(null)
     expect(take('fix the login bug and push to main', 'open a session to fix the login bug')).toBe(null)
     expect(sessionPrompts('open two sessions')).toEqual(new Set())
+    // A typed /storm hands off one /agt line it wrote itself; nothing else rides on a /storm turn.
+    const line = '/agt heavy "Build the 2 picks in docs/storm/2026-10-24.md, one slice per pick."'
+    expect(take(line, '/storm quick 3 "onboarding"')).toBe(line)
+    expect(take('/agt medium "x y"', '/agentille:storm')).toBe('/agt medium "x y"')
+    expect(take('git push origin HEAD:main', '/storm')).toBe(null)
+    expect(take(line, 'open a session')).toBe(null)
+    expect((sessionsToolInput({ kind: 'codex', tasks: [line] }, { typed: '/storm' }) as any).tasks).toEqual([null])
     expect(droppedNote([{ n: 0, task: 'rm -rf ~', why: 'a first prompt runs only as the person typed it' }], ['s-k7f2ab-1'])).toContain('s-k7f2ab-1 opened with no first prompt: "rm -rf ~" was dropped')
     expect(droppedNote([], ['s-k7f2ab-1'])).toBe('')
   })

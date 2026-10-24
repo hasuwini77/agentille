@@ -603,10 +603,18 @@ export function sessionPrompts(typed) {
   return out
 }
 
+// A typed /storm hands its picks to one Claude session as `/agt heavy "…"` (`/agt medium` for quick), a line the
+// skill writes (skills/storm/handoff.md → "agt task line"), so on a /storm turn that one shape is a first prompt the
+// person asked for: it starts a typed /agt run in that session, under that session's own guard. Same test for a
+// typed /storm as routing.js asksSessions.
+const STORM_TYPED = /^\s*\/(?:agentille:)?storm\b/
+const STORM_HANDOFF = /^\/(?:agentille:)?agt\s+(?:heavy|medium)\s+"[^\n]+"$/
+
 // open_sessions input → { count, tasks, kind, model, cwd, layout, dropped } or { error }. `tasks` has one entry per
 // session, null where none was given. `typed` is the person's own prompt, and a session is the person's, with no Bash
 // guard in it, so a first prompt is never the model's own: a shell command runs only when it is one of
-// shellCommands, a Claude or Codex prompt only when it is one of sessionPrompts. Any other task is dropped, the
+// shellCommands, a Claude or Codex prompt only when it is one of sessionPrompts (or /storm's hand-off line on a typed
+// /storm). Any other task is dropped, the
 // session opens with no first prompt, and `dropped` says which and why. `--fable` rides into a Claude or Codex
 // session only when `fableTyped` says the person typed it.
 export function sessionsToolInput(input, { typed = '', fableTyped = false } = {}) {
@@ -637,7 +645,8 @@ export function sessionsToolInput(input, { typed = '', fableTyped = false } = {}
     tasks.forEach((t, n) => t && !ok.has(t) && drop(n, 'a shell command runs only as the person typed it, and this is not a command they quoted or asked a shell to run'))
   } else {
     const ok = sessionPrompts(typed)
-    tasks.forEach((t, n) => t && !ok.has(normTask(t)) && !ok.has(normTask(stripFable(t))) && drop(n, 'a first prompt runs only as the person typed it, and this is not in their newest prompt word for word'))
+    const storm = kind === 'claude' && STORM_TYPED.test(String(typed ?? ''))
+    tasks.forEach((t, n) => t && !(storm && STORM_HANDOFF.test(t)) && !ok.has(normTask(t)) && !ok.has(normTask(stripFable(t))) && drop(n, 'a first prompt runs only as the person typed it, and this is not in their newest prompt word for word'))
     if (!fableTyped) tasks = tasks.map((t) => (t ? stripFable(t) || null : t))
   }
   if (kind === 'claude' && tasks.some((t) => t && BARE_WORD.test(t))) return { error: 'A one-word task would run as a claude subcommand. Say more.' }

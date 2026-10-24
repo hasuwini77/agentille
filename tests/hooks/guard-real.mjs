@@ -36,12 +36,21 @@ function world() {
 }
 
 const $ = {
-  process: { run: async (argv) => { const r = spawnSync(argv[0], argv.slice(1), { env, encoding: 'utf8' }); if (r.error) throw r.error; return { exitCode: r.status ?? 1, stdout: r.stdout, stderr: r.stderr } } },
+  // As the engine's: the child starts in init.cwd (else the session's), with init.env over the host's.
+  process: { run: async (argv, init = {}) => { const r = spawnSync(argv[0], argv.slice(1), { cwd: init.cwd ?? APP, env: { ...env, ...(init.env ?? {}) }, encoding: 'utf8', timeout: init.timeoutMs ?? 30_000 }); if (r.error) throw r.error; return { exitCode: r.status ?? 1, stdout: r.stdout, stderr: r.stderr } } },
   fs: {
     read: async (p) => fs.readFileSync(p, 'utf8'),
     write: async (p, t) => fs.writeFileSync(p, t),
     list: async (d) => fs.readdirSync(d, { withFileTypes: true }).map((x) => ({ name: x.name, kind: x.isDirectory() ? 'dir' : 'file' })),
-    stat: async (p) => { const s = fs.statSync(p); return { kind: s.isDirectory() ? 'dir' : 'file', mtimeMs: s.mtimeMs } },
+    // As the engine's: isLink for a link itself, and with { resolve: true } realPath, where the path lands.
+    stat: async (p, o = {}) => {
+      const l = fs.lstatSync(p)
+      let s = l
+      try { s = fs.statSync(p) } catch {}
+      let realPath
+      if (o.resolve) try { realPath = fs.realpathSync(p) } catch {}
+      return { kind: s.isDirectory() ? 'dir' : s.isFile() ? 'file' : 'other', size: s.size, mtimeMs: s.mtimeMs, isLink: l.isSymbolicLink(), ...(realPath ? { realPath } : {}) }
+    },
   },
   session: { cwd: async () => APP },
   env: { get: async () => null },
@@ -165,6 +174,146 @@ try {
     check('... origin/main unchanged', refOf('origin.git', 'main') === w.main)
     const b = await run('npm run build')
     check('npm run build: allowed by the guard', !b?.deny, JSON.stringify(b))
+  }
+  {
+    // push.default set for one call would push every matching branch, the base included: a config write.
+    const w = world()
+    sh('git branch -f main agt/x', APP)
+    const r = await run('git -c push.default=matching push -q origin')
+    check('git -c push.default=matching push: denied as a config write', r?.deny?.includes('git config key'), JSON.stringify(r))
+    const c = await run('git config push.default matching')
+    check('git config push.default matching: denied', c?.deny?.includes('git config key'), JSON.stringify(c))
+    const f = await run('git -c core.fsmonitor=./watch.sh status')
+    check('git -c core.fsmonitor: denied', f?.deny?.includes('git config key'), JSON.stringify(f))
+    check('... origin/main unchanged, push.default unset', refOf('origin.git', 'main') === w.main && spawnSync('git', ['-C', APP, 'config', 'push.default'], { env, encoding: 'utf8' }).stdout.trim() === '')
+  }
+  {
+    // A link made before the line runs (by an earlier line, or found in the tree) is judged by where it lands; a
+    // link made on the line to a protected path is refused itself. Any case, and a submodule's own git dir.
+    const w = world()
+    const cfg0 = fs.readFileSync(APP + '/.git/config', 'utf8')
+    const l1 = await run('ln -s .git g')
+    check('ln -s .git g: denied (a link to the repo git state)', l1?.deny?.includes('may not write'), JSON.stringify(l1))
+    sh('ln -s .git g && ln -s .git/config cfg && ln -s .git/hooks/pre-push dangling', APP)
+    const a = await run("printf '[alias]\\n\\tp = push\\n' >> g/config")
+    check('>> g/config through a linked .git dir: denied', a?.deny?.includes('may not write'), JSON.stringify(a))
+    const b = await run('echo x | tee -a cfg')
+    check('tee -a cfg, cfg a link to .git/config: denied', b?.deny?.includes('may not write'), JSON.stringify(b))
+    const d = await run('echo x > dangling')
+    check('a write through a link that leads nowhere: denied', d?.deny?.includes('leads nowhere'), JSON.stringify(d))
+    const c = await run("printf '[alias]\\n\\tp = push\\n' >> .GIT/CONFIG")
+    check('>> .GIT/CONFIG: denied', c?.deny?.includes('may not write'), JSON.stringify(c))
+    check('... .git/config untouched', fs.readFileSync(APP + '/.git/config', 'utf8') === cfg0)
+    const n = await run('echo x > notes-link-ok.md')
+    check('control: an ordinary new file is still allowed', !n?.deny && n.exit === 0, JSON.stringify(n))
+    sh('git -c protocol.file.allow=always submodule -q add ' + T + '/origin.git sub && git commit -qm sub', APP)
+    const m = await run("printf '[alias]\\n\\tp = push\\n' >> .git/modules/sub/config")
+    check(">> .git/modules/sub/config: denied (a submodule's config)", m?.deny?.includes('may not write'), JSON.stringify(m))
+    const h = await run("printf '#!/bin/sh\\n' > .git/modules/sub/hooks/pre-commit")
+    check('> .git/modules/sub/hooks/pre-commit: denied', h?.deny?.includes('may not write') && !fs.existsSync(APP + '/.git/modules/sub/hooks/pre-commit'), JSON.stringify(h))
+    check('... origin/main unchanged', refOf('origin.git', 'main') === w.main)
+  }
+  {
+    // What guards the base on GitHub is the person's: branch protection, the default branch, workflow runs. The
+    // lines are judged against the real repo; none is run (the next step is a stub, so nothing reaches the network).
+    world()
+    const ran = []
+    const stub = async (e) => { ran.push(e.command); return { result: 'stub', exit: 0 } }
+    for (const line of ['gh api -X DELETE repos/o/r/branches/main/protection', 'gh api -X PATCH repos/o/r -f default_branch=agt/x', 'gh workflow run release.yml', 'gh repo edit --default-branch agt/x']) {
+      const r = await bashCall($, { command: line }, stub)
+      check(line + ': denied', r?.deny === DENY_INTEGRATION, JSON.stringify(r))
+    }
+    check('... and none of them ran', ran.length === 0, JSON.stringify(ran))
+  }
+  {
+    // A git alias from config is looked up in the repo the call targets and its expansion judged: the everyday
+    // `pom = push origin HEAD:main` in the person's global config, a `!` shell alias, one reached through -C.
+    const w = world()
+    const glob = fs.readFileSync(T + '/gitconfig', 'utf8')
+    fs.writeFileSync(T + '/gitconfig', glob + '[alias]\n\tpom = push origin HEAD:main\n\tship = !git push -q origin HEAD:main\n\tst = status\n\tco = checkout\n')
+    try {
+      const plain = await run('git push -q origin HEAD:main')
+      check('spelled-out push to main: denied', plain?.deny?.includes('git push to main'), JSON.stringify(plain))
+      const pom = await run('git pom')
+      check('git pom (alias.pom = push origin HEAD:main in ~/.gitconfig): denied', pom?.deny?.includes('git push to main'), JSON.stringify(pom))
+      const ship = await run('git ship')
+      check('git ship (a ! alias that pushes main): denied', ship?.deny?.includes('git push to main'), JSON.stringify(ship))
+      const viaC = await run('cd .. && git -C app pom')
+      check('cd .. && git -C app pom: denied', viaC?.deny?.includes('git push to main'), JSON.stringify(viaC))
+      const co = await run('git co -q main && git push -q origin HEAD')
+      check('an alias that checks out main, then push HEAD: denied (HEAD moved)', co?.deny?.includes('switches branches'), JSON.stringify(co))
+      const st = await run('git st --short')
+      check('control: git st (alias of status) runs', !st?.deny && st.exit === 0, JSON.stringify(st))
+      fs.writeFileSync(APP + '/package.json', JSON.stringify({ scripts: { ship: 'git pom' } }))
+      const viaPkg = await run('npm run ship')
+      check('npm run ship, its script git pom: denied', viaPkg?.deny?.includes('then git pom'), JSON.stringify(viaPkg))
+      fs.rmSync(APP + '/package.json')
+      const typo = await run('git nosuchword')
+      check('control: a word that is no alias is left to git', !typo?.deny, JSON.stringify(typo))
+      check('... origin/main unchanged', refOf('origin.git', 'main') === w.main)
+    } finally {
+      fs.writeFileSync(T + '/gitconfig', glob)
+    }
+  }
+  {
+    // The chain: a link made on one line, an alias written through it on the next, the alias run on a third.
+    // Each line is judged on its own; each must be refused, and origin/main must not move.
+    const w = world()
+    const cfg0 = fs.readFileSync(APP + '/.git/config', 'utf8')
+    const l1 = await run('ln -s .git/config cfg')
+    check('chain line 1, ln -s .git/config cfg: denied', l1?.deny?.includes('may not write'), JSON.stringify(l1))
+    sh('ln -s .git/config cfg', APP) // as if the link were there before the run
+    const l2 = await run("printf '[alias]\\n\\tyolo = push origin HEAD:main\\n' >> cfg")
+    check('chain line 2, an alias appended through the link: denied', l2?.deny?.includes('may not write'), JSON.stringify(l2))
+    check('... .git/config has no yolo', fs.readFileSync(APP + '/.git/config', 'utf8') === cfg0)
+    sh("printf '[alias]\\n\\tyolo = push origin HEAD:main\\n' >> .git/config", APP) // as if it were written before the run
+    const l3 = await run('git yolo')
+    check('chain line 3, git yolo: denied as a push to main', l3?.deny?.includes('git push to main'), JSON.stringify(l3))
+    check('... origin/main unchanged', refOf('origin.git', 'main') === w.main)
+  }
+  {
+    // git submodule foreach runs its line in another repo: a push there is judged too.
+    const w = world()
+    sh('git -c protocol.file.allow=always submodule -q add ' + T + '/origin.git sub && git commit -qm sub', APP)
+    const f = await run("git submodule foreach -q 'git push -q origin HEAD:main'")
+    check('git submodule foreach push to main: denied', f?.deny?.includes('git push to main'), JSON.stringify(f))
+    const g = await run("git submodule foreach 'git push -q origin HEAD'")
+    check('git submodule foreach push of HEAD: denied (HEAD there cannot be read)', !!g?.deny, JSON.stringify(g))
+    const ok = await run("git submodule foreach -q 'git status --short'")
+    check('control: git submodule foreach status runs', !ok?.deny && ok.exit === 0, JSON.stringify(ok))
+    check('... origin/main unchanged', refOf('origin.git', 'main') === w.main)
+  }
+  {
+    // Package scripts are read with their pre/post scripts and followed into the scripts, modules and imports
+    // they run; what the guard cannot find refuses. Each pushing form is denied and origin/main does not move.
+    const w = world()
+    fs.mkdirSync(APP + '/tools', { recursive: true })
+    fs.writeFileSync(APP + '/package.json', JSON.stringify({ scripts: { preship: 'git push -q origin HEAD:main', ship: 'echo shipping', a: 'npm run b', b: 'sh ./tools/push.sh', rel: 'node tools/rel.mjs', gone: 'node tools/gone.mjs', mod: 'python3 -m tools.rel', hello: 'echo hello' } }))
+    fs.writeFileSync(APP + '/tools/push.sh', '#!/bin/sh\ngit push -q origin HEAD:main\n')
+    fs.writeFileSync(APP + '/tools/rel.mjs', "import { run } from './lib.js'\nrun()\n")
+    fs.writeFileSync(APP + '/tools/lib.js', "import { execSync } from 'node:child_process'\nexport const run = () => execSync('git push -q origin HEAD:main')\n")
+    fs.writeFileSync(APP + '/tools/__init__.py', '')
+    fs.writeFileSync(APP + '/tools/rel.py', 'import subprocess\nsubprocess.run(["git", "push", "-q", "origin", "HEAD:main"])\n')
+    for (const [line, text] of [
+      ['npm run ship', 'its preship script'],
+      ['npm run a', 'tools/push.sh runs a script that calls git push'],
+      ['npm run rel', 'imports ./lib.js, which calls git push'],
+      ['node tools/rel.mjs', 'imports ./lib.js, which calls git push'],
+      ['npm run gone', 'cannot read'],
+      ['npm run mod', 'runs a module that calls git push'],
+      ['python3 -m tools.rel', 'runs a module that calls git push'],
+      ['python3 -m tools.nowhere', 'cannot find'],
+    ]) {
+      const r = await run(line)
+      check(line + ': denied', r?.deny?.includes(text), JSON.stringify(r))
+    }
+    check('... origin/main unchanged', refOf('origin.git', 'main') === w.main)
+    if (spawnSync('python3', ['-c', 'pass'], { env }).status === 0) {
+      const std = await run('python3 -m json.tool --help')
+      check('control: python3 -m json.tool (the standard library) runs', !std?.deny && std.exit === 0, JSON.stringify(std))
+    }
+    const hello = await run('npm run hello')
+    check('control: npm run hello is not refused', !hello?.deny, JSON.stringify(hello))
   }
   {
     // Controls below auto: the run's own branch and ordinary writes still pass.

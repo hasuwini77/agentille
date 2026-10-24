@@ -1,11 +1,13 @@
 // agentille guard: what a run's Bash and file-write calls may do on their own, and which worktrees a run made.
-// The guard is split across three modules; this file wires the hooks and re-exports their public surface, so
-// every existing import of ./guard.js keeps working.
+// The guard is split across four modules; this file wires the hooks and re-exports their public surface, so
+// every existing import of ./guard.js keeps working. Imports run one way: guard.js → guard-policy.js →
+// guard-lex.js → guard-steps.js, never back.
 //
+//   guard-policy.js — the policy: the integration mode for the repo a command targets, and the judgements on
+//                     pushes, merges, tags, releases, ref writes, scripts and recipes.
 //   guard-lex.js    — the shell lexer: reads a line the way the shell would (words, quotes, $( ), heredocs,
 //                     wrappers, interpreters, the variables set on the line) and turns it into candidates.
-//   guard-policy.js — the policy: the integration mode for the repo a command targets, and the judgements on
-//                     pushes, merges, tags, releases, ref writes, the GitHub API, scripts and recipes.
+//   guard-steps.js  — a leaf with the gh and curl/wget readers (merges, releases, API writes).
 //   guard-own.js    — worktree ownership: which worktrees a run made, so the cleaner touches only those.
 //
 //   integration — `auto` (merge, tag and push with no human step) holds only where the person's own
@@ -30,19 +32,20 @@ import { SPAWN_ROLE, splitName } from './panes.js'
 import { Proofs, moment, inFlight, runHeld, flight, setRunProfile } from './proofs.js'
 import { reportRun } from './drawing.js'
 import { Runs, completeReport } from './dispatch.js'
-import { joinPath, protectedPath } from './guard-lex.js'
-import { DENY_UNREAD, denyProtected, guardLine, integrationAllowed, readProfile } from './guard-policy.js'
+import { joinPath } from './guard-lex.js'
+import { DENY_UNREAD, denyProtected, guardLine, integrationAllowed, readProfile, resolvedProtected } from './guard-policy.js'
 import { WT_SCRIPT, listTrees, newTrees, claimedTrees, scriptTrees, scriptSlugs, worktreeAdds, saveOwned, runOf } from './guard-own.js'
 
 // Re-exports: every name ./guard.js used to carry still resolves here.
-export { protectedPath, SHELLS, commands, splitCommands, gitCall, commandSteps, joinPath, MENTIONS_TOOL, SCRIPT_RISK, MAKE_RISK } from './guard-lex.js'
-export { DENY_INTEGRATION, DENY_PUSH, DENY_LOCAL, DENY_UNREAD, denyHidden, denyProtected, judgePush, judgeRef, judgeLocal, integrationIn, integrationOf, integrationAllowed, guardLine, makeRecipe, normUrl, normSlug, sameRemote, capsOf } from './guard-policy.js'
+export { protectedPath, SHELLS, commands, splitCommands, gitCall, commandSteps, lineMovesHead, joinPath, MENTIONS_TOOL, SCRIPT_RISK, MAKE_RISK } from './guard-lex.js'
+export { ghStep, httpStep } from './guard-steps.js'
+export { DENY_INTEGRATION, DENY_PUSH, DENY_LOCAL, DENY_UNREAD, denyHidden, denyProtected, judgePush, judgeRef, judgeLocal, resolvedProtected, integrationIn, integrationOf, integrationAllowed, guardLine, makeRecipe, normUrl, normSlug, sameRemote, capsOf } from './guard-policy.js'
 export { OWNED_TTL_MS, worktreeAdds, newTrees, WT_SCRIPT, scriptTrees, scriptSlugs, claimedTrees, recordTrees, parseOwned, Worktrees, worktreesFile, saveOwned, ownedWorktrees, forgetOwned } from './guard-own.js'
 
 // ── who is a run ─────────────────────────────────────────────────────────────
-// An agentille subagent, a worker pane (not a /agt-spawn pane: that is the person's own task), or the lead
-// on an /agt turn, from the turn its run names an id until that run's ✓/✗ card (proofs.js runHeld; no clock
-// or typed-reply count ends it), or while a run with no id is in flight (routing.js runInFlight, on the clocks
+// An agentille subagent, a worker pane (not a /agt-spawn pane: that is the person's own task), or the lead from
+// its typed /agt until that run's ✓/✗ card (proofs.js runHeld; no clock or typed-reply count ends it, and a run
+// that never names an id is held the same way), or while a run is in flight (routing.js runInFlight, on the clocks
 // proofs.js moment($) read): a question typed mid-run does not switch the guard off. A plain session has none.
 export function fromRun(e, at) {
   if (e.agentId) {
@@ -91,13 +94,24 @@ export async function loadRunProfile($) {
 
 // ── the non-Bash write hooks ─────────────────────────────────────────────────
 // A write (Write, Edit, MultiEdit, NotebookEdit) to the trust root or the repo's own git state, refused below
-// auto exactly as a Bash write is. Returns the deny reason, or null to let it through.
+// auto exactly as a Bash write is. Returns the deny reason, or null to let it through. Only a run is judged, as
+// for Bash; inside one, a judgement that throws refuses the write instead of letting it through unread.
+export const denyUnjudged = (path) => 'The guard could not judge this write to ' + String(path) + ', so it refused it. Retry, or make the change yourself.'
+
 async function editDeny($, e) {
   const path = e.file_path ?? e.notebook_path ?? e.path ?? null
-  if (!path || !fromRun(e, await moment($))) return null
+  if (path == null || !fromRun(e, await moment($))) return null
+  try {
+    return await judgeEdit($, path)
+  } catch {
+    return denyUnjudged(path)
+  }
+}
+
+async function judgeEdit($, path) {
   const cwd = await $.session.cwd().catch(() => null)
   const abs = path.startsWith('/') ? joinPath('/', path) : !/[$`~]/.test(path) && cwd ? joinPath(cwd, path) : null
-  const lbl = protectedPath(path, abs)
+  const lbl = await resolvedProtected($, path, abs)
   if (!lbl) return null
   const mode = await integrationAllowed($, cwd).catch(() => 'pr')
   return mode === 'auto' ? null : denyProtected(lbl)
@@ -105,7 +119,7 @@ async function editDeny($, e) {
 
 // The Write hook: refuse a protected write; else let it through, then observe a run's report write for the band.
 export async function writeCall($, e, next) {
-  const deny = await editDeny($, e).catch(() => null)
+  const deny = await editDeny($, e)
   if (deny) return { deny }
   const r = await next(e)
   if (!e.agentId && reportRun(e.file_path)) await completeReport($, e.file_path).catch(() => {})
@@ -114,6 +128,6 @@ export async function writeCall($, e, next) {
 
 // The Edit / MultiEdit / NotebookEdit hook: refuse a protected write, else let it through.
 export async function editCall($, e, next) {
-  const deny = await editDeny($, e).catch(() => null)
+  const deny = await editDeny($, e)
   return deny ? { deny } : next(e)
 }

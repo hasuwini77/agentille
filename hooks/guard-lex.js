@@ -3,35 +3,52 @@
 // variables set on the line; then turns a line into the simple commands it runs and each command into an
 // integration candidate (commandSteps/codeStep). Policy (guard-policy.js) judges those candidates.
 import { Profile } from './profile.js'
-import { ghStep, httpStep } from './guard-policy.js'
+import { base, ghStep, httpStep } from './guard-steps.js'
+import { ELSEWHERE, NPM_SCRIPT_ALIASES, VALUE_FLAGS, pythonModule } from './script-refs.js'
+
+export { base }
 
 
 // The trust root and the repo's own git state: a write to any of these below auto is refused, because a run could
 // use it to lift its own ceiling (rewrite ~/.agentille/profile.json), run code (a git hook) or publish (a ref).
 // `raw` is the path as the line wrote it (so `~`, `$HOME`, a relative `.git/config` are seen); `abs` its resolved
-// form. Returns a short label for the deny message, or null.
-export function protectedPath(raw, abs) {
+// form (the guard also passes where a link lands, guard-policy.js resolvedProtected); `homes` the home folder's
+// spellings. Matching ignores case: APFS and NTFS open `.GIT/CONFIG` as `.git/config`. A submodule's own git dir
+// (`.git/modules/<name>/…`, nested at any depth) counts as the repo's. Returns a short label for the deny
+// message, or null.
+export function protectedPath(raw, abs, homes = [Profile.home]) {
   const r = String(raw ?? '')
   const a = String(abs ?? '')
   if (/\$\{?GIT_DIR\}?/.test(r)) return '$GIT_DIR'
-  if (/^~\/\.agentille(\/|$)/.test(r)) return '~/.agentille'
-  if (/^(\$HOME|\$\{HOME\})\/\.agentille(\/|$)/.test(r)) return '~/.agentille'
-  if (Profile.home && (a === Profile.home + '/.agentille' || a.startsWith(Profile.home + '/.agentille/'))) return '~/.agentille'
+  if (/^~\/\.agentille(\/|$)/i.test(r)) return '~/.agentille'
+  if (/^(\$HOME|\$\{HOME\})\/\.agentille(\/|$)/i.test(r)) return '~/.agentille'
+  const al = a.toLowerCase()
+  for (const h of homes) {
+    const t = String(h ?? '').toLowerCase().replace(/\/+$/, '')
+    if (t && (al === t + '/.agentille' || al.startsWith(t + '/.agentille/'))) return '~/.agentille'
+  }
   const git = (s) =>
-    /(^|\/)\.git\/config$/.test(s) ? '.git/config'
-    : /(^|\/)\.git\/hooks(\/|$)/.test(s) ? '.git/hooks'
-    : /(^|\/)\.git\/info(\/|$)/.test(s) ? '.git/info'
-    : /(^|\/)\.git\/refs(\/|$)/.test(s) ? '.git/refs'
-    : /(^|\/)\.git\/packed-refs$/.test(s) ? '.git/packed-refs'
-    : /(^|\/)\.git$/.test(s) ? 'the worktree .git file'
+    /(^|\/)\.git\/config$/i.test(s) ? '.git/config'
+    : /(^|\/)\.git\/hooks(\/|$)/i.test(s) ? '.git/hooks'
+    : /(^|\/)\.git\/info(\/|$)/i.test(s) ? '.git/info'
+    : /(^|\/)\.git\/refs(\/|$)/i.test(s) ? '.git/refs'
+    : /(^|\/)\.git\/packed-refs$/i.test(s) ? '.git/packed-refs'
+    : MODULE_GIT.test(s) ? 'a submodule\'s .git/modules config, hooks or refs'
+    : /(^|\/)\.git$/i.test(s) ? 'the worktree .git file'
     : null
   return git(a) ?? git(r)
 }
 
+// A submodule's git dir under the repo's: its config, hooks and refs (`.git/modules/a/modules/b/config` too).
+const MODULE_GIT = /(^|\/)\.git\/modules\/(?:[^/]+\/)+?(config$|hooks(\/|$)|refs(\/|$)|packed-refs$)/i
 
-// git config keys a run may not set below auto: aliases (rename a step past the reader), the hooks path (run code),
-// a remote's push URL or refspec, URL rewriting, receive.* — anything that changes where or how a push lands.
-const PROTECT_CFG = /^(alias\.|core\.hookspath$|remote\..*\.(push|pushurl)$|url\..*\.(push)?insteadof$|receive\.)/i
+
+// git config keys a run may not set below auto: aliases (rename a step past the reader), the hooks path, the
+// fsmonitor hook and the ssh command (each runs code), a remote's push URL or refspec, push.default, URL rewriting,
+// receive.* — anything that runs code or changes where or how a push lands.
+const PROTECT_CFG = /^(alias\.|core\.hookspath$|core\.fsmonitor$|core\.sshcommand$|push\.default$|remote\..*\.(push|pushurl)$|url\..*\.(push)?insteadof$|receive\.)/i
+
+const CFG_WHAT = 'a git config key (core.hooksPath, core.fsmonitor, core.sshCommand, push.default, remote push, URL rewriting or receive.*)'
 
 
 // Whether a `git config …` writes a value (as opposed to reading or unsetting one): a `set` verb, `--add`/
@@ -97,6 +114,24 @@ function writeTargets(words) {
     return scriptGiven ? pos : pos.slice(1)
   }
   return out
+}
+
+
+// `ln` and `mv` → the paths they link to or move away (every positional but the destination, or all of them
+// with -t).
+function linkSources(words) {
+  const p = base(words[0])
+  if (p !== 'ln' && p !== 'mv') return []
+  const pos = []
+  let t = false
+  for (let i = 1; i < words.length; i++) {
+    const w = words[i]
+    if (w === '-t' || w === '--target-directory') { t = true; i++; continue }
+    if (/^--target-directory=/.test(w)) { t = true; continue }
+    if (['-S', '--suffix'].includes(w)) { i++; continue }
+    if (!w.startsWith('-')) pos.push(w)
+  }
+  return t ? pos : pos.slice(0, -1)
 }
 
 
@@ -233,8 +268,6 @@ function lex(s, at = 0, closer = null, depth = 0) {
   return { cmds, end: i }
 }
 
-
-export const base = (w) => String(w ?? '').split('/').pop()
 
 export const ASSIGN = /^([A-Za-z_][A-Za-z0-9_]*)=(.*)$/s
 
@@ -399,11 +432,31 @@ export function splitCommands(line) {
 // variable, which cannot be read here. `cfg`: the config keys -c / --config-env set for this one call.
 const GIT_VALUE_OPTS = new Set(['-C', '-c', '--git-dir', '--work-tree', '--namespace', '--exec-path', '--config-env', '--super-prefix'])
 
+// git's own commands (its builtins and the commands it ships as scripts). git runs one of these whatever an
+// alias of the same name says, so only another word is looked up as an alias.
+const GIT_COMMANDS = new Set(('add am annotate apply archive backfill bisect blame branch bugreport bundle cat-file check-attr check-ignore ' +
+  'check-mailmap check-ref-format checkout checkout--worker checkout-index cherry cherry-pick clean clone column commit commit-graph ' +
+  'commit-tree config count-objects credential credential-cache credential-cache--daemon credential-store describe diagnose diff ' +
+  'diff-files diff-index diff-pairs diff-tree difftool fast-export fast-import fetch fetch-pack fmt-merge-msg for-each-ref ' +
+  'for-each-repo format-patch fsck fsck-objects fsmonitor--daemon gc get-tar-commit-id grep hash-object help hook index-pack init ' +
+  'init-db interpret-trailers log ls-files ls-remote ls-tree mailinfo mailsplit maintenance merge merge-base merge-file merge-index ' +
+  'merge-ours merge-recursive merge-recursive-ours merge-recursive-theirs merge-subtree merge-tree mktag mktree multi-pack-index mv ' +
+  'name-rev notes pack-objects pack-redundant pack-refs patch-id pickaxe prune prune-packed pull push range-diff read-tree rebase ' +
+  'receive-pack reflog refs remote remote-ext remote-fd repack replace replay rerere reset restore rev-list rev-parse revert rm ' +
+  'send-pack shortlog show show-branch show-index show-ref sparse-checkout stage stash status stripspace submodule--helper switch ' +
+  'symbolic-ref tag unpack-file unpack-objects update-index update-ref update-server-info upload-archive upload-archive--writer ' +
+  'upload-pack var verify-commit verify-pack verify-tag version whatchanged worktree write-tree submodule subtree filter-branch ' +
+  'mergetool difftool--helper request-pull send-email instaweb quiltimport web--browse http-push http-fetch imap-send daemon shell ' +
+  'svn p4 cvsimport cvsexportcommit cvsserver archimport gui citool merge-octopus merge-one-file merge-resolve sh-setup sh-i18n ' +
+  'mergetool--lib remote-http remote-https remote-ftp remote-ftps pull-request').split(' '))
+
+
 export function gitCall(words) {
   if (!['git', 'hub'].includes(base(words[0]))) return null
   let dir = null
   let unknown = false
   const cfg = []
+  const loc = [] // the options that place the repo (-C, --git-dir, --work-tree) as argv words: an alias lookup reuses them
   let i = 1
   while (i < words.length && words[i].startsWith('-')) {
     const w = words[i]
@@ -411,6 +464,7 @@ export function gitCall(words) {
     const k = w.startsWith('--') && eq > 0 ? w.slice(0, eq) : w
     if (GIT_VALUE_OPTS.has(k)) {
       const v = k === w ? words[i + 1] ?? '' : w.slice(eq + 1)
+      if (k === '-C' || k === '--git-dir' || k === '--work-tree') loc.push(k, v)
       if (k === '-C') dir = dir ? joinPath(dir, v) : v
       if (k === '--work-tree' || k === '--git-dir') dir = k === '--git-dir' ? v.replace(/\/\.git\/?$/, '') || v : v
       if ((k === '-C' || k === '--work-tree' || k === '--git-dir') && /[$`~]/.test(v)) unknown = true
@@ -418,7 +472,7 @@ export function gitCall(words) {
       i += k === w ? 2 : 1
     } else i++
   }
-  return i < words.length ? { sub: words[i], args: words.slice(i + 1), dir, unknown, cfg } : null
+  return i < words.length ? { sub: words[i], args: words.slice(i + 1), dir, unknown, cfg, loc } : null
 }
 
 
@@ -599,7 +653,7 @@ function riskyCode(code) {
 }
 
 // Interpreter code that names the trust root or the repo's own git state: it may write them directly.
-const PROTECT_IN_CODE = /\.agentille\/|\.git\/config|\.git\/hooks|\.git\/refs|\.git\/info|packed-refs/
+const PROTECT_IN_CODE = /\.agentille\/|\.git\/config|\.git\/hooks|\.git\/refs|\.git\/info|packed-refs|\.git\/modules\/\S*(config|hooks|refs)/i
 
 // A script that pushes, merges, tags or releases: per line, git with push/merge/tag/send-pack/update-ref, gh or
 // hub with a merge, release, api or alias, curl or wget at GitHub.
@@ -623,30 +677,67 @@ const OPAQUE_RUNNER = /^(npx|bunx|mise|docker|docker-compose|podman|podman-compo
 
 
 // A package-manager invocation → { script, what } to read, { deny, what } to refuse, or null when it is not a
-// script-running form (install, a builtin, a bare shorthand): those are left alone.
+// script-running form (install, a builtin): those are left alone. `npm test`/`npm start` (and pnpm's and yarn's)
+// run that script; `pnpm|yarn|bun <name>` runs the script of that name when there is one (`optional`: no such
+// script, or no package.json, means a bin or a command the manager refuses itself). `bun run <file>` runs a file.
+// A script run pointed at another package folder (--prefix, --filter, -w, -r, …) is refused: the guard cannot
+// tell which package.json it reads.
+const PM_BUILTINS = new Set(('add remove rm uninstall un install i ci isntall in update up upgrade upgrade-interactive why outdated list ls ' +
+  'link ln unlink init create publish pack audit config c get set store exec dlx x import rebuild rb prune info view licenses patch ' +
+  'patch-commit patch-remove setup env deploy fetch server root bin cache global help version login logout whoami workspaces ' +
+  'workspace dedupe plugin node policies constraints explain npm pm repl completions build test').split(' '))
+
+// Package-folder flags that take a value (npm -w app, pnpm --filter app, --prefix dir).
+const PM_FOLDER_VALUE = new Set(['--prefix', '-C', '--dir', '--cwd', '--filter', '-F', '--workspace', '-w', '--location'])
+const isScriptWord = (w) => w === 'run' || w === 'run-script' || Object.hasOwn(NPM_SCRIPT_ALIASES, w)
+
 function pkgScript(p, args) {
-  const pos = args.filter((x) => !x.startsWith('-'))
+  // Words after `--` are the script's own arguments (`npm test -- -g adds`), never the manager's flags.
+  const dd = args.indexOf('--')
+  const own = dd < 0 ? args : args.slice(0, dd)
+  // The positionals, a flag's value left out (`npm --loglevel silent run x`, `npm -w app run x`): a word after a
+  // package-folder flag may be its value or the subcommand, so both readings are tried below.
+  const pos = []
+  for (let i = 0; i < own.length; i++) {
+    if (VALUE_FLAGS.has(own[i]) || (PM_FOLDER_VALUE.has(own[i]) && /^[^-]/.test(own[i + 1] ?? '') && !isScriptWord(own[i + 1]))) i++
+    else if (!own[i].startsWith('-')) pos.push(own[i])
+  }
   const sub = pos[0]
   if (sub === 'exec' || sub === 'dlx' || sub === 'x') return { deny: true, what: p + ' ' + sub + ' runs a package the guard cannot read' }
-  if ((sub === 'run' || sub === 'run-script') && pos[1]) return { script: pos[1], what: p + ' run ' + pos[1] }
-  return null
+  let r = null
+  if ((sub === 'run' || sub === 'run-script') && pos[1]) {
+    if (p === 'bun' && (pos[1].includes('/') || /\.[cm]?[jt]sx?$/.test(pos[1]))) return { file: pos[1], what: 'bun run ' + pos[1] }
+    r = { script: pos[1], what: p + ' run ' + pos[1] }
+  } else if (sub !== undefined && p !== 'bun' && Object.hasOwn(NPM_SCRIPT_ALIASES, sub)) r = { script: NPM_SCRIPT_ALIASES[sub], what: p + ' ' + sub, optional: true }
+  else if (sub !== undefined && p === 'bun' && (sub.includes('/') || /\.[cm]?[jt]sx?$/.test(sub))) return { file: sub, what: 'bun ' + sub }
+  else if (sub !== undefined && p !== 'npm' && !PM_BUILTINS.has(sub)) r = { script: sub, what: p + ' ' + sub, optional: true }
+  if (r && own.some((a) => ELSEWHERE.has(a.split('=')[0]))) return { deny: true, what: p + ' ' + own.join(' ') + ' runs a script in another package folder, which the guard cannot place' }
+  return r
 }
 
 
 // A run of code the reader cannot follow: an interpreter's code string → { kind: 'hidden' } when it reaches a
 // tool or spawns a process; a script file, a sourced file, a package script or a make target → { kind: 'file' }
 // for guardLine to read; an opener it cannot introspect → { kind: 'hidden' }.
-function codeStep(w, here, stdin = null, piped = false) {
+function codeStep(w, here, stdin = null, piped = false, env = null) {
   const p = base(w[0])
   const at = (f) => (/[$`]/.test(f) ? null : f.startsWith('~/') ? null : f.startsWith('/') ? joinPath('/', f) : here ? joinPath(here, f) : null)
-  const file = (f, what) => ({ kind: 'file', how: 'script', what, path: at(f), dir: here, slug: null })
+  // `lang`: how the file is read past its own text (node: its imports; sh: the scripts it runs); null reads the
+  // shebang.
+  const file = (f, what, lang = null) => ({ kind: 'file', how: 'script', what, path: at(f), dir: here, slug: null, lang })
   const hidden = (what) => ({ kind: 'hidden', what, dir: here, slug: null })
   const protect = (what) => ({ kind: 'protected', what, dir: here, slug: null })
   // Interpreter code → a protected-write deny (it names the trust root or git state), a hidden deny (it reaches
   // a tool or spawns), or null.
   const judgeCode = (code, label) => (PROTECT_IN_CODE.test(String(code ?? '')) ? protect('the trust root or repo git state (named in ' + p + ' ' + label + ')') : riskyCode(code) ? hidden(p + ' ' + label + ' runs code that reaches git, gh or curl') : null)
   const ik = interpKey(p)
-  if (ik) {
+  // python -m pkg.mod runs a module found on python's path, not a file named on the line.
+  const mod = ik && /^(python|pypy)/.test(ik) ? pythonModule(w.slice(1)) : null
+  if (mod !== null) return { kind: 'file', how: 'module', what: p + ' -m ' + mod, module: mod, interp: w[0], pyPath: env?.get('PYTHONPATH') ?? null, dir: here, slug: null }
+  // bun is a package manager as well as a runtime: `bun run x`, `bun test`, `bun <script>` are its package side.
+  const bunFirst = p === 'bun' ? w.slice(1).find((x) => !x.startsWith('-')) : undefined
+  const bunPkg = bunFirst !== undefined && !w.slice(1).some((x) => INTERP.bun.includes(x)) && !bunFirst.includes('/') && !/\.[cm]?[jt]sx?$/.test(bunFirst)
+  if (ik && !bunPkg) {
     const flags = INTERP[ik]
     const k = w.findIndex((x, n) => n > 0 && (flags.includes(x) || flags.some((f) => f.startsWith('-') && f.length === 2 && x.startsWith(f) && x.length > 2 && !x.startsWith('--'))))
     if (k > 0) {
@@ -666,7 +757,8 @@ function codeStep(w, here, stdin = null, piped = false) {
     // No code flag: the first positional is a script file (a pipe into it is data), else it reads code from stdin.
     const pos = w.slice(1).filter((x) => !x.startsWith('-') || x === '-')
     const f = pos.find((x) => x !== '-')
-    if (f && !pos.includes('-')) return /(^|\/)node_modules\//.test(f) ? null : file(f, p + ' ' + f)
+    const lang = ['node', 'nodejs', 'bun'].includes(ik) ? 'node' : /^(python|pypy)/.test(ik) ? 'python' : 'other'
+    if (f && !pos.includes('-')) return /(^|\/)node_modules\//.test(f) ? null : file(f, p + ' ' + f, lang)
     if (stdin != null && !piped) return judgeCode(stdin, 'stdin')
     return hidden(p + ' runs code from stdin that the guard cannot read')
   }
@@ -674,16 +766,17 @@ function codeStep(w, here, stdin = null, piped = false) {
     const hasS = w.some((x, n) => n > 0 && !x.startsWith('--') && /^-[a-z]*s/.test(x))
     for (let i = 1; i < w.length; i++) {
       if (SHELL_VALUE_OPTS.has(w[i])) i++
-      else if (!w[i].startsWith('-') && !w[i].startsWith('+')) return file(w[i], p + ' ' + w[i])
+      else if (!w[i].startsWith('-') && !w[i].startsWith('+')) return file(w[i], p + ' ' + w[i], 'sh')
     }
     return piped || hasS ? hidden(p + ' runs code from stdin that the guard cannot read') : null
   }
-  if ((p === 'source' || w[0] === '.') && w[1]) return file(w[1], w[0] + ' ' + w[1])
+  if ((p === 'source' || w[0] === '.') && w[1]) return file(w[1], w[0] + ' ' + w[1], 'sh')
   if (Object.hasOwn(PKG_FILE, p)) {
     const r = pkgScript(p, w.slice(1))
     if (!r) return null // not a script-running form (install, a builtin): left alone
     if (r.deny) return hidden(r.what)
-    return { kind: 'file', how: 'pkg', what: r.what, script: r.script, path: here ? joinPath(here, PKG_FILE[p]) : null, dir: here, slug: null }
+    if (r.file) return file(r.file, r.what, 'node')
+    return { kind: 'file', how: 'pkg', what: r.what, script: r.script, optional: !!r.optional, path: here ? joinPath(here, PKG_FILE[p]) : null, dir: here, slug: null }
   }
   if (Object.hasOwn(RUNNER_FILE, p)) {
     const t = w.slice(1).filter((x) => !x.startsWith('-'))
@@ -719,7 +812,7 @@ function codeStep(w, here, stdin = null, piped = false) {
 
 
 // A line → its integration candidates, each with the dir it runs in (cd, pushd, git -C, env -C followed).
-export function commandSteps(line, cwd = null) {
+export function commandSteps(line, cwd = null, depth = 0) {
   const out = []
   let here = cwd
   let moved = false // a step before this one switched branches, in any dir
@@ -745,10 +838,20 @@ export function commandSteps(line, cwd = null) {
     }
     const at = c.dir ? (/[$`~]/.test(c.dir) ? null : c.dir.startsWith('/') ? joinPath('/', c.dir) : here && joinPath(here, c.dir)) : here
     // A write into the trust root or the repo's own git state: redirects (`>`/`>>`) and tee/cp/mv/ln/sed -i/… targets.
+    // A target that reads clean is still a `write` candidate: guardLine resolves where it lands (a link made on an
+    // earlier line, `cfg` → .git/config) and judges that path too.
     for (const t of [...(c.redirects ?? []), ...writeTargets(w)]) {
       const abs = t.startsWith('/') ? joinPath('/', t) : !/[$`~]/.test(t) && at ? joinPath(at, t) : null
       const lbl = protectedPath(t, abs)
       if (lbl) out.push({ kind: 'protected', what: lbl, dir: at, slug: null })
+      else if (abs && !/^\/dev(\/|$)/.test(abs) && !/^\d+$/.test(t)) out.push({ kind: 'write', raw: t, path: abs, dir: at, slug: null })
+    }
+    // A link to (or a move of) the trust root or git state: the link is a second name a later write would land
+    // through, the move rewrites it.
+    for (const t of linkSources(w)) {
+      const abs = t.startsWith('/') ? joinPath('/', t) : !/[$`~]/.test(t) && at ? joinPath(at, t) : null
+      const lbl = protectedPath(t, abs)
+      if (lbl) out.push({ kind: 'protected', what: lbl + ' (through ' + p + ')', dir: at, slug: null })
     }
     // A tool whose subcommand and arguments xargs appends from stdin cannot be read: fail closed below auto.
     if (c.viaXargs && ['git', 'gh', 'hub', 'curl', 'wget'].includes(p)) {
@@ -769,7 +872,7 @@ export function commandSteps(line, cwd = null) {
       const k = httpStep(w, at)
       if (k) out.push(k)
     } else if (p !== 'gh' && p !== 'git' && p !== 'hub') {
-      const k = codeStep(w, at, c.stdin, c.piped)
+      const k = codeStep(w, at, c.stdin, c.piped, c.env)
       if (k) out.push(k)
     } else if (p !== 'gh') {
       const g = gitCall(w)
@@ -785,9 +888,27 @@ export function commandSteps(line, cwd = null) {
       if (g.sub === 'tag' && !tagListing(g.args)) out.push({ kind: 'step', what: 'git tag', dir, slug: null })
       // An alias or a hooks-path/push-config key set for one call changes a step past this reader.
       if (keys.some((k) => k.startsWith('alias.'))) out.push({ kind: 'step', what: 'git -c alias.*', dir, slug: null })
-      if (keys.some((k) => PROTECT_CFG.test(k) && !k.startsWith('alias.'))) out.push({ kind: 'protected', what: 'a git config key (core.hooksPath, remote push, URL rewriting or receive.*)', dir, slug: null })
+      if (keys.some((k) => PROTECT_CFG.test(k) && !k.startsWith('alias.'))) out.push({ kind: 'protected', what: CFG_WHAT, dir, slug: null })
+      // A word that is no git command may be an alias from git config (alias.pom = push origin HEAD:main): guardLine
+      // looks it up in the repo the call targets and judges what it expands to.
+      if (!GIT_COMMANDS.has(g.sub) && !g.sub.startsWith('-')) {
+        const genv = {}
+        for (const k of ['GIT_DIR', 'GIT_WORK_TREE']) if (c.env?.get(k)) genv[k] = c.env.get(k)
+        out.push({ kind: 'alias', what: 'git ' + g.sub, sub: g.sub, args: g.args, loc: g.loc, at, unknown: g.unknown || Object.values(genv).some((v) => /[$`~]/.test(v)), genv, dir, slug: null, headMoved: moved, remoteEdited: edited || retarget })
+        continue
+      }
+      // git submodule foreach '<line>': the line runs in each submodule, a repo of its own the guard cannot place.
+      if (g.sub === 'submodule') {
+        const k = g.args.indexOf('foreach')
+        if (k >= 0 && g.args.slice(0, k).every((x) => x.startsWith('-'))) {
+          const rest = g.args.slice(k + 1)
+          while (rest.length && /^(--recursive|-q|--quiet)$/.test(rest[0])) rest.shift()
+          if (rest.length && depth < 3) for (const x of commandSteps(rest.join(' '), null, depth + 1)) out.push({ ...x, what: x.what + ' (in git submodule foreach)' })
+          else if (rest.length) out.push({ kind: 'hidden', what: 'git submodule foreach nests deeper than the guard reads', dir, slug: null })
+        }
+      }
       // `git config <key> <value>` setting a protected key (the hooks path, a remote's push, URL rewriting, …).
-      if (g.sub === 'config' && gitConfigSets(g.args) && g.args.some((x) => PROTECT_CFG.test(x))) out.push(/^alias\./i.test(g.args.find((x) => PROTECT_CFG.test(x)) ?? '') ? { kind: 'step', what: 'git config alias.*', dir, slug: null } : { kind: 'protected', what: 'a git config key (core.hooksPath, remote push, URL rewriting or receive.*)', dir, slug: null })
+      if (g.sub === 'config' && gitConfigSets(g.args) && g.args.some((x) => PROTECT_CFG.test(x))) out.push(/^alias\./i.test(g.args.find((x) => PROTECT_CFG.test(x)) ?? '') ? { kind: 'step', what: 'git config alias.*', dir, slug: null } : { kind: 'protected', what: CFG_WHAT, dir, slug: null })
       // Plumbing that writes a remote with no `push` in sight.
       if (['send-pack', 'http-push'].includes(g.sub) || (g.sub === 'subtree' && g.args[0] === 'push')) out.push({ kind: 'step', what: 'git ' + g.sub, dir, slug: null })
       const ref = refWrite(g)
@@ -803,6 +924,18 @@ export function commandSteps(line, cwd = null) {
     }
   }
   return out
+}
+
+
+// Whether a line moves HEAD in any repo (a checkout, switch, reset, branch -f, gh pr checkout): a push judged after
+// it cannot read the branch from before the line ran. guardLine asks it of an alias's expansion.
+export function lineMovesHead(line) {
+  for (const c of commands(line)) {
+    const g = gitCall(c.words)
+    if (g && movesHead(g)) return true
+    if (base(c.words[0]) === 'gh' && c.words.includes('checkout') && c.words.includes('pr')) return true
+  }
+  return false
 }
 
 

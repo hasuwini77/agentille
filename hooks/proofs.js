@@ -14,7 +14,7 @@
 //   endRun()                   the run's ✓/✗ card: the /agt proof, its --fable, the guard's hold and the run's
 //                              profile snapshot lapse
 //   dropProof()                the first turn after the run is over (routing.js runInFlight): the /agt proof and
-//                              its --fable lapse; the guard's hold (agtRun) waits for the card or the next /agt
+//                              its --fable lapse; the guard's hold (agtHeld, agtRun) waits for the card or the next /agt
 //   rawDone()                  the raw answer went on the clipboard: a later turn is not raw
 //
 // and the gates read them through spawnAllowed, sessionsAllowed, fableProof and runHeld.
@@ -39,6 +39,7 @@ const { s: my, view } = makeStore('proofs.js', {
   agtTypedAt: null,  // $.clock.now() of the newest typed /agt (null: unknown): its run is in flight AGT_INFLIGHT_MAX_MS at most
   agtBirth: false,  // this turn is the typed /agt's own: any run id may open a pane, and the first one is the run's
   agtRun: null,  // the run id the typed /agt named first (a pane or a routed dispatch): later turns open panes only for it, and the lead's Bash guard holds until its card
+  agtHeld: false,  // a typed /agt's run has not printed its card: the lead's Bash guard holds, whether or not the run named an id
   agtProfile: null,  // the ~/.agentille/profile.json read at the typed /agt: the guard never lets a later read raise the run's integration ceiling above it (guard-policy.js capMode)
   agtTypedSince: 0,  // typed prompts other than /agt since the newest typed /agt (the run's grace, AGT_GRACE_TYPED)
   sessionsAsked: false,  // this turn's prompt was typed and asked for sessions of the person's own (open_sessions)
@@ -78,6 +79,7 @@ export function typedPrompt(text, origin, at = NO_MOMENT) {
     my.agtTypedAt = at.clock
     my.agtBirth = true
     my.agtRun = null
+    my.agtHeld = true
   }
   // A worker's proof is its first prompt: the lead already rewrote fable=forced there when nobody typed --fable.
   if (Session.worker && !my.workerProved) {
@@ -129,18 +131,21 @@ export function endRun() {
   my.agtTyped = false
   my.fableTyped = false
   my.agtRun = null
+  my.agtHeld = false
   my.agtProfile = null
 }
 
-// The run is over without a card (a question, an error, an interrupt): the proof lapses the same way. The run id
-// stays: the lead's Bash guard holds until the card or the next typed /agt, past any in-flight window.
+// The run is over without a card (a question, an error, an interrupt): the proof lapses the same way. The hold
+// stays (agtHeld, and the run id if one was named): the lead's Bash guard holds until the card or the next typed
+// /agt, past any in-flight window and any count of typed replies.
 export function dropProof() {
   my.agtTyped = false
   my.fableTyped = false
 }
 
-// The lead's Bash guard holds for a run that named its id and has not printed its card (guard.js fromRun).
-export const runHeld = () => !!my.agtRun
+// The lead's Bash guard holds for a typed /agt's run until its card (guard.js fromRun), whether or not it named an
+// id: a solo or inline run never does.
+export const runHeld = () => !!my.agtRun || my.agtHeld
 
 export function rawDone() {
   my.rawTurn = false

@@ -432,7 +432,7 @@ describe('guard: worktree adds', () => {
 // A run in a session with no pane transport: the ownership list lives in memory.
 // git: per dir, the branch checked out (`current`), its remote URL and its main checkout (default /work/repo).
 type Repo = { current?: string; remote?: string; common?: string; pushurl?: string; upstream?: string; tracking?: string }
-const setup = (on: any, o: { profile?: unknown; repoConfig?: unknown; env?: Record<string, string>; files?: Record<string, string>; repos?: Record<string, Repo>; feat?: boolean; broken?: boolean; aliases?: Record<string, string>; aliasBroken?: boolean; pyFind?: Record<string, string>; hooksPath?: string; remoteHeads?: string[]; originHead?: string } = {}) => {
+const setup = (on: any, o: { profile?: unknown; repoConfig?: unknown; env?: Record<string, string>; files?: Record<string, string>; repos?: Record<string, Repo>; feat?: boolean; broken?: boolean; aliases?: Record<string, string>; aliasBroken?: boolean; pyFind?: Record<string, string>; hooksPath?: string; remoteHeads?: string[]; originHead?: string; followTags?: boolean; tags?: string[]; remoteTags?: string[] } = {}) => {
   const seen: string[][] = []
   const ran: string[] = []
   const git = { made: false, committed: false, feat: false }
@@ -511,6 +511,10 @@ const setup = (on: any, o: { profile?: unknown; repoConfig?: unknown; env?: Reco
     // Every branch the remote has, and the remote's default as origin/HEAD records it (none unless the test sets one).
     if (/ls-remote --heads \S+$/.test(a)) return out((o.remoteHeads ?? []).map((h) => 'abc\trefs/heads/' + h + '\n').join(''))
     if (a.endsWith('symbolic-ref --short refs/remotes/origin/HEAD')) return o.originHead ? out('origin/' + o.originHead + '\n') : out('', 1)
+    // push.followTags, the annotated tags merged into a pushed source, and the tags the remote has.
+    if (a.includes('config --type=bool --get push.followTags')) return o.followTags ? out('true\n') : out('', 1)
+    if (a.includes('for-each-ref --format=%(objecttype) %(refname:short)')) return out((o.tags ?? []).map((t) => 'tag ' + t + '\n').join(''))
+    if (/ls-remote --tags \S+$/.test(a)) return out((o.remoteTags ?? []).map((t) => 'abc\trefs/tags/' + t + '\n').join(''))
     // The upstream of the branch checked out: what the test sets as `tracking`.
     if (a.includes('@{upstream}')) return repos[dir]?.tracking ? out(repos[dir].tracking + '\n') : out('', 128)
     // The hooks folder git runs: core.hooksPath when the test sets one, else the repo's .git/hooks.
@@ -1699,6 +1703,32 @@ describe('guard: lifecycle scripts are read before install, pack and version run
     await typed($)
     expect((await bash($, 'npm ci')).deny).toContain('cannot read')
     expect((await bash($, 'npm --prefix ../other ci')).deny).toContain('another package folder')
+  })
+})
+
+describe('guard: push.followTags makes a branch push a tag push', () => {
+  test('a push that carries an annotated tag the remote lacks is refused; one it has, or no followTags, is not', async ($, on) => {
+    const { ran } = setup(on, { profile: { integration: 'pr' }, followTags: true, tags: ['v1.0.0', 'v1.1.0'], remoteTags: ['v1.0.0'], repos: { '/work/repo': { current: 'agt/x' } } })
+    await boot($)
+    await typed($)
+    expect((await bash($, 'git push -u origin agt/x')).deny).toContain('push.followTags carries v1.1.0')
+    expect((await bash($, 'git push')).deny).toContain('push.followTags carries v1.1.0')
+    expect((await bash($, 'git push --no-follow-tags origin agt/x')).result).toBe('ok')
+    expect(ran).toEqual(['git push --no-follow-tags origin agt/x'])
+  })
+
+  test('every tag already on the remote, or followTags unset: the branch push goes', async ($, on) => {
+    const { ran } = setup(on, { profile: { integration: 'pr' }, followTags: true, tags: ['v1.0.0'], remoteTags: ['v1.0.0'], repos: { '/work/repo': { current: 'agt/x' } } })
+    await boot($)
+    await typed($)
+    expect((await bash($, 'git push -u origin agt/x')).result).toBe('ok')
+    expect(ran).toEqual(['git push -u origin agt/x'])
+  })
+
+  test('setting push.followTags is a protected config write, by git config, -c or the environment', () => {
+    for (const line of ['git config push.followTags true', 'git config --global push.followtags true', 'git -c push.followTags=true push origin agt/x', "GIT_CONFIG_PARAMETERS=\"'push.followTags'='true'\" git push origin agt/x", 'GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=push.followTags GIT_CONFIG_VALUE_0=true git push origin agt/x']) {
+      expect([line, integrationIn(line, onSlice)]).toEqual([line, expect.stringContaining('git config key')])
+    }
   })
 })
 

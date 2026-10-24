@@ -561,6 +561,18 @@ try {
     check('control: npm install with a harmless prepare runs', !ok?.deny && ok.exit === 0, JSON.stringify(ok))
   }
   {
+    // push.followTags sends the annotated tag a release made along with the branch: judged as the tag push it is.
+    const w = world()
+    sh('git config push.followTags true && git tag -a v9.0.0 -m v9', APP)
+    const r = await run('git push -q origin agt/x')
+    check('push.followTags with a new annotated tag, push agt/x: denied', r?.deny?.includes('push.followTags carries v9.0.0'), JSON.stringify(r))
+    check('... no tag and no agt/x on origin, origin/main unchanged', refOf('origin.git', 'refs/tags/v9.0.0') === null && refOf('origin.git', 'agt/x') === null && refOf('origin.git', 'main') === w.main)
+    const c = await run('git config push.followTags false')
+    check('git config push.followTags: denied as a config write', c?.deny?.includes('git config key'), JSON.stringify(c))
+    const ok = await run('git push -q --no-follow-tags origin agt/x')
+    check('control: --no-follow-tags pushes the branch alone', !ok?.deny && refOf('origin.git', 'agt/x') === w.slice && refOf('origin.git', 'refs/tags/v9.0.0') === null, JSON.stringify(ok))
+  }
+  {
     // Controls below auto: the run's own branch and ordinary writes still pass.
     world()
     const ok = await run('git push -q -u origin agt/x')

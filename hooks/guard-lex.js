@@ -65,7 +65,7 @@ const MODULE_GIT = /(^|\/)\.git\/modules\/(?:[^/]+\/)+?(config$|hooks(\/|$)|refs
 // an external diff or textconv, the pager, the editors, a gpg program, a credential helper, a diff or merge tool),
 // an include (it pulls in any of these), a remote's push URL or refspec, push.default, URL rewriting, receive.* —
 // anything that runs code or changes where or how a push lands.
-const PROTECT_CFG = /^(alias\.|core\.(hookspath|fsmonitor|sshcommand|pager|editor|askpass|gitproxy|attributesfile)$|push\.default$|remote\..*\.(push|pushurl)$|url\..*\.(push)?insteadof$|receive\.|filter\.|diff\.external$|diff\..+\.(textconv|command)$|merge\..+\.driver$|pager\.|sequence\.editor$|gpg\.(.+\.)?program$|credential\.(.+\.)?helper$|include\.path$|includeif\..+\.path$|(diff|merge)tool\..+\.cmd$|uploadpack\.packobjectshook$|sendemail\.(.+\.)?(tocmd|cccmd|sendmailcmd)$)/i
+const PROTECT_CFG = /^(alias\.|core\.(hookspath|fsmonitor|sshcommand|pager|editor|askpass|gitproxy|attributesfile)$|push\.default$|remote\..*\.(push|pushurl)$|url\..*\.(push)?insteadof$|receive\.|push\.followtags$|filter\.|diff\.external$|diff\..+\.(textconv|command)$|merge\..+\.driver$|pager\.|sequence\.editor$|gpg\.(.+\.)?program$|credential\.(.+\.)?helper$|include\.path$|includeif\..+\.path$|(diff|merge)tool\..+\.cmd$|uploadpack\.packobjectshook$|sendemail\.(.+\.)?(tocmd|cccmd|sendmailcmd)$)/i
 
 // Keys that name a pager or an editor: setting one to a program that runs nothing else (`-c core.pager=cat`,
 // `-c core.editor=true`, as a run does to keep git from waiting) is allowed.
@@ -86,7 +86,7 @@ function safeCodeVar(k, v) {
 // A config key set to a value: refused below auto, unless it is a viewer set to a harmless program.
 const protectedCfg = (k, v) => PROTECT_CFG.test(k) && !(VIEWER_CFG.test(k) && v !== undefined && SAFE_PROGRAM.test(v))
 
-const CFG_WHAT = 'a git config key that runs code or moves a push (core.hooksPath, core.fsmonitor, core.sshCommand, a filter, diff or merge driver, the pager or editor, a credential helper, an include, push.default, remote push, URL rewriting or receive.*)'
+const CFG_WHAT = 'a git config key that runs code or moves a push (core.hooksPath, core.fsmonitor, core.sshCommand, a filter, diff or merge driver, the pager or editor, a credential helper, an include, push.default, push.followTags, remote push, URL rewriting or receive.*)'
 
 
 
@@ -622,6 +622,7 @@ function parsePush(args) {
       else if (k === '--delete') p.del = true
       else if (['--all', '--branches', '--mirror', '--tags', '--follow-tags', '--prune'].includes(k)) p.bulk = k
       else if (k === '--dry-run') p.dry = true
+      else if (k === '--no-follow-tags') p.noFollow = true
     } else if (!rest && /^-[^-]/.test(a)) {
       for (let j = 1; j < a.length; j++) {
         if (a[j] === 'f') p.force = true
@@ -1132,7 +1133,12 @@ export function commandSteps(line, cwd = null, depth = 0, homes = [], { strict =
       if (['send-pack', 'http-push'].includes(g.sub) || (g.sub === 'subtree' && g.args[0] === 'push')) out.push({ kind: 'step', what: 'git ' + g.sub, dir, slug: null })
       const ref = refWrite(g)
       if (ref) out.push({ kind: 'ref', what: 'git ' + g.sub + ' ' + ref, dir, slug: null, ref })
-      if (g.sub === 'push') out.push({ kind: 'push', what: 'git push', dir, slug: null, push: { ...parsePush(g.args), headMoved: moved, remoteEdited: edited || retarget } })
+      if (g.sub === 'push') {
+        // The variables that decide which config git reads (push.followTags among it), as for an alias.
+        const genv = {}
+        for (const [k, v] of c.env ?? []) if (ALIAS_ENV.test(k)) genv[k] = v
+        out.push({ kind: 'push', what: 'git push', dir, slug: null, genv, push: { ...parsePush(g.args), headMoved: moved, remoteEdited: edited || retarget } })
+      }
       // A merge, reset --hard, rebase or branch -f/-M onto the base branch, judged where it runs.
       const lw = localWrite(g, curBranch)
       if (lw !== undefined) out.push({ kind: 'local', what: 'git ' + g.sub, dir, slug: null, branch: lw, ...(g.sub === 'merge' ? { merge: true, from: mergeSources(g.args) } : {}) })

@@ -781,6 +781,31 @@ async function pushInfo($, c, cwd, cache) {
 }
 
 
+// push.followTags: a push also sends every annotated tag that points into what it pushes and that the remote does
+// not have. Read from the config git reads for this push (the repo's and the global one, with the line's config
+// variables), and worked out locally: the annotated tags merged into each pushed source, less the remote's tags.
+// Returns why the push is a tag push, or null.
+async function followedTags($, c, at, current) {
+  if (!at || c.push.noFollow || c.push.dry) return null
+  const env = Object.keys(c.genv ?? {}).length ? { ...PROBE, env: c.genv } : PROBE
+  const cfg = await $.process.run(['git', '-C', at, 'config', '--type=bool', '--get', 'push.followTags'], env).catch(() => null)
+  if (!cfg || typeof cfg.exitCode !== 'number') return 'git push with push.followTags the guard could not read'
+  if (cfg.exitCode !== 0 || String(cfg.stdout ?? '').trim() !== 'true') return null
+  const srcs = c.push.specs.length ? c.push.specs.map((x) => x.replace(/^\+/, '').split(':')[0]).map((x) => (x === '@' || !x ? 'HEAD' : x)) : [current ? 'refs/heads/' + current : 'HEAD']
+  const tags = new Set()
+  for (const src of srcs) {
+    if (/[$`]/.test(src)) return 'git push of a source the guard cannot read, with push.followTags set'
+    const r = await gitOutOrThrow($, at, 'for-each-ref', '--format=%(objecttype) %(refname:short)', '--merged=' + src, 'refs/tags/')
+    for (const l of r.split('\n')) if (l.startsWith('tag ')) tags.add(l.slice(4).trim())
+  }
+  if (!tags.size) return null
+  const ls = await $.process.run(['git', '-C', at, 'ls-remote', '--tags', c.push.remote ?? 'origin'], PROBE).catch(() => null)
+  if (!ls || ls.exitCode !== 0) return 'git push with push.followTags, to a remote whose tags the guard could not read'
+  const there = new Set(String(ls.stdout ?? '').split('\n').map((l) => /\trefs\/tags\/(.+?)(\^\{\})?$/.exec(l.trim())?.[1]).filter(Boolean))
+  const carried = [...tags].filter((t) => !there.has(t))
+  return carried.length ? 'git push <tag> (push.followTags carries ' + carried.slice(0, 3).join(', ') + ')' : null
+}
+
 // Whether the remote has a branch: 'yes', 'no', or 'unread' when it could not be asked. The remote-tracking ref is
 // asked first, then ls-remote.
 async function remoteHas($, at, remote, name) {
@@ -1012,6 +1037,8 @@ async function judgeCands($, cands, ctx, depth) {
         const other = await othersBranch($, c, n, cwd, { current, guessed: info.guessed, made: ctx.made, cache })
         if (other) return DENY_PUSH + ' Refused: ' + other + '.'
       }
+      const tag = await followedTags($, c, c.dir ?? cwd, c.push.headMoved ? null : info.current)
+      if (tag) return DENY_PUSH + ' Refused: ' + tag + '.'
     }
   }
   return null

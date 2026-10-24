@@ -66,6 +66,10 @@ A message that starts with an `[agt … mode=build …]` header and `RESUME:` me
 
 When only a person can unblock the slice (a missing secret or access, a product decision, a contradiction in the plan), stop and make your first line `BLOCKED: <what you need, one line>`. Never stop on a question you could answer from the repo.
 
+## Integrate (after a gauntlet or duel)
+
+A message that starts with an `[agt … mode=build …]` header and `INTEGRATE:` means a formation held you at `integration: local` and has cleared. Re-attach as in a fix round, run step 7 with the `integration:` in that message on the same branch (push the `branch:` the lead handed you, written out), change no code, then reply in the Output format below; only the head and `INTEGRATION:` change.
+
 ## Context discipline
 
 Quality degrades long before the window fills. Read ranges of big files, never re-read a file you hold, send anything over ~50 lines of output to a log (exit code + tail only), and reference paths and SHAs instead of pasting diffs.

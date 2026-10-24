@@ -453,9 +453,11 @@ describe('guard: worktree ownership and the run-end tidy', () => {
     expect(early.text).toContain('agt/x (no commits of its own)')
     expect(early.text).toContain('agt/other (not opened by this session)')
     expect(seen.some((a) => a.join(' ') === 'git -C /work/repo-other status --porcelain')).toBe(false)
-    expect(seen.some((a) => a.includes('clean'))).toBe(false)
+    // A typed /agt-clean sweeps the run's .env copies even while it keeps the tree (an aborted run's go too).
+    expect(seen.filter((a) => a.includes('clean')).map((a) => a.join(' '))).toEqual(['git -C /work/repo-x clean -fqx -- .env*'])
     // The slice commits and merges; the run ends on its card.
     git.committed = true
+    seen.length = 0
     await card($)
     const sweep = seen.findIndex((a) => a.join(' ') === 'git -C /work/repo-x clean -fqx -- .env*')
     const removed = seen.findIndex((a) => a.join(' ') === 'git -C /work/repo worktree remove /work/repo-x')
@@ -466,6 +468,17 @@ describe('guard: worktree ownership and the run-end tidy', () => {
     expect(seen).not.toContainEqual(['git', '-C', '/work/repo', 'branch', '-d', 'agt/other'])
     // The main checkout's own .env is never swept.
     expect(seen.some((a) => a.join(' ') === 'git -C /work/repo clean -fqx -- .env*')).toBe(false)
+  })
+
+  test('the run-end sweep leaves an owned feat/* tree\'s .env alone; only agt/* trees are swept', async ($, on) => {
+    const { seen, git } = setup(on)
+    await boot($)
+    await typed($)
+    await bash($, 'git worktree add ../repo-x -b agt/x main && git worktree add ../repo-f -b feat/f main')
+    git.committed = true
+    await card($)
+    expect(seen).toContainEqual(['git', '-C', '/work/repo-x', 'clean', '-fqx', '--', '.env*'])
+    expect(seen.some((a) => a.includes('/work/repo-f') && a.includes('clean'))).toBe(false)
   })
 
   test('a session that recorded no worktree removes nothing', async ($, on) => {

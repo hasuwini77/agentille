@@ -42,6 +42,7 @@ export const S = {
   flags: [],  // [{ text, key, at }] from agent results this run
   agtTurn: false,  // this turn is part of an /agt run
   worktrees: [],  // { path, branch, head, run, at } of the worktrees this session's runs made (guard.js), saved to lead-<pane>.worktrees
+  // The typed proofs: written only through proofs.js, read here and through ctx.
   agtTyped: false,  // the person typed /agt and its run is not over (routing.js runInFlight): only then may the lead open worker panes
   fableTyped: false,  // ... and typed --fable on it: only then does a header's fable=forced hold
   agtTypedSince: 0,  // typed prompts other than /agt since the newest typed /agt (the run's grace, AGT_GRACE_TYPED)
@@ -81,6 +82,9 @@ export const S = {
   listBusy: false,
 }
 
+// This session is the lead: no worker env and no agt- name of its own. The one lead/worker predicate.
+export const isLead = () => !S.worker && !S.selfName
+
 // What the modules wired last in register(on) read: live state through getters, since most of
 // it is reassigned.
 export const ctx = {
@@ -89,6 +93,6 @@ export const ctx = {
   get tick() { return S.tick },
   get panes() { return S.panes },
   get routes() { return S.paneRoutes },
-  get isLead() { return !S.worker && !S.selfName },
+  get isLead() { return isLead() },
   onTick: [], // (io, ctx, now) callbacks the redraw ticker calls each period; a module adds its own while registering
 }

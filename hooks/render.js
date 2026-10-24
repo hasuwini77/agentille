@@ -2,7 +2,7 @@
 // band, built from the surface's own elements (`els`) and the state. Nothing here changes state; the one call
 // out is the ↗ button's jump to a pane.
 
-import { S } from './state.js'
+import { S, isLead } from './state.js'
 import { ACCENT, FRAME_COLOR, DONE_COLOR, WIRE_COLOR, INK, hex, colorOf, chip, cast, boardRows, header, leadLine, wireRow, castColumns, routingLines, wireLines, tokenBars, swarm } from './board.js'
 import { focusLines } from './display.js'
 import { MARK, SPAN_COLOR, spans, bodyParts } from './highlight.js'
@@ -169,7 +169,7 @@ export async function switchboard($, e, next) {
   const scene = stage({ agents: live, panes: S.panes, routes: paneRoutes, run: S.lastRun, now })
   const focus = focusLines(now)
   const wire = wireRow(wireLog, now)
-  if (scene.rows.length === 0 && !S.selfName && !S.worker && focus.length === 0 && !wire) return next(e)
+  if (scene.rows.length === 0 && isLead() && focus.length === 0 && !wire) return next(e)
   const els = $.ui.resolve(e)
   const kids = focus.map((l) => focusRow(els, l))
   if (S.worker) kids.push(...workerBand(els, e, await $.clock.now()))

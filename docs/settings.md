@@ -1,6 +1,6 @@
-# Settings: display switches, highlight and older commands
+# Settings: display, voice and older commands
 
-The README's Settings section covers every `~/.agentille/profile.json` key. This page holds the detail of the `display` block: one switch per surface, `display.highlight`, and the commands that used to set these keys.
+The README's Settings section and this page together cover every `~/.agentille/profile.json` key. This page holds the detail of the `display` block (one switch per surface, `display.highlight`), the voice keys, `viewports`, and the commands that used to set the `display` keys.
 
 ## Display switches
 
@@ -30,6 +30,26 @@ Default `off`. `on` lights `/agt` replies, `all` every reply, `off` none. The mo
 - **Under `all`:** each question you type also gets the answer-shape note, which asks Claude for that shape: a one-line answer, at most 6 short bullets, and numbered steps only when you have something to do.
 - **Text to paste:** ask for "no formatting", "plain text" or "copy-paste", or start with `raw:` (in a short prompt, or in the short first or last sentence of a long one), and under `on` or `all` the prompt gets a one-line "answer in plain text" note, the answer skips the frame, comes back as plain text and lands on your clipboard.
 - **`off`** adds nothing to any prompt and copies nothing.
+
+## Voice keys
+
+`/agentille-init` asks up to 5 skippable questions and merges the answers into the profile (it never replaces the file); you can also set these keys by hand. `/agt` reads them on every run and hands them to each agent, so the planner, executors and reviewers write in your voice and respect your hard limits. Missing keys take the defaults below, and `/agt` works the same with none of them. With no voice key set, the first `/agt` prints `tip: /agentille-init makes agents sound like you` once.
+
+| key | values | default | what it does |
+|---|---|---|---|
+| `name`, `role` | free text | unset | who the agents work for |
+| `deliveryStyle` | `direct`, `detailed`, `step-by-step`, `short-paragraphs` | `direct` | how answers and reports are written |
+| `tone` | `peer-to-peer`, `mentor`, `formal`, `blunt`, `casual` | `peer-to-peer` | the register agents write in |
+| `preTaskQuestioning` | `never`, `ambiguous-only`, `always` | `ambiguous-only` | when `/agt` asks before it starts: never, only when the task is genuinely ambiguous (at most 3 questions, each with a recommended default), or up front |
+| `neverDo` | a list of strings | `[]` | hard prohibitions, passed verbatim to every agent |
+
+```json
+{ "name": "<your name>", "role": "solo developer", "deliveryStyle": "direct", "tone": "blunt", "preTaskQuestioning": "ambiguous-only", "neverDo": ["edit generated files"] }
+```
+
+## `viewports`
+
+The viewports the design reviewer screenshots when your task names none: any of `desktop`, `tablet`, `mobile`. Default: desktop and mobile. Set it by hand.
 
 ## Older commands
 

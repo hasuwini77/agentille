@@ -205,6 +205,15 @@ describe('guard: worktree adds', () => {
     expect(newTrees(before, after, line).map((t) => t.path)).toEqual(['/w/app-filter'])
   })
 
+  test('a name inside another word claims nothing: the person\'s feat/ui tree is not the run\'s', async () => {
+    const before = parseWorktrees('worktree /w/app\nHEAD a\nbranch refs/heads/main\n')
+    const after = parseWorktrees('worktree /w/app\nHEAD a\nbranch refs/heads/main\n\nworktree /w/app-x\nHEAD a\nbranch refs/heads/agt/x\n\nworktree /w/ui\nHEAD a\nbranch refs/heads/feat/ui\n')
+    expect(newTrees(before, after, 'npm run build && git worktree add ../app-x -b agt/x main').map((t) => t.path)).toEqual(['/w/app-x'])
+    expect(newTrees(before, after, 'git worktree add ../ui -b feat/ui').map((t) => t.path)).toEqual(['/w/ui'])
+    expect(newTrees(before, after, 'git worktree add /w/ui feat/ui').map((t) => t.path)).toEqual(['/w/ui'])
+    expect(newTrees(before, after, 'git worktree add ../app-x2 -b agt/x2 && echo built-ui').map((t) => t.path)).toEqual([])
+  })
+
   test('splitting keeps quoted operators inside their word', async () => {
     expect(splitCommands('a "b && c" | d; e')).toEqual([['a', 'b && c'], ['d'], ['e']])
   })

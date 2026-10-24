@@ -726,12 +726,32 @@ export function joinPath(dir, p) {
   return '/' + out.join('/')
 }
 
-// The worktrees that appeared during the call and that the call names: its branch's last segment or the
-// path's basename is in the command. Another session's worktree made in the same seconds is not.
+// The worktrees that appeared during the call and that the call names as a whole word, once the line's own
+// variables are expanded: the full branch (feat/ui, agt/x), the full path, or a word whose last segment is the
+// path's basename (../proj-ui). A word that only contains a name ("build" holds "ui") names nothing, so the
+// person's worktree made in the same seconds is never claimed.
 export function newTrees(before, after, line) {
   const had = new Set(before.map((t) => t.path))
-  const text = String(line ?? '')
-  return after.slice(1).filter((t) => !had.has(t.path) && ((t.branch && text.includes(t.branch.split('/').pop())) || text.includes(t.path.split('/').pop())))
+  const words = new Set()
+  let list = []
+  try {
+    list = commands(line)
+  } catch {
+    list = []
+  }
+  for (const c of list) {
+    for (const w of c.words) {
+      const m = ASSIGN.exec(w)
+      for (const x of m ? [w, m[2]] : [w]) words.add(x.length > 1 ? x.replace(/\/+$/, '') : x)
+    }
+  }
+  const named = (t) => {
+    const bn = base(t.path)
+    if (t.branch && (words.has(t.branch) || words.has('refs/heads/' + t.branch))) return true
+    if (words.has(t.path) || (bn && words.has(bn))) return true
+    return !!bn && [...words].some((w) => w.includes('/') && base(w) === bn)
+  }
+  return after.slice(1).filter((t) => !had.has(t.path) && named(t))
 }
 
 const ownedRec = (r) => r && typeof r.path === 'string' && r.path.startsWith('/') && (r.branch === null || typeof r.branch === 'string')

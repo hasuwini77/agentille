@@ -573,6 +573,14 @@ try {
     check('control: --no-follow-tags pushes the branch alone', !ok?.deny && refOf('origin.git', 'agt/x') === w.slice && refOf('origin.git', 'refs/tags/v9.0.0') === null, JSON.stringify(ok))
   }
   {
+    // A tag named like a branch: git reads the plain name as the tag, so the push publishes a tag.
+    const w = world()
+    sh('git tag feat/rel agt/x', APP)
+    const r = await run('git push -q origin feat/rel')
+    check('git push origin feat/rel (a tag of that name): denied', r?.deny?.includes('feat/rel names a tag'), JSON.stringify(r))
+    check('... no tag on origin, origin/main unchanged', refOf('origin.git', 'refs/tags/feat/rel') === null && refOf('origin.git', 'main') === w.main)
+  }
+  {
     // Controls below auto: the run's own branch and ordinary writes still pass.
     world()
     const ok = await run('git push -q -u origin agt/x')

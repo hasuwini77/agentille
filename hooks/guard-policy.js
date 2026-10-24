@@ -52,7 +52,8 @@ const CURRENT_SUB = /^\$\(git (branch --show-current|rev-parse --abbrev-ref HEAD
 // A push to the branch checked out, or to an own-prefix branch (agt/*, feat/*, fix/*, storm/*), is let through here
 // and handed to `claim` (name, whether it is the one checked out): guardLine then asks whether it is the run's own.
 // `bases` is every base-like branch (guardLine baseLike): never pushed below auto, checked out or not.
-export function judgePush(p, { current = null, pushDst = null, bases = new Set(['main', 'master']), refspecs = [], pushDefault = null, claim = null } = {}) {
+// `tags`: the sources the push names that git reads as a tag (refs/tags/<name> exists): a tag push, however named.
+export function judgePush(p, { current = null, pushDst = null, bases = new Set(['main', 'master']), refspecs = [], pushDefault = null, claim = null, tags = new Set() } = {}) {
   if (p.dry) return null
   if (p.bulk) return 'git push ' + p.bulk
   if (p.force) return 'git push --force'
@@ -89,6 +90,7 @@ export function judgePush(p, { current = null, pushDst = null, bases = new Set([
     if (CURRENT_SUB.test(src)) src = 'HEAD'
     if (CURRENT_SUB.test(to)) to = cur
     if (/(^|\/)refs\/tags\//.test(src) || /^refs\/tags\//.test(to ?? '')) return 'git push <tag>'
+    if (tags.has(src)) return 'git push <tag> (' + src + ' names a tag)'
     // A deletion is never a run's own push: a branch it did not make (feat/* is the person's prefix too) goes with it.
     if (p.del || (k === 0 && to)) return 'git push --delete ' + (to || src || 'a branch')
     if (k < 0 && (src === 'HEAD' || src === '@')) to = cur
@@ -777,7 +779,17 @@ async function pushInfo($, c, cwd, cache) {
     const r = names.find((n) => to.startsWith(n + '/'))
     if (to && r) pushDst = to.slice(r.length + 1)
   }
-  return { current, pushDst, bases, guessed, refspecs, pushDefault }
+  // A source written as a plain name is the tag of that name when one exists (git looks in refs/tags before
+  // refs/heads), so `git push origin v1` and a tag named like a branch are tag pushes.
+  const tags = new Set()
+  if (at) for (const raw of c.push.specs) {
+    const src = raw.replace(/^\+/, '').split(':')[0]
+    if (!src || src === 'HEAD' || src === '@' || src.startsWith('refs/') || /[$`]/.test(src)) continue
+    const r = await $.process.run(['git', '-C', at, 'rev-parse', '-q', '--verify', 'refs/tags/' + src], PROBE).catch(() => null)
+    if (!r || typeof r.exitCode !== 'number') throw new Error('git did not run')
+    if (r.exitCode === 0 && String(r.stdout ?? '').trim()) tags.add(src)
+  }
+  return { current, pushDst, bases, guessed, refspecs, pushDefault, tags }
 }
 
 

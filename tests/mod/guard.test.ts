@@ -432,7 +432,7 @@ describe('guard: worktree adds', () => {
 // A run in a session with no pane transport: the ownership list lives in memory.
 // git: per dir, the branch checked out (`current`), its remote URL and its main checkout (default /work/repo).
 type Repo = { current?: string; remote?: string; common?: string; pushurl?: string; upstream?: string; tracking?: string }
-const setup = (on: any, o: { profile?: unknown; repoConfig?: unknown; env?: Record<string, string>; files?: Record<string, string>; repos?: Record<string, Repo>; feat?: boolean; broken?: boolean; aliases?: Record<string, string>; aliasBroken?: boolean; pyFind?: Record<string, string>; hooksPath?: string; remoteHeads?: string[]; originHead?: string; followTags?: boolean; tags?: string[]; remoteTags?: string[] } = {}) => {
+const setup = (on: any, o: { profile?: unknown; repoConfig?: unknown; env?: Record<string, string>; files?: Record<string, string>; repos?: Record<string, Repo>; feat?: boolean; broken?: boolean; aliases?: Record<string, string>; aliasBroken?: boolean; pyFind?: Record<string, string>; hooksPath?: string; remoteHeads?: string[]; originHead?: string; followTags?: boolean; tags?: string[]; remoteTags?: string[]; localTags?: string[] } = {}) => {
   const seen: string[][] = []
   const ran: string[] = []
   const git = { made: false, committed: false, feat: false }
@@ -511,6 +511,9 @@ const setup = (on: any, o: { profile?: unknown; repoConfig?: unknown; env?: Reco
     // Every branch the remote has, and the remote's default as origin/HEAD records it (none unless the test sets one).
     if (/ls-remote --heads \S+$/.test(a)) return out((o.remoteHeads ?? []).map((h) => 'abc\trefs/heads/' + h + '\n').join(''))
     if (a.endsWith('symbolic-ref --short refs/remotes/origin/HEAD')) return o.originHead ? out('origin/' + o.originHead + '\n') : out('', 1)
+    // A tag of that name, asked of git as refs/tags/<name>.
+    const tg = /rev-parse -q --verify refs\/tags\/(\S+)$/.exec(a)
+    if (tg) return (o.localTags ?? []).includes(tg[1]) ? out('abc\n') : out('', 1)
     // push.followTags, the annotated tags merged into a pushed source, and the tags the remote has.
     if (a.includes('config --type=bool --get push.followTags')) return o.followTags ? out('true\n') : out('', 1)
     if (a.includes('for-each-ref --format=%(objecttype) %(refname:short)')) return out((o.tags ?? []).map((t) => 'tag ' + t + '\n').join(''))
@@ -1729,6 +1732,18 @@ describe('guard: push.followTags makes a branch push a tag push', () => {
     for (const line of ['git config push.followTags true', 'git config --global push.followtags true', 'git -c push.followTags=true push origin agt/x', "GIT_CONFIG_PARAMETERS=\"'push.followTags'='true'\" git push origin agt/x", 'GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=push.followTags GIT_CONFIG_VALUE_0=true git push origin agt/x']) {
       expect([line, integrationIn(line, onSlice)]).toEqual([line, expect.stringContaining('git config key')])
     }
+  })
+})
+
+describe('guard: a tag named like a branch is a tag push', () => {
+  test('git push origin <name> where refs/tags/<name> exists is refused; a branch of that name alone is not', async ($, on) => {
+    const { ran } = setup(on, { profile: { integration: 'pr' }, localTags: ['feat/rel', 'v2'], repos: { '/work/repo': { current: 'agt/x' } } })
+    await boot($)
+    await typed($)
+    expect((await bash($, 'git push origin feat/rel')).deny).toContain('git push <tag> (feat/rel names a tag)')
+    expect((await bash($, 'git push origin v2:feat/new')).deny).toContain('v2 names a tag')
+    expect((await bash($, 'git push origin feat/other')).result).toBe('ok')
+    expect(ran).toEqual(['git push origin feat/other'])
   })
 })
 

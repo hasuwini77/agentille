@@ -11,7 +11,7 @@ import { verdictChip, party, answerLine } from './links.js'
 import { addUsage, finish, ledger } from './live.js'
 import { BYE_MS } from './mascot.js'
 import { cleanWorkspace } from './reaper.js'
-import { typedPrompt, endRun, rawDone, sessionsAllowed, moment } from './proofs.js'
+import { typedPrompt, agtTurnStart, endRun, rawDone, sessionsAllowed, moment, runHeld } from './proofs.js'
 import { verdictOf } from './routing.js'
 import { ensureTools } from './spawn.js'
 import { refreshAgents, ensureTicker } from './ticker.js'
@@ -24,7 +24,7 @@ const { live, paneRoutes, mascot, wireLog, pub } = S
 export async function onPromptSubmit($, e) {
   const { typed, agt } = typedPrompt(e.text, e.origin, await moment($))
   if (!typed) return e
-  S.agtTurn = agt
+  agtTurnStart(agt)
   if (S.agtTurn) S.flags = []   // a new run starts with a clean slate
   if (S.agtTurn) await ensureTools($, 'panes')
   if (sessionsAllowed()) await ensureTools($, 'sessions')
@@ -50,11 +50,13 @@ export async function onTurnComplete($, e) {
     // A run's ✓/✗ card ends it: its own ⚑ lines carry what is left, so the band's flags come down,
     // what the run leaves behind is tidied (finished orphans, merged worktrees), and the typed proof
     // lapses: the next worker pane needs the next typed /agt. A run nobody typed /agt for tidies nothing.
-    if (S.agtTurn && S.agtTyped && isLead() && /^[✓✗]/.test(e.answer.trimStart())) {
+    const card = isLead() && /^[✓✗]/.test(e.answer.trimStart())
+    if (card && S.agtTurn && S.agtTyped) {
       S.flags = []
       endRun()
       void cleanWorkspace($, { auto: true }).catch(() => {})
-    }
+    } else if (card && runHeld()) endRun() // a card after the person typed in between still ends the run's guard
+
   }
   if (!e.agentId && S.worker && mascot.working) {
     const now = await $.clock.now()

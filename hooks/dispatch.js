@@ -8,6 +8,7 @@ import { newAgent, short, ledger, ledgerText } from './live.js'
 import { SAFE_RUN, splitName } from './panes.js'
 import { formationOf, roleOf, parseHeader, proveHeader, demoteHeaderText, ladderFixes, decide } from './routing.js'
 import { logWire } from './wire.js'
+import { agtTurnFromDispatch } from './proofs.js'
 const { wfToasted, runs, live, decisions, paneRoutes, demotedToasted, wireLog } = S
 
 // A workflow agent is in no agent list, and a cancelled one raises no turn.complete: it is marked,
@@ -113,7 +114,7 @@ export async function dispatchAgent($, e, next) {
     const run = runState(fileRun)
     const busy = [...live.values()].some((a) => a.run === S.lastRun && a.state === 'working') || S.panes.some((p) => splitName(p.name)?.run === S.lastRun && p.state === 'working')
     if (named && (S.lastRun === 'adhoc' || !busy)) S.lastRun = named
-    S.agtTurn = true
+    agtTurnFromDispatch()
     // The table pick follows the run in progress (its REVISEs); `run` is only where the log goes.
     const d = decide({ role, hdr, run: { ...runState(runId), fixes: ladderFixes(runState(runId), pieceOf(hdr)) }, depth: S.depth, settings: S.settings, weeklyPct: S.weeklyPct })
     const res = await next(e)
@@ -139,7 +140,7 @@ export async function dispatchAgent($, e, next) {
   }
 
   const runId = SAFE_RUN.test(hdr.run ?? '') ? hdr.run : 'adhoc'
-  S.agtTurn = true
+  agtTurnFromDispatch()
   S.lastRun = runId
   const run = runState(runId)
   run.formation = formationOf(hdr) ?? run.formation

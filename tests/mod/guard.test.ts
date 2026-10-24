@@ -318,8 +318,8 @@ const setup = (on: any, o: { profile?: unknown; repoConfig?: unknown; env?: Reco
     if (a.includes('rev-parse --path-format=absolute --git-common-dir')) return out('/work/repo/.git\n')
     return out('')
   })
-  mock.clock(on, { now: 1_000_000 })
-  return { seen, ran, git }
+  const clock = mock.clock(on, { now: 1_000_000 })
+  return { seen, ran, git, clock }
 }
 const boot = ($: any) => $.session.start({ cwd: '/work/repo', surface: null, isInteractive: false })
 const typed = ($: any, text = '/agt ship it') => $.prompt.submit({ text, origin: { kind: 'composer' } } as never)
@@ -554,5 +554,63 @@ describe('guard: it fails closed', () => {
     await typed($)
     for (const line of ['git push origin :feat/someone-else', 'git push origin --delete agt/x', 'git push -d origin fix/y']) expect((await bash($, line)).deny).toContain('git push --delete')
     expect((await bash($, 'git push -u origin agt/x')).result).toBe('ok')
+  })
+})
+
+// The lead's guard lasts for its run, not for a clock window: a run that named its id is guarded until its card.
+describe('guard: the lead stays guarded for the whole run', () => {
+  const sub = (run: string) => ({ prompt: '[agt run=' + run + ' size=small mode=build]\nbuild', subagentType: 'agentille:agentille-executor', model: 'sonnet' })
+  // In steps: the redraw ticker keeps a short interval while the band shows the run.
+  const later = async (clock: any, ms: number) => { for (let t = 0; t < ms; t += 60_000) await clock.advance(60_000) }
+  const subDone = async ($: any) => {
+    await $.turn.start({ text: 'go', turnId: 's1', agentId: 'sub1' })
+    await $.turn.complete({ answer: 'done', durationMs: 1, isAborted: false, turnId: 's1', reason: 'answer', agentId: 'sub1' })
+  }
+
+  test('61 minutes into a run with its id named, after a typed question, a merge is still denied', async ($, on) => {
+    const { clock } = setup(on)
+    await boot($)
+    await typed($)
+    await $.agent.spawn(sub('gl1'))
+    await subDone($)
+    await later(clock, 61 * 60_000)
+    await typed($, 'still there?')
+    expect((await bash($, 'gh pr merge 9 --merge --delete-branch')).deny).toBe(DENY_INTEGRATION)
+  })
+
+  test('three typed replies with nothing working do not switch it off', async ($, on) => {
+    setup(on)
+    await boot($)
+    await typed($)
+    await $.agent.spawn(sub('gl2'))
+    await subDone($)
+    for (const t of ['a', 'b', 'c', 'd']) await typed($, t)
+    expect((await bash($, 'gh pr merge 9 --merge')).deny).toBe(DENY_INTEGRATION)
+  })
+
+  test('a dispatch on a later turn names the run when the /agt turn did not', async ($, on) => {
+    const { clock } = setup(on)
+    await boot($)
+    await typed($)
+    await typed($, 'yes, go ahead')
+    await $.agent.spawn(sub('gl3'))
+    await subDone($)
+    await later(clock, 61 * 60_000)
+    for (const t of ['a', 'b', 'c']) await typed($, t)
+    expect((await bash($, 'gh pr merge 9')).deny).toBe(DENY_INTEGRATION)
+  })
+
+  test('the card ends it, even on a turn the person typed after the run lapsed', async ($, on) => {
+    const { clock } = setup(on)
+    await boot($)
+    await typed($)
+    await $.agent.spawn(sub('gl4'))
+    await subDone($)
+    await later(clock, 61 * 60_000)
+    await typed($, 'merge it once green')
+    expect((await bash($, 'gh pr merge 9')).deny).toBe(DENY_INTEGRATION)
+    await card($)
+    await typed($, 'something else')
+    expect((await bash($, 'gh pr merge 9')).result).toBe('ok')
   })
 })

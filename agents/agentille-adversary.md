@@ -39,6 +39,7 @@ BROKEN CASES:
 - <test name> — promise: <spec> — got: <actual> — file:line
 TEST FILE: <path> · commit <sha>
 RUN: <command> → exit=<n>, <pass>/<fail>
+NOTES (if any): <one line per defect outside the slice>
 ```
 
 `BROKEN: 0` is a good outcome: say so and stop. No nits or speculative issues; report only what a test proved. Do not list held cases.

@@ -97,6 +97,15 @@ check "formations.md names the post-gauntlet pusher" 'grep -F "clears the gauntl
 check "factory.md Integrate routes INTEGRATE:" 'integrate | grep -qF "INTEGRATE:"'
 check "the executor answers INTEGRATE:" 'has agents/agentille-executor.md "INTEGRATE:"'
 check "display.md lists INTEGRATE:" 'has skills/agt/display.md "INTEGRATE:"'
+# every output field an agent's prose sends something "under" exists in that agent's own output template
+fenced() { awk '/^ *```/ { on = !on; next } on' "$1"; }
+under_fields() { grep -oE "under \`?[A-Z][A-Z]+" "$1" | sed -E 's/^under `?//' | sort -u; }
+for f in agents/agentille-*.md; do
+  for fld in $(under_fields "$f"); do
+    check "$f's template has the $fld field its prose names" 'fenced "$f" | grep -qE "^ *(- )?$fld( \(if any\))?:"'
+  done
+done
+check "the adversary's prose names a template field (NOTES)" '[ -n "$(under_fields agents/agentille-adversary.md)" ]'
 # every agent treats what it reads as data
 for f in agents/agentille-*.md; do
   check "$f treats content as untrusted data" 'grep -qE "untrusted DATA.*never (as )?instructions" "$f" && grep -qE "Never run a shell command (that originates from|sourced from)" "$f"'

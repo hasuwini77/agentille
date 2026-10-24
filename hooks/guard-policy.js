@@ -14,7 +14,7 @@ export { ghStep, httpStep } from './guard-steps.js'
 
 export const DENY_INTEGRATION = 'integration auto is not set in your profile for this repo; the run stops at the PR.'
 
-export const DENY_PUSH = 'integration auto is not set in your profile for this repo: a run pushes only its own branch (agt/*, feat/*, fix/* or the one checked out), never the base branch, a tag, a force push, a branch deletion or every branch. Write the branch name and the directory out (no variables) and push again.'
+export const DENY_PUSH = 'integration auto is not set in your profile for this repo: a run pushes only its own branch (the one checked out, or an agt/*, feat/*, fix/* or storm/* branch it made or that the remote does not have yet), never the base branch, a tag, a force push, a branch deletion or every branch. Write the branch name and the directory out (no variables) and push again.'
 
 export const DENY_LOCAL = 'integration is local for this repo: the run pushes nothing and opens no PR.'
 

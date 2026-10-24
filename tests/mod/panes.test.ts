@@ -742,6 +742,22 @@ describe('pane tools: in the mod', () => {
     expect((await $.tool.call({ tool: 'mcp__agentille__spawn_pane', run: 'k7f2ab', role: 'exec-1', task: 'build the filter', ...EXEC })).result).toContain('Opened agt-k7f2ab-exec-1')
   })
 
+  test('a pane dispatch past the default $15 ceiling is demoted too: an Opus adversary pane opens on Sonnet, with one toast', async ($, on) => {
+    const toasts: string[] = []
+    on('ui.toast', async ($: any, e: any) => { toasts.push(e.text); return { value: undefined } })
+    on('turn.complete', async ($: any, e: any) => ({ text: e.answer }))
+    setup(on, TMUX, { 'tmux split-window': { stdout: '%9\n' } })
+    await $.session.start({ cwd: '/work/repo', surface: null, isInteractive: false })
+    const RISK = '[agt run=k7f2ab size=small risk=auth mode=build]'
+    await typed($)
+    const planner: any = await $.agent.spawn({ prompt: RISK + '\nplan', subagentType: 'agentille:agentille-planner', model: 'opus' })
+    await $.turn.complete({ agentId: planner.agentId, answer: 'ok', durationMs: 10, isAborted: false, turnId: 't0', reason: 'answer', usage: { input_tokens: 0, output_tokens: 750_000 } } as never) // $15.00 of Opus
+    const r = await $.tool.call({ tool: 'mcp__agentille__spawn_pane', run: 'k7f2ab', role: 'adv', task: 'break it', agent: 'adversary', header: RISK })
+    expect(r.result).toContain('Opened agt-k7f2ab-adv · sonnet · high')
+    expect(r.result).toContain('maxRunUsd $15.00')
+    expect(toasts.filter((t) => t.includes('maxRunUsd'))).toEqual([expect.stringContaining('adversary opus → sonnet')])
+  })
+
   test('spawn_pane lasts while the typed /agt run is in flight, not for the session', async ($, on) => {
     setup(on, TMUX, { 'tmux split-window': { stdout: '%9\n' } })
     const call = (role: string) => $.tool.call({ tool: 'mcp__agentille__spawn_pane', run: 'k7f2ab', role, task: 'build the filter', ...EXEC })

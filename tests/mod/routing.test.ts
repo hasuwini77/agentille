@@ -1,5 +1,5 @@
 import { describe, expect, mock, test } from 'claude-code/testing'
-import { AGENT_SILENT_MS, AGT_GRACE_TYPED, AGT_INFLIGHT_MAX_MS, PANE_REST_MS, DEFAULTS, MAX_EXECUTORS_AT_ONCE, PRICES, asksSessions, decide, estimateRunUsd, executorCapFlag, executorsWorking, ordinal, demoteHeaderText, formationOf, ladderFixes, mentionsCodex, mentionsFable, parseHeader, proveHeader, roleOf, runInFlight, typedFable, verdictOf } from '../../hooks/routing.js'
+import { AGENT_SILENT_MS, AGT_GRACE_TYPED, AGT_INFLIGHT_MAX_MS, PANE_REST_MS, PANE_EST_MAX_MS, PANE_TOKENS_PER_MIN, CEILING_ROLES, ROLES, paneUsd, DEFAULTS, MAX_EXECUTORS_AT_ONCE, PRICES, asksSessions, decide, estimateRunUsd, executorCapFlag, executorsWorking, ordinal, demoteHeaderText, formationOf, ladderFixes, mentionsCodex, mentionsFable, parseHeader, proveHeader, roleOf, runInFlight, typedFable, verdictOf } from '../../hooks/routing.js'
 import { pieceOf } from '../../hooks/links.js'
 
 const fresh = () => ({ revise: 0, fixes: 0, fable: 0 })
@@ -370,8 +370,10 @@ describe('maxRunUsd: a per-run cost ceiling', () => {
     expect(PRICES.sonnet.input).toBeLessThan(PRICES.opus.input)
   })
 
-  test('off by default, and anything but a positive number is off', async () => {
-    expect(DEFAULTS.maxRunUsd).toBe(null)
+  test('on by default at $15; the person\'s null, or anything but a positive number, turns it off', async () => {
+    expect(DEFAULTS.maxRunUsd).toBe(15)
+    expect(decide({ role: 'code-reviewer', hdr: { size: 'large' }, run: { ...fresh(), usd: 15 } })).toMatchObject({ model: 'sonnet', capped: true, from: 'opus' })
+    expect(decide({ role: 'code-reviewer', hdr: { size: 'large' }, run: { ...fresh(), usd: 14.99 } })).toMatchObject({ model: 'opus', reason: 'table' })
     for (const maxRunUsd of [null, 0, -1, '5', Infinity, NaN]) {
       expect(decide({ role: 'code-reviewer', hdr: { size: 'large' }, run: { ...fresh(), usd: 1e6 }, settings: { ...DEFAULTS, maxRunUsd } as never })).toMatchObject({ model: 'opus', reason: 'table' })
     }
@@ -379,17 +381,37 @@ describe('maxRunUsd: a per-run cost ceiling', () => {
 
   test('below the ceiling nothing changes; at or past it an Opus reviewer or planner runs Sonnet at the same effort', async () => {
     expect(decide({ role: 'code-reviewer', hdr: { size: 'large' }, run: under, settings: C })).toEqual({ model: 'opus', effort: 'high', reason: 'table', fable: false })
-    expect(decide({ role: 'code-reviewer', hdr: { size: 'large' }, run: over, settings: C })).toEqual({ model: 'sonnet', effort: 'high', reason: 'run ~$5.00 ≥ maxRunUsd $5.00', fable: false, capped: true })
+    expect(decide({ role: 'code-reviewer', hdr: { size: 'large' }, run: over, settings: C })).toEqual({ model: 'sonnet', effort: 'high', reason: 'run ~$5.00 ≥ maxRunUsd $5.00', fable: false, capped: true, from: 'opus' })
     expect(decide({ role: 'security-reviewer', hdr: { risk: 'money' }, run: over, settings: C })).toMatchObject({ model: 'sonnet', effort: 'max', capped: true })
     expect(decide({ role: 'planner', hdr: {}, run: { ...over, revise: 1 }, settings: C })).toMatchObject({ model: 'sonnet', effort: 'max', reason: 'plan REVISE ×1 · run ~$5.00 ≥ maxRunUsd $5.00' })
     expect(decide({ role: 'code-reviewer', hdr: {}, run: over, settings: C })).toMatchObject({ model: 'sonnet', reason: 'table' }) // already Sonnet: untouched
   })
 
-  test('the executor, design-reviewer, ui-prototyper and adversary keep the table', async () => {
+  test('past the ceiling every Opus role but the executor runs Sonnet: design-reviewer, ui-prototyper and adversary included', async () => {
+    expect([...CEILING_ROLES].sort()).toEqual(ROLES.filter((r) => r !== 'executor').sort())
     expect(decide({ role: 'executor', hdr: { size: 'large' }, run: over, settings: C })).toMatchObject({ model: 'sonnet', effort: 'high', reason: 'table' })
-    expect(decide({ role: 'design-reviewer', hdr: {}, run: over, settings: C })).toMatchObject({ model: 'opus', reason: 'table' })
-    expect(decide({ role: 'ui-prototyper', hdr: {}, run: over, settings: C })).toMatchObject({ model: 'opus', reason: 'table' })
-    expect(decide({ role: 'adversary', hdr: { risk: 'auth' }, run: over, settings: C })).toMatchObject({ model: 'opus', reason: 'table' })
+    expect(decide({ role: 'design-reviewer', hdr: {}, run: over, settings: C })).toMatchObject({ model: 'sonnet', effort: 'high', capped: true, from: 'opus' })
+    expect(decide({ role: 'ui-prototyper', hdr: {}, run: over, settings: C })).toMatchObject({ model: 'sonnet', effort: 'high', capped: true })
+    expect(decide({ role: 'adversary', hdr: { risk: 'auth' }, run: over, settings: C })).toMatchObject({ model: 'sonnet', effort: 'high', capped: true })
+    // A duel's judge is a code-reviewer; every role the table puts on Opus is covered, none stays there.
+    for (const role of ROLES) for (const hdr of [{}, { size: 'large' }, { risk: 'auth' }]) {
+      expect(decide({ role, hdr, run: over, settings: C }).model).not.toBe('opus')
+    }
+  })
+
+  test('a pane worker is estimated from its role, its routed model and its minutes open', async () => {
+    const t0 = 1_000_000
+    const exec = { run: 'r1', agent: 'executor', model: 'sonnet', start: t0, end: t0 + 10 * 60_000 }
+    // build rate on Sonnet: (10k × 2 + 2.5k × 10 + 80k × 0.20) / 1M = $0.061 a minute
+    expect(Math.round(paneUsd(exec) * 1e6) / 1e6).toBe(0.61)
+    // judge rate on Opus: (8k × 4 + 1.5k × 20 + 60k × 0.20) / 1M = $0.074 a minute, still running at `now`
+    const rev = { run: 'r1', agent: 'code-reviewer', model: 'opus', start: t0, end: null }
+    expect(Math.round(paneUsd(rev, t0 + 5 * 60_000) * 1e6) / 1e6).toBe(0.37)
+    expect(paneUsd({ ...rev, end: t0 + 10 * PANE_EST_MAX_MS })).toBe(paneUsd({ ...rev, end: t0 + PANE_EST_MAX_MS })) // capped
+    expect(paneUsd({ ...exec, model: 'codex' })).toBe(0) // the person's Codex account
+    expect(PANE_TOKENS_PER_MIN.build.output).toBeGreaterThan(PANE_TOKENS_PER_MIN.judge.output)
+    const routes = [exec, { ...exec, run: 'r2' }]
+    expect(Math.round(estimateRunUsd(new Map(), 'r1', routes) * 1e6) / 1e6).toBe(0.61)
   })
 
   test('a ladder Fable past the ceiling runs Sonnet and is not counted; a typed --fable is the person\'s and holds', async () => {
@@ -433,7 +455,7 @@ describe('maxRunUsd: a per-run cost ceiling', () => {
     await review($, 'usd1') // c2: rewritten
     await review($, 'usd1') // c3: rewritten, no second toast
     expect(seen.slice(2)).toEqual(['sonnet', 'sonnet'])
-    expect(ceilingToasts(toasts)).toEqual(['agt ⚑ run usd1: ~$1.00 spent, past maxRunUsd $1.00; Opus reviewers and planners now run Sonnet'])
+    expect(ceilingToasts(toasts)).toEqual(['agt ⚑ run usd1: ~$1.00 spent, past maxRunUsd $1.00; code-reviewer opus → sonnet, and every later Opus or Fable planner, reviewer, ui-prototyper and adversary runs Sonnet (the executor keeps its route)'])
     expect(toasts.filter((t) => t.startsWith('agt ↑'))).toEqual([])
     const log = writes['/h/.agentille/state/run-usd1/routing.jsonl'].trim().split('\n').map((l) => JSON.parse(l))
     expect(log.map((r) => r.capped ?? false)).toEqual([false, false, true, true])
@@ -443,8 +465,19 @@ describe('maxRunUsd: a per-run cost ceiling', () => {
     expect(seen[4]).toBe('opus')
   })
 
-  test('in the mod: with no ceiling set nothing is estimated or rewritten', async ($, on) => {
+  test('in the mod: with no profile key the $15 default holds', async ($, on) => {
     const { toasts, seen } = boot(on, {})
+    await $.session.start({ cwd: '/w', surface: null, isInteractive: false })
+    await plan($, 'usd4')
+    await spend($, 'c0', 750_000) // 750k Opus output = $15.00
+    await review($, 'usd4')
+    expect(seen).toEqual(['opus', 'sonnet'])
+    expect(ceilingToasts(toasts)).toHaveLength(1)
+    expect((await $.command.run({ command: 'agt-info', args: 'ledger' })).text).toContain('estimate ~$15.00 of maxRunUsd $15.00')
+  })
+
+  test('in the mod: with the ceiling set to null nothing is estimated or rewritten', async ($, on) => {
+    const { toasts, seen } = boot(on, { maxRunUsd: null })
     await $.session.start({ cwd: '/w', surface: null, isInteractive: false })
     await plan($, 'usd3')
     await spend($, 'c0', 10_000_000)

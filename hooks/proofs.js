@@ -106,7 +106,9 @@ export async function moment($) {
   }
   return { clock, rest }
 }
-const inFlight = (st, at) => runInFlight(st, Date.now(), at.rest, at.clock)
+// The run's in-flight test on the right clocks: agents by Date.now(), the typed /agt and the panes' rest by the
+// plugin clock `at` was read on. guard.js asks this too, so the guard and spawn_pane never disagree.
+export const inFlight = (st, at = NO_MOMENT) => runInFlight(st, Date.now(), at.rest, at.clock)
 
 // spawn_pane's typed gate: null when it may open a pane, else the one sentence it is denied with. With no `runId`,
 // only the typed /agt and its run in flight are checked. The typed /agt's own turn may open any run id (that is

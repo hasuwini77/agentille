@@ -2,15 +2,19 @@
 // ~/.agentille/profile.json and the older per-key store values, and writes the block back.
 //
 // Precedence per key: profile.display → the $.store value an old /agt-focus, /agt-highlight or
-// /agt-deck left behind → the default. Junk in any of them reads as "not set".
+// /agt-deck left behind → the default. Junk in any of them reads as "not set". band, statusLine and
+// mascot never had a command, so only the profile sets them.
 
-export const DISPLAY_DEFAULTS = { deck: 'off', focus: true, highlight: 'off' }
+export const DISPLAY_DEFAULTS = { deck: 'off', focus: true, highlight: 'off', band: 'on', statusLine: 'on', mascot: 'on' }
 export const DISPLAY_KEYS = Object.keys(DISPLAY_DEFAULTS)
 
 const VALID = {
   deck: (v) => v === 'auto' || v === 'off',
   focus: (v) => typeof v === 'boolean',
   highlight: (v) => v === 'on' || v === 'all' || v === 'off',
+  band: (v) => v === 'on' || v === 'off',
+  statusLine: (v) => v === 'on' || v === 'off',
+  mascot: (v) => v === 'on' || v === 'off',
 }
 
 // profile.display with every invalid key dropped; anything but an object reads as empty.
@@ -31,7 +35,7 @@ export function storedDisplay({ deckAuto, focusMode, highlightOn, highlightAll }
   return out
 }
 
-// → { values: { deck, focus, highlight }, from: { deck, focus, highlight } } where from is 'profile' | 'store' | 'default'
+// → { values: { deck, focus, …, mascot }, from: { deck, focus, …, mascot } } where from is 'profile' | 'store' | 'default'
 export function resolveDisplay(profileDisplay, stored = {}) {
   const p = cleanDisplay(profileDisplay)
   const s = cleanDisplay(stored)
@@ -64,7 +68,7 @@ export function profileJson(profile) {
 
 export function displayText({ values, from }) {
   const word = (k) => from[k] === 'default' ? 'default' : from[k]
-  return DISPLAY_KEYS.map((k) => '  ' + k.padEnd(10) + String(values[k]).padEnd(6) + word(k)).join('\n')
+  return DISPLAY_KEYS.map((k) => '  ' + k.padEnd(12) + String(values[k]).padEnd(6) + word(k)).join('\n')
 }
 
 // Keys that make a profile a voice (what /agentille-init writes). A file holding only `display` or

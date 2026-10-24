@@ -89,8 +89,8 @@ describe('rows: in the transcript', () => {
       const ids = ['r1', 'r2']
       on('agent.spawn', async ($, e) => { carried.push((e as any).tool_use_id); return { model: 'claude-sonnet-5', agentId: ids[carried.length - 1] } })
       on('ui.render', async () => ({ type: 'engine', ref: 0 }) as never)
-      await $.agent.spawn({ prompt: '[agt run=rowrun size=large mode=build]\nbuild', subagentType: 'agentille:agentille-executor' })
-      await $.agent.spawn({ prompt: '[agt run=rowrun size=large mode=build]\nbuild', subagentType: 'agentille:agentille-executor', tool_use_id: 'tu2' } as never)
+      await $.agent.spawn({ prompt: '[agt run=rowrun size=large work=build]\nbuild', subagentType: 'agentille:agentille-executor' })
+      await $.agent.spawn({ prompt: '[agt run=rowrun size=large work=build]\nbuild', subagentType: 'agentille:agentille-executor', tool_use_id: 'tu2' } as never)
       expect(carried[1]).toBe('tu2')
 
       // finished call: the result names the agent
@@ -113,7 +113,7 @@ describe('rows: in the transcript', () => {
     on('store.get', async () => ({ value: null }))
     on('agent.spawn', async () => ({ model: 'claude-sonnet-5', agentId: 'r3' }))
     on('ui.render', async () => ({ type: 'engine', ref: 0 }) as never)
-    await $.agent.spawn({ prompt: '[agt run=rowrun size=large mode=build]\nbuild', subagentType: 'agentille:agentille-executor' })
+    await $.agent.spawn({ prompt: '[agt run=rowrun size=large work=build]\nbuild', subagentType: 'agentille:agentille-executor' })
     const draw = async (props: object) => {
       const ui = await $.ui.mount({ plugin: 'agentille', surface: 'terminal', component: 'ToolUse', requestId: 'x', props: props as never })
       const mine = await ui.find({ type: 'Text', text: /executor/ })
@@ -137,7 +137,7 @@ describe('rows: in the transcript', () => {
     on('turn.complete', async ($, e) => ({ text: (e as any).answer }) as never)
     on('ui.render', async () => ({ type: 'engine', ref: 0 }) as never)
     mock.clock(on, { now: Date.now() }) // the spawns start the redraw ticker: hold it still
-    const spawn = (tool_use_id: string) => $.agent.spawn({ prompt: '[agt run=rowrun size=large mode=build]\nbuild', subagentType: 'agentille:agentille-executor', tool_use_id } as never)
+    const spawn = (tool_use_id: string) => $.agent.spawn({ prompt: '[agt run=rowrun size=large work=build]\nbuild', subagentType: 'agentille:agentille-executor', tool_use_id } as never)
     await spawn('tuI1')
     await spawn('tuI2')
     await $.turn.complete({ agentId: 'i1', answer: 'stopped', durationMs: 10, isAborted: true, turnId: 'ti1', reason: 'aborted', usage: { input_tokens: 10, output_tokens: 5 } } as never)
@@ -155,7 +155,7 @@ describe('rows: in the transcript', () => {
     expect(await drawn('tuI2', { isRunning: true })).not.toEqual(engine)
   })
 
-  test('a workflow agent keeps the script\'s model; a table mismatch is logged and toasted, never rewritten', async ($, on) => {
+  test('a workflow agent is never rewritten: a script naming another model is refused, one naming none is logged and toasted', async ($, on) => {
     on('store.get', async () => ({ value: null }))
     const toasts: string[] = []
     on('ui.toast', async ($: any, e: any) => { toasts.push(e.text ?? String(e)); return { value: undefined } })
@@ -163,10 +163,13 @@ describe('rows: in the transcript', () => {
     on('agent.spawn', async ($, e) => { asked.push(e.model); return { model: 'claude-haiku-4-5', agentId: 'wfm' + asked.length } })
     on('ui.render', async () => ({ type: 'engine', ref: 0 }) as never)
     const wf = { tool_use_id: 'tuWfm', workflow: { runId: 'wf_2', agentIndex: 1 } }
-    await $.agent.spawn({ prompt: '[agt run=wfrun size=large mode=review]\nreview', subagentType: 'agentille:agentille-code-reviewer', model: 'haiku', ...wf } as never)
-    expect(asked).toEqual(['haiku']) // untouched: the table would have said opus
+    const r = await $.agent.spawn({ prompt: '[agt run=wfrun size=large work=review]\nreview', subagentType: 'agentille:agentille-code-reviewer', model: 'haiku', ...wf } as never) as any
+    expect(r.deny).toContain('agt ✗ workflow code-reviewer asks haiku, routed opus · high') // the table says opus
+    expect(asked).toEqual([])
+    await $.agent.spawn({ prompt: '[agt run=wfrun size=large work=review]\nreview', subagentType: 'agentille:agentille-code-reviewer', ...wf } as never)
+    expect(asked).toEqual([undefined]) // untouched: the engine's default runs
     expect(toasts.some((t) => /workflow code-reviewer runs haiku — table says opus · high/.test(t))).toBe(true)
-    expect((await $.command.run({ command: 'agt-info', args: 'routing' })).text).toBe('code-reviewer → claude-haiku-4-5  (workflow, table says opus · high)')
+    expect((await $.command.run({ command: 'agt-info', args: 'routing' })).text).toBe('code-reviewer → claude-haiku-4-5  (workflow, no model named: engine default haiku, table says opus · high)')
   })
 
   test('a workflow agent with no header joins the run in progress', async ($, on) => {
@@ -174,7 +177,7 @@ describe('rows: in the transcript', () => {
     let n = 0
     on('agent.spawn', async ($, e) => ({ model: e.model ?? 'claude-sonnet-5-5', agentId: 'wj' + n++ }))
     on('ui.render', async () => ({ type: 'engine', ref: 0 }) as never)
-    await $.agent.spawn({ prompt: '[agt run=joinrun size=small mode=build]\nplan', subagentType: 'agentille:agentille-planner' })
+    await $.agent.spawn({ prompt: '[agt run=joinrun size=small work=build]\nplan', subagentType: 'agentille:agentille-planner' })
     await $.agent.spawn({ prompt: 'no header here', subagentType: 'agentille:agentille-executor', tool_use_id: 'tuJ', workflow: { runId: 'wf_3', agentIndex: 1 } } as never)
     const ui = await $.ui.mount({ plugin: 'agentille', surface: 'terminal', component: 'AbovePrompt', props: { hasSurvey: false, isWorking: true, maxRows: 10, bodyColumns: 100 } as never })
     expect(await ui.find({ type: 'Text', text: /run joinrun/ })).toBeDefined()
@@ -189,7 +192,7 @@ describe('rows: in the transcript', () => {
     on('agent.spawn', async ($, e) => { seen.push((e as any).workflow); return { model: 'claude-sonnet-5', agentId: ids[seen.length - 1] } })
     on('ui.render', async () => ({ type: 'engine', ref: 0 }) as never)
     mock.clock(on, { now: Date.now() })
-    const prompt = '[agt run=rowrun size=large mode=build]\nbuild'
+    const prompt = '[agt run=rowrun size=large work=build]\nbuild'
     await $.agent.spawn({ prompt, subagentType: 'agentille:agentille-executor', tool_use_id: 'tuWf', workflow: { runId: 'wf_1', agentIndex: 1 } } as never)
     await $.agent.spawn({ prompt, subagentType: 'agentille:agentille-executor', tool_use_id: 'tuAgent' } as never)
     expect(seen).toEqual([{ runId: 'wf_1', agentIndex: 1 }, undefined]) // the mod is handed the workflow field
@@ -205,7 +208,7 @@ describe('rows: in the transcript', () => {
 })
 
 describe('rows: workflow agents', () => {
-  const PROMPT = '[agt run=wfrun size=large mode=build]\nbuild'
+  const PROMPT = '[agt run=wfrun size=large work=build]\nbuild'
   const band = ($: any) => $.ui.mount({ plugin: 'agentille', surface: 'terminal', component: 'AbovePrompt', props: { hasSurvey: false, isWorking: true, maxRows: 10, bodyColumns: 100 } as never })
   const has = async (ui: any, re: RegExp) => (await ui.find({ type: 'Text', text: re })) !== undefined
   const shows = async (ui: any, re: RegExp) => { if (!(await has(ui, re))) throw new Error(String(re) + ' not drawn: ' + JSON.stringify(await ui.drawn())) }

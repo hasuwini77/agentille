@@ -1,5 +1,5 @@
 import { describe, expect, mock, test } from 'claude-code/testing'
-import { DENY_INTEGRATION, DENY_LOCAL, DENY_PUSH, DENY_UNREAD, capsOf, claimedTrees, integrationIn, integrationOf, joinPath, judgePush, newTrees, normSlug, normUrl, parseOwned, recordTrees, sameRemote, scriptSlugs, scriptTrees, splitCommands, worktreeAdds } from '../../hooks/guard.js'
+import { DENY_INTEGRATION, DENY_LOCAL, DENY_PUBLISH, DENY_PUSH, DENY_UNREAD, capsOf, claimedTrees, integrationIn, integrationOf, joinPath, judgePush, newTrees, normSlug, normUrl, parseOwned, recordTrees, sameRemote, scriptSlugs, scriptTrees, splitCommands, worktreeAdds } from '../../hooks/guard.js'
 import { parseWorktrees } from '../../hooks/clean.js'
 import { DEFAULT_PROFILE, guardLine as judge, loadRunProfile } from '../../hooks/guard.js'
 import { setRunProfile } from '../../hooks/proofs.js'
@@ -98,7 +98,10 @@ describe('guard: which commands integrate', () => {
       'git push origin master',
       'git push -f origin agt/x',
       'git push --force origin agt/x',
-      'git push --force-with-lease origin agt/x',
+      'git push --force-with-lease origin feat/x',
+      'git push --force-with-lease=main origin agt/x',
+      'git push --force-with-lease origin agt/x:main',
+      'git push --force-with-lease origin +agt/x',
       'git push -uf origin agt/x',
       'git push origin +agt/x',
       'git merge --no-ff agt/x && git push origin main',
@@ -431,8 +434,8 @@ describe('guard: worktree adds', () => {
 
 // A run in a session with no pane transport: the ownership list lives in memory.
 // git: per dir, the branch checked out (`current`), its remote URL and its main checkout (default /work/repo).
-type Repo = { current?: string; remote?: string; common?: string; pushurl?: string; upstream?: string }
-const setup = (on: any, o: { profile?: unknown; repoConfig?: unknown; env?: Record<string, string>; files?: Record<string, string>; repos?: Record<string, Repo>; feat?: boolean; broken?: boolean; aliases?: Record<string, string>; aliasBroken?: boolean; pyFind?: Record<string, string>; hooksPath?: string; remoteHeads?: string[] } = {}) => {
+type Repo = { current?: string; remote?: string; common?: string; pushurl?: string; upstream?: string; tracking?: string; gitDir?: string }
+const setup = (on: any, o: { profile?: unknown; repoConfig?: unknown; env?: Record<string, string>; files?: Record<string, string>; repos?: Record<string, Repo>; feat?: boolean; broken?: boolean; aliases?: Record<string, string>; aliasBroken?: boolean; pyFind?: Record<string, string>; hooksPath?: string; remoteHeads?: string[]; originHead?: string; followTags?: boolean; tags?: string[]; remoteTags?: string[]; localTags?: string[]; gitConfigFiles?: string; gitConfigBroken?: boolean; cwd?: string } = {}) => {
   const seen: string[][] = []
   const ran: string[] = []
   const git = { made: false, committed: false, feat: false }
@@ -442,7 +445,7 @@ const setup = (on: any, o: { profile?: unknown; repoConfig?: unknown; env?: Reco
   if (o.profile) files['/h/.agentille/profile.json'] = JSON.stringify(o.profile)
   if (o.repoConfig) files['/work/repo/.agentille/config.json'] = JSON.stringify(o.repoConfig)
   on('env.get', async ($: any, e: any) => ({ value: ({ HOME: '/h', ...(o.env ?? {}) } as any)[e.name] }))
-  on('session.cwd', async () => ({ value: '/work/repo' }))
+  on('session.cwd', async () => ({ value: o.cwd ?? '/work/repo' }))
   on('session.start', async ($: any, e: any) => ({ cwd: e.cwd }))
   on('command.register', async () => ({ value: undefined }))
   on('tool.register', async ($: any, e: any) => ({ value: { tool: 'mcp__agentille__' + e.name } }))
@@ -508,9 +511,25 @@ const setup = (on: any, o: { profile?: unknown; repoConfig?: unknown; env?: Reco
     // The branches the remote has: ls-remote prints the one asked for when it is there.
     const lr = /ls-remote --heads \S+ refs\/heads\/(\S+)$/.exec(a)
     if (lr) return out((o.remoteHeads ?? []).includes(lr[1]) ? 'abc\trefs/heads/' + lr[1] + '\n' : '')
+    // Every branch the remote has, and the remote's default as origin/HEAD records it (none unless the test sets one).
+    if (/ls-remote --heads \S+$/.test(a)) return out((o.remoteHeads ?? []).map((h) => 'abc\trefs/heads/' + h + '\n').join(''))
+    if (a.endsWith('symbolic-ref --short refs/remotes/origin/HEAD')) return o.originHead ? out('origin/' + o.originHead + '\n') : out('', 1)
+    // The includes and hooks folder git config names, with where each was set (`git config --show-origin --show-scope`).
+    if (a.includes('config --show-origin --show-scope --get-regexp')) return o.gitConfigBroken ? out('', 128) : out(o.gitConfigFiles ?? '', o.gitConfigFiles ? 0 : 1)
+    // A tag of that name, asked of git as refs/tags/<name>.
+    const tg = /rev-parse -q --verify refs\/tags\/(\S+)$/.exec(a)
+    if (tg) return (o.localTags ?? []).includes(tg[1]) ? out('abc\n') : out('', 1)
+    // push.followTags, the annotated tags merged into a pushed source, and the tags the remote has.
+    if (a.includes('config --type=bool --get push.followTags')) return o.followTags ? out('true\n') : out('', 1)
+    if (a.includes('for-each-ref --format=%(objecttype) %(refname:short)')) return out((o.tags ?? []).map((t) => 'tag ' + t + '\n').join(''))
+    if (/ls-remote --tags \S+$/.test(a)) return out((o.remoteTags ?? []).map((t) => 'abc\trefs/tags/' + t + '\n').join(''))
+    // The upstream of the branch checked out: what the test sets as `tracking`.
+    if (a.includes('@{upstream}')) return repos[dir]?.tracking ? out(repos[dir].tracking + '\n') : out('', 128)
     // The hooks folder git runs: core.hooksPath when the test sets one, else the repo's .git/hooks.
     if (a.includes('--git-path hooks')) return out((o.hooksPath ?? '/work/repo/.git/hooks') + '\n')
     if (a.includes('rev-parse --path-format=absolute --git-common-dir') && repos[dir]?.common) return out(repos[dir].common + '\n')
+    // The checkout's own git dir: a linked worktree's lives under the main checkout's .git/worktrees.
+    if (a.endsWith('rev-parse --path-format=absolute --git-dir')) return out((repos[dir]?.gitDir ?? (dir === '/work/repo' ? '/work/repo/.git' : '')) + '\n', repos[dir]?.gitDir || dir === '/work/repo' ? 0 : 128)
     if (a.includes('symbolic-ref')) return out('', 1)
     if (a.includes('branch --merged')) return out('agt/other\n' + (git.made ? 'agt/x\n' : ''))
     if (a === 'git -C /work/repo rev-parse HEAD') return out(git.committed ? 'm2\n' : 'm1\n')
@@ -553,7 +572,7 @@ describe('guard: integration in the mod', () => {
     setup(on)
     await boot($)
     await typed($)
-    await $.agent.spawn({ prompt: '[agt run=gd1 size=small mode=build]\nbuild', subagentType: 'agentille:agentille-executor', model: 'sonnet' })
+    await $.agent.spawn({ prompt: '[agt run=gd1 size=small work=build]\nbuild', subagentType: 'agentille:agentille-executor', model: 'sonnet' })
     await typed($, 'how is it going?')
     expect((await bash($, 'gh pr merge 3')).deny).toBe(DENY_INTEGRATION)
   })
@@ -579,10 +598,46 @@ describe('guard: integration in the mod', () => {
     expect(main.deny).toContain(DENY_PUSH)
     expect(main.deny).toContain('git push to main')
     expect((await bash($, 'git push')).deny).toContain('git push to main')
-    expect((await bash($, 'git push --force-with-lease origin agt/x')).deny).toContain('--force')
+    // agt/x is the run's now (its push above created it): a lease push of it goes; one of agt/y, which it did not make, does not.
+    expect((await bash($, 'git push --force-with-lease origin agt/y')).deny).toContain('--force')
     expect((await bash($, 'cd "$WT" && git push -u origin "$BRANCH"')).deny).toContain('(a variable)')
     expect((await bash($, 'cd "$WT" && git push -u origin HEAD')).deny).toContain('cannot be read')
     expect(ran).toEqual(['cd /work/repo-x && git push -u origin HEAD', 'git -C /work/repo-x push', 'git push -u origin agt/x'])
+  })
+
+  test('/agt --local runs that one run under integration local: no push, no PR, whatever the profile says', async ($, on) => {
+    const { ran } = setup(on)
+    await boot($)
+    await typed($, '/agt --local fix the typo in the footer')
+    expect((await bash($, 'git push -u origin agt/x')).deny).toBe(DENY_LOCAL)
+    expect((await bash($, 'cd /work/repo-x && git push -u origin HEAD')).deny).toBe(DENY_LOCAL)
+    expect((await bash($, 'gh pr create --base main --title x --body y')).deny).toBe(DENY_LOCAL)
+    expect((await bash($, 'git commit -m "fix: typo"')).result).toBe('ok')
+    expect(ran).toEqual(['git commit -m "fix: typo"'])
+    // The flag holds for its own run only: after the card, the next /agt is back on the default, pr.
+    await card($)
+    await typed($, '/agt fix the typo in the footer')
+    expect((await bash($, 'git push -u origin agt/x')).result).toBe('ok')
+  })
+
+  test('without --local the default pr lets the run push its own branch', async ($, on) => {
+    const { ran } = setup(on)
+    await boot($)
+    await typed($, '/agt fix the typo in the footer')
+    expect((await bash($, 'git push -u origin agt/x')).result).toBe('ok')
+    expect(ran).toEqual(['git push -u origin agt/x'])
+  })
+
+  test('--local wins over a projects[] entry that says auto for the repo', async ($, on) => {
+    const { ran } = setup(on, {
+      profile: { integration: 'auto', projects: [{ url: 'https://github.com/me/repo', integration: 'auto' }] },
+      repos: { '/work/repo': { current: 'main', remote: 'git@github.com:me/repo.git' }, '/work/repo-x': { current: 'agt/x', remote: 'git@github.com:me/repo.git' } },
+    })
+    await boot($)
+    await typed($, '/agt --local ship it')
+    expect((await bash($, 'git push -u origin agt/x')).deny).toBe(DENY_LOCAL)
+    expect((await bash($, 'gh pr merge 3 --merge')).deny).toEqual(expect.any(String))
+    expect(ran).toEqual([])
   })
 
   test('the repo the command targets decides, not the session\'s', async ($, on) => {
@@ -756,6 +811,19 @@ describe('guard: worktree ownership and the run-end tidy', () => {
     expect(seen).toContainEqual(['git', '-C', '/work/repo-f', 'clean', '-fqX', '--', '.env*'])
   })
 
+  test('a tree whose branch a record names, but at another path, is not the run\'s and is never removed', async ($, on) => {
+    // The lead's saved record names agt/x at a path that is gone; /work/repo-x is on agt/x, made by another session.
+    const rec = JSON.stringify([{ path: '/work/repo-x-old', branch: 'agt/x', head: 'm1', run: 'r1', at: Date.now(), src: 'add' }])
+    const { seen, git } = setup(on, { env: { HERDR_PANE_ID: 'w1:p1' }, files: { '/h/.agentille/state/lead-w1-p1.worktrees': rec } })
+    git.made = true
+    git.committed = true
+    await boot($)
+    await typed($)
+    const r = await $.command.run({ command: 'agt-clean', args: '', origin: { kind: 'composer' } } as never)
+    expect(r.text).toContain('agt/x (not opened by this session)')
+    expect(seen.some((a) => a.includes('/work/repo-x') && (a.includes('remove') || a.includes('clean')))).toBe(false)
+  })
+
   test('a session that recorded no worktree removes nothing', async ($, on) => {
     const { seen } = setup(on)
     await boot($)
@@ -799,15 +867,17 @@ describe('guard: it fails closed', () => {
     }
     // Nothing to judge but the deep part: still refused, never let through unread.
     expect((await bash($, deep + '; echo hi')).deny).toContain('substitution nests deeper than the guard reads')
-    expect((await bash($, 'echo $($($($(x))))')).result).toBe('ok')
+    expect((await bash($, 'echo $(echo $(echo $(echo x)))')).result).toBe('ok')
+    // Within the caps a substitution's output run as a program is still unreadable.
+    expect((await bash($, 'echo $($($($(x))))')).deny).toContain('a program the guard cannot read')
     // Within the caps the normal path still judges the line.
-    expect((await bash($, 'echo $($(x)); gh pr merge 4')).deny).toBe(DENY_INTEGRATION)
+    expect((await bash($, 'echo $(echo $(x)); gh pr merge 4')).deny).toBe(DENY_INTEGRATION)
     expect((await bash($, 'eval eval eval gh pr merge 4')).deny).toBe(DENY_INTEGRATION)
     // The lexer resumes after the deep part's closer: what follows it is read as its own command.
     expect(splitCommands(deep + '; gh pr merge 4').at(-1)).toEqual(['gh', 'pr', 'merge', '4'])
     expect((await bash($, '')).result).toBe('ok')
     expect((await bash($, '# a note')).result).toBe('ok')
-    expect(ran).toEqual(['echo $($($($(x))))', '', '# a note'])
+    expect(ran).toEqual(['echo $(echo $(echo $(echo x)))', '', '# a note'])
   })
 
   test('under auto the depth caps refuse nothing', async ($, on) => {
@@ -829,7 +899,7 @@ describe('guard: it fails closed', () => {
 
 // The lead's guard lasts for its run, not for a clock window: a run that named its id is guarded until its card.
 describe('guard: the lead stays guarded for the whole run', () => {
-  const sub = (run: string) => ({ prompt: '[agt run=' + run + ' size=small mode=build]\nbuild', subagentType: 'agentille:agentille-executor', model: 'sonnet' })
+  const sub = (run: string) => ({ prompt: '[agt run=' + run + ' size=small work=build]\nbuild', subagentType: 'agentille:agentille-executor', model: 'sonnet' })
   // In steps: the redraw ticker keeps a short interval while the band shows the run.
   const later = async (clock: any, ms: number) => { for (let t = 0; t < ms; t += 60_000) await clock.advance(60_000) }
   const subDone = async ($: any) => {
@@ -901,6 +971,90 @@ describe('guard: the lead stays guarded for the whole run', () => {
     await card($)
     await typed($, 'something else')
     expect((await bash($, 'gh pr merge 9')).result).toBe('ok')
+  })
+})
+
+// A solo run prints no card: its recon line marks it, and the end of the turn that printed it ends the hold.
+describe('guard: a solo run ends its hold when its answer ends', () => {
+  const user = (text: string) => ({ role: 'user', text, toolUses: [] })
+  const said = (text: string) => ({ role: 'assistant', text, toolUses: [{ id: 'u1', name: 'Bash', input: {} }] })
+  const results = () => ({ role: 'user', text: '', toolUses: [], toolResults: [{ tool_use_id: 'u1', text: 'ok', isError: false }] })
+  const answer = async ($: any, text: string) => {
+    await $.turn.start({ text: 'go', turnId: 't2' })
+    await $.turn.complete({ answer: text, durationMs: 1, isAborted: false, turnId: 't2', reason: 'answer' })
+    await new Promise((r) => setTimeout(r, 30))
+  }
+
+  test('solo recon, then the turn ends: a later typed merge in the lead is allowed', async ($, on) => {
+    const { ran } = setup(on)
+    const rows: any[] = []
+    on('session.messages', async () => ({ value: rows }))
+    await boot($)
+    await typed($, '/agt fix the typo in the footer')
+    rows.push(user('/agt fix the typo in the footer'), said('recon: low · solo · one-line copy fix · advisor'), results())
+    expect((await bash($, 'gh pr merge 12 --merge')).deny).toBe(DENY_INTEGRATION) // the solo's own steps are judged
+    rows.push(said('Fixed the typo; PR #12 is open.'))
+    await answer($, 'Fixed the typo; PR #12 is open.')
+    await typed($, 'merge it')
+    expect((await bash($, 'gh pr merge 12 --merge')).result).toBe('ok')
+    expect(ran).toEqual(['gh pr merge 12 --merge'])
+  })
+
+  test('a solo answer that carries its own recon line ends the hold too', async ($, on) => {
+    setup(on)
+    on('session.messages', async () => ({ deny: 'no transcript' }))
+    await boot($)
+    await typed($, '/agt what does the footer say')
+    await answer($, 'recon: low · solo · a question about one file\n\nIt says hello.')
+    await typed($, 'merge it')
+    expect((await bash($, 'gh pr merge 12')).result).toBe('ok')
+  })
+
+  for (const line of ['recon: low · subagent · one slice', 'recon: medium · subagent · two small slices']) {
+    test('"' + line + '" keeps holding past its turn, until the card', async ($, on) => {
+      setup(on)
+      const rows: any[] = [user('/agt ship it'), said(line), results(), said('Dispatched the executor.')]
+      on('session.messages', async () => ({ value: rows }))
+      await boot($)
+      await typed($)
+      await answer($, 'Dispatched the executor.')
+      await typed($, 'merge it')
+      expect((await bash($, 'gh pr merge 12')).deny).toBe(DENY_INTEGRATION)
+      await card($)
+      expect((await bash($, 'gh pr merge 12')).result).toBe('ok')
+    })
+  }
+
+  test('a solo recon from an earlier turn does not end a later run', async ($, on) => {
+    setup(on)
+    const rows: any[] = [user('/agt fix the typo'), said('recon: low · solo · one-line fix'), results(), said('Fixed.'), user('/agt ship the search page'), said('recon: medium · subagent · two small slices'), results(), said('Dispatched both executors.')]
+    on('session.messages', async () => ({ value: rows }))
+    await boot($)
+    await typed($, '/agt ship the search page')
+    await answer($, 'Dispatched both executors.')
+    await typed($, 'merge it')
+    expect((await bash($, 'gh pr merge 12')).deny).toBe(DENY_INTEGRATION)
+  })
+
+  test('an unreadable transcript keeps the hold', async ($, on) => {
+    setup(on)
+    on('session.messages', async () => { throw new Error('no transcript') })
+    await boot($)
+    await typed($, '/agt fix the typo')
+    await answer($, 'Fixed the typo.')
+    await typed($, 'merge it')
+    expect((await bash($, 'gh pr merge 12')).deny).toBe(DENY_INTEGRATION)
+  })
+
+  test('an interrupted solo turn keeps the hold', async ($, on) => {
+    setup(on)
+    on('session.messages', async () => ({ value: [user('/agt fix the typo'), said('recon: low · solo · one-line fix')] }))
+    await boot($)
+    await typed($, '/agt fix the typo')
+    await $.turn.start({ text: 'go', turnId: 't3' })
+    await $.turn.complete({ answer: '', durationMs: 1, isAborted: true, turnId: 't3', reason: 'aborted' })
+    await typed($, 'merge it')
+    expect((await bash($, 'gh pr merge 12')).deny).toBe(DENY_INTEGRATION)
   })
 })
 
@@ -989,6 +1143,7 @@ describe('guard: scripts are read before they run', () => {
     '/work/repo/ship.py': 'import subprocess\nsubprocess.run(["git", "push", "origin", "main"])\n',
     '/work/repo/test.sh': '#!/bin/sh\nnpm test\n',
     '/work/repo/Makefile': 'test:\n\tnpm test\n\nrelease: test tag-it\n\nlint:\n\tnpm run lint\n\ntag-it:\n\tgit tag v1 && git push --tags\n\n%.o: %.c\n\tcc $<\n',
+    '/work/repo/package.json': JSON.stringify({ name: 'p', scripts: { test: 'echo t', lint: 'eslint .' } }),
   }
 
   test('a script that pushes, merges or tags is refused, and the text says why; a plain one runs', async ($, on) => {
@@ -1089,10 +1244,12 @@ describe('guard: package scripts, modules and imports are followed', () => {
     await deny('npm run wrap', 'tools/push.sh runs a script that calls git push')
     await deny('sh tools/wrap.sh', 'tools/push.sh runs a script that calls git push')
     const ok = ['npm run loop', 'npm run lint', 'npm run fine', 'node tools/fine.mjs', 'python3 -m pkg.ok', 'python3 -m pytest -q', 'python3 -m http.server', 'pnpm install', 'yarn', 'bun test',
-      'npm run check', 'sh tools/check.sh', 'npm i -g typescript', 'pnpm add -w lodash', 'pnpm -r install', 'npm install --prefix x', 'yarn add left-pad',
+      'npm run check', 'sh tools/check.sh', 'npm i -g typescript', 'yarn add left-pad',
       'npm run lint -- -g adds', 'npm run lint -- -w', 'pnpm run lint -- --filter x']
     for (const line of ok) expect([line, (await bash($, line)).result]).toEqual([line, 'ok'])
     expect(ran).toEqual(ok)
+    // An install runs lifecycle scripts: pointed at another package folder, the guard cannot tell whose, as for run.
+    for (const line of ['pnpm add -w lodash', 'pnpm -r install', 'npm install --prefix x']) await deny(line, 'another package folder')
   })
 
   test('a run script that is not there, or a package.json that does not parse, is refused', async ($, on) => {
@@ -1393,11 +1550,42 @@ describe('guard: a script step it cannot read refuses', () => {
     expect((await bash($, 'npm run deep')).deny).toContain('nests deeper than the guard reads')
     expect((await bash($, 'sh s.sh')).deny).toContain('a program the guard cannot read')
     expect((await bash($, '$(printf gi)t push origin agt/x:main')).deny).toContain('a program the guard cannot read')
-    // A variable program with no integration word after it is not judged: `"$@"`, `"$NODE" x.js`, `"$EDITOR" f`.
+    // In a script's text a variable program with no integration word after it is not judged: `"$@"`, `"$NODE" x.js`.
     expect((await bash($, 'npm run build')).result).toBe('ok')
     expect((await bash($, 'sh run.sh npm test')).result).toBe('ok')
-    expect((await bash($, '"$EDITOR" notes.md')).result).toBe('ok')
-    expect(ran).toEqual(['npm run build', 'sh run.sh npm test', '"$EDITOR" notes.md'])
+    // On the Bash line itself an unresolved program word is refused: `"$EDITOR" f` is rare in a run.
+    expect((await bash($, '"$EDITOR" notes.md')).deny).toContain('a program the guard cannot read ($EDITOR)')
+    expect(ran).toEqual(['npm run build', 'sh run.sh npm test'])
+  })
+})
+
+describe('guard: a program word built from a variable', () => {
+  test('a variable the line sets is expanded and split as the shell does, then judged', async ($, on) => {
+    const { ran } = setup(on, { repos: { '/work/repo': { current: 'agt/x' } } })
+    await boot($)
+    await typed($)
+    expect((await bash($, "c='git push -q origin agt/x:main'; $c")).deny).toContain('git push to main')
+    expect((await bash($, "c='git push -q origin agt/x:main' && ${c}")).deny).toContain('git push to main')
+    expect((await bash($, "a='push -q origin agt/x:main'; git $a")).deny).toContain('git push to main')
+    expect((await bash($, "g=gh; $g pr merge 4")).deny).toBe(DENY_INTEGRATION)
+    // Quoted, the value stays one word: git is asked for no such subcommand, and the guard refuses what it cannot read.
+    expect((await bash($, "a='push origin agt/x:main'; git \"$a\"")).deny).toContain('git runs a subcommand the guard cannot read')
+    // Unset, a substitution, or a variable from the session: refused below auto.
+    for (const line of ['$c', '$GIT push origin agt/x', '"$NODE" tools/x.js', '$(which git) push origin agt/x', '`printf git` status']) {
+      expect([line, (await bash($, line)).deny]).toEqual([line, expect.stringContaining('a program the guard cannot read')])
+    }
+    // Resolved to something harmless, it runs; $HOME is the session's home.
+    expect((await bash($, "c='git status --short'; $c")).result).toBe('ok')
+    expect((await bash($, "t=echo; $t hi")).result).toBe('ok')
+    expect((await bash($, '$HOME/bin/tool --help')).result).toBe('ok')
+    expect(ran).toEqual(["c='git status --short'; $c", 't=echo; $t hi', '$HOME/bin/tool --help'])
+  })
+
+  test('commandSteps splits only unquoted expansions, and never an assignment', () => {
+    const steps = commandSteps("D='a b'; cd \"$D\" && x=\"$D\" git push origin \"$D\"", '/w', 0, ['/h'])
+    expect(steps.find((s: any) => s.kind === 'push')?.push.specs).toEqual(['a b'])
+    expect(splitCommands("c='git push origin x'; $c")).toEqual([['git', 'push', 'origin', 'x']])
+    expect(splitCommands("c='git push origin x'; \"$c\"")).toEqual([['git push origin x']])
   })
 })
 
@@ -1538,7 +1726,7 @@ describe('guard: the hooks folder the repo sets is protected like .git/hooks', (
 
 describe('guard: the run pushes only branches it made or that are new', () => {
   test('an own-prefix branch the remote already has, not checked out and not the run\'s, is refused', async ($, on) => {
-    const { ran } = setup(on, { profile: { integration: 'pr' }, repos: { '/work/repo': { current: 'agt/x' } }, remoteHeads: ['feat/other', 'fix/theirs', 'agt/x'] })
+    const { ran } = setup(on, { profile: { integration: 'pr' }, originHead: 'main', repos: { '/work/repo': { current: 'agt/x' } }, remoteHeads: ['feat/other', 'fix/theirs', 'agt/x'] })
     await boot($)
     await typed($)
     expect((await bash($, 'git push origin agt/x:feat/other')).deny).toContain('a branch the remote already has that this run did not make')
@@ -1558,11 +1746,334 @@ describe('guard: the run pushes only branches it made or that are new', () => {
     expect(ran).toEqual(['git worktree add ../repo-x -b agt/x', 'git push origin agt/x'])
   })
 
-  test('judgePush hands an own-prefix branch that is not checked out to the caller', () => {
-    const claims: string[] = []
-    expect(judgePush({ remote: 'origin', specs: ['agt/x:feat/y'], force: false, del: false, bulk: null, dry: false, mergeOpt: false } as any, { current: 'agt/x', claim: (n: string) => claims.push(n) } as any)).toBe(null)
-    expect(judgePush({ remote: 'origin', specs: ['feat/z'], force: false, del: false, bulk: null, dry: false, mergeOpt: false } as any, { current: 'feat/z', claim: (n: string) => claims.push(n) } as any)).toBe(null)
-    expect(claims).toEqual(['feat/y'])
+  test('judgePush hands the branch checked out and an own-prefix branch to the caller, saying which is which', () => {
+    const claims: unknown[] = []
+    expect(judgePush({ remote: 'origin', specs: ['agt/x:feat/y'], force: false, del: false, bulk: null, dry: false, mergeOpt: false } as any, { current: 'agt/x', claim: (n: string, cur: boolean) => claims.push([n, cur]) } as any)).toBe(null)
+    expect(judgePush({ remote: 'origin', specs: ['feat/z'], force: false, del: false, bulk: null, dry: false, mergeOpt: false } as any, { current: 'feat/z', claim: (n: string, cur: boolean) => claims.push([n, cur]) } as any)).toBe(null)
+    // A base-like branch is refused checked out or not: develop, when the guard read it as the base.
+    expect(judgePush({ remote: 'origin', specs: ['develop'], force: false, del: false, bulk: null, dry: false, mergeOpt: false } as any, { current: 'develop', bases: new Set(['main', 'master', 'develop']), claim: (n: string) => claims.push(n) } as any)).toBe('git push to develop')
+    expect(claims).toEqual([['feat/y', false], ['feat/z', true]])
+  })
+})
+
+describe('guard: the run\'s own branches and the base-like ones', () => {
+  test('the branch checked out at /agt is pushed as itself, but nothing is merged into it below auto', async ($, on) => {
+    const { ran } = setup(on, { profile: { integration: 'pr' }, originHead: 'main', repos: { '/work/repo': { current: 'feat/big' } }, remoteHeads: ['main', 'feat/big', 'feat/other'] })
+    await boot($)
+    await typed($)
+    expect((await bash($, 'git push origin feat/big')).result).toBe('ok')
+    expect((await bash($, 'git push')).result).toBe('ok')
+    const m = await bash($, 'git merge --no-ff agt/slice && git push origin feat/big')
+    expect(m.deny).toContain('a merge into feat/big, a branch this run did not make')
+    expect((await bash($, 'git merge agt/slice')).deny).toContain('a merge into feat/big')
+    expect((await bash($, 'git pull origin agt/slice')).deny).toContain('a merge into feat/big')
+    // Catching up with its own upstream is no integration.
+    expect((await bash($, 'git merge --ff-only origin/feat/big')).result).toBe('ok')
+    expect((await bash($, 'git pull --ff-only')).result).toBe('ok')
+    // Another branch the remote has, checked out later: not the run's.
+    expect((await bash($, 'git checkout feat/other && git push origin feat/other')).deny).toContain('a branch the remote already has that this run did not make')
+    expect(ran).toEqual(['git push origin feat/big', 'git push', 'git merge --ff-only origin/feat/big', 'git pull --ff-only'])
+  })
+
+  test('under local nothing leaves the machine: the merge into the checkout is the local flow', async ($, on) => {
+    const { ran } = setup(on, { profile: { integration: 'local' }, originHead: 'main', repos: { '/work/repo': { current: 'feat/big' } }, remoteHeads: ['main', 'feat/big'] })
+    await boot($)
+    await typed($)
+    expect((await bash($, 'git merge --no-ff agt/slice')).result).toBe('ok')
+    expect((await bash($, 'git push origin feat/big')).deny).toBe(DENY_LOCAL)
+    expect(ran).toEqual(['git merge --no-ff agt/slice'])
+  })
+
+  test('a branch the run created on the remote stays its own: pushed again, and merged into', async ($, on) => {
+    const heads = ['main']
+    const { ran } = setup(on, { profile: { integration: 'pr' }, originHead: 'main', repos: { '/work/repo': { current: 'feat/slug' } }, remoteHeads: heads })
+    await boot($)
+    await typed($)
+    expect((await bash($, 'git push -u origin feat/slug')).result).toBe('ok')
+    heads.push('feat/slug') // the remote has it now
+    expect((await bash($, 'git push origin feat/slug')).result).toBe('ok')
+    expect((await bash($, 'git merge --no-ff agt/two && git push')).result).toBe('ok')
+    expect(ran).toEqual(['git push -u origin feat/slug', 'git push origin feat/slug', 'git merge --no-ff agt/two && git push'])
+  })
+
+  test('with no origin/HEAD every branch the remote has that the run did not make is base-like; agt/* never is', async ($, on) => {
+    const { ran } = setup(on, { profile: { integration: 'pr' }, repos: { '/work/repo': { current: 'develop' }, '/work/repo-x': { current: 'agt/x' } }, remoteHeads: ['develop', 'agt/x'] })
+    await boot($)
+    await typed($)
+    expect((await bash($, 'git push origin develop')).deny).toContain('git push to develop')
+    expect((await bash($, 'git merge agt/x')).deny).toContain('the base branch develop')
+    expect((await bash($, 'cd /work/repo-x && git push origin agt/x')).result).toBe('ok')
+    expect(ran).toEqual(['cd /work/repo-x && git push origin agt/x'])
+  })
+
+  for (const originHead of ['main', undefined]) {
+    test('a pane worker on its feat/* slice in a linked worktree pushes it and merges the base into it' + (originHead ? '' : ', with no origin/HEAD'), async ($, on) => {
+      const slice = { current: 'feat/slug', gitDir: '/work/repo/.git/worktrees/repo-slug', common: '/work/repo/.git' }
+      const { ran } = setup(on, { env: { AGENTILLE_WORKER: 'executor:sonnet:medium' }, cwd: '/work/repo-slug', profile: { integration: 'pr' }, originHead, repos: { '/work/repo-slug': slice }, remoteHeads: ['main', 'feat/slug'] })
+      await boot($)
+      expect((await bash($, 'git push origin feat/slug')).result).toBe('ok')
+      expect((await bash($, 'git merge main')).result).toBe('ok')
+      expect((await bash($, 'git push origin HEAD:main')).deny).toContain('git push to main')
+      expect(ran).toEqual(['git push origin feat/slug', 'git merge main'])
+    })
+  }
+
+  test('a pane worker at the main checkout gains nothing: the person\'s feat/big there is not its slice', async ($, on) => {
+    const { ran } = setup(on, { env: { AGENTILLE_WORKER: 'executor:sonnet:medium' }, profile: { integration: 'pr' }, originHead: 'main', repos: { '/work/repo': { current: 'feat/big' } }, remoteHeads: ['main', 'feat/big'] })
+    await boot($)
+    expect((await bash($, 'git push origin feat/big')).deny).toContain('a branch the remote already has that this run did not make')
+    expect((await bash($, 'git merge agt/x')).deny).toContain('a merge into feat/big')
+    expect(ran).toEqual([])
+  })
+
+  test('the upstream of the branch checked out is base-like when it names another branch', async ($, on) => {
+    const { ran } = setup(on, { profile: { integration: 'pr' }, originHead: 'main', repos: { '/work/repo': { current: 'feat/slug', tracking: 'origin/develop' } }, remoteHeads: ['main', 'develop'] })
+    await boot($)
+    await typed($)
+    expect((await bash($, 'git push origin HEAD:develop')).deny).toContain('git push to develop')
+    expect((await bash($, 'git push -u origin feat/slug')).result).toBe('ok')
+    expect(ran).toEqual(['git push -u origin feat/slug'])
+  })
+})
+
+describe('guard: lifecycle scripts are read before install, pack and version run them', () => {
+  const pkg = (scripts: Record<string, string>) => ({ '/work/repo/package.json': JSON.stringify({ name: 'p', version: '1.0.0', scripts }) })
+
+  test('a lifecycle script that pushes refuses the command that runs it', async ($, on) => {
+    setup(on, { files: pkg({ postversion: 'git push && git push --tags', postinstall: 'git push origin HEAD:main', prepack: 'gh release create v1', prepare: 'sh tools/ship.sh' }), repos: { '/work/repo': { current: 'agt/x' } } })
+    await boot($)
+    await typed($)
+    expect((await bash($, 'npm version minor')).deny).toContain('npm version minor (its postversion script) runs a package script that calls git push')
+    for (const line of ['npm install', 'npm i', 'npm ci', 'pnpm install', 'pnpm add left-pad', 'yarn', 'yarn add x', 'bun install', 'npm rebuild', 'npm it', 'npm pack', 'bun pm pack']) {
+      expect([line, (await bash($, line)).deny]).toEqual([line, expect.stringContaining('script')])
+    }
+  })
+
+  test('npm version tags as git tag does; --ignore-scripts and a package with no scripts run', async ($, on) => {
+    const { ran } = setup(on, { files: pkg({ prepare: 'husky', test: 'vitest run' }), repos: { '/work/repo': { current: 'agt/x' } } })
+    await boot($)
+    await typed($)
+    expect((await bash($, 'npm version patch')).deny).toBe(DENY_INTEGRATION)
+    expect((await bash($, 'npm version patch --no-git-tag-version')).result).toBe('ok')
+    expect((await bash($, 'npm ci')).result).toBe('ok')
+    expect((await bash($, 'npm install --ignore-scripts')).result).toBe('ok')
+    expect((await bash($, 'npm version')).result).toBe('ok')
+    expect(ran).toEqual(['npm version patch --no-git-tag-version', 'npm ci', 'npm install --ignore-scripts', 'npm version'])
+  })
+
+  test('a lifecycle run in another package folder, or a package.json that does not parse, refuses', async ($, on) => {
+    setup(on, { files: { '/work/repo/package.json': '{ not json' }, repos: { '/work/repo': { current: 'agt/x' } } })
+    await boot($)
+    await typed($)
+    expect((await bash($, 'npm ci')).deny).toContain('cannot read')
+    expect((await bash($, 'npm --prefix ../other ci')).deny).toContain('another package folder')
+  })
+})
+
+describe('guard: push.followTags makes a branch push a tag push', () => {
+  test('a push that carries an annotated tag the remote lacks is refused; one it has, or no followTags, is not', async ($, on) => {
+    const { ran } = setup(on, { profile: { integration: 'pr' }, followTags: true, tags: ['v1.0.0', 'v1.1.0'], remoteTags: ['v1.0.0'], repos: { '/work/repo': { current: 'agt/x' } } })
+    await boot($)
+    await typed($)
+    expect((await bash($, 'git push -u origin agt/x')).deny).toContain('push.followTags carries v1.1.0')
+    expect((await bash($, 'git push')).deny).toContain('push.followTags carries v1.1.0')
+    expect((await bash($, 'git push --no-follow-tags origin agt/x')).result).toBe('ok')
+    expect(ran).toEqual(['git push --no-follow-tags origin agt/x'])
+  })
+
+  test('every tag already on the remote, or followTags unset: the branch push goes', async ($, on) => {
+    const { ran } = setup(on, { profile: { integration: 'pr' }, followTags: true, tags: ['v1.0.0'], remoteTags: ['v1.0.0'], repos: { '/work/repo': { current: 'agt/x' } } })
+    await boot($)
+    await typed($)
+    expect((await bash($, 'git push -u origin agt/x')).result).toBe('ok')
+    expect(ran).toEqual(['git push -u origin agt/x'])
+  })
+
+  test('setting push.followTags is a protected config write, by git config, -c or the environment', () => {
+    for (const line of ['git config push.followTags true', 'git config --global push.followtags true', 'git -c push.followTags=true push origin agt/x', "GIT_CONFIG_PARAMETERS=\"'push.followTags'='true'\" git push origin agt/x", 'GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=push.followTags GIT_CONFIG_VALUE_0=true git push origin agt/x']) {
+      expect([line, integrationIn(line, onSlice)]).toEqual([line, expect.stringContaining('git config key')])
+    }
+  })
+})
+
+describe('guard: a tag named like a branch is a tag push', () => {
+  test('git push origin <name> where refs/tags/<name> exists is refused; a branch of that name alone is not', async ($, on) => {
+    const { ran } = setup(on, { profile: { integration: 'pr' }, localTags: ['feat/rel', 'v2'], repos: { '/work/repo': { current: 'agt/x' } } })
+    await boot($)
+    await typed($)
+    expect((await bash($, 'git push origin feat/rel')).deny).toContain('git push <tag> (feat/rel names a tag)')
+    expect((await bash($, 'git push origin v2:feat/new')).deny).toContain('v2 names a tag')
+    expect((await bash($, 'git push origin feat/other')).result).toBe('ok')
+    expect(ran).toEqual(['git push origin feat/other'])
+  })
+})
+
+describe('guard: --force-with-lease on the run\'s own agt/* branch', () => {
+  test('allowed on the slice branch checked out or one the run made; refused on any other, and plain --force stays refused', async ($, on) => {
+    const { ran } = setup(on, { profile: { integration: 'pr' }, originHead: 'main', remoteHeads: ['agt/x', 'agt/other', 'agt/made'], repos: { '/work/repo-x': { current: 'agt/x' } } })
+    await boot($)
+    await typed($)
+    expect((await bash($, 'cd /work/repo-x && git push --force-with-lease origin agt/x')).result).toBe('ok')
+    expect((await bash($, 'cd /work/repo-x && git push --force-with-lease=agt/x --force-if-includes origin HEAD')).result).toBe('ok')
+    // From the main checkout, agt/x is not checked out: it is the run's because one of its worktrees was made on it.
+    expect((await bash($, 'git push --force-with-lease origin agt/x')).deny).toContain('an agt/* branch this run did not make')
+    expect((await bash($, 'git worktree add ../repo-x -b agt/x')).result).toBe('ok')
+    expect((await bash($, 'git push --force-with-lease origin agt/x')).result).toBe('ok')
+    expect((await bash($, 'git push --force-with-lease origin agt/other')).deny).toContain('an agt/* branch this run did not make')
+    expect((await bash($, 'cd /work/repo-x && git push --force origin agt/x')).deny).toContain('git push --force')
+    expect((await bash($, 'cd /work/repo-x && git push --force-with-lease=main origin agt/x')).deny).toContain('not an agt/* branch of this run')
+    expect(ran).toEqual(['cd /work/repo-x && git push --force-with-lease origin agt/x', 'cd /work/repo-x && git push --force-with-lease=agt/x --force-if-includes origin HEAD', 'git worktree add ../repo-x -b agt/x', 'git push --force-with-lease origin agt/x'])
+  })
+})
+
+describe('guard: publish, deploy and destructive repo changes are auto only', () => {
+  const PUB = ['npm publish', 'pnpm publish --access public', 'yarn npm publish', 'bun publish', 'npm dist-tag add p@1.2.0 latest', 'npm unpublish p@1.0.0',
+    'cargo publish', 'twine upload dist/*', 'python3 -m twine upload dist/*', 'gem push p.gem', 'docker push img:1', 'docker image push img', 'podman push img',
+    'docker buildx build --push -t img .', 'vercel --prod', 'vercel deploy --prod', 'railway up', 'fly deploy', 'flyctl deploy', 'release-it', 'semantic-release',
+    'changeset publish', 'lerna publish', 'gh repo delete o/r --yes', 'gh repo archive o/r', 'gh repo rename x', 'gh secret set TOKEN', 'gh secret delete TOKEN',
+    'gh variable set V --body 1', 'gh ruleset create', 'gh api -X PUT repos/o/r/collaborators/bot', 'gh api -X PATCH repos/o/r -F allow_auto_merge=true',
+    'gh api -X PATCH repos/o/r -f delete_branch_on_merge=true', 'gh api -X DELETE repos/o/r', 'gh api -X PUT repos/o/r/actions/secrets/X -f encrypted_value=v',
+    'curl -X DELETE https://api.github.com/repos/o/r', 'curl -X PUT https://api.github.com/repos/o/r/collaborators/bot']
+
+  test('each is refused below auto; the reads beside them are not', () => {
+    for (const line of PUB) expect([line, integrationIn(line, onSlice)]).toEqual([line, expect.any(String)])
+    for (const line of ['npm dist-tag ls', 'npm pack --dry-run', 'docker build -t img .', 'vercel', 'vercel deploy', 'railway logs', 'fly status', 'gh repo view',
+      'gh secret list', 'gh variable list', 'gh ruleset list', 'gh ruleset view 3', 'cargo build', 'gh api repos/o/r', 'changeset version', 'npm run publish-docs']) {
+      expect([line, integrationIn(line, onSlice)]).toEqual([line, null])
+    }
+  })
+
+  test('in the mod the deny says publish needs auto or the person; a package script or recipe that publishes refuses too', async ($, on) => {
+    const { ran } = setup(on, { profile: { integration: 'pr' }, files: { '/work/repo/package.json': JSON.stringify({ name: 'p', scripts: { release: 'release-it', ship: 'npm run build && npm publish', wf: 'gh workflow run deploy.yml', build: 'tsc' } }) } })
+    await boot($)
+    await typed($)
+    const d = await bash($, 'npm publish')
+    expect(d.deny).toContain(DENY_PUBLISH)
+    expect(d.deny).toContain('needs integration auto, or the person runs it')
+    expect((await bash($, 'railway up --service web')).deny).toContain('railway up')
+    expect((await bash($, 'npm run release')).deny).toContain('runs release-it (a release tool')
+    expect((await bash($, 'npm run ship')).deny).toContain('runs npm publish')
+    expect((await bash($, 'npm run wf')).deny).toContain('runs gh workflow run')
+    expect((await bash($, 'npm run build')).result).toBe('ok')
+    expect(ran).toEqual(['npm run build'])
+  })
+
+  test('under auto they run', async ($, on) => {
+    const { ran } = setup(on, { profile: { projects: [{ id: 'repo', integration: 'auto' }] } })
+    await boot($)
+    await typed($)
+    expect((await bash($, 'npm publish')).result).toBe('ok')
+    expect((await bash($, 'gh secret set X --body y')).result).toBe('ok')
+    expect(ran).toEqual(['npm publish', 'gh secret set X --body y'])
+  })
+})
+
+describe('guard: recipes, local bins, test files and Python imports are followed', () => {
+  const files = {
+    '/work/repo/Makefile': 'SHIP = ./bin/ship\ngo:\n\t@$(SHIP) --now\nbuild:\n\t./bin/tool\nsub:\n\t$(MAKE) -C /work/repo go\nok:\n\t-echo fine && $(CC) -o x x.c\n',
+    '/work/repo/bin/ship': '#!/bin/sh\ngit push origin HEAD:main\n',
+    '/work/repo/bin/tool': '\u0000ELF binary',
+    '/work/repo/package.json': JSON.stringify({ name: 'p', scripts: { thing: 'node_modules/.bin/thing --go', npmbin: '$(npm bin)/thing', test: 'vitest run', prepare: 'husky' } }),
+    '/work/repo/node_modules/.bin/thing': "#!/usr/bin/env node\nimport '../thing/lib/cli.js'\n",
+    '/work/repo/node_modules/thing/lib/cli.js': "require('child_process').execSync('git push origin HEAD:main')\n",
+    '/work/repo/run.py': 'import os\nimport pusher\npusher.go()\n',
+    '/work/repo/pusher.py': 'import subprocess\ndef go():\n    subprocess.run(["git", "push", "origin", "HEAD:main"])\n',
+    '/work/repo/fine.py': 'import os, json\nfrom pathlib import Path\nprint(1)\n',
+  }
+
+  test('a make recipe is followed into the scripts and bins it runs; one that is no readable script refuses', async ($, on) => {
+    const { ran } = setup(on, { files })
+    await boot($)
+    await typed($)
+    expect((await bash($, 'make go')).deny).toContain('./bin/ship runs a script that calls git push')
+    expect((await bash($, 'make sub')).deny).toContain('./bin/ship runs a script that calls git push')
+    expect((await bash($, 'make build')).deny).toContain('the guard cannot read')
+    expect((await bash($, 'make ok')).result).toBe('ok')
+    expect(ran).toEqual(['make ok'])
+  })
+
+  test('a local bin a package script names is read where it lands, with its own package\'s imports', async ($, on) => {
+    const { ran } = setup(on, { files })
+    await boot($)
+    await typed($)
+    expect((await bash($, 'npm run thing')).deny).toContain('imports ../thing/lib/cli.js, which calls git push')
+    expect((await bash($, 'npm run npmbin')).deny).toContain('imports ../thing/lib/cli.js')
+    // A bare program word is an installed program: not read (vitest, husky).
+    expect((await bash($, 'npm test')).result).toBe('ok')
+    expect((await bash($, 'npm ci')).result).toBe('ok')
+    expect(ran).toEqual(['npm test', 'npm ci'])
+  })
+
+  test('python3 <file> reads the modules beside it that the file imports, one level deep', async ($, on) => {
+    const { ran } = setup(on, { files })
+    await boot($)
+    await typed($)
+    expect((await bash($, 'python3 run.py')).deny).toContain('run.py imports pusher, which calls git push')
+    expect((await bash($, 'python3 fine.py')).result).toBe('ok')
+    expect(ran).toEqual(['python3 fine.py'])
+  })
+
+  test('node --test reads the files it runs: given, or found by node\'s own patterns', async () => {
+    seed(Profile, { home: '/h' })
+    const tree: Record<string, string> = {
+      '/w/app/package.json': JSON.stringify({ scripts: { test: 'node --test', some: 'node --test "test/*.test.mjs"', one: 'node --test test/ok.test.mjs' } }),
+      '/w/app/test/pusher.test.mjs': "import { ship } from './helpers/ship.mjs'\nship()\n",
+      '/w/app/test/helpers/ship.mjs': "export const ship = () => require('child_process').execSync('git push origin HEAD:main')\n",
+      '/w/app/test/ok.test.mjs': "import assert from 'node:assert'\nassert.ok(1)\n",
+      '/w/app/src/index.js': 'export const x = 1\n',
+    }
+    const dirs = new Set<string>()
+    for (const f of Object.keys(tree)) for (let d = f.slice(0, f.lastIndexOf('/')); d; d = d.slice(0, d.lastIndexOf('/'))) dirs.add(d)
+    const host: any = {
+      fs: {
+        read: async (p: string) => { if (p in tree) return tree[p]; throw new Error('ENOENT') },
+        stat: async (p: string) => { if (p in tree) return { kind: 'file' }; if (dirs.has(p)) return { kind: 'dir' }; throw new Error('ENOENT') },
+        list: async (d: string) => { if (!dirs.has(d)) throw new Error('ENOENT'); const out = new Map<string, string>(); for (const f of Object.keys(tree)) if (f.startsWith(d + '/')) { const n = f.slice(d.length + 1).split('/'); out.set(n[0], n.length > 1 ? 'dir' : 'file') } return [...out].map(([name, kind]) => ({ name, kind })) },
+      },
+      process: { run: async () => ({ exitCode: 1, stdout: '', stderr: '' }) },
+      env: { get: async () => null },
+    }
+    expect(await judge(host, 'npm test', '/w/app')).toContain('imports ./helpers/ship.mjs, which calls git push')
+    expect(await judge(host, 'npm run some', '/w/app')).toContain('pusher.test.mjs')
+    expect(await judge(host, 'node --test', '/w/app')).toContain('imports ./helpers/ship.mjs')
+    expect(await judge(host, 'npm run one', '/w/app')).toBe(null)
+    expect(await judge(host, 'node --test test/ok.test.mjs', '/w/app')).toBe(null)
+  })
+})
+
+describe('guard: shell startup files, ssh, npm and MCP config, include targets and a global hooks folder', () => {
+  test('the home config a new shell, ssh or npm reads, and .mcp.json anywhere, are protected writes', () => {
+    for (const line of ['echo x >> ~/.zshrc', 'echo x >> ~/.zshenv', 'echo x >> $HOME/.bashrc', 'cp a ~/.bash_profile', 'tee -a ~/.zprofile < a', 'echo x >> ~/.profile',
+      'echo x >> ~/.ssh/config', 'cat k >> ~/.ssh/authorized_keys', 'echo x > ~/.npmrc', 'echo {} > .mcp.json', 'cp m.json ~/.mcp.json', 'echo {} > ~/.claude.json',
+      'node -e "require(\'fs\').appendFileSync(process.env.HOME + \'/.zshrc\', \'x\')"', "python3 -c \"open('.mcp.json','w').write('{}')\""]) {
+      expect([line, integrationIn(line, onSlice)]).toEqual([line, expect.any(String)])
+    }
+    for (const line of ['echo x > notes/zshrc.md', 'echo x > profile.txt', 'cat ~/.zshrc', 'echo x > mcp.json']) expect([line, integrationIn(line, onSlice)]).toEqual([line, null])
+  })
+
+  test('a file an include pulls in, and the folder a global core.hooksPath names, are protected for Bash and the Write tool', async ($, on) => {
+    const cfg = ['global\tfile:/h/.gitconfig\tinclude.path ~/.gitconfig.local', 'global\tfile:/h/.gitconfig\tincludeif.gitdir:/work/.path work.cfg', 'global\tfile:/h/.gitconfig\tcore.hookspath ~/.githooks', 'local\tfile:/work/repo/.git/config\tinclude.path ../shared.cfg'].join('\n') + '\n'
+    const { ran } = setup(on, { profile: { integration: 'pr' }, gitConfigFiles: cfg })
+    await boot($)
+    await typed($)
+    expect((await bash($, "printf '[alias]\\n\\tp = push\\n' >> /h/.gitconfig.local")).deny).toContain('an include pulls in')
+    expect((await bash($, 'echo x > /h/work.cfg')).deny).toContain('an include pulls in')
+    expect((await bash($, 'echo x > /work/repo/.git/../shared.cfg')).deny).toContain('an include pulls in')
+    expect((await bash($, 'echo x > /h/.githooks/pre-commit')).deny).toContain('the global hooks folder')
+    expect((await $.tool.call({ tool: 'Write', file_path: '/h/.githooks/post-commit', content: 'x' } as never)).deny).toContain('the global hooks folder')
+    expect((await bash($, 'echo x > /h/notes.cfg')).result).toBe('ok')
+    expect(ran).toEqual(['echo x > /h/notes.cfg'])
+  })
+})
+
+describe('guard: a write when git cannot say what its config includes', () => {
+  test('is refused, as an unreadable include would be; a write with no includes at all is not', async ($, on) => {
+    const { ran } = setup(on, { profile: { integration: 'pr' }, gitConfigBroken: true })
+    await boot($)
+    await typed($)
+    expect((await bash($, 'echo x > /work/repo/notes.md')).deny).toContain('config the guard could not read')
+    expect((await bash($, 'echo x')).result).toBe('ok')
+    expect(ran).toEqual(['echo x'])
   })
 })
 

@@ -10,26 +10,26 @@
 //   startRun(id)               the typed /agt's own turn named its run (a pane; a routed dispatch through
 //                              dispatchedRun, or a later turn's while none is named): later turns may open panes
 //                              for that run only, and the lead's Bash guard holds until the run's card
-//   setRunProfile(profile)     the typed /agt's turn read the profile: the run's integration ceiling (guard.js)
-//   endRun()                   the run's ✓/✗ card: the /agt proof, its --fable, the guard's hold and the run's
-//                              profile snapshot lapse
+//                              (a solo run, which prints none: until the turn that printed its recon line ends)
+//   setRunProfile(profile)     the typed /agt's turn read the profile: the run's integration ceiling (guard.js);
+//                              a typed --local makes it `local` whatever the profile says
+//   endRun()                   the run's ✓/✗ card, or the end of a solo run's turn (turns.js soloTurn): the /agt
+//                              proof, its --fable, the guard's hold and the run's profile snapshot lapse
 //   dropProof()                the first turn after the run is over (routing.js runInFlight): the /agt proof and
 //                              its --fable lapse; the guard's hold (agtHeld, agtRun) waits for the card or the next /agt
 //   rawDone()                  the raw answer went on the clipboard: a later turn is not raw
 //
 // and the gates read them through spawnAllowed, sessionsAllowed, fableProof and runHeld.
 
-import { isLead, Session } from './session.js'
+import { isLead, Session, ctx } from './session.js'
 import { Display } from './display.js'
 import { Profile } from './profile.js'
-import { Runs } from './dispatch.js'
-import { Panes } from './reaper.js'
 import { makeStore } from './store.js'
 import { SAFE_RUN } from './panes.js'
 import * as P from './panerec.js'
 import { isRawPrompt } from './highlight.js'
 import { isAgtPrompt } from './live.js'
-import { parseHeader, typedFable, asksSessions, runInFlight } from './routing.js'
+import { parseHeader, typedFable, typedLocal, asksSessions, runInFlight } from './routing.js'
 
 // The typed proofs' store. Read through the Proofs view (ctx and the gates below read it too); written only by the
 // transitions in this file.
@@ -37,6 +37,7 @@ const { s: my, view } = makeStore('proofs.js', {
   agtTurn: false,  // this turn is part of an /agt run (agtTurnStart / agtTurnFromDispatch)
   agtTyped: false,  // the person typed /agt and its run is not over (routing.js runInFlight): only then may the lead open worker panes
   fableTyped: false,  // ... and typed --fable on it: only then does a header's fable=forced hold
+  localTyped: false,  // ... and typed --local on it: the run's integration snapshot is `local` (guard.js loadRunProfile)
   agtTypedAt: null,  // $.clock.now() of the newest typed /agt (null: unknown): its run is in flight AGT_INFLIGHT_MAX_MS at most
   agtBirth: false,  // this turn is the typed /agt's own: any run id may open a pane, and the first one is the run's
   agtRun: null,  // the run id the typed /agt named first (a pane or a routed dispatch): later turns open panes only for it, and the lead's Bash guard holds until its card
@@ -76,6 +77,7 @@ export function typedPrompt(text, origin, at = NO_MOMENT) {
     my.agtTyped = true
     my.agtTypedSince = 0
     my.fableTyped = typedFable(text)
+    my.localTyped = typedLocal(text)
     my.agtPrompt = my.lastTyped
     my.agtTypedAt = at.clock
     my.agtBirth = true
@@ -129,13 +131,15 @@ export function setRunProfile(profile) {
   my.agtProfile = profile ?? null
 }
 
-// The run's ✓/✗ card: the next worker pane needs the next typed /agt, and the lead's Bash is its own again.
+// The run's ✓/✗ card, or the end of the turn that printed a solo run's recon line: the next worker pane needs the
+// next typed /agt, and the lead's Bash is its own again.
 export function endRun() {
   my.agtTyped = false
   my.fableTyped = false
   my.agtRun = null
   my.agtHeld = false
   my.agtProfile = null
+  my.localTyped = false
 }
 
 // The run is over without a card (a question, an error, an interrupt): the proof lapses the same way. The hold
@@ -147,7 +151,7 @@ export function dropProof() {
 }
 
 // The lead's Bash guard holds for a typed /agt's run until its card (guard.js fromRun), whether or not it named an
-// id: a solo or inline run never does.
+// id: an inline run never does. A solo run prints no card; the turn that printed its recon line ends it instead.
 export const runHeld = () => !!my.agtRun || my.agtHeld
 
 export function rawDone() {
@@ -174,9 +178,9 @@ export const flight = Object.freeze({
   get agtTypedSince() { return my.agtTypedSince },
   get agtBirth() { return my.agtBirth },
   get agtRun() { return my.agtRun },
-  get panes() { return Panes.panes },
-  get lastRun() { return Runs.lastRun },
-  get live() { return Runs.live },
+  get panes() { return ctx.panes },
+  get lastRun() { return ctx.run },
+  get live() { return ctx.live },
 })
 
 // The run's in-flight test on the right clocks: agents by Date.now(), the typed /agt and the panes' rest by the

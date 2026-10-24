@@ -32,18 +32,25 @@ describe('skew: versions', () => {
 describe('skew: in the mod', () => {
   const TMUX = { TMUX: '/tmp/tmux-1/default,1,0', TMUX_PANE: '%1', SHELL: '/bin/zsh', HOME: '/h' }
   // `orphaned` names the sibling folders that hold a .orphaned_at marker; `lookups` is every marker path asked about.
-  const boot = async ($: any, on: any, o: { version?: string | null; siblings: string[]; orphaned?: string[] }) => {
+  // `display` is the profile's display block; `host` the Claude Code version $.session.version() reports.
+  const boot = async ($: any, on: any, o: { version?: string | null; siblings: string[]; orphaned?: string[]; display?: object; host?: string }) => {
     const toasts: string[] = []
     const seen: string[][] = []
     const lookups: string[] = []
+    const tools: string[] = []
     const siblings = o.siblings
     on('env.get', async ($: any, e: any) => ({ value: (TMUX as any)[e.name] }))
     on('session.cwd', async () => ({ value: '/work/repo' }))
     on('session.start', async ($: any, e: any) => ({ cwd: e.cwd }))
     on('command.register', async () => ({ value: undefined }))
-    on('tool.register', async ($: any, e: any) => ({ value: { tool: 'mcp__agentille__' + e.name } }))
+    on('tool.register', async ($: any, e: any) => { tools.push(e.name); return { value: { tool: 'mcp__agentille__' + e.name } } })
+    if (o.host) on('session.version', async () => ({ value: { version: o.host, base: o.host } }))
     on('ui.toast', async ($: any, e: any) => { toasts.push(e.text); return { value: undefined } })
-    on('fs.read', async ($: any, e: any) => (e.path.endsWith('/.claude-plugin/plugin.json') && o.version !== null ? { value: JSON.stringify({ version: o.version ?? '3.5.1' }) } : { deny: 'ENOENT' }))
+    on('fs.read', async ($: any, e: any) => {
+      if (e.path.endsWith('/.claude-plugin/plugin.json') && o.version !== null) return { value: JSON.stringify({ version: o.version ?? '3.5.1' }) }
+      if (o.display && e.path === '/h/.agentille/profile.json') return { value: JSON.stringify({ display: o.display }) }
+      return { deny: 'ENOENT' }
+    })
     on('fs.list', async () => ({ value: siblings.map((name) => ({ name, kind: 'dir', size: 0, mtimeMs: 0, isLink: false })) }))
     on('fs.exists', async ($: any, e: any) => {
       if (!e.path.endsWith('/.orphaned_at')) return { value: false }
@@ -60,11 +67,11 @@ describe('skew: in the mod', () => {
     })
     mock.clock(on, { now: 1_000_000 })
     await $.session.start({ cwd: '/work/repo', surface: null, isInteractive: false })
-    return { toasts, seen, siblings, lookups }
+    return { toasts, seen, siblings, lookups, tools }
   }
   const spawn = async ($: any) => {
     await $.prompt.submit({ text: '/agt ship it', origin: { kind: 'composer' } } as never)
-    return $.tool.call({ tool: 'mcp__agentille__spawn_pane', run: 'k7f2ab', role: 'exec-1', task: 'build one', agent: 'executor', header: '[agt run=k7f2ab size=small mode=build]' })
+    return $.tool.call({ tool: 'mcp__agentille__spawn_pane', run: 'k7f2ab', role: 'exec-1', task: 'build one', agent: 'executor', header: '[agt run=k7f2ab size=small work=build]' })
   }
   const MSG = 'agentille v3.6.0 is installed but this session runs v3.5.1 — restart Claude Code before opening panes'
 
@@ -75,6 +82,32 @@ describe('skew: in the mod', () => {
     expect((await spawn($)).deny).toBe(MSG)
     expect(seen.some((a) => a[1] === 'split-window')).toBe(false)
     expect(toasts.filter((t) => t.includes('v3.6.0 is installed'))).toHaveLength(1)
+  })
+
+  test('band off: no toast at start, and spawn_pane still refuses with the message', { timeoutMs: 20_000 }, async ($, on) => {
+    const { toasts, seen } = await boot($, on, { siblings: ['3.5.1', '3.6.0'], display: { band: 'off' } })
+    expect(toasts).toEqual([])
+    expect((await spawn($)).deny).toBe(MSG)
+    expect(seen.some((a) => a[1] === 'split-window')).toBe(false)
+  })
+
+  test('band on (the default spelled out): the start toast is there', async ($, on) => {
+    const { toasts } = await boot($, on, { siblings: ['3.5.1', '3.6.0'], display: { band: 'on' } })
+    expect(toasts.filter((t) => t.includes('v3.6.0 is installed'))).toHaveLength(1)
+  })
+
+  test('band off with an older Claude Code: no toast at start, and still no pane tools', async ($, on) => {
+    const { toasts, tools } = await boot($, on, { siblings: ['3.5.1'], display: { band: 'off' }, host: '2.1.200' })
+    expect(toasts).toEqual([])
+    await $.prompt.submit({ text: '/agt ship it', origin: { kind: 'composer' } } as never)
+    expect(tools).toEqual([])
+  })
+
+  test('band on with an older Claude Code: one toast at start, and no pane tools', async ($, on) => {
+    const { toasts, tools } = await boot($, on, { siblings: ['3.5.1'], host: '2.1.200' })
+    expect(toasts.filter((t) => t.includes('Claude Code v2.1.200 is older'))).toHaveLength(1)
+    await $.prompt.submit({ text: '/agt ship it', origin: { kind: 'composer' } } as never)
+    expect(tools).toEqual([])
   })
 
   test('an update that lands mid-session is caught at the next spawn_pane', async ($, on) => {

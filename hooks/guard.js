@@ -13,18 +13,21 @@
 //   integration — `auto` (merge, tag and push with no human step) holds only where the person's own
 //                 ~/.agentille/profile.json says so for the repo the command targets; the repo may lower it,
 //                 never raise it, and a profile read mid-run can lower but never raise the run's snapshot.
-//                 Below `auto`, a run's merge, tag, release and API merge are denied, so is any push but one of
-//                 its own branch, and so is a write to the trust root (~/.agentille) or the repo's own git state.
+//                 Below `auto`, a run's merge, tag, release, API merge, publish and deploy are denied, so is any
+//                 push but one of its own branch (one it made, never a base-like one), and so is a write to the
+//                 trust root (~/.agentille), the repo's own git state or config that runs code.
 //   ownership   — every worktree a run's `git worktree add` created is recorded, so the cleaner removes
 //                 only those and never another session's fresh checkout.
 //
 // A session where /agt was never typed is untouched: its Bash and writes run as the engine runs them.
 //
 // What it reads: the Bash tool line (wrappers, heredocs/here-strings, interpreters and scripts it can read,
-// package scripts it can read) and the Write/Edit/MultiEdit/NotebookEdit tools. It does not judge any other
-// tool (a GitHub MCP merge, say), and a Codex worker pane runs outside the mod. The guard is a seatbelt against
-// a cooperative model's mistakes, not a sandbox against one that sets out to evade it; it fails closed on what
-// it cannot read. See docs/guards.md.
+// package and lifecycle scripts, recipes, local bins and test files it can read) and the Write/Edit/MultiEdit/
+// NotebookEdit tools. It does not judge any other tool (a GitHub MCP merge, say), a Codex worker pane runs outside
+// the mod, and the remote's own protection is the remote's. The guard is a seatbelt against a cooperative model's
+// mistakes, not a sandbox against one that sets out to evade it: it fails closed on what it reads but cannot
+// follow, and what it does not read at all (installed programs a script runs by bare name, code a script builds
+// at run time) is listed in docs/guards.md.
 
 import { Session } from './session.js'
 import { ROLES } from './routing.js'
@@ -33,19 +36,20 @@ import { Proofs, moment, inFlight, runHeld, flight, setRunProfile } from './proo
 import { reportRun } from './drawing.js'
 import { Runs, completeReport } from './dispatch.js'
 import { joinPath } from './guard-lex.js'
-import { DENY_UNREAD, denyProtected, guardLine, integrationAllowed, readProfile, resolvedProtected } from './guard-policy.js'
-import { WT_SCRIPT, listTrees, newTrees, claimedTrees, scriptTrees, scriptSlugs, worktreeAdds, saveOwned, runOf } from './guard-own.js'
+import { DENY_UNREAD, checkoutOf, denyProtected, guardLine, integrationAllowed, readProfile, resolvedProtected } from './guard-policy.js'
+import { WT_SCRIPT, listTrees, newTrees, claimedTrees, scriptTrees, scriptSlugs, worktreeAdds, saveOwned, runOf, noteBranches, noteCheckout } from './guard-own.js'
 
 // Re-exports: every name ./guard.js used to carry still resolves here.
 export { protectedPath, SHELLS, commands, splitCommands, gitCall, commandSteps, lineMovesHead, joinPath, MENTIONS_TOOL, SCRIPT_RISK, MAKE_RISK } from './guard-lex.js'
 export { ghStep, httpStep } from './guard-steps.js'
-export { DENY_INTEGRATION, DENY_PUSH, DENY_LOCAL, DENY_UNREAD, denyHidden, denyProtected, judgePush, judgeRef, judgeLocal, resolvedProtected, integrationIn, integrationOf, integrationAllowed, guardLine, makeRecipe, normUrl, normSlug, sameRemote, capsOf } from './guard-policy.js'
-export { OWNED_TTL_MS, worktreeAdds, newTrees, WT_SCRIPT, scriptTrees, scriptSlugs, claimedTrees, recordTrees, parseOwned, Worktrees, worktreesFile, saveOwned, ownedWorktrees, forgetOwned } from './guard-own.js'
+export { DENY_INTEGRATION, DENY_PUSH, DENY_PUBLISH, DENY_LOCAL, DENY_UNREAD, denyHidden, denyProtected, judgePush, judgeRef, judgeLocal, resolvedProtected, integrationIn, integrationOf, integrationAllowed, guardLine, makeRecipe, normUrl, normSlug, sameRemote, capsOf } from './guard-policy.js'
+export { OWNED_TTL_MS, worktreeAdds, newTrees, WT_SCRIPT, scriptTrees, scriptSlugs, claimedTrees, recordTrees, parseOwned, Worktrees, worktreesFile, saveOwned, ownedWorktrees, forgetOwned, branchesFile, parseBranches, ownedBranches } from './guard-own.js'
 
 // ── who is a run ─────────────────────────────────────────────────────────────
 // An agentille subagent, a worker pane (not a /agt-spawn pane: that is the person's own task), or the lead from
-// its typed /agt until that run's ✓/✗ card (proofs.js runHeld; no clock or typed-reply count ends it, and a run
-// that never names an id is held the same way), or while a run is in flight (routing.js runInFlight, on the clocks
+// its typed /agt until that run's ✓/✗ card, or for a solo run until the turn that printed its recon line ends
+// (proofs.js runHeld, turns.js soloTurn; no clock or typed-reply count ends it, and a run that never names an id is
+// held the same way), or while a run is in flight (routing.js runInFlight, on the clocks
 // proofs.js moment($) read): a question typed mid-run does not switch the guard off. A plain session has none.
 export function fromRun(e, at) {
   if (e.agentId) {
@@ -64,13 +68,22 @@ export async function bashCall($, e, next) {
   if (!fromRun(e, await moment($))) return next(e)
   const cwd = await $.session.cwd().catch(() => null)
   // Probing that throws is no answer: the command does not run unread.
-  const deny = await guardLine($, line, cwd).catch(() => DENY_UNREAD)
+  const seen = {}
+  const worker = !!Session.worker || !!splitName(Session.wireName ?? Session.selfName)
+  const deny = await guardLine($, line, cwd, seen, { worker }).catch(() => DENY_UNREAD)
   if (deny) return { deny }
+  // A branch the push creates on the remote stays the run's own once the remote has it.
+  const created = seen.made ?? []
   const script = WT_SCRIPT.test(line)
-  if (!script && !/\bworktree\s+add\b/.test(line)) return next(e)
+  if (!script && !/\bworktree\s+add\b/.test(line)) {
+    const res = await next(e)
+    if (created.length && !res?.deny) await noteBranches($, created).catch(() => {})
+    return res
+  }
   const before = cwd ? await listTrees($, cwd) : null
   const res = await next(e)
   if (res?.deny) return res
+  if (created.length) await noteBranches($, created).catch(() => {})
   const after = before ? await listTrees($, cwd) : null
   const at = Date.now()
   const run = runOf(e)
@@ -89,10 +102,18 @@ export async function bashCall($, e, next) {
 // ── the profile snapshot ─────────────────────────────────────────────────────
 // The profile the run started with: read at the typed /agt so a later read cannot raise the mode mid-run (capMode).
 // With no profile (or one that does not parse) the run's ceiling is the default, `pr`, never a live read: a profile
-// the run writes itself cannot lift it.
+// the run writes itself cannot lift it. A typed `/agt --local` snapshots `local` alone, with no projects[] entry
+// that could resolve higher: capMode keeps the lower of it and every later read, so the run pushes nothing.
 export const DEFAULT_PROFILE = Object.freeze({ integration: 'pr' })
+export const LOCAL_PROFILE = Object.freeze({ integration: 'local' })
+// The branch checked out where /agt was typed is snapshotted with it: pushes of that branch count as the run's own.
 export async function loadRunProfile($) {
-  setRunProfile((await readProfile($)) ?? DEFAULT_PROFILE)
+  setRunProfile(Proofs.localTyped ? LOCAL_PROFILE : (await readProfile($)) ?? DEFAULT_PROFILE)
+  try {
+    noteCheckout(await checkoutOf($, await $.session.cwd()))
+  } catch {
+    noteCheckout(null) // no session folder, or no git there: no branch is taken on trust
+  }
 }
 
 // ── the non-Bash write hooks ─────────────────────────────────────────────────

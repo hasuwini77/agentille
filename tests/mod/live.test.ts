@@ -106,7 +106,7 @@ describe('band', () => {
     on('store.get', async () => ({ value: null }))
     on('agent.spawn', async ($, e) => ({ model: 'claude-opus-5-5', agentId: 'band1' }))
     on('ui.render', async () => ({ type: 'engine', ref: 0 }) as never)
-    await $.agent.spawn({ prompt: '[agt run=bandrun size=large mode=review]\nreview', subagentType: 'agentille:agentille-code-reviewer' })
+    await $.agent.spawn({ prompt: '[agt run=bandrun size=large work=review]\nreview', subagentType: 'agentille:agentille-code-reviewer' })
     const ui = await $.ui.mount({ plugin: 'agentille', surface: 'terminal', component: 'AbovePrompt', props: { hasSurvey: false, isWorking: true, maxRows: 10, bodyColumns: 100 } as never })
     expect(await ui.find({ type: 'Text', text: /code-reviewer/ })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: /^\s*opus\s*$/ })).toBeDefined()
@@ -124,7 +124,7 @@ describe('band', () => {
     on('store.get', async () => ({ value: null }))
     on('agent.spawn', async ($, e) => ({ model: 'claude-sonnet-5-5', agentId: 'sw' + n++ }))
     on('ui.render', async () => ({ type: 'engine', ref: 0 }) as never)
-    for (const r of ['code', 'security', 'design']) await $.agent.spawn({ prompt: '[agt run=swarmrun size=small mode=review]\nreview', subagentType: 'agentille:agentille-' + r + '-reviewer' })
+    for (const r of ['code', 'security', 'design']) await $.agent.spawn({ prompt: '[agt run=swarmrun size=small work=review]\nreview', subagentType: 'agentille:agentille-' + r + '-reviewer' })
     const ui = await $.ui.mount({ plugin: 'agentille', surface: 'terminal', component: 'AbovePrompt', props: { hasSurvey: false, isWorking: true, maxRows: 10, bodyColumns: 100 } as never })
     expect(await ui.find({ type: 'Text', text: /^review $/ })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: /0\/3 done/ })).toBeDefined()
@@ -135,7 +135,7 @@ describe('band', () => {
     on('store.get', async () => ({ value: null }))
     on('agent.spawn', async ($, e) => ({ model: 'claude-opus-5-5', agentId: 'band3' }))
     on('ui.render', async () => ({ type: 'engine', ref: 0 }) as never)
-    await $.agent.spawn({ prompt: '[agt run=shortrun size=large mode=review]\nreview', subagentType: 'agentille:agentille-code-reviewer' })
+    await $.agent.spawn({ prompt: '[agt run=shortrun size=large work=review]\nreview', subagentType: 'agentille:agentille-code-reviewer' })
     const ui = await $.ui.mount({ plugin: 'agentille', surface: 'terminal', component: 'AbovePrompt', props: { hasSurvey: false, isWorking: true, maxRows: 5, bodyColumns: 100 } as never })
     expect(await ui.find({ type: 'Text', text: /code-reviewer/ })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: /▝▜█████▛▘/ })).toBeUndefined()
@@ -146,7 +146,7 @@ describe('band', () => {
     on('store.get', async () => ({ value: null }))
     on('agent.spawn', async ($, e) => ({ model: 'claude-opus-5-5', agentId: 'band4' }))
     on('ui.render', async () => ({ type: 'engine', ref: 0 }) as never)
-    await $.agent.spawn({ prompt: '[agt run=surveyrun size=large mode=review]\nreview', subagentType: 'agentille:agentille-code-reviewer' })
+    await $.agent.spawn({ prompt: '[agt run=surveyrun size=large work=review]\nreview', subagentType: 'agentille:agentille-code-reviewer' })
     const props = { isWorking: true, maxRows: 10, bodyColumns: 100 }
     let ui = await $.ui.mount({ plugin: 'agentille', surface: 'terminal', component: 'AbovePrompt', props: { ...props, hasSurvey: true } as never })
     expect(await ui.find({ type: 'Text', text: /code-reviewer/ })).toBeUndefined()
@@ -161,7 +161,7 @@ describe('band', () => {
     on('store.get', async () => ({ value: null }))
     on('agent.spawn', async ($, e) => ({ model: 'claude-opus-5-5', agentId: 'spin1' }))
     on('ui.render', async ($: any, e: any) => { seen.push(e); return { type: 'engine', ref: 0 } as never })
-    await $.agent.spawn({ prompt: '[agt run=spinrun size=large mode=review]\nreview', subagentType: 'agentille:agentille-code-reviewer' })
+    await $.agent.spawn({ prompt: '[agt run=spinrun size=large work=review]\nreview', subagentType: 'agentille:agentille-code-reviewer' })
     const props = { word: 'Working', message: null, suffix: '…', mode: 'responding' } as never
     let ui = await $.ui.mount({ plugin: 'agentille', surface: 'terminal', component: 'Spinner', requestId: 'main', props })
     expect(seen.at(-1).props.suffix).toBe('… · review') // in a run the spinner names the phase; the status line counts
@@ -177,7 +177,7 @@ describe('band', () => {
     on('turn.complete', async ($, e) => ({ text: e.answer }) as never)
     on('ui.render', async () => ({ type: 'engine', ref: 0 }) as never)
     mock.clock(on, { now: 1_000_000 })
-    await $.agent.spawn({ prompt: '[agt run=byerun size=large mode=review]\nreview', subagentType: 'agentille:agentille-code-reviewer' })
+    await $.agent.spawn({ prompt: '[agt run=byerun size=large work=review]\nreview', subagentType: 'agentille:agentille-code-reviewer' })
     await $.turn.complete({ agentId: 'band2', answer: 'APPROVE', durationMs: 10, isAborted: false, turnId: 't', reason: 'answer' } as never)
     const ui = await $.ui.mount({ plugin: 'agentille', surface: 'terminal', component: 'AbovePrompt', props: { hasSurvey: false, isWorking: true, maxRows: 10, bodyColumns: 100 } as never })
     expect(await ui.find({ type: 'Text', text: /^✓$/ })).toBeDefined()
@@ -202,7 +202,7 @@ describe('raw reports', () => {
     mock.clock(on, { now: 1_000_000 })
     return writes
   }
-  const spawn = ($: any, role: string, run = 'rr1') => $.agent.spawn({ prompt: '[agt run=' + run + ' size=small mode=build]\nwork', subagentType: 'agentille:agentille-' + role })
+  const spawn = ($: any, role: string, run = 'rr1') => $.agent.spawn({ prompt: '[agt run=' + run + ' size=small work=build]\nwork', subagentType: 'agentille:agentille-' + role })
   const done = ($: any, agentId: string, answer: string) => $.turn.complete({ agentId, answer, durationMs: 10, isAborted: false, turnId: 't' + agentId, reason: 'answer' })
   const DIR = '/h/.agentille/state/run-rr1/agents/'
 

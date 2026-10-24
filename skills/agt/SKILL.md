@@ -13,12 +13,16 @@ One command. Do it yourself when it is small, fan out when it is not, merge or e
 
 - **The lead:** you, the session that runs `/agt`. The agents and panes you dispatch are workers.
 - **Slice:** one file-disjoint part of the task, built by one executor on its own branch and worktree.
+- **Level:** how big the crew is: low, medium or heavy ("Levels"). **Transport:** how its workers run: `solo`, `subagent`, `panes` or `workflow`. **Recon:** the run's first line, which names both.
 - **The mod:** agentille's code that runs inside Claude Code. It routes models, draws the live views, carries messages between panes and closes finished panes. `/agt` works without it.
 - **Band:** the mod's live status block above the prompt: one row per agent of the run, and `⚑` flags.
-- **Wire:** the mod's messages between panes. A pane worker that finishes sends its result to the lead as a message.
+- **Wire:** the mod's messages between panes. A pane worker that finishes sends its result to the lead as a message. **Harvest:** reading a finished worker's answer (its wire message or answer file); its pane closes right after.
 - **Card:** the run's final summary, at most 8 lines (`display.md` → "Final card").
-- **Formation:** an optional run shape that changes how workers relate: gauntlet, duel or relay (`formations.md`).
+- **⚑:** a flag for something that needs the person: on the band as it happens (a REVISE, a FAIL, a blocked pane) and on the card's `⚑` line (escalated, PR ready, a P0/P1 left).
+- **Formation:** an optional run shape that changes how workers relate: gauntlet, duel or relay (`formations.md`). **Gauntlet:** the formation where an adversary writes tests that try to break a slice before it integrates.
 - **Squad:** a group of extra specialist reviewers that joins when the repo matches its signals (`squads.md`).
+- **Ladder:** the escalation ladder: a role's model or effort climbs after a REVISE or a failed fix (`routing.md` → "Escalation ladder").
+- **B0:** the planner's first, sequential step that lands the files ≥2 slices share (a lockfile, schema, types) before any parallel slice; frozen like a relay contract.
 
 ## Levels
 
@@ -40,7 +44,7 @@ The first word may force a level; otherwise detect it. First match wins.
 - **heavy**: planner, then one pane per slice through `spawn_pane` (`panes-mode.md`), at most 3 at once like medium. Planners and reviewers stay subagents. Slices merge one at a time.
   Heavy differs from medium by panes, not by width: a real session per slice in its own worktree, the live wire, and resume. A task that asks for Codex workers runs heavy (`panes-mode.md` → "Codex workers").
 - **Risk gate:** auth, money or data work (`routing.md` → "Risk words") never runs solo, and runs the gauntlet when the repo has a test runner (`formations.md`). A screen merely named login or checkout is `risk=none`.
-- `--fable` is the only flag (`routing.md` → "Escalation ladder"). Older flags still work: "Deprecated" at the end.
+- Two flags: `--fable` (`routing.md` → "Escalation ladder") and `--local`, which runs this one /agt as `integration: local` whatever the profile says, `projects[]` entries included: merge locally, push nothing, open no PR. The mod holds it for you and your subagents; say it in each pane worker's task. Older flags still work: "Deprecated" at the end.
 
 Print the recon line before anything else: `recon: <level> · <transport> · <one-clause reason>`, where transport is `solo`, `subagent`, `panes` or `workflow` (`display.md` → "Mid-run lines").
 
@@ -61,7 +65,7 @@ Print the recon line before anything else: `recon: <level> · <transport> · <on
 7. **Scout, plan, then review it.**
    - Scouts are optional, on medium and heavy only. Send them when the task names no files and the planner would have to map unfamiliar ground in ≥3 areas.
    - Send at most 3 `Explore` subagents with `model: haiku`, as one message of background calls. Each gets one question ("which files wire X?") and answers in ≤15 lines of paths and facts. Hand their answers to the planner under `SCOUTS:`.
-   - The plan carries numbered ACCEPTANCE criteria. APPROVE → build.
+   - The plan carries numbered ACCEPTANCE criteria. The plan-reviewer is skipped on `thinkingDepth=quick` and for a ≤3-step fully sequential plan (`routing.md` → "Roster"), and that plan builds as written. APPROVE → build.
    - A first REVISE → re-plan, then review again.
    - A second REVISE → re-plan once more. Send that third plan to the plan-reviewer one last time on Opus: one call, with `size=large` in its header (so the mod routes it to Opus) and `model: opus`.
    - A third REVISE stops the run before any build. The card's first line is `✗ plan not approved after 3 reviews`. Its `⚑` line is `⚑ plan not approved: <reason 1> · <reason 2> · <reason 3>`, one clause per REVISE.
@@ -75,11 +79,11 @@ Print the recon line before anything else: `recon: <level> · <transport> · <on
 
 Every `agentille:agentille-*` dispatch prompt starts with one line:
 
-`[agt run=<id> size=<small|large> risk=<none|auth|money|data> mode=<build|fix|diagnose|review|research> fable=<auto|forced> formation=<none|duel|gauntlet|relay> slice=<slug>]`
+`[agt run=<id> size=<small|large> risk=<none|auth|money|data> work=<build|fix|diagnose|review|research> fable=<auto|forced> formation=<none|duel|gauntlet|relay> slice=<slug>]`
 
 - `size=large`: plan ≥6 steps or a shared contract, a third plan's review, or a diff with logic in >1 file, >~150 LoC, or a public API/schema change.
 - `risk`: `routing.md` → "Risk words" (sessions, tokens, guards → `auth`; payments, webhooks → `money`; migrations → `data`; a form or page with no such logic → `none`).
-- `mode=fix` on every fix round, including a `SendMessage` to the kept executor (a `RESUME:` after an early stop stays `mode=build`); `diagnose` for the read-only root-cause planner.
+- `work=` is the work type: `work=fix` on every fix round, including a `SendMessage` to the kept executor (a `RESUME:` after an early stop stays `work=build`); `diagnose` for the read-only root-cause planner. The older spelling `mode=` is still read the same way.
 - `fable=forced` only when the user typed `--fable`.
 - `slice=<slug>` (lowercase, ≤24 chars) names the slice: its executor, adversary and reviewers share it. Omit it for planning roles and single-slice runs.
 
@@ -95,21 +99,22 @@ Ask: <preTaskQuestioning>. Depth: <thinkingDepth>.
 
 ## Hard rules
 
-- **Honor `neverDo`.** Absolute; pass it verbatim into every dispatch.
-- **Review gate: P0/P1 block; P2/P3 advisory.** Fix every P0/P1 and confirm the fix. If it cannot or should not be fixed, put it on the card's `⚑` line; never call it shipped.
-- **Never commit to `main` directly.** Work lands through a branch and a PR or a local merge (`factory.md` → "Integrate").
-- **Never let an agent push through context pressure.** An executor that reports `CONTEXT …` is replaced by a fresh one seeded from its checkpoint and slice.
-- **At most 3 executors at once.** Batch the rest in waves; the mod flags a fourth on the band and in `routing.jsonl` but does not block it.
-- **Executor is never Haiku**; Haiku only classifies and scouts (read-only). Fable comes only from the ladder or `--fable`.
-- **Foreground when it gates.** A dispatch whose result feeds the next step runs in the foreground; independent dispatches go out as one message of background calls, then one wait.
-- **Mods off still works.** The mod only adds the band, routing, the wire between panes and the automatic pane cleanup.
-- **Never close a pane you did not open.** The `agt-` prefix is ownership.
-- **Re-enter from the files, not from memory.** Do it after a compaction or a `/clear`, and whenever you cannot name the current slice and its state. Before the next dispatch, re-read the sections you need of this file, `routing.md` and `factory.md`. Then read `run-<id>/context-pack.md`, the mod's `ledger.json` and `routing.jsonl` when present, and `git log $BASE..<branch>` for each slice branch still there.
+- **Honor `neverDo`** (a worker knows only what its prompt carries). Absolute; pass it verbatim into every dispatch.
+- **Review gate: P0/P1 block; P2/P3 advisory** (a P0/P1 that ships is a defect the person finds after the card called it done). Fix every P0/P1 and confirm the fix. If it cannot or should not be fixed, put it on the card's `⚑` line; never call it shipped.
+- **Never commit to `main` directly** (a direct commit skips the review gate and the person's integration mode). Work lands through a branch and a PR or a local merge (`factory.md` → "Integrate").
+- **Never let an agent push through context pressure** (an agent near a full window writes subtly worse code). An executor that reports `CONTEXT …` is replaced by a fresh one seeded from its checkpoint and slice.
+- **At most 3 executors at once** (each is a full session, ~500–700 MB as a pane, and slices still merge one at a time). Batch the rest in waves; the mod refuses a fourth executor subagent (`agt ✗ … a 4th executor at once is refused`) and flags it on the band.
+- **Executor is never Haiku** (it writes the code that ships); Haiku only classifies and scouts (read-only). Fable comes only from the ladder or `--fable` (Fable costs about twice Opus).
+- **Foreground when it gates** (the next step cannot start without that result, and independent ones lose nothing by going out together). A dispatch whose result feeds the next step runs in the foreground; independent dispatches go out as one message of background calls, then one wait.
+- **Mods off still works** (the skill also runs where the mod is off or cannot draw, such as `claude -p`). The mod only adds the band, routing, the wire between panes and the automatic pane cleanup. What the lead does itself without it: `no-mod.md`.
+- **Never close a pane you did not open** (a pane the person opened holds their own work). The `agt-` prefix is ownership.
+- **Re-enter from the files, not from memory** (a compaction's summary can drop which slices are done and which are still building). Do it after a compaction or a `/clear`, and whenever you cannot name the current slice and its state. Before the next dispatch, re-read the sections you need of this file, `routing.md` and `factory.md`. Then read `run-<id>/context-pack.md`, the mod's `ledger.json` and `routing.jsonl` when present, and `git log $BASE..<branch>` for each slice branch still there.
   After a compaction the mod's hook prints an `[agt re-entry]` block with the run id and each slice's state from `ledger.json`: start from it, then read the files above.
-- **Never re-dispatch a finished slice.** A slice is done when its branch has a PR (`gh pr list --head <branch> --state all`) or is merged into `$BASE`. A deleted branch whose merge is in `git log $BASE` counts as merged. A slice whose executor report under `run-<id>/agents/` carries `VERIFICATION:` is built: it goes to review, not to a new executor.
+- **Never re-dispatch a finished slice** (a lead that lost its place after a compaction would rebuild finished work). A slice is done when its branch has a PR (`gh pr list --head <branch> --state all`) or is merged into `$BASE`. A deleted branch whose merge is in `git log $BASE` counts as merged. A slice whose executor report under `run-<id>/agents/` carries `VERIFICATION:` is built: it goes to review, not to a new executor.
 
 ## Deprecated
 
 Still honored when typed, never suggested:
 
-- `--mode solo|subagent|panes|herdr` (= low|medium|heavy|heavy), `--plan` (stop after the plan review; "go" resumes it), `--formation <f>` (that formation). All three go away in v4.
+- `--mode solo|subagent|panes|herdr` (= low|medium|heavy|heavy), `--plan` (stop after the plan review; "go" resumes it), `--formation <f>` (that formation): each deprecated; removed in 4.0.0.
+- In the dispatch header, `mode=` for `work=` and `piece=` for `slice=`: deprecated; removed in 4.0.0.

@@ -35,6 +35,11 @@ done
 check "planner writes ACCEPTANCE" 'has agents/agentille-planner.md "ACCEPTANCE"'
 check "SKILL.md reads ACCEPTANCE" 'has skills/agt/SKILL.md "ACCEPTANCE"'
 check "SKILL.md prints the recon line" 'has skills/agt/SKILL.md "recon: <level>"'
+# the plan-review skip reads the same where the plan review is described (SKILL.md step 7) and in the roster
+plan_skip() { grep -F "$2" "$1" | grep -F "plan-reviewer" | grep -qF "thinkingDepth=quick"; }
+for f in skills/agt/SKILL.md skills/agt/routing.md; do
+  check "$f skips the plan-reviewer on quick and for a ≤3-step fully sequential plan" 'plan_skip "$f" "for a ≤3-step fully sequential plan"'
+done
 # every stop head factory.md routes is listed in display.md and written by the executor
 for tok in "CONTEXT" "BLOCKED:" "CONTRACT:" "STUCK:" "RESUME:"; do
   check "factory.md routes $tok" 'has skills/agt/factory.md "$tok"'
@@ -42,6 +47,30 @@ for tok in "CONTEXT" "BLOCKED:" "CONTRACT:" "STUCK:" "RESUME:"; do
   check "executor writes $tok" 'has agents/agentille-executor.md "$tok"'
 done
 check "Codex workers get the STUCK: line" 'has skills/agt/panes-mode.md "STUCK:"'
+# fix rounds and early stops are counted in one table in factory.md: every stop head and lead message has its row
+fixtable() { sed -n '/^## Fix rounds/,/^## Early stop/p' skills/agt/factory.md | grep '^|'; }
+check "factory.md counts fix attempts in one table" 'fixtable | grep -qF "| Event | Fix attempt? | What happens next | The card shows |"'
+for tok in "CONTEXT" "BLOCKED:" "STUCK:" "CONTRACT:" "RESUME:" "INTEGRATE:"; do
+  check "factory.md's fix table has a row for $tok" 'fixtable | grep -qF "$tok"'
+done
+check "factory.md's fix table: an early stop is no fix attempt" 'fixtable | grep -F "| Early stop" | grep -qF "| no"'
+check "factory.md's fix table: the limit is 2 per slice" 'sed -n "/^## Fix rounds/,/^## Early stop/p" skills/agt/factory.md | grep -qF "Limit: 2 per slice."'
+
+# the "without the mod" branches live in one appendix, and each main file points there instead of forking
+check "no-mod.md holds the squad scoring" 'has skills/agt/no-mod.md "signals.deps"'
+check "no-mod.md holds the progress spine" 'has skills/agt/no-mod.md "seed TodoWrite"'
+check "no-mod.md holds the manual Herdr spawn" 'has skills/agt/no-mod.md "herdr pane split"'
+check "no-mod.md holds the manual tmux spawn" 'has skills/agt/no-mod.md "tmux split-window"'
+check "squads.md points at no-mod.md and no longer counts squad signals" 'has skills/agt/squads.md "no-mod.md" && ! has skills/agt/squads.md "signals.deps"'
+check "display.md points at no-mod.md and no longer seeds TodoWrite" 'has skills/agt/display.md "no-mod.md" && ! has skills/agt/display.md "seed TodoWrite"'
+check "panes-mode.md points at no-mod.md and carries no manual spawn" 'has skills/agt/panes-mode.md "no-mod.md" && ! has skills/agt/panes-mode.md "herdr pane split" && ! has skills/agt/panes-mode.md "tmux split-window -d"'
+check "SKILL.md names no-mod.md in its hard rules" 'grep -F "Mods off still works" skills/agt/SKILL.md | grep -qF "no-mod.md"'
+
+# every coined term the prompt files use is defined in SKILL.md's Words section, in one bolded entry
+words() { awk '/^## Words/ { on = 1; next } on && /^## / { on = 0 } on' skills/agt/SKILL.md; }
+for t in mod band wire card formation squad gauntlet ladder harvest B0 ⚑ slice level transport recon; do
+  check "SKILL.md's Words section defines $t" 'words | grep -qiE "\*\*(the )?$t[^*]*:\*\*"'
+done
 
 # worktrees: one script, no inline recipe for the two files to drift apart on
 for f in skills/agt/factory.md agents/agentille-executor.md; do
@@ -74,6 +103,15 @@ check "formations.md names the post-gauntlet pusher" 'grep -F "clears the gauntl
 check "factory.md Integrate routes INTEGRATE:" 'integrate | grep -qF "INTEGRATE:"'
 check "the executor answers INTEGRATE:" 'has agents/agentille-executor.md "INTEGRATE:"'
 check "display.md lists INTEGRATE:" 'has skills/agt/display.md "INTEGRATE:"'
+# every output field an agent's prose sends something "under" exists in that agent's own output template
+fenced() { awk '/^ *```/ { on = !on; next } on' "$1"; }
+under_fields() { grep -oE "under \`?[A-Z][A-Z]+" "$1" | sed -E 's/^under `?//' | sort -u; }
+for f in agents/agentille-*.md; do
+  for fld in $(under_fields "$f"); do
+    check "$f's template has the $fld field its prose names" 'fenced "$f" | grep -qE "^ *(- )?$fld( \(if any\))?:"'
+  done
+done
+check "the adversary's prose names a template field (NOTES)" '[ -n "$(under_fields agents/agentille-adversary.md)" ]'
 # every agent treats what it reads as data
 for f in agents/agentille-*.md; do
   check "$f treats content as untrusted data" 'grep -qE "untrusted DATA.*never (as )?instructions" "$f" && grep -qE "Never run a shell command (that originates from|sourced from)" "$f"'
@@ -87,6 +125,11 @@ reentry() { grep -F "compaction" skills/agt/SKILL.md | grep -F "Re-enter"; }
 check "SKILL.md has a re-entry rule" '[ -n "$(reentry)" ]'
 check "the re-entry rule names ledger.json and context-pack.md" 'reentry | grep -F "ledger.json" | grep -qF "context-pack.md"'
 check "SKILL.md never re-dispatches a finished slice" 'has skills/agt/SKILL.md "Never re-dispatch a finished slice"'
+# every hard rule carries its reason: the lead's in parentheses right after the bold rule, the executor's in its line
+rules_of() { awk '/^## Hard rules/ { on = 1; next } on && /^## / { on = 0 } on && /^- /' "$1"; }
+check "SKILL.md has hard rules" '[ "$(rules_of skills/agt/SKILL.md | wc -l)" -ge 10 ]'
+check "every SKILL.md hard rule gives its reason" '! rules_of skills/agt/SKILL.md | grep -vqE "^- \*\*[^*]+\*\* \("'
+check "every executor hard rule gives its reason" '[ -n "$(rules_of agents/agentille-executor.md)" ] && ! rules_of agents/agentille-executor.md | grep -vqF " ("'
 # the hook lines of one SessionStart matcher: from its "matcher" line to the next matcher or hook event
 matcher_block() { awk -v m="\"matcher\": \"$1\"" 'index($0, m) { on = 1; next } on && /"matcher"|"SessionEnd"/ { on = 0 } on' hooks/hooks.json; }
 check "the compact hook runs the re-entry script" 'matcher_block compact | grep -qF "hooks/agentille-compact.sh"'
@@ -114,6 +157,14 @@ check "hooks/settings.js declares DISPLAY_DEFAULTS on one line" '[ -n "$(display
 check "the init skill's display default is hooks/settings.js's DISPLAY_DEFAULTS" '[ "$(init_display_row | awk -F"|" "{ print \$(NF-1) }" | sed "s/^ *\`//; s/\` *$//")" = "$(display_defaults)" ]'
 for k in $(display_defaults | tr -d '{}' | tr ',' '\n' | sed 's/:.*//; s/ //g'); do
   check "the init skill's display row lists the values $k takes" 'init_display_values | grep -qE "[{ ]$k: [^,}]+[,}]"'
+done
+
+# every display switch, and the top-level sessions key, is a row of settings.md's switch table and named in the README's switch sentence
+readme_switches() { grep -F "off switch in the profile's \`display\` block" README.md; }
+check "README.md has its display switch sentence" '[ -n "$(readme_switches)" ]'
+for k in $(display_defaults | tr -d '{}' | tr ',' '\n' | sed 's/:.*//; s/ //g') sessions; do
+  check "docs/settings.md's switch table has a $k row" 'grep -qF "| \`$k\` " docs/settings.md'
+  check "README.md's switch sentence names $k" 'readme_switches | grep -qF "\`$k\`"'
 done
 
 # setup skills that say "typed only" disable model invocation

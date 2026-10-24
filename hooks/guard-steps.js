@@ -31,6 +31,20 @@ const apiSlug = (path) => {
 // A repository_dispatch (repos/o/r/dispatches) starts workflows as a workflow dispatch does.
 const API_GUARD_PATH = /^repos\/[^/]+\/[^/]+\/(branches\/.+\/protection|rulesets|dispatches|actions\/workflows\/[^/]+\/(dispatches|enable|disable))(\/|$)/
 
+// Repo writes that publish or destroy, which only `auto` (or the person) makes: a collaborator added, a secret or
+// variable set, the repo deleted or transferred, merge settings changed. → the label, or null.
+const REPO_SETTINGS = /\b(allow_auto_merge|delete_branch_on_merge|archived|allow_squash_merge|allow_merge_commit|allow_rebase_merge|visibility|private)\b/
+export function apiPublish(m, path, bodies = [], unread = false) {
+  const p = String(path ?? '').replace(/^\//, '').replace(/\/$/, '')
+  if (m === 'GET' || m === 'HEAD') return null
+  if (/^repos\/[^/]+\/[^/]+\/collaborators\/[^/]+$/.test(p) && m === 'PUT') return 'a collaborator added'
+  if (/^repos\/[^/]+\/[^/]+\/(actions|dependabot|codespaces)\/(secrets|variables)(\/|$)/.test(p) || /^(orgs\/[^/]+|user)\/(actions\/)?(secrets|variables)(\/|$)/.test(p)) return 'a secret or variable written'
+  if (/^repos\/[^/]+\/[^/]+\/transfer$/.test(p)) return 'a repo transfer'
+  if (/^repos\/[^/]+\/[^/]+$/.test(p) && m === 'DELETE') return 'a repo deletion'
+  if (/^repos\/[^/]+\/[^/]+$/.test(p) && (unread || bodies.some((b) => REPO_SETTINGS.test(b)))) return 'a change to the repo settings'
+  return null
+}
+
 const sensitive = (path) => path.split('/').some((s) => API_WRITES.has(s)) || API_WRITE_PATH.test(path) || API_GUARD_PATH.test(path)
 
 // A write to the repo itself (`repos/o/r`) that sets its default branch, or whose body the guard cannot read.
@@ -83,6 +97,11 @@ export function ghStep(w, dir, env = new Map()) {
   // A workflow run can publish or merge on the run's behalf; enabling or disabling one changes what guards the base.
   if (a0 === 'workflow' && ['run', 'enable', 'disable'].includes(a1)) return { kind: 'step', what: 'gh workflow ' + a1, dir, slug }
   if (a0 === 'repo' && a1 === 'edit' && pos.some((x) => x === '--default-branch' || x.startsWith('--default-branch='))) return { kind: 'step', what: 'gh repo edit --default-branch', dir, slug }
+  // Destructive or publishing repo changes: only `auto`, or the person.
+  if (a0 === 'repo' && ['delete', 'archive', 'unarchive', 'rename', 'transfer'].includes(a1)) return { kind: 'publish', what: 'gh repo ' + a1, dir, slug }
+  if (a0 === 'repo' && a1 === 'edit' && pos.some((x) => /^--(enable-auto-merge|delete-branch-on-merge|visibility|enable-merge-commit|enable-squash-merge|enable-rebase-merge)/.test(x))) return { kind: 'publish', what: 'gh repo edit (merge settings or visibility)', dir, slug }
+  if ((a0 === 'secret' && ['set', 'delete', 'remove'].includes(a1)) || (a0 === 'variable' && ['set', 'delete', 'remove'].includes(a1))) return { kind: 'publish', what: 'gh ' + a0 + ' ' + a1, dir, slug }
+  if (a0 === 'ruleset' && a1 && !['list', 'ls', 'view', 'check'].includes(a1)) return { kind: 'publish', what: 'gh ruleset ' + a1, dir, slug }
   if (a0 !== 'api') return null
   let method = null
   let body = false
@@ -106,6 +125,8 @@ export function ghStep(w, dir, env = new Map()) {
   if (m === 'GET') return null
   if (path === 'graphql') return fields.some((f) => gqlWrites(f) || gqlUnread(f)) || input ? { kind: 'step', what: 'gh api graphql mutation', dir, slug } : null
   if (repoRoot(path) && setsDefault(fields, input)) return { kind: 'step', what: 'gh api ' + m + ' ' + path + ' default_branch', dir, slug: apiSlug(path) ?? slug }
+  const pub = apiPublish(m, path, fields, input)
+  if (pub) return { kind: 'publish', what: 'gh api ' + m + ' ' + path + ' (' + pub + ')', dir, slug: apiSlug(path) ?? slug }
   return sensitive(path) ? { kind: 'step', what: 'gh api ' + m + ' ' + path, dir, slug: apiSlug(path) ?? slug } : null
 }
 
@@ -190,6 +211,7 @@ function githubWrite(p, m, urls, data, dir) {
     if (path.replace(/\/$/, '') === 'graphql') {
       if (data.some((d) => gqlWrites(d) || d.startsWith('@') || /^\$/.test(d))) return { kind: 'step', what: p + ' graphql mutation', dir, slug: null }
     } else if (sensitive(path) || host === 'uploads.github.com' || (repoRoot(path) && setsDefault(data, false))) return { kind: 'step', what: p + ' ' + m + ' ' + path, dir, slug: apiSlug(path) }
+    else if (apiPublish(m, path, data, data.some((d) => /^[@$]/.test(d)))) return { kind: 'publish', what: p + ' ' + m + ' ' + path + ' (' + apiPublish(m, path, data, data.some((d) => /^[@$]/.test(d))) + ')', dir, slug: apiSlug(path) }
   }
   return null
 }

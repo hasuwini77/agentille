@@ -2,7 +2,7 @@
 
 Everything on this page is drawn by the mod (`hooks/`) for zero model tokens. Without the mod, `/agt` still runs and you get the plain subagent tree.
 
-## The switchboard
+## The band
 
 A framed dispatch tree above your prompt, rooted at your session.
 

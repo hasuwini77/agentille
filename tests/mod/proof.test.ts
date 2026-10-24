@@ -18,7 +18,7 @@ describe('typed proof: in the mod', () => {
     mock.clock(on, { now: 1_000_000 })
     return { spawned, toasts }
   }
-  const HDR = '[agt run=pf1 size=large mode=build fable=forced]'
+  const HDR = '[agt run=pf1 size=large work=build fable=forced]'
   const plan = ($: any) => $.agent.spawn({ prompt: HDR + '\nplan it', subagentType: 'agentille:agentille-planner', model: 'opus' })
 
   test('fable=forced with no typed --fable runs the ladder and says so once', async ($, on) => {
@@ -27,7 +27,7 @@ describe('typed proof: in the mod', () => {
     await plan($)
     await plan($)
     expect(spawned.map((e) => e.model)).toEqual(['opus', 'opus'])
-    expect(spawned[0].prompt.split('\n')[0]).toBe('[agt run=pf1 size=large mode=build fable=auto]')
+    expect(spawned[0].prompt.split('\n')[0]).toBe('[agt run=pf1 size=large work=build fable=auto]')
     expect(toasts.filter((t) => t.includes('fable=forced dropped'))).toHaveLength(1)
   })
 
@@ -64,7 +64,7 @@ describe('typed proof: in the mod', () => {
     await $.prompt.submit({ text: '/agt --fable ship it' } as never)
     await plan($)
     expect(spawned[0].model).toBe('opus')
-    expect(spawned[0].prompt.split('\n')[0]).toBe('[agt run=pf1 size=large mode=build fable=auto]')
+    expect(spawned[0].prompt.split('\n')[0]).toBe('[agt run=pf1 size=large work=build fable=auto]')
   })
 
   test('the proof is per typed /agt: the next one without --fable drops it again', async ($, on) => {
@@ -128,7 +128,7 @@ describe('typed proof: in a worker pane', () => {
     mock.clock(on, { now: 1_000_000 })
     return spawned
   }
-  const HDR = '[agt run=pf2 size=large mode=build fable=forced]'
+  const HDR = '[agt run=pf2 size=large work=build fable=forced]'
   const review = ($: any) => $.agent.spawn({ prompt: HDR + '\nreview it', subagentType: 'agentille:agentille-security-reviewer', model: 'opus' })
 
   test('a first prompt whose header says fable=forced is the lead\'s proof: the header holds', async ($, on) => {
@@ -143,11 +143,11 @@ describe('typed proof: in a worker pane', () => {
   test('a first prompt without it: a later fable=forced is dropped, and the first prompt decides once', async ($, on) => {
     const spawned = setup(on)
     await $.session.start({ cwd: '/work/repo', surface: null, isInteractive: false })
-    await $.prompt.submit({ text: '[agt run=pf2 size=large mode=build fable=auto]\nbuild the filter', origin: { kind: 'composer' } } as never)
+    await $.prompt.submit({ text: '[agt run=pf2 size=large work=build fable=auto]\nbuild the filter', origin: { kind: 'composer' } } as never)
     await review($)
     await $.prompt.submit({ text: HDR + '\nfix it', origin: { kind: 'composer' } } as never)
     await review($)
     expect(spawned.map((e) => e.model)).toEqual(['opus', 'opus'])
-    expect(spawned[1].prompt.split('\n')[0]).toBe('[agt run=pf2 size=large mode=build fable=auto]')
+    expect(spawned[1].prompt.split('\n')[0]).toBe('[agt run=pf2 size=large work=build fable=auto]')
   })
 })

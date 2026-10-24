@@ -79,7 +79,7 @@ try {
   check('the typed /agt finds the tmux transport', Spawn.transport === 'tmux', String(Spawn.transport))
   check('... and registers spawn_pane and close_pane', registered.includes('spawn_pane') && registered.includes('close_pane'), JSON.stringify(registered))
 
-  const r = await spawnPane($, { run: RUN, role: 'exec-1', task: 'build slice one', agent: 'executor', header: '[agt run=' + RUN + ' size=small mode=build]' })
+  const r = await spawnPane($, { run: RUN, role: 'exec-1', task: 'build slice one', agent: 'executor', header: '[agt run=' + RUN + ' size=small work=build]' })
   check('spawn_pane opens a tmux pane', typeof r?.result === 'string' && r.result.startsWith('Opened ' + NAME + ' ') && r.result.includes('tmux pane'), JSON.stringify(r))
   const mine = rows().find((p) => p.agt === NAME)
   check('tmux lists the pane, tagged @agt ' + NAME, !!mine, JSON.stringify(rows()))

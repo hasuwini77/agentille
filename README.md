@@ -11,11 +11,7 @@ One typed command runs the work. Type `/agt "task"` in Claude Code and that one 
    ```
 2. **Check that the mod loaded:** type `/agt-info`. Its first line reads `display (profile.json → display):`, followed by the display settings in effect and the last run's routing. Every `/agt-*` command comes from the module `hooks/hooks.json` loads, so if Claude Code does not know `/agt-info`, the mod did not load.
    - `/agt` still works without the mod; its recon line then ends in `[agentille v<version>]`, and you get the plain subagent tree instead of the band.
-3. **Smoke test, kept local:** put `"integration": "local"` in `~/.agentille/profile.json` (create the file with the line below, or add the key to the one you have), so the first run pushes nothing and opens no PR.
-   ```json
-   { "integration": "local" }
-   ```
-   Then type `/agt "fix the typo in the footer"`. It prints `recon: low · solo · <reason>`, then Claude makes the fix itself on a new `fix/<slug>` branch, with no agents and no card. The default is `integration: "pr"`, which pushes that branch and opens a PR; remove the key when you want that.
+3. **Smoke test, kept local:** type `/agt --local "fix the typo in the footer"`. `--local` runs that one `/agt` under `integration: "local"`, so it pushes nothing and opens no PR, with no profile file. It prints `recon: low · solo · <reason>`, then Claude makes the fix itself on a new `fix/<slug>` branch, with no agents and no card. The default is `integration: "pr"`, which pushes that branch and opens a PR; `{ "integration": "local" }` in `~/.agentille/profile.json` makes local permanent.
 4. **Run a bigger one:** `/agt "add a CSV export endpoint and a download button on the reports page"`. It reads your repo and picks a level: low (it just does it, or one builder), medium (2–3 builders in parallel) or heavy (one Herdr or tmux pane per part). The recon line names the level it picked (`medium · subagent`, say), and the band above your prompt fills with the planner, executors and reviewers. Risky changes (auth, payments, data) get a red-team pass, under `pr` you get one reviewed PR per part to merge (merging on green is opt-in, see "What it touches"), and every pane it opened is closed.
 5. **Read the card** it ends on (solo runs have none). Everything else (plan, findings, each agent's full report) is in that `report.md`. A one-part feature's card under `pr` looks like this:
    ```
@@ -26,7 +22,7 @@ One typed command runs the work. Type `/agt "task"` in Claude Code and that one 
    Open: ~/.agentille/state/run-a1b2/report.md
    Next: gh pr merge 12 --merge
    ```
-6. **Then:** every other key in `~/.agentille/profile.json` is optional ([Settings](#settings)). `/agentille-init` adds your voice; `/agentille-project` adds a repo's entry. Each surface the mod draws (the band, the status line, the mascot, the deck, the `⚑` flags, reply highlighting) has an off switch in the profile's `display` block, and `AGENTILLE_UPDATE_CHECK=0` turns the daily version check off: [docs/settings.md](./docs/settings.md#display-switches).
+6. **Then:** every other key in `~/.agentille/profile.json` is optional ([Settings](#settings)). `/agentille-init` adds your voice; `/agentille-project` adds a repo's entry. Each surface the mod draws has an off switch in the profile's `display` block: `band` (the band and its session-start toasts), `statusLine`, `mascot`, `rows` (the transcript rows), `spinner`, `deck`, `focus` (the `⚑` flags) and `highlight` (reply highlighting). The top-level `sessions` key stops a plain prompt from opening sessions, and `AGENTILLE_UPDATE_CHECK=0` turns the daily version check off: [docs/settings.md](./docs/settings.md#display-switches).
 
 Small tasks stay cheap: a one-sentence task with no risk words (the typo, the rename) runs solo, with no agents and no card. A plain prompt never starts `/agt`: the skill runs only when you type it. Powered by [Systown AI Lab](https://systown.ai).
 
@@ -70,7 +66,7 @@ Every command and its arguments (`--fable`, `/agt-spawn`, `/agt-clean`, `/agt-te
 
 ## Settings
 
-Everything lives in `~/.agentille/profile.json`. Every key is optional and no profile file is needed. The key most people set first is `integration`, what a finished slice becomes: `pr` (the default) pushes a branch and opens a PR per slice, `auto` also merges each PR on green and pushes a version tag, `push` pushes the branch only, `local` pushes nothing. A repo can only lower it, and a risky diff (auth, payments, deploy, migrations, dependencies) stops at the PR under every setting. `/agt-info` shows the `display` values in effect and where each came from.
+Everything lives in `~/.agentille/profile.json`. Every key is optional and no profile file is needed. The key most people set first is `integration`, what a finished slice becomes: `pr` (the default) pushes a branch and opens a PR per slice, `auto` also merges each PR on green and pushes a version tag, `push` pushes the branch only, `local` pushes nothing (`/agt --local "task"` runs one run that way, with no profile). A repo can only lower it, and a risky diff (auth, payments, deploy, migrations, dependencies) stops at the PR under every setting. `/agt-info` shows the `display` values in effect and where each came from.
 
 Every key, its default and what is checked (`integration`, `thinkingDepth`, `projects[]`, `routing.*`, `display.*`, the voice keys, `viewports`): [docs/settings.md](./docs/settings.md).
 
@@ -107,7 +103,7 @@ Kinds, follow-ups, which ones close on their own and how to get one back: [docs/
 - **Review is a gate**: P0/P1 findings get fixed before the card says ✓.
 - **Squads**: in a saas, ecommerce, content or immersive repo, payments, SEO and performance specialists join the review when the diff touches their area.
 - **Type less**: the first word after `/agt` completes to a level (`low`, `medium`, `heavy`, `next`), and a dash completes to `--fable`.
-- **What you see:** the switchboard (a live dispatch tree above your prompt), a live row per `Agent` call in the transcript, a pinned status line under the prompt, and a small mascot in each worker pane, all drawn by the mod for zero model tokens: [docs/display.md](./docs/display.md). Each has its own switch in the profile's `display` block ([docs/settings.md](./docs/settings.md#display-switches)).
+- **What you see:** the band (a live dispatch tree above your prompt, also called the switchboard), a live row per `Agent` call in the transcript, a pinned status line under the prompt, and a small mascot in each worker pane, all drawn by the mod for zero model tokens: [docs/display.md](./docs/display.md). Each has its own switch in the profile's `display` block ([docs/settings.md](./docs/settings.md#display-switches)).
 - **Pane workers report back over the wire**, and a pane is closed only once its answer is saved or read.
 - **Best with Herdr:** workers are labeled in its sidebar and a run with 3+ pane workers gets its own tab; ask for Codex in the task ("codex builds the API slice") and that slice runs as a Codex pane. tmux works with the same band; without a multiplexer you get the subagent tree.
 
@@ -161,7 +157,7 @@ Everything else waits for a typed `/agt`, `/storm` or a session ask. When you do
   - The run-end tidy and `/agt-clean` remove only merged, clean `agt/*` worktrees this session's runs made, and never one made under 10 minutes ago or with no commits of its own.
   - Copied `.env*` files are deleted from every worktree the run made when it ends, whatever the branch; only untracked copies git ignores go, a tracked or un-ignored `.env.example` stays.
 - **In your home:** `~/.agentille/state/run-<id>/` (plan, checkpoints, every agent's report, `report.md`), `~/.agentille/profile.json` when you save a setting, and `~/.agentille/.update-check.json`.
-- **Network:** the hook runs at session start and after a compaction, and at most once a day it fetches this repo's `plugin.json` from GitHub to compare versions (3 s timeout, nothing sent). `AGENTILLE_UPDATE_CHECK=0` turns it off.
+- **Network:** the hook runs at session start and after a compaction, and at most once a day it fetches this repo's `plugin.json` from GitHub to compare versions (3 s timeout, nothing sent). `AGENTILLE_UPDATE_CHECK=0` turns it off, and so does Claude Code's own `DISABLE_TELEMETRY` or `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC` set to `1` or `true`.
   - Research agents (`/storm`) read the web.
   - An executor whose worktree has no `node_modules` to copy runs the project's own install, and the security reviewer runs `npm audit`; both reach the package registry.
   - Nothing else goes out.

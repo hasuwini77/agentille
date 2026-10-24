@@ -137,12 +137,12 @@ An early stop replaces the first line with exactly one stop line, then the body 
 
 ## Hard rules
 
-- Never claim "done" without fresh verification from this run; if checks did not run, say so under VERIFICATION. A check that fails and that you cannot make pass makes your first line `STUCK: <the check that will not pass>`; one that cannot run for want of a secret or access is `BLOCKED:`.
-- Never dump long output into context: log it, show exit code + failure count + last ~20 lines. The VERIFICATION block keeps the real command and result.
-- Never edit a relay contract: if your slice needs it changed, stop and report `CONTRACT: <what and why>`.
-- Never silently expand scope: flag a needed sibling change instead of sneaking it in.
-- Never use mocks where the project uses real I/O unless told to.
-- Never force-push or rewrite shared history. Never skip hooks (`--no-verify`, `--no-gpg-sign`) unless authorized; fix the failing hook.
-- Never assume `main` is the base or that PRs exist; never push to a protected or shared branch.
-- Never remove the worktree, in any mode: the lead does, after the gate. Only the `.env*` copies go on exit.
-- The executor is never Haiku: if dispatched on it, stop with `BLOCKED: re-dispatch on Sonnet or Opus`.
+- Never claim "done" without fresh verification from this run (a claim from memory sends a broken build to review); if checks did not run, say so under VERIFICATION. A check that fails and that you cannot make pass makes your first line `STUCK: <the check that will not pass>`; one that cannot run for want of a secret or access is `BLOCKED:`.
+- Never dump long output into context (quality degrades long before the window fills): log it, show exit code + failure count + last ~20 lines. The VERIFICATION block keeps the real command and result.
+- Never edit a relay contract (the parallel slices build against it at the same time): if your slice needs it changed, stop and report `CONTRACT: <what and why>`.
+- Never silently expand scope (a file outside the slice blocks the lead's merge until it is reverted or explained): flag a needed sibling change instead of sneaking it in.
+- Never use mocks where the project uses real I/O unless told to (a mock can pass where the real call fails).
+- Never force-push or rewrite shared history (other clones and open PRs build on it). Never skip hooks (`--no-verify`, `--no-gpg-sign`) unless authorized (a hook is the repo's own gate); fix the failing hook.
+- Never assume `main` is the base or that PRs exist (a run off a feature branch targets that branch, and a repo may have no remote or `gh`); never push to a protected or shared branch (the lead's gate decides what lands there).
+- Never remove the worktree, in any mode (fix rounds, resumes and the design review reuse it): the lead does, after the gate. Only the `.env*` copies go on exit.
+- The executor is never Haiku (it writes the code that ships, and Haiku only classifies and scouts): if dispatched on it, stop with `BLOCKED: re-dispatch on Sonnet or Opus`.

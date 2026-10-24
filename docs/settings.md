@@ -28,6 +28,7 @@ What a finished slice becomes.
   - `push` pushes each slice branch, no PR, no merge.
   - `local` merges locally and pushes nothing.
   - Without `gh`, `pr` behaves as `push`.
+- **For one run:** `/agt --local "task"` runs that one `/agt` under `local`, whatever the profile says (`projects[]` entries included): the mod snapshots `local` at the typed `/agt` and the guard refuses every push and PR for the lead and its subagents until the run's card. The next `/agt` is back on the profile. No profile file is needed.
 - **Your profile decides:** that repo's `projects[].integration` entry (matched by `url`, the `origin` remote, or `path`; `/agentille-project` writes both), then the top-level `integration`, then `pr`.
   - An entry with only an `id` matches a repo with no remote and can only lower the integration mode, so a clone of someone else's repo with the same folder name never inherits `auto`.
 - **A repo can only lower it** (auto → pr → push → local): its `.agentille/config.json` `{"integration": …}` (`/agentille-project` writes it), a CLAUDE.md or AGENTS.md saying `no-mistakes` (at most `pr`) or `local-only` (`local`).
@@ -66,7 +67,7 @@ Each surface the mod draws has its own key in the `display` block. An invalid va
 
 | key | values | default | `off` (or the other value) does |
 |---|---|---|---|
-| `band` | `on`, `off` | `on` | Draws nothing above the prompt: the run's tree, the wire line, the `⚑` flags and a worker pane's own band all live there and go with it. |
+| `band` | `on`, `off` | `on` | Draws nothing above the prompt: the run's tree, the wire line, the `⚑` flags and a worker pane's own band all live there and go with it. The session-start toasts (a newer agentille installed, a Claude Code too old for the pane tools) go with it too; `spawn_pane` still refuses with the same message. |
 | `statusLine` | `on`, `off` | `on` | Pins no status line under the prompt, and clears one an earlier reload left pinned. |
 | `mascot` | `on`, `off` | `on` | Drops the figure from a worker pane's band and from the deck's cast. A worker keeps its one-line caption (role, model, effort, elapsed); the deck keeps each agent's role and model. |
 | `rows` | `on`, `off` | `on` | Leaves every `Agent` call in the transcript as Claude Code's own row, and a `Workflow` call without the agents listed under it. This covers a plain subagent you never ran through `/agt` and an `/agt` run's own agents alike. |
@@ -80,7 +81,7 @@ Each surface the mod draws has its own key in the `display` block. An invalid va
 { "display": { "band": "off", "statusLine": "on", "mascot": "off" } }
 ```
 
-The daily version check is not a display key: set `AGENTILLE_UPDATE_CHECK=0` in your environment to turn it off.
+The daily version check is not a display key: set `AGENTILLE_UPDATE_CHECK=0` in your environment to turn it off. It also stays off when Claude Code's own `DISABLE_TELEMETRY` or `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC` is set to `1` or `true` (no fetch and no cache write).
 
 ## `display.highlight`
 
@@ -116,7 +117,7 @@ The viewports the design reviewer screenshots when your task names none: any of 
 
 `/agt-routing`, `/agt-ledger` and `/agt-squads` were removed in v3.14.0: use `/agt-info routing|ledger|squads`.
 
-Two commands still work and write the `display` block, but both are deprecated and go away in v4:
+Two commands still work and write the `display` block. Both are deprecated; removed in 4.0.0:
 
 | You type | You get | Instead |
 |---|---|---|

@@ -7,7 +7,10 @@ export const AGT_LEVELS = [
   { text: 'heavy', description: 'worker panes in Herdr or tmux' },
   { text: 'next', description: 'build the next item of .agentille/backlog.md' },
 ]
-export const AGT_FLAGS = [{ text: '--fable', description: 'Fable ceiling on judgment roles' }]
+export const AGT_FLAGS = [
+  { text: '--fable', description: 'Fable ceiling on judgment roles' },
+  { text: '--local', description: 'Integration local for this run: commits, no push, no PR' },
+]
 
 const CMD = /^\/(agentille:)?agt$/
 

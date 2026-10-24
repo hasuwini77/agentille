@@ -123,7 +123,7 @@ export function roleOf(subagentType) {
   return Object.hasOwn(TABLE, role) ? role : null
 }
 
-// "[agt run=a1b2 size=large risk=auth mode=fix fable=auto]" on the prompt's first line
+// "[agt run=a1b2 size=large risk=auth work=fix fable=auto]" on the prompt's first line
 export function parseHeader(prompt) {
   const first = String(prompt ?? '').split('\n', 1)[0]
   const m = /^\s*\[agt\s+([^\]]*)\]/.exec(first)
@@ -135,28 +135,36 @@ export function parseHeader(prompt) {
   }
   // `slice=<slug>` names the slice. The older `piece=` still parses as its alias, and wins when a header carries the two.
   if (h.piece !== undefined) h.slice = h.piece
+  // `work=<type>` is the work type (build, fix, diagnose, review, research). The older `mode=` still parses as its
+  // alias until 4.0.0, and wins when a header carries the two, as `piece=` does; both keys hold the one value.
+  if (h.mode !== undefined) h.work = h.mode
+  if (h.work !== undefined) h.mode = h.work
   return h
 }
 
-// Proof that the person typed `--fable` on the /agt line. The dispatch header is written by the
-// model, so `fable=forced` on its own proves nothing; the mod keeps what the typed prompt said.
-// The flag counts in the flag region right after `/agt` (with the level) or as the line's last word:
+// Proof that the person typed a flag on the /agt line. The dispatch header is written by the model, so
+// `fable=forced` on its own proves nothing; the mod keeps what the typed prompt said.
+// A flag counts in the flag region right after `/agt` (with the level) or as the line's last word:
 // "/agt heavy fix the --fable flag parser" names a flag inside the task and proves nothing.
+//   --fable  the Fable ceiling on judgment roles (typedFable)
+//   --local  this one run under `integration: local` (typedLocal; guard.js loadRunProfile snapshots it)
 const LEVELS = new Set(['low', 'medium', 'heavy', 'next'])
-export function typedFable(text) {
+export function typedFlag(text, flag) {
   const first = String(text ?? '').split('\n', 1)[0].trim()
   const words = first.split(/\s+/)
   if (!/^\/(agentille:)?agt$/.test(words[0] ?? '')) return false
-  if (words.length > 1 && words[words.length - 1] === '--fable') return true
+  if (words.length > 1 && words[words.length - 1] === flag) return true
   let value = false // the word after --mode or --formation is that flag's value
   for (const w of words.slice(1)) {
-    if (w === '--fable') return true
+    if (w === flag) return true
     if (value) { value = false; continue }
     if (w === '--mode' || w === '--formation') value = true
     else if (!LEVELS.has(w) && !w.startsWith('--')) return false
   }
   return false
 }
+export const typedFable = (text) => typedFlag(text, '--fable')
+export const typedLocal = (text) => typedFlag(text, '--local')
 
 // `--fable` anywhere in a typed ask for sessions ("open a session with --fable and ship it"): the flag then rides
 // into the session's first prompt. Not a proof for a dispatch header; typedFable above is.
@@ -191,8 +199,8 @@ export function runInFlight(st, now = Date.now(), restMs = () => null, clockNow 
   return (st.agtTypedSince ?? 0) < AGT_GRACE_TYPED
 }
 
-// The roster runs at most this many executors at once (SKILL.md → "Hard rules"). The mod never refuses a dispatch:
-// the one past the cap is flagged. `agents` is the live map (subagents: working and heard from within AGENT_SILENT_MS,
+// The roster runs at most this many executors at once (SKILL.md → "Hard rules"). The mod refuses the subagent
+// dispatch past the cap and flags it. `agents` is the live map (subagents: working and heard from within AGENT_SILENT_MS,
 // since a cancelled one raises no turn.complete), `routes` the pane routes (an executor pane counts until it leaves the
 // stage). `run` is the run id; `now` is Date.now().
 export const MAX_EXECUTORS_AT_ONCE = 3
@@ -211,6 +219,11 @@ export function ordinal(n) {
 // The flag for an executor dispatch that makes `count` executors at once in `run`, or null within the cap.
 export function executorCapFlag(run, count) {
   return count > MAX_EXECUTORS_AT_ONCE ? 'run ' + run + ': ' + ordinal(count) + ' executor at once; the roster says ' + MAX_EXECUTORS_AT_ONCE : null
+}
+
+// The one line that dispatch is refused with, or null within the cap.
+export function executorCapDeny(run, count) {
+  return count > MAX_EXECUTORS_AT_ONCE ? 'agt ✗ run ' + run + ': a ' + ordinal(count) + ' executor at once is refused; the roster runs at most ' + MAX_EXECUTORS_AT_ONCE + '. Dispatch it again once one of them is done, and batch the rest in waves.' : null
 }
 
 // The person named Codex in a typed prompt ("codex builds the API slice", "use Codex"): the only proof a worker pane

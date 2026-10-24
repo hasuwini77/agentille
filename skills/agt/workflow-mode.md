@@ -9,7 +9,7 @@ Applies on the heavy level when there is no pane transport and the `Workflow` to
 - design-reviewer: Opus, on UI slices only.
 - security-reviewer: on security slices (`risk=auth|money|data`) only.
 
-Every stage prompt starts with the `[agt …]` header (`SKILL.md` → "Dispatch header"). The lead must name the routed model in the workflow script; the mod stops the run at the ceiling but cannot rewrite the model. Give each `agent()` the model from `routing.md` → "Default routing" yourself; the mod logs the model it actually ran and toasts a mismatch. A stop (`routing.stopAtCeiling` past `maxRunUsd`, or `routing.stopAtWeeklyPct`) denies the workflow agent like any other dispatch.
+Every stage prompt starts with the `[agt …]` header (`SKILL.md` → "Dispatch header"). The lead must name the routed model in the workflow script: the mod cannot rewrite a workflow agent's model, so it refuses one whose script names another model than the routed pick (`agt ✗ workflow <role> asks <model>, routed <model> · <effort>: …`). Give each `agent()` the model from `routing.md` → "Default routing" yourself (past `maxRunUsd`, the demoted pick); on that refusal, rewrite the script with the routed model and run it again. An `agent()` that names no model runs the engine's default, which the mod logs and toasts when it differs from the table. A stop (`routing.stopAtCeiling` past `maxRunUsd`, or `routing.stopAtWeeklyPct`) denies the workflow agent like any other dispatch.
 
 ## Adversarial verify
 

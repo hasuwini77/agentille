@@ -426,7 +426,7 @@ describe('guard: worktree adds', () => {
 // A run in a session with no pane transport: the ownership list lives in memory.
 // git: per dir, the branch checked out (`current`), its remote URL and its main checkout (default /work/repo).
 type Repo = { current?: string; remote?: string; common?: string; pushurl?: string; upstream?: string }
-const setup = (on: any, o: { profile?: unknown; repoConfig?: unknown; env?: Record<string, string>; files?: Record<string, string>; repos?: Record<string, Repo>; feat?: boolean; broken?: boolean } = {}) => {
+const setup = (on: any, o: { profile?: unknown; repoConfig?: unknown; env?: Record<string, string>; files?: Record<string, string>; repos?: Record<string, Repo>; feat?: boolean; broken?: boolean; aliases?: Record<string, string>; aliasBroken?: boolean } = {}) => {
   const seen: string[][] = []
   const ran: string[] = []
   const git = { made: false, committed: false, feat: false }
@@ -477,6 +477,9 @@ const setup = (on: any, o: { profile?: unknown; repoConfig?: unknown; env?: Reco
     const a = e.argv.join(' ')
     if (o.broken && e.argv[0] === 'git' && !a.includes('worktree list')) return { deny: 'git could not be run' }
     const out = (stdout: string, exitCode = 0) => ({ value: { exitCode, stdout, stderr: '' } })
+    // git config --get alias.<word>: the value, exit 1 when there is none, a deny when git cannot be run.
+    const am = /config --get alias\.(\S+)$/.exec(a)
+    if (am) return o.aliasBroken ? { deny: 'git could not be run' } : o.aliases?.[am[1]] ? out(o.aliases[am[1]] + '\n') : out('', 1)
     if (a === 'git -C /work/repo worktree list --porcelain') {
       return out([
         'worktree /work/repo', 'HEAD ' + (git.committed ? 'm2' : 'm1'), 'branch refs/heads/main', '',
@@ -960,6 +963,41 @@ describe('guard: scripts are read before they run', () => {
     expect((await bash($, './ship.sh')).result).toBe('ok')
     expect((await bash($, 'python3 -c "import os; os.system(\'git push origin main\')"')).result).toBe('ok')
     expect(ran).toHaveLength(3)
+  })
+})
+
+describe('guard: git aliases from config', () => {
+  test('a word that is no git command is looked up as an alias and its expansion judged', async ($, on) => {
+    const { ran, seen } = setup(on, { repos: { '/work/repo': { current: 'agt/x' } }, aliases: { pom: 'push origin HEAD:main', ship: '!git push origin HEAD:main', st: 'status', mine: 'push -u origin agt/x' } })
+    await boot($)
+    await typed($)
+    expect((await bash($, 'git pom')).deny).toContain('git push to main')
+    expect((await bash($, 'git ship')).deny).toContain('git push to main')
+    expect((await bash($, 'git -C /work/repo pom')).deny).toContain('git push to main')
+    expect((await bash($, 'git st')).result).toBe('ok')
+    expect((await bash($, 'git mine')).result).toBe('ok')
+    expect((await bash($, 'git lfs ls-files')).result).toBe('ok')
+    expect((await bash($, 'git status')).result).toBe('ok')
+    expect(ran).toEqual(['git st', 'git mine', 'git lfs ls-files', 'git status'])
+    // git's own commands are never looked up: git ignores an alias that shadows one.
+    expect(seen.some((a) => a.join(' ').includes('alias.status'))).toBe(false)
+    expect(seen.some((a) => a.join(' ') === 'git -C /work/repo config --get alias.pom')).toBe(true)
+  })
+
+  test('an alias the guard cannot look up is refused in a run; outside a run nothing is looked up', async ($, on) => {
+    const { ran, seen } = setup(on, { aliasBroken: true })
+    await boot($)
+    expect((await bash($, 'git pom')).result).toBe('ok')
+    expect(seen.some((a) => a.join(' ').includes('alias.'))).toBe(false)
+    await typed($)
+    expect((await bash($, 'git pom')).deny).toContain('could not look up')
+    expect((await bash($, 'cd "$X" && git pom')).deny).toContain('cannot place')
+    expect(ran).toEqual(['git pom'])
+  })
+
+  test('an alias set for one call or written to config stays a step of its own', async () => {
+    expect(integrationIn('git -c alias.p=push p origin agt/x:main', onSlice)).toBe('git -c alias.*')
+    expect(integrationIn('git config alias.p push && git p origin HEAD:main', onSlice)).toBe('git config alias.*')
   })
 })
 

@@ -226,6 +226,48 @@ try {
     check('... and none of them ran', ran.length === 0, JSON.stringify(ran))
   }
   {
+    // A git alias from config is looked up in the repo the call targets and its expansion judged: the everyday
+    // `pom = push origin HEAD:main` in the person's global config, a `!` shell alias, one reached through -C.
+    const w = world()
+    const glob = fs.readFileSync(T + '/gitconfig', 'utf8')
+    fs.writeFileSync(T + '/gitconfig', glob + '[alias]\n\tpom = push origin HEAD:main\n\tship = !git push -q origin HEAD:main\n\tst = status\n\tco = checkout\n')
+    try {
+      const plain = await run('git push -q origin HEAD:main')
+      check('spelled-out push to main: denied', plain?.deny?.includes('git push to main'), JSON.stringify(plain))
+      const pom = await run('git pom')
+      check('git pom (alias.pom = push origin HEAD:main in ~/.gitconfig): denied', pom?.deny?.includes('git push to main'), JSON.stringify(pom))
+      const ship = await run('git ship')
+      check('git ship (a ! alias that pushes main): denied', ship?.deny?.includes('git push to main'), JSON.stringify(ship))
+      const viaC = await run('cd .. && git -C app pom')
+      check('cd .. && git -C app pom: denied', viaC?.deny?.includes('git push to main'), JSON.stringify(viaC))
+      const co = await run('git co -q main && git push -q origin HEAD')
+      check('an alias that checks out main, then push HEAD: denied (HEAD moved)', co?.deny?.includes('switches branches'), JSON.stringify(co))
+      const st = await run('git st --short')
+      check('control: git st (alias of status) runs', !st?.deny && st.exit === 0, JSON.stringify(st))
+      const typo = await run('git nosuchword')
+      check('control: a word that is no alias is left to git', !typo?.deny, JSON.stringify(typo))
+      check('... origin/main unchanged', refOf('origin.git', 'main') === w.main)
+    } finally {
+      fs.writeFileSync(T + '/gitconfig', glob)
+    }
+  }
+  {
+    // The chain: a link made on one line, an alias written through it on the next, the alias run on a third.
+    // Each line is judged on its own; each must be refused, and origin/main must not move.
+    const w = world()
+    const cfg0 = fs.readFileSync(APP + '/.git/config', 'utf8')
+    const l1 = await run('ln -s .git/config cfg')
+    check('chain line 1, ln -s .git/config cfg: denied', l1?.deny?.includes('may not write'), JSON.stringify(l1))
+    sh('ln -s .git/config cfg', APP) // as if the link were there before the run
+    const l2 = await run("printf '[alias]\\n\\tyolo = push origin HEAD:main\\n' >> cfg")
+    check('chain line 2, an alias appended through the link: denied', l2?.deny?.includes('may not write'), JSON.stringify(l2))
+    check('... .git/config has no yolo', fs.readFileSync(APP + '/.git/config', 'utf8') === cfg0)
+    sh("printf '[alias]\\n\\tyolo = push origin HEAD:main\\n' >> .git/config", APP) // as if it were written before the run
+    const l3 = await run('git yolo')
+    check('chain line 3, git yolo: denied as a push to main', l3?.deny?.includes('git push to main'), JSON.stringify(l3))
+    check('... origin/main unchanged', refOf('origin.git', 'main') === w.main)
+  }
+  {
     // Controls below auto: the run's own branch and ordinary writes still pass.
     world()
     const ok = await run('git push -q -u origin agt/x')

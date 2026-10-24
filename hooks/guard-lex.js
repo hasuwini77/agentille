@@ -431,11 +431,31 @@ export function splitCommands(line) {
 // variable, which cannot be read here. `cfg`: the config keys -c / --config-env set for this one call.
 const GIT_VALUE_OPTS = new Set(['-C', '-c', '--git-dir', '--work-tree', '--namespace', '--exec-path', '--config-env', '--super-prefix'])
 
+// git's own commands (its builtins and the commands it ships as scripts). git runs one of these whatever an
+// alias of the same name says, so only another word is looked up as an alias.
+const GIT_COMMANDS = new Set(('add am annotate apply archive backfill bisect blame branch bugreport bundle cat-file check-attr check-ignore ' +
+  'check-mailmap check-ref-format checkout checkout--worker checkout-index cherry cherry-pick clean clone column commit commit-graph ' +
+  'commit-tree config count-objects credential credential-cache credential-cache--daemon credential-store describe diagnose diff ' +
+  'diff-files diff-index diff-pairs diff-tree difftool fast-export fast-import fetch fetch-pack fmt-merge-msg for-each-ref ' +
+  'for-each-repo format-patch fsck fsck-objects fsmonitor--daemon gc get-tar-commit-id grep hash-object help hook index-pack init ' +
+  'init-db interpret-trailers log ls-files ls-remote ls-tree mailinfo mailsplit maintenance merge merge-base merge-file merge-index ' +
+  'merge-ours merge-recursive merge-recursive-ours merge-recursive-theirs merge-subtree merge-tree mktag mktree multi-pack-index mv ' +
+  'name-rev notes pack-objects pack-redundant pack-refs patch-id pickaxe prune prune-packed pull push range-diff read-tree rebase ' +
+  'receive-pack reflog refs remote remote-ext remote-fd repack replace replay rerere reset restore rev-list rev-parse revert rm ' +
+  'send-pack shortlog show show-branch show-index show-ref sparse-checkout stage stash status stripspace submodule--helper switch ' +
+  'symbolic-ref tag unpack-file unpack-objects update-index update-ref update-server-info upload-archive upload-archive--writer ' +
+  'upload-pack var verify-commit verify-pack verify-tag version whatchanged worktree write-tree submodule subtree filter-branch ' +
+  'mergetool difftool--helper request-pull send-email instaweb quiltimport web--browse http-push http-fetch imap-send daemon shell ' +
+  'svn p4 cvsimport cvsexportcommit cvsserver archimport gui citool merge-octopus merge-one-file merge-resolve sh-setup sh-i18n ' +
+  'mergetool--lib remote-http remote-https remote-ftp remote-ftps pull-request').split(' '))
+
+
 export function gitCall(words) {
   if (!['git', 'hub'].includes(base(words[0]))) return null
   let dir = null
   let unknown = false
   const cfg = []
+  const loc = [] // the options that place the repo (-C, --git-dir, --work-tree) as argv words: an alias lookup reuses them
   let i = 1
   while (i < words.length && words[i].startsWith('-')) {
     const w = words[i]
@@ -443,6 +463,7 @@ export function gitCall(words) {
     const k = w.startsWith('--') && eq > 0 ? w.slice(0, eq) : w
     if (GIT_VALUE_OPTS.has(k)) {
       const v = k === w ? words[i + 1] ?? '' : w.slice(eq + 1)
+      if (k === '-C' || k === '--git-dir' || k === '--work-tree') loc.push(k, v)
       if (k === '-C') dir = dir ? joinPath(dir, v) : v
       if (k === '--work-tree' || k === '--git-dir') dir = k === '--git-dir' ? v.replace(/\/\.git\/?$/, '') || v : v
       if ((k === '-C' || k === '--work-tree' || k === '--git-dir') && /[$`~]/.test(v)) unknown = true
@@ -450,7 +471,7 @@ export function gitCall(words) {
       i += k === w ? 2 : 1
     } else i++
   }
-  return i < words.length ? { sub: words[i], args: words.slice(i + 1), dir, unknown, cfg } : null
+  return i < words.length ? { sub: words[i], args: words.slice(i + 1), dir, unknown, cfg, loc } : null
 }
 
 
@@ -751,7 +772,7 @@ function codeStep(w, here, stdin = null, piped = false) {
 
 
 // A line → its integration candidates, each with the dir it runs in (cd, pushd, git -C, env -C followed).
-export function commandSteps(line, cwd = null) {
+export function commandSteps(line, cwd = null, depth = 0) {
   const out = []
   let here = cwd
   let moved = false // a step before this one switched branches, in any dir
@@ -828,6 +849,14 @@ export function commandSteps(line, cwd = null) {
       // An alias or a hooks-path/push-config key set for one call changes a step past this reader.
       if (keys.some((k) => k.startsWith('alias.'))) out.push({ kind: 'step', what: 'git -c alias.*', dir, slug: null })
       if (keys.some((k) => PROTECT_CFG.test(k) && !k.startsWith('alias.'))) out.push({ kind: 'protected', what: CFG_WHAT, dir, slug: null })
+      // A word that is no git command may be an alias from git config (alias.pom = push origin HEAD:main): guardLine
+      // looks it up in the repo the call targets and judges what it expands to.
+      if (!GIT_COMMANDS.has(g.sub) && !g.sub.startsWith('-')) {
+        const genv = {}
+        for (const k of ['GIT_DIR', 'GIT_WORK_TREE']) if (c.env?.get(k)) genv[k] = c.env.get(k)
+        out.push({ kind: 'alias', what: 'git ' + g.sub, sub: g.sub, args: g.args, loc: g.loc, at, unknown: g.unknown || Object.values(genv).some((v) => /[$`~]/.test(v)), genv, dir, slug: null, headMoved: moved, remoteEdited: edited || retarget })
+        continue
+      }
       // `git config <key> <value>` setting a protected key (the hooks path, a remote's push, URL rewriting, …).
       if (g.sub === 'config' && gitConfigSets(g.args) && g.args.some((x) => PROTECT_CFG.test(x))) out.push(/^alias\./i.test(g.args.find((x) => PROTECT_CFG.test(x)) ?? '') ? { kind: 'step', what: 'git config alias.*', dir, slug: null } : { kind: 'protected', what: CFG_WHAT, dir, slug: null })
       // Plumbing that writes a remote with no `push` in sight.
@@ -845,6 +874,18 @@ export function commandSteps(line, cwd = null) {
     }
   }
   return out
+}
+
+
+// Whether a line moves HEAD in any repo (a checkout, switch, reset, branch -f, gh pr checkout): a push judged after
+// it cannot read the branch from before the line ran. guardLine asks it of an alias's expansion.
+export function lineMovesHead(line) {
+  for (const c of commands(line)) {
+    const g = gitCall(c.words)
+    if (g && movesHead(g)) return true
+    if (base(c.words[0]) === 'gh' && c.words.includes('checkout') && c.words.includes('pr')) return true
+  }
+  return false
 }
 
 

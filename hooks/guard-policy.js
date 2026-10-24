@@ -4,7 +4,7 @@
 // (guard-lex.js) turns a line into the candidates these functions judge.
 import { Profile, Proofs } from './state.js'
 import { PROBE } from './panes.js'
-import { base, commands, commandSteps, joinPath, protectedPath, SCRIPT_RISK, MAKE_RISK } from './guard-lex.js'
+import { base, commands, commandSteps, joinPath, lineMovesHead, protectedPath, SCRIPT_RISK, MAKE_RISK } from './guard-lex.js'
 
 // The gh and curl/wget step readers live in a leaf the lexer shares; the policy keeps carrying their names.
 export { ghStep, httpStep } from './guard-steps.js'
@@ -132,7 +132,7 @@ export function integrationIn(line, { cwd = null, current = null, pushDst = null
       continue
     }
     if (c.kind === 'hidden') return c.what
-    if (c.kind === 'file' || c.kind === 'write') continue // read in guardLine: a line alone has no files
+    if (c.kind === 'file' || c.kind === 'write' || c.kind === 'alias') continue // read in guardLine: a line alone has no files or config
     if (mode === 'local') return c.what
     if (c.kind === 'push') {
       const why = judgePush(c.push, { current, pushDst, bases: new Set(['main', 'master', b].filter(Boolean)) })
@@ -516,6 +516,27 @@ async function pushInfo($, c, cwd, cache) {
 }
 
 
+// How deep an alias may expand into another alias (git itself stops a loop; the guard stops sooner).
+const ALIAS_DEPTH = 5
+
+const shq = (w) => "'" + String(w).replace(/'/g, "'\\''") + "'"
+
+// `git <word>` where the word is no git command → the line it runs, read from git config in the repo the call
+// targets: { line } for an alias (a `!` alias is a shell line, git appends the arguments), { none } when git config
+// has no such alias (git runs an external git-<word> or refuses the word itself), or { why } when it cannot be read.
+async function aliasLine($, c) {
+  if (c.unknown || (!c.at && !c.loc.some((x, i) => i % 2 === 1 && x.startsWith('/')))) return { why: 'git ' + c.sub + ' may be an alias, in a repo the guard cannot place' }
+  const argv = ['git', ...(c.at ? ['-C', c.at] : []), ...c.loc, 'config', '--get', 'alias.' + c.sub]
+  const r = await $.process.run(argv, Object.keys(c.genv ?? {}).length ? { ...PROBE, env: c.genv } : PROBE).catch(() => null)
+  if (!r || typeof r.exitCode !== 'number') return { why: 'git ' + c.sub + ' may be an alias the guard could not look up' }
+  const value = String(r.stdout ?? '').trim()
+  if (r.exitCode === 1 || (r.exitCode === 0 && !value)) return { none: true }
+  if (r.exitCode !== 0) return { why: 'git ' + c.sub + ' may be an alias the guard could not look up' }
+  const args = c.args.map(shq).join(' ')
+  if (value.startsWith('!')) return { line: value.slice(1) + (args ? ' ' + args : '') }
+  return { line: ['git', ...c.loc.map(shq), value, args].filter(Boolean).join(' ') }
+}
+
 // A line → the deny text, or null. A line the reader cannot parse falls back to the plain words.
 export async function guardLine($, line, cwd) {
   let cands
@@ -526,10 +547,17 @@ export async function guardLine($, line, cwd) {
   }
   if (!cands.length) return null
   const profile = await readProfile($)
-  const cache = new Map()
+  return judgeCands($, cands, { profile, cwd, cache: new Map(), envRepo: undefined }, 0)
+}
+
+// The candidates of one line (or of an alias's expansion), judged in order: the first refusal, or null.
+async function judgeCands($, cands, ctx, depth) {
+  const { profile, cwd, cache } = ctx
   // GH_REPO in the session's own environment names gh's repo as one set on the line does.
-  const envRepo = cands.some((c) => c.gh && !c.slug) ? (await $.env.get('GH_REPO').catch(() => null)) || null : null
-  for (const c of cands) {
+  if (ctx.envRepo === undefined && cands.some((c) => c.gh && !c.slug)) ctx.envRepo = (await $.env.get('GH_REPO').catch(() => null)) || null
+  let aliasMoved = false // an alias earlier on the line moved HEAD: a later push cannot read it
+  for (const c0 of cands) {
+    const c = aliasMoved && c0.kind === 'push' ? { ...c0, push: { ...c0.push, headMoved: true } } : c0
     if (c.kind === 'write') {
       // An ordinary write target: judged by where it lands, and only a protected landing costs a mode lookup.
       const lbl = await resolvedProtected($, c.raw, c.path)
@@ -537,9 +565,21 @@ export async function guardLine($, line, cwd) {
       if ((await modeFor($, profile, { ...c, slug: null }, cwd, cache)) === 'auto') continue
       return denyProtected(lbl)
     }
-    const slug = c.gh && !c.slug ? envRepo ?? (await ghDefault($, c.dir, cache)) : c.slug
+    const slug = c.gh && !c.slug ? ctx.envRepo ?? (await ghDefault($, c.dir, cache)) : c.slug
     const mode = c.kind === 'push' ? await pushMode($, profile, c, cwd, cache) : await modeFor($, profile, { ...c, slug }, cwd, cache)
     if (mode === 'auto') continue
+    if (c.kind === 'alias') {
+      // Below auto a git alias is read and its expansion judged like the line itself; one that cannot be read refuses.
+      if (depth >= ALIAS_DEPTH) return denyHidden('git ' + c.sub + ' expands through more aliases than the guard follows')
+      const a = await aliasLine($, c)
+      if (a.why) return denyHidden(a.why)
+      if (a.none) continue
+      const inner = commandSteps(a.line, c.at).map((x) => (x.kind === 'push' ? { ...x, push: { ...x.push, headMoved: x.push.headMoved || c.headMoved || aliasMoved, remoteEdited: x.push.remoteEdited || c.remoteEdited } } : x))
+      const why = await judgeCands($, inner, ctx, depth + 1)
+      if (why) return why
+      if (lineMovesHead(a.line)) aliasMoved = true
+      continue
+    }
     if (c.kind === 'protected') return denyProtected(c.what)
     if (c.kind === 'step') return DENY_INTEGRATION
     if (c.kind === 'hidden') return denyHidden(c.what)

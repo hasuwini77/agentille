@@ -1616,3 +1616,17 @@ describe('guard: GitHub writes past merges, releases and refs', () => {
     expect(ghAliases('aliases:\n  - co\n')).toBe(null)
   })
 })
+
+describe('guard: the words passed to a script are read as a command', () => {
+  test('an exec "$@" wrapper cannot carry a push, a merge or a protected write past the guard', async ($, on) => {
+    const { ran } = setup(on, { files: { '/work/repo/run.sh': '#!/bin/sh\nexec "$@"\n' } })
+    await boot($)
+    await typed($)
+    expect((await bash($, 'sh run.sh git push origin HEAD:main')).deny).toContain('git push to main')
+    expect((await bash($, './run.sh gh pr merge 4')).deny).toBe(DENY_INTEGRATION)
+    expect((await bash($, 'bash run.sh sh -c "gh pr merge 4"')).deny).toBe(DENY_INTEGRATION)
+    expect((await bash($, 'sh run.sh npm test')).result).toBe('ok')
+    expect((await bash($, './run.sh --fast')).result).toBe('ok')
+    expect(ran).toEqual(['sh run.sh npm test', './run.sh --fast'])
+  })
+})

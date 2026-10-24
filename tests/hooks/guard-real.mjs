@@ -475,6 +475,16 @@ try {
     for (const d of [lead, wt]) fs.rmSync(d, { recursive: true, force: true })
   }
   {
+    // A wrapper script that runs `exec "$@"`: the words passed to it are read as a command of their own.
+    const w = world()
+    fs.writeFileSync(APP + '/run.sh', '#!/bin/sh\nexec "$@"\n')
+    const a = await run('sh run.sh git push -q origin HEAD:main')
+    check('sh run.sh git push origin HEAD:main: denied', a?.deny?.includes('git push to main'), JSON.stringify(a))
+    const b = await run('sh run.sh git status --short')
+    check('control: sh run.sh git status runs', !b?.deny && b.exit === 0, JSON.stringify(b))
+    check('... origin/main unchanged', refOf('origin.git', 'main') === w.main)
+  }
+  {
     // Controls below auto: the run's own branch and ordinary writes still pass.
     world()
     const ok = await run('git push -q -u origin agt/x')

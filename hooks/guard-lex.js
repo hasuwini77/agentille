@@ -826,7 +826,8 @@ function codeStep(w, here, stdin = null, piped = false, env = null) {
   const at = (f) => (/[$`]/.test(f) ? null : f.startsWith('~/') ? null : f.startsWith('/') ? joinPath('/', f) : here ? joinPath(here, f) : null)
   // `lang`: how the file is read past its own text (node: its imports; sh: the scripts it runs); null reads the
   // shebang.
-  const file = (f, what, lang = null) => ({ kind: 'file', how: 'script', what, path: at(f), dir: here, slug: null, lang })
+  // `rest`: the words passed to the script, which an `exec "$@"` wrapper runs as a command of their own.
+  const file = (f, what, lang = null, rest = []) => ({ kind: 'file', how: 'script', what, path: at(f), dir: here, slug: null, lang, rest })
   const hidden = (what) => ({ kind: 'hidden', what, dir: here, slug: null })
   const protect = (what) => ({ kind: 'protected', what, dir: here, slug: null })
   // Interpreter code → a protected-write deny (it names the trust root or git state), a hidden deny (it reaches
@@ -860,7 +861,7 @@ function codeStep(w, here, stdin = null, piped = false, env = null) {
     const pos = w.slice(1).filter((x) => !x.startsWith('-') || x === '-')
     const f = pos.find((x) => x !== '-')
     const lang = ['node', 'nodejs', 'bun'].includes(ik) ? 'node' : /^(python|pypy)/.test(ik) ? 'python' : 'other'
-    if (f && !pos.includes('-')) return /(^|\/)node_modules\//.test(f) ? null : file(f, p + ' ' + f, lang)
+    if (f && !pos.includes('-')) return /(^|\/)node_modules\//.test(f) ? null : file(f, p + ' ' + f, lang, w.slice(w.indexOf(f) + 1))
     if (stdin != null && !piped) return judgeCode(stdin, 'stdin')
     return hidden(p + ' runs code from stdin that the guard cannot read')
   }
@@ -868,11 +869,11 @@ function codeStep(w, here, stdin = null, piped = false, env = null) {
     const hasS = w.some((x, n) => n > 0 && !x.startsWith('--') && /^-[a-z]*s/.test(x))
     for (let i = 1; i < w.length; i++) {
       if (SHELL_VALUE_OPTS.has(w[i])) i++
-      else if (!w[i].startsWith('-') && !w[i].startsWith('+')) return file(w[i], p + ' ' + w[i], 'sh')
+      else if (!w[i].startsWith('-') && !w[i].startsWith('+')) return file(w[i], p + ' ' + w[i], 'sh', w.slice(i + 1))
     }
     return piped || hasS ? hidden(p + ' runs code from stdin that the guard cannot read') : null
   }
-  if ((p === 'source' || w[0] === '.') && w[1]) return file(w[1], w[0] + ' ' + w[1], 'sh')
+  if ((p === 'source' || w[0] === '.') && w[1]) return file(w[1], w[0] + ' ' + w[1], 'sh', w.slice(2))
   if (Object.hasOwn(PKG_FILE, p)) {
     const r = pkgScript(p, w.slice(1))
     if (!r) return null // not a script-running form (install, a builtin): left alone
@@ -908,10 +909,12 @@ function codeStep(w, here, stdin = null, piped = false, env = null) {
     const paths = dir ? files.map((f) => (/[$`]/.test(f) ? null : f.startsWith('/') ? joinPath('/', f) : joinPath(dir, f))) : [null]
     return { kind: 'file', how: 'make', what: 'make' + (targets.length ? ' ' + targets.join(' ') : ''), paths, targets, dir, slug: null }
   }
-  if (w[0].includes('/') && !SYSTEM_BIN.test(w[0])) return file(w[0], w[0])
+  if (w[0].includes('/') && !SYSTEM_BIN.test(w[0])) return file(w[0], w[0], null, w.slice(1))
   return null
 }
 
+
+const shQuote = (w) => "'" + String(w).replace(/'/g, "'\\''") + "'"
 
 // The words after an unreadable program that say it may integrate: git's and gh's own.
 const INTEGRATION_WORD = /^(push|merge|tag|release|send-pack|http-push|update-ref|symbolic-ref|subtree|api|pr|alias|workflow)$/
@@ -993,6 +996,11 @@ export function commandSteps(line, cwd = null, depth = 0, homes = []) {
     } else if (p !== 'gh' && p !== 'git' && p !== 'hub') {
       const k = codeStep(w, at, c.stdin, c.piped, c.env)
       if (k) out.push(k)
+      // The words passed to a script are read as a command too: a wrapper that runs `exec "$@"` runs them.
+      if (k?.rest?.length) {
+        if (depth >= LINE_DEPTH) out.push({ kind: 'hidden', what: LINE_TOO_DEEP, dir: at, slug: null, unread: true })
+        else for (const x of commandSteps(k.rest.map(shQuote).join(' '), at, depth + 1, homes)) out.push({ ...x, what: x.what + ' (passed to ' + k.what + ')' })
+      }
     } else if (p !== 'gh') {
       const g = gitCall(w)
       if (!g) continue

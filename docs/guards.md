@@ -69,7 +69,7 @@ The guard is a seatbelt against a cooperative model's honest mistakes, not a san
 
 What it reads has limits, and these are the known ones:
 
-- Inside a shell script file it follows each step it can place and read, and skips a script file named through a variable, one after a `cd` it cannot follow, or one whose file is not there. A program named through a variable is judged only by the words after it: `"$@"` or `"$NODE" x.js` runs unread, `$c push` is refused. A script file the Bash line names that is not there, or is not text, is not judged: the shell fails on it.
+- Inside a shell script file it follows each step it can place and read, and skips a script file named through a variable, one after a `cd` it cannot follow, or one whose file is not there. A program named through a variable is judged only by the words after it: `"$NODE" x.js` runs unread, `$c push` is refused. The words a line passes to a script are read as a command of their own, so a wrapper that runs `exec "$@"` cannot carry a push past the guard. A script file the Bash line names that is not there, or is not text, is not judged: the shell fails on it.
 - It checks a script's text for a push, merge, tag or GitHub call by pattern. A make recipe is checked the same way. It does not refuse an opener such as `npx` inside a script.
 - It does not read installed code: anything under `node_modules`, a bare package import, or a module in the standard library or site-packages.
 - It reads a node file's relative static imports one level deep. An import built at run time is not followed, and neither are a Python file's imports.

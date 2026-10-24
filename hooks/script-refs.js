@@ -10,6 +10,9 @@ export const NPM_SCRIPT_ALIASES = { test: 'test', t: 'test', tst: 'test', start:
 // which, so a command with one is not followed.
 export const ELSEWHERE = new Set(['--prefix', '-C', '--dir', '--cwd', '--filter', '-F', '--workspace', '-w', '--workspaces', '-ws', '-r', '--recursive', '--workspace-root', '--global', '-g', '--location'])
 
+// Flags that take a value before the subcommand (`npm --loglevel silent run x`): the value is not the subcommand.
+export const VALUE_FLAGS = new Set(['--loglevel', '--registry', '--userconfig', '--globalconfig', '--cache', '--scope', '--tag', '--otp', '--reporter', '--color', '--network-concurrency', '--mutex', '--cache-folder', '--modules-folder', '--config'])
+
 // `run x` runs the scripts `prex`, `x` and `postx`, in that order (npm always; pnpm and yarn when set to).
 export const scriptChain = (name) => ['pre' + name, name, 'post' + name]
 

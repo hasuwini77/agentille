@@ -1026,6 +1026,9 @@ describe('guard: package scripts, modules and imports are followed', () => {
     await deny('pnpm ship', 'its preship script')
     await deny('pnpm -r run build', 'another package folder')
     await deny('npm run lint --workspaces', 'another package folder')
+    await deny('npm -w app run lint -- -x', 'another package folder')
+    await deny('pnpm --filter app test', 'another package folder')
+    await deny('npm --loglevel silent run ship', 'its preship script')
     await deny('node tools/rel.mjs', 'imports ./lib.js, which calls git push')
     await deny('node tools/broken.mjs', 'imports ./nowhere.js, which the guard cannot read')
     await deny('python3 -m tools.rel', 'runs a module that calls git push')
@@ -1038,7 +1041,8 @@ describe('guard: package scripts, modules and imports are followed', () => {
     await deny('npm run wrap', 'tools/push.sh runs a script that calls git push')
     await deny('sh tools/wrap.sh', 'tools/push.sh runs a script that calls git push')
     const ok = ['npm run loop', 'npm run lint', 'npm run fine', 'node tools/fine.mjs', 'python3 -m pkg.ok', 'python3 -m pytest -q', 'python3 -m http.server', 'pnpm install', 'yarn', 'bun test',
-      'npm run check', 'sh tools/check.sh', 'npm i -g typescript', 'pnpm add -w lodash', 'pnpm -r install', 'npm install --prefix x', 'yarn add left-pad']
+      'npm run check', 'sh tools/check.sh', 'npm i -g typescript', 'pnpm add -w lodash', 'pnpm -r install', 'npm install --prefix x', 'yarn add left-pad',
+      'npm run lint -- -g adds', 'npm run lint -- -w', 'pnpm run lint -- --filter x']
     for (const line of ok) expect([line, (await bash($, line)).result]).toEqual([line, 'ok'])
     expect(ran).toEqual(ok)
   })

@@ -4,7 +4,7 @@
 // (package-manager scripts, npx, python -m, CLAUDE.md @imports). Reads only through $.fs (read, stat, list).
 // The names a command runs without naming them (script chains, python -m files) come from script-refs.js, which
 // the guard reads them with too.
-import { ELSEWHERE, NPM_SCRIPT_ALIASES, PLAIN_MODULE, moduleFiles, pythonModule, scriptChain } from './script-refs.js'
+import { ELSEWHERE, NPM_SCRIPT_ALIASES, PLAIN_MODULE, VALUE_FLAGS, moduleFiles, pythonModule, scriptChain } from './script-refs.js'
 
 // Absent in the worktree is fine for these (settings.local.json and CLAUDE.local.md are gitignored, so a fresh
 // worktree has none); present, they must be the lead checkout's byte for byte.
@@ -265,8 +265,6 @@ async function followCommands($, ctx, cmds, base, depth) {
 }
 
 const INSTALLS = new Set(['install', 'i', 'ci', 'add', 'isntall', 'in'])
-// Flags that take a value before the subcommand (`npm --loglevel silent run x`): the value is not the subcommand.
-const VALUE_FLAGS = new Set(['--loglevel', '--registry', '--userconfig', '--globalconfig', '--cache', '--scope', '--tag', '--otp', '--reporter', '--color', '--network-concurrency', '--mutex', '--cache-folder', '--modules-folder', '--config'])
 
 // One program and its arguments. Package managers, npx-style runners, python -m and uv are followed to the files
 // they run; anything else runs only what commandPaths already compared.

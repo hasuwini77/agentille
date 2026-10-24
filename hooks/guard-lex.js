@@ -4,7 +4,7 @@
 // integration candidate (commandSteps/codeStep). Policy (guard-policy.js) judges those candidates.
 import { Profile } from './state.js'
 import { base, ghStep, httpStep } from './guard-steps.js'
-import { ELSEWHERE, NPM_SCRIPT_ALIASES, pythonModule } from './script-refs.js'
+import { ELSEWHERE, NPM_SCRIPT_ALIASES, VALUE_FLAGS, pythonModule } from './script-refs.js'
 
 export { base }
 
@@ -687,8 +687,21 @@ const PM_BUILTINS = new Set(('add remove rm uninstall un install i ci isntall in
   'patch-commit patch-remove setup env deploy fetch server root bin cache global help version login logout whoami workspaces ' +
   'workspace dedupe plugin node policies constraints explain npm pm repl completions build test').split(' '))
 
+// Package-folder flags that take a value (npm -w app, pnpm --filter app, --prefix dir).
+const PM_FOLDER_VALUE = new Set(['--prefix', '-C', '--dir', '--cwd', '--filter', '-F', '--workspace', '-w', '--location'])
+const isScriptWord = (w) => w === 'run' || w === 'run-script' || Object.hasOwn(NPM_SCRIPT_ALIASES, w)
+
 function pkgScript(p, args) {
-  const pos = args.filter((x) => !x.startsWith('-'))
+  // Words after `--` are the script's own arguments (`npm test -- -g adds`), never the manager's flags.
+  const dd = args.indexOf('--')
+  const own = dd < 0 ? args : args.slice(0, dd)
+  // The positionals, a flag's value left out (`npm --loglevel silent run x`, `npm -w app run x`): a word after a
+  // package-folder flag may be its value or the subcommand, so both readings are tried below.
+  const pos = []
+  for (let i = 0; i < own.length; i++) {
+    if (VALUE_FLAGS.has(own[i]) || (PM_FOLDER_VALUE.has(own[i]) && /^[^-]/.test(own[i + 1] ?? '') && !isScriptWord(own[i + 1]))) i++
+    else if (!own[i].startsWith('-')) pos.push(own[i])
+  }
   const sub = pos[0]
   if (sub === 'exec' || sub === 'dlx' || sub === 'x') return { deny: true, what: p + ' ' + sub + ' runs a package the guard cannot read' }
   let r = null
@@ -698,7 +711,7 @@ function pkgScript(p, args) {
   } else if (sub !== undefined && p !== 'bun' && Object.hasOwn(NPM_SCRIPT_ALIASES, sub)) r = { script: NPM_SCRIPT_ALIASES[sub], what: p + ' ' + sub, optional: true }
   else if (sub !== undefined && p === 'bun' && (sub.includes('/') || /\.[cm]?[jt]sx?$/.test(sub))) return { file: sub, what: 'bun ' + sub }
   else if (sub !== undefined && p !== 'npm' && !PM_BUILTINS.has(sub)) r = { script: sub, what: p + ' ' + sub, optional: true }
-  if (r && args.some((a) => ELSEWHERE.has(a.split('=')[0]))) return { deny: true, what: p + ' ' + args.join(' ') + ' runs a script in another package folder, which the guard cannot place' }
+  if (r && own.some((a) => ELSEWHERE.has(a.split('=')[0]))) return { deny: true, what: p + ' ' + own.join(' ') + ' runs a script in another package folder, which the guard cannot place' }
   return r
 }
 

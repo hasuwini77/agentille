@@ -1130,15 +1130,16 @@ describe('pane tools: folder trust', () => {
     on('tool.register', async ($: any, e: any) => ({ value: { tool: 'mcp__agentille__' + e.name } }))
     on('fs.read', async ($: any, e: any) => (e.path in files ? { value: files[e.path] } : { deny: 'ENOENT' }))
     on('fs.write', async () => ({ value: undefined }))
-    // A directory exists when a file sits under it; its listing is the files and folders right beneath it.
-    on('fs.exists', async ($: any, e: any) => ({ value: e.path in files || Object.keys(files).some((f) => f.startsWith(e.path + '/')) }))
+    // A folder exists when a file sits under it; its listing is the files and folders right beneath it.
     on('fs.list', async ($: any, e: any) => {
       const under = Object.keys(files).filter((f) => f.startsWith(e.path + '/')).map((f) => f.slice(e.path.length + 1))
       if (!under.length) return { deny: 'ENOENT' }
       const names = [...new Set(under.map((r) => r.split('/')[0]))]
       return { value: names.map((name) => ({ name, kind: under.some((r) => r.startsWith(name + '/')) ? 'dir' : 'file' })) }
     })
-    on('fs.stat', async ($: any, e: any) => (e.path.startsWith('/work/') ? { value: { kind: 'dir', size: 0, mtimeMs: 0, isLink: false } } : { deny: 'ENOENT' }))
+    // Only the two checkouts and folders that hold a file are directories; only listed files are files.
+    const isDir = (path: string) => ['/work/repo', '/work/wt'].includes(path) || Object.keys(files).some((f) => f.startsWith(path + '/'))
+    on('fs.stat', async ($: any, e: any) => (e.path in files ? { value: { kind: 'file', size: 1, mtimeMs: 0, isLink: false } } : isDir(e.path) ? { value: { kind: 'dir', size: 0, mtimeMs: 0, isLink: false } } : { deny: 'ENOENT' }))
     on('store.get', async () => ({ value: undefined }))
     on('store.set', async () => ({ value: undefined }))
     on('ui.panes', async () => ({ value: [] }))
@@ -1236,6 +1237,12 @@ describe('pane tools: folder trust', () => {
     const own = setup(on, { files: { [LIST]: '/work/wt\n', '/work/wt/.mcp.json': '{"mcpServers":{"x":{}}}' } })
     expect(JSON.stringify(await spawn($, own.clock))).toContain('needs a one-time trust')
     expect(accepted(own.seen)).toBe(false)
+  })
+
+  test('a listed agt/* worktree with an empty settings.json the lead\'s differs from is refused', async ($, on) => {
+    const { seen, clock } = setup(on, { files: { [LIST]: '/work/wt\n', '/work/wt/.claude/settings.json': '', '/work/repo/.claude/settings.json': '{"a":1}' } })
+    expect(JSON.stringify(await spawn($, clock))).toContain('needs a one-time trust')
+    expect(accepted(seen)).toBe(false)
   })
 
   test('a listed agt/* worktree whose .mcp.json matches the lead checkout\'s is trusted', async ($, on) => {

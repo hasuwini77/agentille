@@ -97,17 +97,22 @@ export function ownedWorktree(listed, top, branch) {
   return String(listed).split('\n').some((l) => l.trim().split(/\s+/).some((f) => f === top || (branch && f === branch)))
 }
 
-// A file's text, '' for none, null when it is there but cannot be read.
+// A file's text, ABSENT when there is none, UNREADABLE when it is there but cannot be read. Existence is asked of
+// stat, the call that answers for files and folders alike.
+const ABSENT = Symbol('absent')
+const UNREADABLE = Symbol('unreadable')
+async function missing($, path) {
+  return $.fs.stat(path).then(() => false, () => true)
+}
 async function configFile($, path) {
   const text = await $.fs.read(path).catch(() => null)
   if (typeof text === 'string') return text
-  return (await $.fs.exists(path).catch(() => true)) ? null : ''
+  return (await missing($, path)) ? ABSENT : UNREADABLE
 }
 
 // Every file under `dir` as relative path → text (empty for no dir), or null when any part cannot be read or the
 // tree is too big to compare.
 async function configTree($, dir) {
-  if (!(await $.fs.exists(dir).catch(() => true))) return new Map()
   const out = new Map()
   const walk = async (rel) => {
     const entries = await $.fs.list(rel ? dir + '/' + rel : dir).catch(() => null)
@@ -124,15 +129,16 @@ async function configTree($, dir) {
     }
     return true
   }
-  return (await walk('')) ? out : null
+  if (await walk('')) return out
+  return (await missing($, dir)) && out.size === 0 ? out : null
 }
 
 // The worktree brings no project config of its own: what it has is the lead checkout's, byte for byte.
 export async function sameConfig($, top, leadTop) {
   for (const f of CONFIG_FILES) {
     const mine = await configFile($, top + '/' + f)
-    if (mine === '') continue
-    if (mine === null || mine !== (await configFile($, leadTop + '/' + f))) return false
+    if (mine === ABSENT) continue
+    if (mine === UNREADABLE || mine !== (await configFile($, leadTop + '/' + f))) return false
   }
   for (const d of CONFIG_DIRS) {
     const [mine, lead] = await Promise.all([configTree($, top + '/' + d), configTree($, leadTop + '/' + d)])

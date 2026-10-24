@@ -2,7 +2,7 @@
 // lead (split or run tab), the startup dialogs it clears, the run tabs a lead records, and the pane tools'
 // registration on the typed prompt that unlocks them.
 
-import { S, isLead } from './state.js'
+import { S, isLead, Profile } from './state.js'
 import { PROBE, HERDR_START_TIMEOUT, pickTransport, splitName, paneKey, answerFile, advisorEnv, tmuxSplitArgv, tmuxEvenArgv, tmuxTagArgvs, tmuxPaneIdOf, tmuxKillArgv, herdrSplitArgv, herdrPaneIdOf, herdrTabArgv, herdrTabOf, herdrTabListArgv, herdrTabIds, tabsFile, panesFile, startupDialog, dialogKeys, herdrReadArgv, herdrKeysArgv, agentStatusOf, herdrGetArgv, screenLine, codexTask, herdrStartArgv, herdrPromptArgv, herdrCloseArgv, herdrMetaArgv, SPAWN_TOOL, CLOSE_TOOL, OPEN_SESSIONS_TOOL } from './panes.js'
 import { wireEnv, shortName } from './wire.js'
 
@@ -30,7 +30,7 @@ export async function transportOf($) {
 // The run tabs this lead made, one id per line where the SessionEnd sweep reads them. A failed write loses
 // only the sweep's reach, so it never blocks.
 export async function saveTabs($) {
-  const file = tabsFile(S.home, await $.env.get('HERDR_PANE_ID'))
+  const file = tabsFile(Profile.home, await $.env.get('HERDR_PANE_ID'))
   if (file) await $.fs.write(file, [...S.ownedTabs].map((t) => t + '\n').join('')).catch(() => {})
 }
 
@@ -42,12 +42,12 @@ export async function leadPane($) {
 // The worker panes this lead opened, one name per line, where the SessionEnd sweep reads them. Ownership is by
 // name (agt-<run>-<role>, the run id is random), so a restarted lead takes its own panes back and no other.
 export async function savePanes($) {
-  const file = panesFile(S.home, await leadPane($))
+  const file = panesFile(Profile.home, await leadPane($))
   if (file) await $.fs.write(file, [...S.openedNames].map((n) => n + '\n').join('')).catch(() => {})
 }
 
 export async function loadOwned($) {
-  const file = panesFile(S.home, await leadPane($))
+  const file = panesFile(Profile.home, await leadPane($))
   if (!file) return
   const text = await $.fs.read(file).catch(() => '')
   for (const n of String(text ?? '').split('\n')) if (splitName(n)) S.openedNames.add(n)
@@ -259,7 +259,7 @@ export async function trustable($, cwd, leadCwd) {
   if (top === leadTop) return true
   const branch = await gitOut($, cwd, 'symbolic-ref', '--short', 'HEAD')
   if (!branch || !OWN_BRANCH.test(branch)) return false
-  const file = String(panesFile(S.home, await leadPane($)) ?? '').replace(/\.panes$/, '.worktrees')
+  const file = String(panesFile(Profile.home, await leadPane($)) ?? '').replace(/\.panes$/, '.worktrees')
   const listed = file ? await $.fs.read(file).catch(() => null) : null
   if (typeof listed !== 'string' || !(await listsRoot($, listed, top))) return false
   return sameConfig($, top, leadTop)
@@ -320,7 +320,7 @@ export async function openPane($, t, o) {
     if (!lead) throw new Error('TMUX_PANE is not set')
     const target = o.split?.target ?? lead
     const shell = (await $.env.get('SHELL')) ?? ''
-    const id = tmuxPaneIdOf((await runOk($, tmuxSplitArgv({ ...o, target, shell, direction: o.split?.direction, env: [...wireEnv({ name: o.name, lead: S.sessionId }), ...advisorEnv(o.model, S.settings)] }), PROBE)).stdout)
+    const id = tmuxPaneIdOf((await runOk($, tmuxSplitArgv({ ...o, target, shell, direction: o.split?.direction, env: [...wireEnv({ name: o.name, lead: S.sessionId }), ...advisorEnv(o.model, Profile.settings)] }), PROBE)).stdout)
     if (!id) throw new Error('tmux gave no pane id')
     try {
       for (const argv of tmuxTagArgvs(id, o.name)) await runOk($, argv, PROBE)
@@ -334,7 +334,7 @@ export async function openPane($, t, o) {
   }
   const lead = await $.env.get('HERDR_PANE_ID')
   if (!lead) throw new Error('HERDR_PANE_ID is not set')
-  const env = [...wireEnv({ name: o.name, lead: S.sessionId }), ...advisorEnv(o.model, S.settings)]
+  const env = [...wireEnv({ name: o.name, lead: S.sessionId }), ...advisorEnv(o.model, Profile.settings)]
   let id
   let tab = o.split?.tab ?? null
   if (o.newTab) {
@@ -354,7 +354,7 @@ export async function openPane($, t, o) {
   try {
     await startAgent($, herdrStartArgv({ name: o.name, pane: id, model: o.model, effort: o.effort, agent: o.agent, vendor: o.vendor }), o.name, o.cwd)
     // Codex has no pane tools of ours: it saves its answer where the harvest, reaper and wake paths look.
-    const task = o.vendor === 'codex' ? codexTask(o.task, answerFile(S.home, o.run, splitName(o.name).role, paneKey(id))) : o.task
+    const task = o.vendor === 'codex' ? codexTask(o.task, answerFile(Profile.home, o.run, splitName(o.name).role, paneKey(id))) : o.task
     await runOk($, herdrPromptArgv(o.name, task), PROBE)
   } catch (err) {
     await $.process.run(herdrCloseArgv(id), PROBE).catch(() => {})

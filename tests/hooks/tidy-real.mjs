@@ -7,7 +7,8 @@
 import { spawnSync } from 'node:child_process'
 import fs from 'node:fs/promises'
 import { existsSync } from 'node:fs'
-import { S } from '../../hooks/state.js'
+import { S, Profile } from '../../hooks/state.js'
+import { seed } from '../../hooks/store.js'
 import { bashCall } from '../../hooks/guard.js'
 import { cleanGit } from '../../hooks/reaper.js'
 
@@ -49,7 +50,7 @@ const next = async (e) => {
   return { result: { stdout: r.stdout, stderr: r.stderr, interrupted: false }, isError: r.exitCode !== 0 }
 }
 
-S.home = home
+seed(Profile, { home })
 S.agtTurn = true // an /agt turn: the guard records this session's worktrees
 
 const listed = () => sh(['git', '-C', repo, 'worktree', 'list', '--porcelain']).stdout

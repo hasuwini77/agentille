@@ -19,7 +19,7 @@
 // or curl is refused, and a script file, a sourced file or a make target is read first and refused when it pushes,
 // merges, tags or releases. Probing that fails denies the command: the guard never lets a line through unread.
 
-import { S } from './state.js'
+import { S, Profile } from './state.js'
 import { parseWorktrees } from './clean.js'
 import { PROBE, SAFE_RUN, SPAWN_ROLE, splitName, paneKey } from './panes.js'
 import { ROLES } from './routing.js'
@@ -899,7 +899,7 @@ async function localRepo($, dir, cache) {
 
 async function readProfile($) {
   try {
-    return S.home ? JSON.parse(await $.fs.read(S.home + '/.agentille/profile.json')) : null
+    return Profile.home ? JSON.parse(await $.fs.read(Profile.home + '/.agentille/profile.json')) : null
   } catch {
     return null // no profile: the default holds
   }
@@ -920,7 +920,7 @@ async function repoCaps($, dirs) {
 
 // The mode for a repo the guard cannot place (a dir or remote a variable names, a target edited earlier on the
 // line): the profile's top-level integration, never a name or path match.
-const topMode = (profile) => integrationOf(profile, { url: null, paths: [], names: [], home: S.home }, [])
+const topMode = (profile) => integrationOf(profile, { url: null, paths: [], names: [], home: Profile.home }, [])
 
 // The mode for the repo a candidate targets: its dir's repo, or the repo it names (-R, GH_REPO, repos/o/r) when
 // that is not the dir's own. A dir a variable names cannot be placed: the top-level mode.
@@ -932,8 +932,8 @@ async function modeFor($, profile, c, cwd, cache) {
   const named = c.slug ? normSlug(c.slug) : null
   // The dir's own repo is its main remote's (origin, else the first): a fork's upstream is another repo.
   const mine = local && (!named || (!!local.url && sameRepo(normUrl(local.url), named)))
-  if (mine) return integrationOf(profile, { url: local.url, paths: local.dirs, name: local.name, home: S.home }, await repoCaps($, local.dirs))
-  return integrationOf(profile, { url: named, paths: [], name: named ? base(named) : null, home: S.home }, [])
+  if (mine) return integrationOf(profile, { url: local.url, paths: local.dirs, name: local.name, home: Profile.home }, await repoCaps($, local.dirs))
+  return integrationOf(profile, { url: named, paths: [], name: named ? base(named) : null, home: Profile.home }, [])
 }
 
 // gh with no -R or GH_REPO goes to the remote `gh repo set-default` picked (remote.<name>.gh-resolved), if any.
@@ -948,7 +948,7 @@ function remotePath(u, dir) {
   const s = String(u)
   if (/^file:\/\//i.test(s)) return joinPath('/', s.replace(/^file:\/\/[^/]*/i, ''))
   if (/^[a-z][a-z0-9+.-]*:\/\//i.test(s) || /^[^/]+:/.test(s)) return null
-  if (s.startsWith('~/')) return S.home ? joinPath('/', S.home + s.slice(1)) : null
+  if (s.startsWith('~/')) return Profile.home ? joinPath('/', Profile.home + s.slice(1)) : null
   return s.startsWith('/') ? joinPath('/', s) : dir ? joinPath(dir, s) : null
 }
 
@@ -975,7 +975,7 @@ async function pushMode($, profile, c, cwd, cache) {
   const path = remotePath(url, c.dir)
   const paths = path ? [path.replace(/\/\.git$/, '')] : []
   if (path && !local.url && local.dirs.includes(paths[0])) return modeFor($, profile, { ...c, slug: null }, cwd, cache)
-  return integrationOf(profile, { url: path ? null : url, paths, names: [], home: S.home }, [])
+  return integrationOf(profile, { url: path ? null : url, paths, names: [], home: Profile.home }, [])
 }
 
 export async function integrationAllowed($, cwd) {
@@ -1222,11 +1222,11 @@ export function worktreesFile(home, pane) {
 
 // A worker pane records under its run, where the lead that opened it reads: the pane's own key is no lead's.
 async function ownFile($) {
-  if (!S.home) return null
+  if (!Profile.home) return null
   const self = splitName(S.wireName ?? S.selfName)
   const key = paneKey(await leadPane($).catch(() => null))
-  if (self) return SAFE_RUN.test(self.run) && key ? S.home + '/.agentille/state/run-' + self.run + '/worktrees/' + self.role + '.' + key + '.json' : null
-  return worktreesFile(S.home, await leadPane($).catch(() => null))
+  if (self) return SAFE_RUN.test(self.run) && key ? Profile.home + '/.agentille/state/run-' + self.run + '/worktrees/' + self.role + '.' + key + '.json' : null
+  return worktreesFile(Profile.home, await leadPane($).catch(() => null))
 }
 
 // Adds what a call made to the session's records and saves them. What an earlier session of the same lead (a
@@ -1242,11 +1242,11 @@ export async function saveOwned($, made = []) {
 // it opened recorded under their runs.
 export async function ownedWorktrees($) {
   const all = [...S.worktrees]
-  const file = S.home ? worktreesFile(S.home, await leadPane($).catch(() => null)) : null
+  const file = Profile.home ? worktreesFile(Profile.home, await leadPane($).catch(() => null)) : null
   if (file) all.push(...parseOwned(await $.fs.read(file).catch(() => '')))
   const runs = new Set([...S.openedNames].map((n) => splitName(n)?.run).filter((r) => r && SAFE_RUN.test(r)))
   for (const run of runs) {
-    const dir = S.home + '/.agentille/state/run-' + run + '/worktrees'
+    const dir = Profile.home + '/.agentille/state/run-' + run + '/worktrees'
     for (const f of await $.fs.list(dir).catch(() => [])) {
       if (f.kind === 'dir' || !f.name.endsWith('.json')) continue
       all.push(...parseOwned(await $.fs.read(dir + '/' + f.name).catch(() => '')))
@@ -1261,7 +1261,7 @@ export async function forgetOwned($, trees, branches) {
   const listed = new Set(trees.map((t) => t.path))
   const have = new Set(branches)
   const keep = (r) => listed.has(r.path) || (r.branch && have.has(r.branch))
-  const file = S.home ? worktreesFile(S.home, await leadPane($).catch(() => null)) : null
+  const file = Profile.home ? worktreesFile(Profile.home, await leadPane($).catch(() => null)) : null
   const saved = file ? parseOwned(await $.fs.read(file).catch(() => '')) : []
   const mine = [...S.worktrees, ...saved.filter((r) => !S.worktrees.some((m) => m.path === r.path))]
   S.worktrees.splice(0, S.worktrees.length, ...mine.filter(keep))

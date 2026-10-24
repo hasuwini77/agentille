@@ -1,7 +1,7 @@
 // agentille run bookkeeping: per-run counters, the routing log and ledger under ~/.agentille/state/run-<id>/,
 // each subagent's raw report, and the Agents section the mod adds to a finished report.md.
 
-import { S } from './state.js'
+import { S, Profile } from './state.js'
 import { reportRun, reportTail } from './drawing.js'
 import { pieceOf, party, taskLine } from './links.js'
 import { newAgent, short, ledger, ledgerText } from './live.js'
@@ -31,7 +31,7 @@ export function demoteToast($, run) {
 export function ceilingOnce($, runId, run, spent) {
   if (run.ceilingToasted) return
   run.ceilingToasted = true
-  addFlag($, 'ceiling|' + runId, 'run ' + runId + ': ~' + usd(spent) + ' spent, past maxRunUsd ' + usd(maxRunUsdOf(S.settings)) + '; Opus reviewers and planners now run Sonnet')
+  addFlag($, 'ceiling|' + runId, 'run ' + runId + ': ~' + usd(spent) + ' spent, past maxRunUsd ' + usd(maxRunUsdOf(Profile.settings)) + '; Opus reviewers and planners now run Sonnet')
 }
 
 export function runState(id) {
@@ -50,14 +50,14 @@ export function routingView() {
 
 export function ledgerView() {
   const text = ledgerText(ledger(S.live, S.lastRun, S.paneRoutes))
-  const max = maxRunUsdOf(S.settings)
+  const max = maxRunUsdOf(Profile.settings)
   return max == null ? text : text + '\nestimate ~' + usd(estimateRunUsd(S.live, S.lastRun)) + ' of maxRunUsd ' + usd(max) + ' (list prices; pane workers not counted)'
 }
 
 export async function writeRunFile($, runId, name, text) {
-  if (!S.home || !SAFE_RUN.test(runId) || runId === 'adhoc') return
+  if (!Profile.home || !SAFE_RUN.test(runId) || runId === 'adhoc') return
   try {
-    await $.fs.write(S.home + '/.agentille/state/run-' + runId + '/' + name, text)
+    await $.fs.write(Profile.home + '/.agentille/state/run-' + runId + '/' + name, text)
   } catch {
     // the run dir is the orchestrator's; logging never blocks a dispatch
   }
@@ -78,8 +78,8 @@ export const fileRunOf = (a) => a.fileRun ?? a.run
 // /agt writes report.md once at the end; the mod adds the Agents and Raw reports sections it lacks.
 export async function completeReport($, path) {
   const run = reportRun(path)
-  if (!run || !S.home) return
-  const dir = S.home + '/.agentille/state/run-' + run
+  if (!run || !Profile.home) return
+  const dir = Profile.home + '/.agentille/state/run-' + run
   if (path !== dir + '/report.md') return
   try {
     const text = await $.fs.read(path)
@@ -126,7 +126,7 @@ export async function dispatchAgent($, e, next) {
     if (named && (S.lastRun === 'adhoc' || !busy)) S.lastRun = named
     agtTurnFromDispatch()
     // The table pick follows the run in progress (its REVISEs); `run` is only where the log goes.
-    const d = decide({ role, hdr, run: { ...runState(runId), fixes: ladderFixes(runState(runId), pieceOf(hdr)) }, depth: S.depth, settings: S.settings, weeklyPct: S.weeklyPct })
+    const d = decide({ role, hdr, run: { ...runState(runId), fixes: ladderFixes(runState(runId), pieceOf(hdr)) }, depth: Profile.depth, settings: Profile.settings, weeklyPct: S.weeklyPct })
     const res = await next(e)
     if (res.deny) return res
     const off = short(res.model) !== short(d.model)
@@ -163,8 +163,8 @@ export async function dispatchAgent($, e, next) {
   run.fable = Math.max(run.fable, shared)
 
   // The run's spend so far, estimated from its agents' tokens, only when a maxRunUsd ceiling is set.
-  const spent = maxRunUsdOf(S.settings) == null ? null : estimateRunUsd(S.live, runId)
-  const d = decide({ role, hdr, run: { ...run, fixes: ladderFixes(run, pieceOf(hdr)), usd: spent }, depth: S.depth, settings: S.settings, weeklyPct: S.weeklyPct })
+  const spent = maxRunUsdOf(Profile.settings) == null ? null : estimateRunUsd(S.live, runId)
+  const d = decide({ role, hdr, run: { ...run, fixes: ladderFixes(run, pieceOf(hdr)), usd: spent }, depth: Profile.depth, settings: Profile.settings, weeklyPct: S.weeklyPct })
   const res = await next({ ...e, model: d.model })
   if (res.deny) return res
 

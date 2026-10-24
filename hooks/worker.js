@@ -1,7 +1,7 @@
 // agentille worker side of the wire: what this pane publishes about itself, the answer it saves under the run,
 // the done message it sends its lead, and (lead side) the status each visible worker last published.
 
-import { S } from './state.js'
+import { S, Profile } from './state.js'
 import { makeStore } from './store.js'
 import { writeRunFile } from './dispatch.js'
 import { short, elapsed } from './live.js'
@@ -71,10 +71,10 @@ export async function publishNow($, force) {
 // Worker: the full answer of a finished turn, saved under the run where the lead reads it. Returns the path, or null.
 export async function saveAnswer($, name, answer) {
   const n = splitName(name)
-  if (!n || !answer || !S.home) return null
+  if (!n || !answer || !Profile.home) return null
   // One file per pane instance, named by this pane's id, so a respawned role cannot overwrite or be read as its predecessor.
   const pane = (await $.env.get('HERDR_PANE_ID')) ?? (await $.env.get('TMUX_PANE'))
-  const file = answerFile(S.home, n.run, n.role, paneKey(pane))
+  const file = answerFile(Profile.home, n.run, n.role, paneKey(pane))
   if (!file) return null
   await writeRunFile($, n.run, 'agents/' + file.split('/').pop(), answer)
   return file

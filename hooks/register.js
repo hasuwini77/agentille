@@ -1,7 +1,7 @@
 // agentille mod entry: wires the hooks. The state is in state.js; routing, panes, sessions, the reaper, the
 // timers, the worker's wire, display settings, drawing and run files each have a module beside this one.
 
-import { S, ctx, isLead } from './state.js'
+import { S, ctx, isLead, Profile } from './state.js'
 import { registerAutocomplete } from './autocomplete.js'
 import { toolLabel, runPhases } from './board.js'
 import { cleanText } from './clean.js'
@@ -118,10 +118,10 @@ export function register(on) {
     if (a.view === 'routing') return { text: routingView() }
     if (a.view === 'ledger') return { text: ledgerView() }
     if (a.view === 'squads') return { text: await squadsView($) }
-    if (a.view === 'route') return { text: routeText({ ...a, depth: a.depth ?? S.depth }, S.settings, S.weeklyPct) }
+    if (a.view === 'route') return { text: routeText({ ...a, depth: a.depth ?? Profile.depth }, Profile.settings, S.weeklyPct) }
     await loadSquads($)
     const log = S.runs.get(S.lastRun)?.log ?? []
-    return { text: overviewText({ display: S.display, squads: squadsSummary(S.squadRows), routing: routingSummary(log), ledger: ledgerSummary(ledger(S.live, S.lastRun, S.paneRoutes)) }) }
+    return { text: overviewText({ display: S.display, squads: squadsSummary(Profile.squadRows), routing: routingSummary(log), ledger: ledgerSummary(ledger(S.live, S.lastRun, S.paneRoutes)) }) }
   })
 
   // Typed only: a plugin, a scheduled task or a notification never opens a pane.
@@ -164,7 +164,7 @@ export function register(on) {
     if (t !== 'none') ensurePolling($)
     const draws = canDraw(await $.session.surfaces().catch(() => []))
     if (draws) await tipOnce($)
-    return next({ ...e, text: e.text + S.squadBlock + transportBlock(t, S.paneTools && isLead()) + drawingBlock(draws) })
+    return next({ ...e, text: e.text + Profile.squadBlock + transportBlock(t, S.paneTools && isLead()) + drawingBlock(draws) })
   })
 
   // Worker results arrive as peer messages: log them for the band and the deck, then let the

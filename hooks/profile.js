@@ -2,11 +2,25 @@
 // the one-time tip. Read at session start; the squads again on /agt-info.
 
 import { S } from './state.js'
+import { makeStore } from './store.js'
 import { TIP } from './drawing.js'
 import { DEFAULTS } from './routing.js'
 import { cleanDisplay, hasVoice } from './settings.js'
 import { compareVersions, newerInstalled, cacheDirOf } from './skew.js'
 import { depsOf, activeSquads, explain, squadsText, allPaths, injection } from './squads.js'
+
+// The profile's store: what the session read from ~/.agentille/profile.json and squads.json. Read through the Profile
+// view; written only by loadProfile and loadSquads.
+const { s, view } = makeStore('profile.js', {
+  home: null,
+  settings: { ...DEFAULTS },
+  depth: null,
+  profileMissing: false,  // no profile with a voice (missing, unreadable, or only a display block): the tip is due once
+  squads: [],  // active squads for this repo
+  squadBlock: '',
+  squadRows: [],  // every squad scored, for /agt-info squads; null when squads.json is unreadable
+})
+export const Profile = view
 
 // The newer agentille version installed beside the one this session runs, or null: nothing found,
 // nothing readable (a checkout, a host without a plugin cache) all read as no skew. A replaced version
@@ -28,20 +42,20 @@ export async function installedSkew($) {
 }
 
 export async function loadProfile($) {
-  S.home = (await $.env.get('HOME')) ?? null
+  s.home = (await $.env.get('HOME')) ?? null
   S.profileDisplay = {}
-  S.profileMissing = false
-  if (!S.home) return
+  s.profileMissing = false
+  if (!s.home) return
   try {
-    const p = JSON.parse(await $.fs.read(S.home + '/.agentille/profile.json'))
+    const p = JSON.parse(await $.fs.read(s.home + '/.agentille/profile.json'))
     // a toggle can create a profile that holds only display: that is still a profile with no voice
-    S.profileMissing = !hasVoice(p)
-    S.depth = p.thinkingDepth ?? null
-    S.settings = { ...DEFAULTS, ...(p.routing ?? {}) }
+    s.profileMissing = !hasVoice(p)
+    s.depth = p.thinkingDepth ?? null
+    s.settings = { ...DEFAULTS, ...(p.routing ?? {}) }
     S.profileDisplay = cleanDisplay(p.display)
   } catch {
     // no profile yet: the tip says /agentille-init (the mod's toast when it draws, else /agt's line)
-    S.profileMissing = true
+    s.profileMissing = true
   }
 }
 
@@ -54,25 +68,25 @@ export async function loadSquads($) {
     const existing = new Set()
     for (const p of allPaths(config)) if (await $.fs.exists(cwd + '/' + p)) existing.add(p)
     const deps = depsOf(pkg)
-    S.squads = activeSquads(config, deps, existing)
-    S.squadRows = explain(config, deps, existing)
-    S.squadBlock = injection(S.squads)
+    s.squads = activeSquads(config, deps, existing)
+    s.squadRows = explain(config, deps, existing)
+    s.squadBlock = injection(s.squads)
   } catch {
-    S.squads = []
-    S.squadRows = null
-    S.squadBlock = ''
+    s.squads = []
+    s.squadRows = null
+    s.squadBlock = ''
   }
 }
 
 export async function squadsView($) {
   await loadSquads($)
-  return squadsText(S.squadRows)
+  return squadsText(s.squadRows)
 }
 
 // The profile tip, once per machine: the same marker /agt writes when it prints the tip itself.
 export async function tipOnce($) {
-  if (!S.profileMissing || !S.home) return
-  const marker = S.home + '/.agentille/state/.tip-shown'
+  if (!s.profileMissing || !s.home) return
+  const marker = s.home + '/.agentille/state/.tip-shown'
   if (await $.fs.exists(marker).catch(() => true)) return
   $.ui.toast(TIP, { timeoutMs: 8000 })
   await $.fs.write(marker, '').catch(() => {})

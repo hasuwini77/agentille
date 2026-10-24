@@ -1,7 +1,7 @@
 // agentille sessions: the person's own Herdr or tmux panes opened through open_sessions. No worker env, no
 // agt- name, no wire; a lead lists its Herdr ones so the SessionEnd sweep can close the idle ones.
 
-import { S } from './state.js'
+import { S, Profile } from './state.js'
 import { PROBE, tmuxEvenArgv, tmuxPaneIdOf, tmuxKillArgv, herdrPaneIdOf, herdrTabOf, herdrPromptArgv, herdrCloseArgv, herdrMetaArgv, herdrSessionSplitArgv, herdrSessionTabArgv, herdrSessionStartArgv, herdrRunArgv, herdrPaneGetArgv, herdrTerminalOf, tmuxSessionSplitArgv, tmuxTitleArgvs, tmuxTypeArgvs, sessionsFile } from './panes.js'
 import { runOk, startAgent } from './spawn.js'
 import { restingSince } from './panerec.js'
@@ -10,7 +10,7 @@ import { restingSince } from './panerec.js'
 // write loses only the sweep's reach, so it never blocks.
 // With none left the old list stays: its names match no agent, and SessionEnd removes the file.
 export async function saveSessions($) {
-  const file = sessionsFile(S.home, await $.env.get('HERDR_PANE_ID'))
+  const file = sessionsFile(Profile.home, await $.env.get('HERDR_PANE_ID'))
   if (file && S.sessions.length) await $.fs.write(file, S.sessions.filter((s) => s.kind !== 'shell' && s.terminal).map((s) => s.name + '\n').join('')).catch(() => {})
 }
 

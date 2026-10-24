@@ -2,7 +2,7 @@
 // the mod holds (proofs.js: spawnAllowed, sessionsAllowed), the installed version and the transport before it touches a pane;
 // register.js only wires them to tool.call.
 
-import { S, isLead } from './state.js'
+import { S, isLead, Profile } from './state.js'
 import { demoteToast, runState, writeRunFile } from './dispatch.js'
 import { pieceOf, party, taskLine } from './links.js'
 import { PROBE, newRunId, doneFile, paneKey, answerFile, tmuxKillArgv, placePlan, codexNote, herdrCloseArgv, paneRole, spawnToolInput, closeTarget, sessionName, sessionsToolInput, sessionsNote, droppedNote } from './panes.js'
@@ -65,7 +65,7 @@ export async function spawnPane($, e) {
   const fixes = ladderFixes(run, pieceOf(a.hdr)) + (isFix ? 1 : 0)
   run.fable = Math.max(run.fable, Number((await $.store.get('fable:' + a.run)) ?? 0))
   // Codex runs on the person's own config: no routed model or effort, no Fable count.
-  const d = codex ? { model: 'codex', effort: '', reason: 'table', fable: false } : decide({ role: a.agent, hdr: a.hdr, run: { ...run, fixes }, depth: S.depth, settings: S.settings, weeklyPct: S.weeklyPct })
+  const d = codex ? { model: 'codex', effort: '', reason: 'table', fable: false } : decide({ role: a.agent, hdr: a.hdr, run: { ...run, fixes }, depth: Profile.depth, settings: Profile.settings, weeklyPct: S.weeklyPct })
   const r = paneRole(a.agent)
   if (!r.pane) return { deny: r.why }
   await pollNow($, t)
@@ -74,7 +74,7 @@ export async function spawnPane($, e) {
   const plan = placePlan({ transport: t, layout: a.layout, run: a.run, lead, opened: S.opened, live: S.panes })
   // A respawned role (a fix round, a retry) must not inherit the earlier pane's done file: the SessionEnd sweep
   // and the tmux poll would read the new worker as finished and close it mid-slice.
-  const stale = doneFile(S.home, a.run, a.role)
+  const stale = doneFile(Profile.home, a.run, a.role)
   if (stale) await $.process.run(['rm', '-f', stale], PROBE).catch(() => {})
   let id
   let tab
@@ -114,7 +114,7 @@ export async function spawnPane($, e) {
   ensurePolling($)
   ensureTicker($)
   if (d.reason !== 'table') $.ui.toast('agt ↑ ' + a.agent + ' → ' + d.model + ' · ' + d.effort + ' — ' + d.reason)
-  return { result: 'Opened ' + a.name + ' · ' + d.model + (codex ? '' : ' · ' + d.effort) + ' · ' + t + ' pane.' + (d.reason === 'table' ? '' : ' (' + d.reason + ')') + (codex ? codexNote(a.name, answerFile(S.home, a.run, a.role, paneKey(id))) : '') }
+  return { result: 'Opened ' + a.name + ' · ' + d.model + (codex ? '' : ' · ' + d.effort) + ' · ' + t + ' pane.' + (d.reason === 'table' ? '' : ' (' + d.reason + ')') + (codex ? codexNote(a.name, answerFile(Profile.home, a.run, a.role, paneKey(id))) : '') }
 }
 
 // open_sessions: panes the person asked for, their own, like ones opened by hand. No worker env, no agt- name and

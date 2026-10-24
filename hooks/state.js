@@ -3,19 +3,15 @@
 // and the run files. Fields that are reassigned are read as S.name; the collections are destructured once.
 // What the lead keeps about each pane (harvest, wake, stranded, first seen, stage) is in panerec.js.
 
-import { DEFAULTS } from './routing.js'
 import { resolveDisplay } from './settings.js'
 import { Timers } from './ticker.js'
 import { Wire } from './worker.js'
+import { Profile } from './profile.js'
 
 // The read views of the stores the owner modules keep (store.js): read through these, written only by their owners.
-export { Timers, Wire }
+export { Timers, Wire, Profile }
 
 export const S = {
-  settings: { ...DEFAULTS },
-  depth: null,
-  profileMissing: false,  // no profile with a voice (missing, unreadable, or only a display block): the tip is due once
-  home: null,
   weeklyPct: null,
   lastRun: 'adhoc',
   wfToasted: new Set(),  // run:role pairs whose drift the person was told once
@@ -35,9 +31,6 @@ export const S = {
   paneTools: false,  // spawn_pane (and close_pane) registered: a typed /agt arrived in this lead session
   sessionTools: false,  // open_sessions (and close_pane) registered: a typed ask for sessions arrived
   closeTool: false,  // close_pane registered, by whichever of the two came first
-  squads: [],  // active squads for this repo
-  squadBlock: '',
-  squadRows: [],  // every squad scored, for /agt-info squads; null when squads.json is unreadable
   transport: null,  // 'herdr' | 'tmux' | 'none', probed once at session start
   focusOn: true,  // agent flags show above the prompt
   flags: [],  // [{ text, key, at }] from agent results this run

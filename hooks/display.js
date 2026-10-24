@@ -1,7 +1,7 @@
 // agentille display: the three display settings (deck, focus, highlight) read from profile.json or the mod
 // store and written back, the agent flags above the prompt, and the memo of which message closed an answer.
 
-import { S } from './state.js'
+import { S, Profile } from './state.js'
 import { mergeFlags, paneFlags, parseFocusArgs, focusText } from './focus.js'
 import { isAnswerBlock, panel, parseHighlightArgs, highlightText } from './highlight.js'
 import { PROBE } from './panes.js'
@@ -29,8 +29,8 @@ export const PROFILE_FILE = '/.agentille/profile.json'
 // still works once ~/.agentille exists.
 // → null on success, else why not.
 export async function saveDisplay($, key, value) {
-  if (!S.home) return 'no home folder'
-  const path = S.home + PROFILE_FILE
+  if (!Profile.home) return 'no home folder'
+  const path = Profile.home + PROFILE_FILE
   const shown = '~' + PROFILE_FILE
   let profile = null
   let text = null
@@ -50,7 +50,7 @@ export async function saveDisplay($, key, value) {
   // With $.process: make the folder, write a .tmp beside the file and mv it over (no torn write).
   // Without it, or when mv fails: write the file directly; the .bak above is the way back.
   let made = null
-  try { made = (await $.process.run(['mkdir', '-p', S.home + '/.agentille'], PROBE)).exitCode } catch { /* no $.process on this host */ }
+  try { made = (await $.process.run(['mkdir', '-p', Profile.home + '/.agentille'], PROBE)).exitCode } catch { /* no $.process on this host */ }
   if (made === 0) {
     try {
       await $.fs.write(path + '.tmp', body)

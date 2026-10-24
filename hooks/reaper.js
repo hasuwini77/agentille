@@ -1,7 +1,7 @@
 // agentille reaper: what the lead sees of its panes (herdr or tmux poll), which finished worker is harvested,
 // which closes, which is flagged, the wake it sends itself, and the cleaner behind /agt-clean.
 
-import { S } from './state.js'
+import { S, Profile } from './state.js'
 import { herdrOrphans, tmuxOrphans, orphanPlan, staleTabs, parseWorktrees, worktreePlan, cleanText, FRESH_MS } from './clean.js'
 import { ownedWorktrees, forgetOwned } from './guard.js'
 import { writeRunFile } from './dispatch.js'
@@ -40,12 +40,12 @@ export async function freshAnswer($, file, p) {
 export async function answerOf($, p) {
   const n = splitName(p.name)
   if (!n) return null
-  const own = answerFile(S.home, n.run, n.role, paneKey(p.id))
+  const own = answerFile(Profile.home, n.run, n.role, paneKey(p.id))
   if (await freshAnswer($, own, p)) return own
   // Known limit: two keyless twins (an older worker's one legacy file) cannot be told apart, so with two panes of the
   // name neither is harvested by it and both stay flagged.
   if (S.panes.filter((q) => q.name === p.name).length !== 1) return null
-  const legacy = answerFile(S.home, n.run, n.role)
+  const legacy = answerFile(Profile.home, n.run, n.role)
   return (await freshAnswer($, legacy, p)) ? legacy : null
 }
 
@@ -154,7 +154,7 @@ export async function pollTmux($) {
   for (const r of scoped) {
     const n = splitName(r.agt)
     // A worker writes done-<role>; a /agt-spawn pane has no such instruction, so its saved answer is its done signal.
-    const file = n && !r.dead && (n.role === SPAWN_ROLE ? answerFile(S.home, n.run, n.role, paneKey(r.id)) : doneFile(S.home, n.run, n.role))
+    const file = n && !r.dead && (n.role === SPAWN_ROLE ? answerFile(Profile.home, n.run, n.role, paneKey(r.id)) : doneFile(Profile.home, n.run, n.role))
     if (!file) continue
     try {
       done.set(r.agt, isFreshDone(await $.fs.stat(file), P.get(r.id)?.firstSeen))
@@ -181,7 +181,7 @@ export async function pollNow($, t) {
 export async function savedAnswer($, name, id) {
   const n = splitName(name)
   if (!n) return false
-  for (const f of [answerFile(S.home, n.run, n.role, paneKey(id)), answerFile(S.home, n.run, n.role), doneFile(S.home, n.run, n.role)]) {
+  for (const f of [answerFile(Profile.home, n.run, n.role, paneKey(id)), answerFile(Profile.home, n.run, n.role), doneFile(Profile.home, n.run, n.role)]) {
     if (f && (await $.fs.exists(f).catch(() => false))) return true
   }
   return false
@@ -213,7 +213,7 @@ export async function cleanWorkspace($, { all = false, auto = false, panesOnly =
     // A lead missing from the list cannot tell a dead lead's tab from its own: judge nothing.
     const self = await $.env.get('HERDR_PANE_ID')
     if (!list.some((a) => a.pane_id === self && !String(a.name ?? '').startsWith('agt-'))) list = []
-    const dir = S.home ? S.home + '/.agentille/state' : null
+    const dir = Profile.home ? Profile.home + '/.agentille/state' : null
     const keys = dir ? (await $.fs.list(dir).catch(() => [])).map((f) => f.name).filter((n) => /^lead-[\w-]+\.tabs$/.test(n)).map((n) => n.slice(5, -5)) : []
     const tabs = new Map()
     for (const k of keys) tabs.set(k, String(await $.fs.read(dir + '/lead-' + k + '.tabs').catch(() => '')).split('\n').filter(Boolean))
@@ -239,7 +239,7 @@ export async function cleanWorkspace($, { all = false, auto = false, panesOnly =
     const done = new Set()
     for (const row of rows) {
       const n = splitName(row.agt)
-      const file = n && doneFile(S.home, n.run, n.role)
+      const file = n && doneFile(Profile.home, n.run, n.role)
       if (file && (await $.fs.exists(file).catch(() => false))) done.add(row.id)
     }
     const plan = orphanPlan(tmuxOrphans(rows, (row) => done.has(row.id)))
@@ -261,8 +261,8 @@ export async function cleanWorkspace($, { all = false, auto = false, panesOnly =
 export const RUN_TTL_MS = 14 * 24 * 60 * 60_000
 
 export async function pruneRuns($, run, r) {
-  if (!S.home) return
-  const dir = S.home + '/.agentille/state'
+  if (!Profile.home) return
+  const dir = Profile.home + '/.agentille/state'
   const keep = new Set([S.lastRun, ...S.runs.keys(), ...S.panes.map((p) => splitName(p.name)?.run), ...[...S.live.values()].map((a) => a.run)])
   for (const e of await $.fs.list(dir).catch(() => [])) {
     if (e.kind !== 'dir' || !e.name.startsWith('run-')) continue

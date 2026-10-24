@@ -929,3 +929,84 @@ describe('guard: scripts are read before they run', () => {
     expect(ran).toHaveLength(3)
   })
 })
+
+describe('guard: unreadable words and sources fail closed', () => {
+  test('a substitution, a pipe into a shell, xargs, an interpreter spawn, awk, an opaque runner or an inline alias is refused', async () => {
+    for (const line of [
+      'git $(echo push) origin HEAD:main',
+      'git ${X:-push} origin HEAD:main',
+      'gh $(echo pr) merge 1',
+      "echo 'git push origin main' | bash",
+      "printf '%s\\n' push origin main | xargs git",
+      'python3 - <<EOF\nimport subprocess\nsubprocess.run(["git", "push"])\nEOF',
+      'python3 -c "import subprocess as s; s.run([\'g\'+\'it\', \'push\'])"',
+      "awk 'BEGIN{system(\"git push origin main\")}'",
+      'npx release-it',
+      'docker run --rm alpine/git push origin main',
+      'shopt -s expand_aliases\nalias g=git\ng push origin main',
+    ]) expect([line, integrationIn(line, onSlice)]).toEqual([line, expect.any(String)])
+  })
+
+  test('ordinary interpreter, package and container commands are left alone', async () => {
+    for (const line of [
+      'npm test',
+      'node -e "console.log(require(\'./package.json\').version)"',
+      'python3 -c "print(1)"',
+      'docker ps',
+      'git log | grep fix',
+    ]) expect([line, integrationIn(line, onSlice)]).toEqual([line, null])
+  })
+})
+
+describe('guard: the trust root and the repo git state are off-limits below auto', () => {
+  test('a redirect, copy, tee, sed -i or git config that writes them is refused; an ordinary write is not', async () => {
+    for (const line of [
+      'printf x > ~/.agentille/profile.json',
+      'echo x >> "$HOME/.agentille/profile.json"',
+      'echo x >> .git/config',
+      'cp hook .git/hooks/post-commit',
+      'tee .git/hooks/pre-push < h',
+      'git config core.hooksPath .h',
+      'git config remote.origin.push +refs/heads/*:refs/heads/*',
+      'sed -i s/x/y/ .git/config',
+    ]) expect([line, integrationIn(line, onSlice)]).toEqual([line, expect.any(String)])
+    for (const line of [
+      'echo x > notes.md',
+      'cp a b',
+      'git config user.name me',
+      'git config --get remote.origin.url',
+    ]) expect([line, integrationIn(line, onSlice)]).toEqual([line, null])
+  })
+})
+
+describe('guard: protected writes and package scripts in the mod', () => {
+  test('a run below auto cannot rewrite the profile or .git/config by Bash or by the Write/Edit tool', async ($, on) => {
+    setup(on)
+    await boot($)
+    await typed($)
+    expect((await bash($, 'printf \'{"integration":"auto"}\' > "$HOME/.agentille/profile.json"')).deny).toContain('may not write')
+    expect((await bash($, 'printf "[alias]\\n\\tp = push\\n" >> .git/config')).deny).toContain('may not write')
+    expect((await $.tool.call({ tool: 'Write', file_path: '/h/.agentille/profile.json', content: 'x' } as never)).deny).toContain('may not write')
+    expect((await $.tool.call({ tool: 'Edit', file_path: '/work/repo/.git/config', old_string: 'a', new_string: 'b' } as never)).deny).toContain('may not write')
+    expect((await $.tool.call({ tool: 'Write', file_path: '/work/repo/notes.md', content: 'x' } as never))?.deny).toBeUndefined()
+  })
+
+  test('under auto the profile and config are writable again', async ($, on) => {
+    setup(on, { profile: { integration: 'auto' } })
+    await boot($)
+    await typed($)
+    expect((await bash($, 'echo x > ~/.agentille/profile.json'))?.deny).toBeUndefined()
+    expect((await $.tool.call({ tool: 'Write', file_path: '/h/.agentille/profile.json', content: 'x' } as never))?.deny).toBeUndefined()
+  })
+
+  test('an npm/pnpm run script is read from package.json; a plain script and npm test run, an opaque runner is refused', async ($, on) => {
+    setup(on, { files: { '/work/repo/package.json': JSON.stringify({ scripts: { ship: 'git push origin main', build: 'tsc' } }) } })
+    await boot($)
+    await typed($)
+    expect((await bash($, 'npm run ship')).deny).toContain('package script that calls git push')
+    expect((await bash($, 'pnpm run -s ship')).deny).toContain('package script')
+    expect((await bash($, 'npm run build')).result).toBe('ok')
+    expect((await bash($, 'npm test')).result).toBe('ok')
+    expect((await bash($, 'npx release-it')).deny).toContain('cannot read')
+  })
+})

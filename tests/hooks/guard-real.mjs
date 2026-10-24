@@ -121,6 +121,56 @@ try {
     check('a script that pushes the base: denied, and says so', r?.deny?.includes('./ship.sh runs a script'), JSON.stringify(r))
     check('... origin/main unchanged', refOf('origin.git', 'main') === w.main)
   }
+  {
+    // The run below auto cannot lift its own ceiling: rewriting the profile to auto is a protected write.
+    const w = world()
+    const r = await run('printf \'{"integration":"auto"}\' > "$HOME/.agentille/profile.json"')
+    check('profile rewrite below auto: denied', r?.deny?.includes('may not write'), JSON.stringify(r))
+    check('... the profile is still pr', JSON.parse(fs.readFileSync(HOME + '/.agentille/profile.json', 'utf8')).integration === 'pr')
+    const p = await run('git push -q origin HEAD:main')
+    check('... and the base push is still denied', !!p?.deny && refOf('origin.git', 'main') === w.main, JSON.stringify(p))
+  }
+  {
+    // Writing .git/config or .git/hooks is a protected write.
+    const w = world()
+    const a = await run("printf '[alias]\\n\\tp = push\\n' >> .git/config")
+    check('.git/config write: denied', a?.deny?.includes('may not write'), JSON.stringify(a))
+    const h = await run("printf '#!/bin/sh\\ngit push -q origin HEAD:main\\n' > .git/hooks/post-commit")
+    check('.git/hooks write: denied', h?.deny?.includes('may not write'), JSON.stringify(h))
+    check('... origin/main unchanged', refOf('origin.git', 'main') === w.main)
+  }
+  {
+    // A bare push follows a configured push refspec; one reaching the base or a tag is denied.
+    const w = world()
+    sh('git config remote.origin.push refs/heads/agt/x:refs/heads/main', APP)
+    const r = await run('git push -q')
+    check('bare push via a base refspec: denied', r?.deny?.includes('configured push refspec') || r?.deny?.includes('git push'), JSON.stringify(r))
+    check('... origin/main unchanged', refOf('origin.git', 'main') === w.main)
+    sh('git config --unset-all remote.origin.push', APP)
+    sh('git config remote.origin.push "refs/tags/*:refs/tags/*"', APP)
+    sh('git tag v9.9.9', APP)
+    const t = await run('git push -q')
+    check('bare push via a tag refspec: denied', !!t?.deny, JSON.stringify(t))
+    check('... no tag on origin', refOf('origin.git', 'refs/tags/v9.9.9') === null)
+  }
+  {
+    // An npm run script is read from package.json; one that pushes is denied, a plain one is allowed.
+    const w = world()
+    fs.writeFileSync(APP + '/package.json', JSON.stringify({ scripts: { ship: 'git push origin main', build: 'echo build' } }))
+    const r = await run('npm run ship')
+    check('npm run script that pushes: denied', r?.deny?.includes('package script that calls git push'), JSON.stringify(r))
+    check('... origin/main unchanged', refOf('origin.git', 'main') === w.main)
+    const b = await run('npm run build')
+    check('npm run build: allowed by the guard', !b?.deny, JSON.stringify(b))
+  }
+  {
+    // Controls below auto: the run's own branch and ordinary writes still pass.
+    world()
+    const ok = await run('git push -q -u origin agt/x')
+    check('control: push own branch allowed', !ok?.deny, JSON.stringify(ok))
+    const note = await run('echo hello > notes.md')
+    check('control: ordinary redirect allowed', !note?.deny && note.exit === 0, JSON.stringify(note))
+  }
 } catch (err) {
   bad++
   console.log('FAIL the run threw: ' + (err?.stack ?? err))

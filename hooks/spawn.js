@@ -78,23 +78,27 @@ export async function sameRepo($, a, b) {
 
 // Whether the mod may accept the folder-trust prompt for `cwd` on the person's behalf. Sharing the lead's git
 // common dir is not enough: a worktree of a contributor's branch can carry its own hooks, MCP servers, agents and
-// commands. Trusted: the lead's own checkout (or a folder in it), or a worktree of the same repo on an agt/* branch
-// that this lead's runs made, named on its lead-<pane>.worktrees list (guard.js: JSON records with path and branch;
-// a plain one-per-line list is read too), whose project config matches the lead checkout's: .mcp.json and the two
-// .claude settings files absent or byte for byte the same, .claude/agents and .claude/commands absent or the same
-// files with the same contents. With no list nothing but the lead's own checkout is accepted.
+// commands. Trusted: the lead's own checkout (or a folder in it), or a worktree of the same repo
+// on an agt/* branch that this lead's runs made, named by its exact path on the lead-<pane>.worktrees list (guard.js:
+// JSON records with path and branch; a plain one-per-line list is read too; a branch name alone is not ownership),
+// whose project config matches the lead checkout's (sameConfig). With no list nothing but the lead's own checkout is
+// accepted.
 const OWN_BRANCH = /^agt\/[A-Za-z0-9._/-]+$/
 const CONFIG_FILES = ['.mcp.json', '.claude/settings.json', '.claude/settings.local.json']
 const CONFIG_DIRS = ['.claude/agents', '.claude/commands']
 const TREE_MAX = 500
-// Does a lead-<pane>.worktrees file name this worktree: a JSON array of { path, branch } records (guard.js), or
-// one path or branch per line.
-export function ownedWorktree(listed, top, branch) {
+// The worktree paths a lead-<pane>.worktrees file names: the `path` of each JSON record (guard.js), or the absolute
+// paths on a plain one-per-line list. Branch names are skipped: a branch can be checked out anywhere.
+export function listedPaths(listed) {
   try {
     const recs = JSON.parse(listed)
-    if (Array.isArray(recs)) return recs.some((r) => r && (r.path === top || (branch && r.branch === branch)))
+    if (Array.isArray(recs)) return recs.filter((r) => r && typeof r.path === 'string' && r.path.startsWith('/')).map((r) => r.path)
   } catch {}
-  return String(listed).split('\n').some((l) => l.trim().split(/\s+/).some((f) => f === top || (branch && f === branch)))
+  return String(listed).split('\n').flatMap((l) => l.trim().split(/\s+/).filter((f) => f.startsWith('/')))
+}
+// Does the list name this worktree root `top` (as git prints it) by its exact path.
+export function ownedWorktree(listed, top) {
+  return listedPaths(listed).some((p) => p.replace(/\/+$/, '') === top)
 }
 
 // A file's text, ABSENT when there is none, UNREADABLE when it is there but cannot be read. Existence is asked of
@@ -148,21 +152,34 @@ export async function sameConfig($, top, leadTop) {
   return true
 }
 
+// git's answer, trimmed, or null when git failed: '' is a real answer (--show-prefix at a checkout's root).
+async function gitOut($, d, ...a) {
+  const r = await $.process.run(['git', '-C', d, ...a], PROBE).catch(() => null)
+  return r?.exitCode === 0 ? String(r.stdout ?? '').trim() : null
+}
+// A listed path that is not `top` letter for letter may still be it through a symlink (/tmp and /private/tmp): git
+// resolves it. Only paths with top's own last segment are asked, so a long list costs nothing.
+async function listsRoot($, listed, top) {
+  if (ownedWorktree(listed, top)) return true
+  const leaf = top.split('/').pop()
+  for (const p of listedPaths(listed).filter((x) => x.replace(/\/+$/, '').split('/').pop() === leaf).slice(0, 8)) {
+    const [real, prefix] = await Promise.all([gitOut($, p, 'rev-parse', '--show-toplevel'), gitOut($, p, 'rev-parse', '--show-prefix')])
+    if (real === top && prefix === '') return true
+  }
+  return false
+}
+
 export async function trustable($, cwd, leadCwd) {
   if (cwd === leadCwd) return true
   if (!(await sameRepo($, cwd, leadCwd))) return false
-  const git = async (d, ...a) => {
-    const r = await $.process.run(['git', '-C', d, ...a], PROBE).catch(() => null)
-    return r?.exitCode === 0 ? String(r.stdout).trim() : ''
-  }
-  const [top, leadTop] = await Promise.all([git(cwd, 'rev-parse', '--show-toplevel'), git(leadCwd, 'rev-parse', '--show-toplevel')])
+  const [top, leadTop] = await Promise.all([gitOut($, cwd, 'rev-parse', '--show-toplevel'), gitOut($, leadCwd, 'rev-parse', '--show-toplevel')])
   if (!top || !leadTop) return false
   if (top === leadTop) return true
-  const branch = await git(cwd, 'symbolic-ref', '--short', 'HEAD')
-  if (!OWN_BRANCH.test(branch)) return false
+  const branch = await gitOut($, cwd, 'symbolic-ref', '--short', 'HEAD')
+  if (!branch || !OWN_BRANCH.test(branch)) return false
   const file = String(panesFile(S.home, await leadPane($)) ?? '').replace(/\.panes$/, '.worktrees')
   const listed = file ? await $.fs.read(file).catch(() => null) : null
-  if (typeof listed !== 'string' || !ownedWorktree(listed, top, branch)) return false
+  if (typeof listed !== 'string' || !(await listsRoot($, listed, top))) return false
   return sameConfig($, top, leadTop)
 }
 

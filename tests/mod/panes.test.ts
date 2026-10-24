@@ -1115,12 +1115,13 @@ describe('pane tools: in the mod', () => {
   })
 })
 
-// The folder-trust prompt is accepted for the lead's own checkout, or for a worktree of the lead's repo the lead made: an
-// agt/* branch on the lead's lead-<pane>.worktrees list whose .mcp.json, .claude settings, agents and commands are the
-// lead checkout's. With no list, no worktree is accepted.
+// The folder-trust prompt is accepted for the lead's own checkout root, or for the root of a worktree of the lead's repo
+// the lead made: an agt/* branch whose exact path is on the lead's lead-<pane>.worktrees list and whose project config
+// is the lead checkout's. A folder below either root, and a worktree listed by branch name only, are refused. With no
+// list, no worktree is accepted.
 describe('pane tools: folder trust', () => {
   const trust = ' Do you trust the files in this folder?\n\n /work/wt\n\n ❯ 1. Yes, proceed\n   2. No, exit'
-  const setup = (on: any, { branch = 'agt/k7f2ab-exec-1', top = '/work/wt', files = {} as Record<string, string> } = {}) => {
+  const setup = (on: any, { branch = 'agt/k7f2ab-exec-1', top = '/work/wt', prefix = '', files = {} as Record<string, string>, git = {} as Record<string, any> } = {}) => {
     const seen: string[][] = []
     const vars: Record<string, string> = { HERDR_ENV: '1', HERDR_PANE_ID: 'w1:p1', HOME: '/h' }
     on('env.get', async ($: any, e: any) => ({ value: vars[e.name] }))
@@ -1154,6 +1155,8 @@ describe('pane tools: folder trust', () => {
       'git -C /work/wt rev-parse --show-toplevel': { stdout: top + '\n' },
       'git -C /work/repo rev-parse --show-toplevel': { stdout: '/work/repo\n' },
       'git -C /work/wt symbolic-ref --short HEAD': { stdout: branch + '\n' },
+      'git -C /work/wt rev-parse --show-prefix': { stdout: prefix + '\n' },
+      ...git,
     }
     on('process.run', async ($: any, e: any) => {
       seen.push(e.argv)
@@ -1223,6 +1226,27 @@ describe('pane tools: folder trust', () => {
 
   test('no list: a folder inside the lead\'s own checkout is trusted', async ($, on) => {
     const { seen, clock } = setup(on, { branch: 'main', top: '/work/repo' })
+    expect((await spawn($, clock)).result).toContain('Opened agt-k7f2ab-exec-1')
+    expect(accepted(seen)).toBe(true)
+  })
+
+  // Reproduced (read): ownedWorktree matched a record on its branch alone, wherever that branch was checked out.
+  test('a worktree listed by branch name only is not owned: a record must name its exact path', async ($, on) => {
+    const recs = JSON.stringify([{ path: '/work/elsewhere', branch: 'agt/k7f2ab-exec-1', head: 'abc', run: 'k7f2ab', at: 1 }])
+    const json = setup(on, { files: { [LIST]: recs + '\n' } })
+    expect(JSON.stringify(await spawn($, json.clock))).toContain('needs a one-time trust')
+    expect(accepted(json.seen)).toBe(false)
+  })
+
+  test('a plain list naming only the branch is not ownership', async ($, on) => {
+    const { seen, clock } = setup(on, { files: { [LIST]: 'agt/k7f2ab-exec-1\n' } })
+    expect(JSON.stringify(await spawn($, clock))).toContain('needs a one-time trust')
+    expect(accepted(seen)).toBe(false)
+  })
+
+  test('a record whose path reaches the worktree through a symlink is owned: git resolves it', async ($, on) => {
+    const recs = JSON.stringify([{ path: '/link/wt', branch: 'agt/k7f2ab-exec-1', head: null, run: 'k7f2ab', at: 1 }])
+    const { seen, clock } = setup(on, { files: { [LIST]: recs + '\n' }, git: { 'git -C /link/wt rev-parse --show-toplevel': { stdout: '/work/wt\n' }, 'git -C /link/wt rev-parse --show-prefix': { stdout: '\n' } } })
     expect((await spawn($, clock)).result).toContain('Opened agt-k7f2ab-exec-1')
     expect(accepted(seen)).toBe(true)
   })

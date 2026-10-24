@@ -154,13 +154,22 @@ describe('guard: integration in the mod', () => {
     expect(ran).toEqual(['gh pr create --base main --title x --body y'])
   })
 
-  test('an agentille subagent stays guarded after the person moves on; the lead does not', async ($, on) => {
+  test('a question typed mid-run keeps the lead and its subagent guarded', async ($, on) => {
     setup(on)
     await boot($)
     await typed($)
     await $.agent.spawn({ prompt: '[agt run=gd1 size=small mode=build]\nbuild', subagentType: 'agentille:agentille-executor', model: 'sonnet' })
+    await typed($, 'how is it going?')
+    expect((await bash($, 'gh pr merge 3')).deny).toBe(DENY_INTEGRATION)
+  })
+
+  test('once the run\'s card is out, the lead is a plain session again', async ($, on) => {
+    setup(on)
+    await boot($)
+    await typed($)
+    expect((await bash($, 'gh pr merge 3')).deny).toBe(DENY_INTEGRATION)
+    await card($)
     await typed($, 'something else')
-    expect((await bash($, 'gh pr merge 3', 'sub1')).deny).toBe(DENY_INTEGRATION)
     expect((await bash($, 'gh pr merge 3')).result).toBe('ok')
   })
 

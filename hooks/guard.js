@@ -11,7 +11,7 @@
 import { S } from './state.js'
 import { parseWorktrees } from './clean.js'
 import { PROBE, SAFE_RUN, SPAWN_ROLE, splitName, paneKey } from './panes.js'
-import { ROLES } from './routing.js'
+import { ROLES, runInFlight } from './routing.js'
 import { leadPane } from './spawn.js'
 
 export const DENY_INTEGRATION = 'integration auto is not set in your profile for this repo; the run stops at the PR.'
@@ -177,7 +177,8 @@ export async function integrationAllowed($, cwd) {
 
 // ── who is a run ─────────────────────────────────────────────────────────────
 // An agentille subagent, a worker pane (not a /agt-spawn pane: that is the person's own task), or the lead
-// on an /agt turn. A plain session has none of these.
+// on an /agt turn or while its run is in flight (routing.js runInFlight): a question typed mid-run does not
+// switch the guard off. A plain session has none of these.
 export function fromRun(e) {
   if (e.agentId) {
     const a = S.live.get(e.agentId)
@@ -186,7 +187,7 @@ export function fromRun(e) {
   if (S.worker) return S.worker.agent !== SPAWN_ROLE
   const self = splitName(S.wireName ?? S.selfName)
   if (self) return self.role !== SPAWN_ROLE
-  return !!S.agtTurn
+  return !!S.agtTurn || runInFlight(S)
 }
 
 // ── worktree ownership ───────────────────────────────────────────────────────

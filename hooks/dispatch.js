@@ -8,7 +8,7 @@ import { newAgent, short, ledger, ledgerText } from './live.js'
 import { SAFE_RUN, splitName } from './panes.js'
 import { formationOf, roleOf, parseHeader, proveHeader, demoteHeaderText, ladderFixes, decide, executorsWorking, executorCapFlag, estimateRunUsd, maxRunUsdOf, usd } from './routing.js'
 import { addFlag } from './display.js'
-import { logWire } from './wire.js'
+import { noteWire } from './worker.js'
 import { agtTurnFromDispatch } from './proofs.js'
 
 // A workflow agent is in no agent list, and a cancelled one raises no turn.complete: it is marked,
@@ -176,7 +176,7 @@ export async function dispatchAgent($, e, next) {
   // At most 3 executors at once: counted before this one joins, subagents and the run's executor panes alike.
   const cap = role === 'executor' && runId !== 'adhoc' && res.agentId ? executorCapFlag(runId, executorsWorking(S.live, S.paneRoutes, runId) + 1) : null
   if (res.agentId) S.live.set(res.agentId, { ...newAgent({ id: res.agentId, role, routed: true, model: res.model, effort: d.effort, reason: d.reason, run: runId, now: Date.now(), parentId: e.parentAgentId ?? null }), piece })
-  if (runId !== 'adhoc') logWire(S.wireLog, { from: 'lead', to: party(role, piece), kind: 'task', summary: taskLine(e.prompt) || role, at: Date.now(), via: 'sub' })
+  if (runId !== 'adhoc') noteWire({ from: 'lead', to: party(role, piece), kind: 'task', summary: taskLine(e.prompt) || role, at: Date.now(), via: 'sub' })
   const rec = { at: new Date().toISOString(), role, model: res.model, effort: d.effort, reason: d.reason, asked: e.model ?? null, agentId: res.agentId ?? null, ...(cap && { cap }), ...(d.capped && { capped: true }) }
   S.decisions.push(rec)
   run.log.push(JSON.stringify(rec))

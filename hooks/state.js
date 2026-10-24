@@ -6,9 +6,10 @@
 import { DEFAULTS } from './routing.js'
 import { resolveDisplay } from './settings.js'
 import { Timers } from './ticker.js'
+import { Wire } from './worker.js'
 
 // The read views of the stores the owner modules keep (store.js): read through these, written only by their owners.
-export { Timers }
+export { Timers, Wire }
 
 export const S = {
   settings: { ...DEFAULTS },
@@ -71,12 +72,8 @@ export const S = {
   skewToasted: false,
   sessionId: null,  // this session's id: workers it opens send their results here
   leadModel: null,  // the main loop's model, for the tree's root
-  wireLog: [],  // [{ from, to, kind, summary, at }] messages between sessions, newest last
-  wireStatus: new Map(),  // pane name → what its worker last published (wire.js workerStatus)
   wireName: null,  // worker: its own agt- name (AGENTILLE_NAME), where it publishes
   leadSession: null,  // worker: the lead's session id (AGENTILLE_LEAD), where it reports
-  pub: { state: 'starting', tool: null, tok: 0, model: null, effort: null, start: null, at: 0 },  // worker's published status
-  lastMeta: '',  // worker: the last Herdr sidebar title it reported
   deckAuto: false,  // display.deck = auto: the deck opens on every typed /agt
   profileDisplay: {},  // the valid keys of ~/.agentille/profile.json → display
   storedRaw: {},  // the old $.store toggles, read once at session start (back-compat)

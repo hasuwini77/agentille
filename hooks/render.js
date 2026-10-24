@@ -2,7 +2,7 @@
 // band, built from the surface's own elements (`els`) and the state. Nothing here changes state; the one call
 // out is the ↗ button's jump to a pane.
 
-import { S, isLead, Timers } from './state.js'
+import { S, isLead, Timers, Wire } from './state.js'
 import { ACCENT, FRAME_COLOR, DONE_COLOR, WIRE_COLOR, INK, hex, colorOf, chip, cast, boardRows, header, leadLine, wireRow, castColumns, routingLines, wireLines, tokenBars, swarm } from './board.js'
 import { focusLines } from './display.js'
 import { MARK, SPAN_COLOR, spans, bodyParts } from './highlight.js'
@@ -167,7 +167,7 @@ export async function switchboard($, e, next) {
   const now = Date.now()
   const scene = stage({ agents: S.live, panes: S.panes, routes: S.paneRoutes, run: S.lastRun, now })
   const focus = focusLines(now)
-  const wire = wireRow(S.wireLog, now)
+  const wire = wireRow(Wire.wireLog, now)
   if (scene.rows.length === 0 && isLead() && focus.length === 0 && !wire) return next(e)
   const els = $.ui.resolve(e)
   const kids = focus.map((l) => focusRow(els, l))
@@ -179,7 +179,7 @@ export async function switchboard($, e, next) {
 
   const rows = nest(linkPieces(cast(scene, S.live, S.lastRun)))
   const cols = (e.props.bodyColumns ?? 80) - 4
-  const view = boardRows(rows, { now, tick: Timers.tick, cols, wire: S.wireStatus, transport: S.transport, view: e.props.view?.agentId ?? null })
+  const view = boardRows(rows, { now, tick: Timers.tick, cols, wire: Wire.wireStatus, transport: S.transport, view: e.props.view?.agentId ?? null })
   const sw = swarm({ agents: S.live, routes: S.paneRoutes, run: S.lastRun, tick: Timers.tick })
   const room = Math.max(1, (e.props.maxRows ?? 10) - 4 - kids.length - (wire ? 1 : 0) - (sw ? 1 : 0))
   const waiting = rows.filter((r) => r.state === 'working').length
@@ -203,10 +203,10 @@ export async function deck($, e) {
   const now = Date.now()
   const scene = stage({ agents: S.live, panes: S.panes, routes: S.paneRoutes, run: S.lastRun, now })
   const all = [...scene.rows, ...[...S.live.values()].filter((a) => a.run === S.lastRun && !scene.rows.includes(a))]
-  const rows = cast({ rows: all.map((r) => (r.kind === 'pane' && !r.model ? { ...r, model: S.wireStatus.get(r.name)?.model ?? null } : r)), tally: { working: 0 } }, S.live, S.lastRun)
+  const rows = cast({ rows: all.map((r) => (r.kind === 'pane' && !r.model ? { ...r, model: Wire.wireStatus.get(r.name)?.model ?? null } : r)), tally: { working: 0 } }, S.live, S.lastRun)
   const cols = e.props.bodyColumns ?? 80
   const kids = [boardHeader(els, header({ run: S.lastRun, formation: S.runs.get(S.lastRun)?.formation, squads: S.squads.map((q) => q.name), loops: loopText(S.runs.get(S.lastRun)) }), S.runningVersion)]
-  if (rows.length === 0 && S.decisions.length === 0 && S.wireLog.length === 0) {
+  if (rows.length === 0 && S.decisions.length === 0 && Wire.wireLog.length === 0) {
     kids.push(Text({ dimColor: true, children: ['No agents yet. Type /agt "task": every dispatch shows up here.'] }))
     return Box({ flexDirection: 'column', children: kids })
   }
@@ -220,9 +220,9 @@ export async function deck($, e) {
     kids.push(line((m) => Box({ width: 14, children: [m.model ? Text({ color: INK, backgroundColor: colorOf(m.model), children: [chip(m.model)] }) : Text({ dimColor: true, children: ['pane'] })] })))
     if (c.more > 0) kids.push(Text({ dimColor: true, children: ['+' + c.more + ' more'] }))
   }
-  if (S.wireLog.length) {
+  if (Wire.wireLog.length) {
     kids.push(rule(els, 'conversation'))
-    for (const w of wireLines(S.wireLog)) kids.push(Text({ wrap: 'truncate', children: [Text({ dimColor: true, children: [w.at + '  '] }), Text({ color: w.sub ? undefined : hex(WIRE_COLOR), children: [w.arrow + ' '] }), Text({ dimColor: true, children: [w.kind + ' '] }), w.text] }))
+    for (const w of wireLines(Wire.wireLog)) kids.push(Text({ wrap: 'truncate', children: [Text({ dimColor: true, children: [w.at + '  '] }), Text({ color: w.sub ? undefined : hex(WIRE_COLOR), children: [w.arrow + ' '] }), Text({ dimColor: true, children: [w.kind + ' '] }), w.text] }))
   }
   if (S.decisions.length) {
     kids.push(rule(els, 'routing'))

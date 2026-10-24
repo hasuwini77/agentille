@@ -24,8 +24,8 @@ import { detectTransport, transportOf, openPane, loadOwned, savePanes } from './
 import { spawnPane, openSessions, closePane } from './tools.js'
 import { registerStatus } from './status.js'
 import { refreshAgents, working, ensurePolling, ensureTicker } from './ticker.js'
-import { statusKey, freshStatus, validLead, parseWire, shortName, logWire, parseTellArgs } from './wire.js'
-import { publish } from './worker.js'
+import { statusKey, freshStatus, validLead, parseWire, shortName, parseTellArgs } from './wire.js'
+import { publish, noteWire, pubRoute, pubTool, pubStep, pubWorking } from './worker.js'
 import { onPromptSubmit, onTurnComplete } from './turns.js'
 import { dispatchedRun, agtTurnFromDispatch } from './proofs.js'
 import { parseHeader, roleOf } from './routing.js'
@@ -56,7 +56,7 @@ export function register(on) {
     S.sessionId = validLead(await $.session.id().catch(() => null))
     S.wireName = /^agt-[A-Za-z0-9_-]+$/.test((await $.env.get('AGENTILLE_NAME')) ?? '') ? await $.env.get('AGENTILLE_NAME') : null
     S.leadSession = S.wireName ? validLead(await $.env.get('AGENTILLE_LEAD')) : null
-    if (S.worker) { S.pub.model = S.worker.model; S.pub.effort = S.worker.effort || null }
+    if (S.worker) pubRoute(S.worker.model, S.worker.effort)
     await $.command.register({ name: 'agt-deck', description: 'Open the agentille deck: the cast, routing timeline, wire log and tokens. auto = open on every /agt (saved as display.deck) · off', argumentHint: '[auto|off]', immediate: true })
     await $.command.register({ name: 'agt-tell', description: 'Send a message to a worker pane over the wire', argumentHint: '<worker> <message>', immediate: true })
     await $.command.register({ name: 'agt-spawn', description: 'Open a routed claude pane beside this one (Herdr or tmux); it closes itself once its answer is saved', argumentHint: '"task" [--model sonnet|opus|haiku|fable]' })
@@ -106,7 +106,7 @@ export function register(on) {
     if (sid) sent = (await $.session.send({ to: { sessionId: sid }, text: '[agt wire] lead note · ' + a.text }).catch(() => ({ isDelivered: false }))).isDelivered
     if (!sent && t === 'herdr') sent = (await $.process.run(herdrPromptArgv(a.name, a.text), PROBE).catch(() => null))?.exitCode === 0
     if (!sent) return { text: 'Could not reach ' + a.name + '.' }
-    logWire(S.wireLog, { from: 'lead', to: shortName(a.name), kind: 'note', summary: a.text, at: Date.now() })
+    noteWire({ from: 'lead', to: shortName(a.name), kind: 'note', summary: a.text, at: Date.now() })
     $.ui.invalidate('ui.render')
     return { text: '⇄ sent to ' + a.name }
   })
@@ -178,7 +178,7 @@ export function register(on) {
       if (hit) { const r = P.rec(hit.id); r.harvested = true; r.wireDone = true }
       const route = w.kind === 'done' ? S.paneRoutes.findLast((r) => r.name === w.from) : null
       if (route) route.verdict = verdictChip(route.agent, w.summary)
-      logWire(S.wireLog, { from, to: S.wireName ? shortName(S.wireName) : 'lead', kind: w.kind, summary: w.summary, at: Date.now() })
+      noteWire({ from, to: S.wireName ? shortName(S.wireName) : 'lead', kind: w.kind, summary: w.summary, at: Date.now() })
       $.ui.toast('⇄ ' + from + ' ' + w.kind)
       $.ui.invalidate('ui.render')
     }
@@ -212,7 +212,7 @@ export function register(on) {
         }
       }
     } else if (S.wireName) {
-      S.pub.tool = toolLabel(e.tool, e)
+      pubTool(toolLabel(e.tool, e))
       void publish($).catch(() => {})
     }
     return next(e)
@@ -237,9 +237,7 @@ export function register(on) {
     if (!e.agentId) S.leadModel = e.model
     const result = yield* next(a && a.routed ? { ...e, effort: a.effort } : e)
     if (!e.agentId && S.wireName && result?.usage) {
-      const u = result.usage
-      S.pub.tok += (u.input_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0) + (u.output_tokens ?? 0)
-      S.pub.model = e.model
+      pubStep(result.usage, e.model)
       await publish($)
     }
     if (a) {
@@ -270,7 +268,7 @@ export function register(on) {
       $.ui.invalidate('ui.render')
     }
     if (S.wireName) {
-      Object.assign(S.pub, { state: 'working', tool: null, start: Date.now(), ms: null })
+      pubWorking()
       await publish($, true)
     }
     return next(e)

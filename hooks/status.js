@@ -1,7 +1,9 @@
 // The pinned agt status line under the prompt: one line of what the run is doing, so the
-// count survives the band scrolling out of view. Wired in register.js.
+// count survives the band scrolling out of view. Wired in register.js. display.statusLine off
+// pins nothing.
 
 import { STATUS_GRACE_MS, stage, tokens } from './live.js'
+import { Display } from './state.js'
 
 // The line, or undefined to clear it: nothing works and every finished agent is past the grace.
 // Only an /agt run pins one: a plain subagent's run is `adhoc`, and the band already shows it.
@@ -65,7 +67,8 @@ async function refresh(io, ctx, at) {
     ...ctx.routes.filter((r) => r.run === run && r.end != null).map((r) => r.end),
   ].filter((t) => t != null)
   const lastLeftAt = left.length ? Math.max(...left) : null
-  const text = statusText({ run, subs, panes, done: tally.done, tok: tally.tok, usd: st.usd, ctxPct: st.ctxPct, lastLeftAt, now })
+  // Off clears the line once (a reload may have left one pinned) and arms no grace timer.
+  const text = Display.statusOn ? statusText({ run, subs, panes, done: tally.done, tok: tally.tok, usd: st.usd, ctxPct: st.ctxPct, lastLeftAt, now }) : undefined
 
   pin(io, text)
 

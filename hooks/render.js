@@ -148,22 +148,25 @@ export function wireLine(els, w) {
 export const rule = (els, label) => els.Text({ dimColor: true, children: ['── ' + label + ' ' + '─'.repeat(Math.max(0, 40 - label.length))] })
 
 // A worker's own band: the mascot's three rows over a caption, or the caption alone when the
-// band is short, off a terminal, or nothing is animating.
+// band is short, off a terminal, nothing is animating, or display.mascot is off (then without
+// the hi and bye the figure says).
 export function workerBand(els, e, now) {
   const { Box, Text } = els
-  const mood = moodAt({ ...Display.mascot, now })
+  const m = Display.mascotOn ? Display.mascot : { ...Display.mascot, hiUntil: 0, byeUntil: 0 }
+  const mood = moodAt({ ...m, now })
   const cap = caption({ mood, ...Session.worker, ms: mood === 'working' ? now - Display.mascot.start : Display.mascot.ms })
   const capText = Text({ color: hex(MODEL_COLOR[modelKey(Session.worker.model)]), wrap: 'truncate', children: [cap] })
-  if (mood === 'idle' || e.surface !== 'terminal' || (e.props.maxRows ?? 0) < 5) return [capText]
+  if (mood === 'idle' || !Display.mascotOn || e.surface !== 'terminal' || (e.props.maxRows ?? 0) < 5) return [capText]
   const [head, body, legs] = frame(mood, Timers.tick >> 1, Session.worker.agent)
   const orange = hex(MASCOT_COLOR)
   return [Text({ color: orange, children: [head] }), Text({ color: orange, children: [body] }), Box({ flexDirection: 'row', children: [Text({ color: orange, children: [legs + '   '] }), capText] })]
 }
 
 // The switchboard above the prompt: a framed dispatch tree rooted at the lead, one row per
-// subagent (◇) and pane session (▣), the newest wire message, and any agent flags.
+// subagent (◇) and pane session (▣), the newest wire message, and any agent flags. display.band
+// off draws none of it: the flags and a worker's own band live in it too.
 export async function switchboard($, e, next) {
-  if (e.props.hasSurvey) return next(e)
+  if (e.props.hasSurvey || !Display.bandOn) return next(e)
   const now = Date.now()
   const scene = stage({ agents: Runs.live, panes: Panes.panes, routes: Runs.paneRoutes, run: Runs.lastRun, now })
   const focus = focusLines(now)
@@ -215,7 +218,7 @@ export async function deck($, e) {
     const c = castColumns(rows, { cols, tick: Timers.tick >> 1, frameOf: frame, moodOf: (r) => (r.kind === 'sub' ? agentMood(r, now) : r.state === 'working' ? 'working' : 'bye') })
     const orange = hex(MASCOT_COLOR)
     const line = (pick) => Box({ flexDirection: 'row', children: c.cells.map(pick) })
-    for (const i of [0, 1, 2]) kids.push(line((m) => Text({ color: orange, dimColor: m.dim, children: [m.lines[i]] })))
+    if (Display.mascotOn) for (const i of [0, 1, 2]) kids.push(line((m) => Text({ color: orange, dimColor: m.dim, children: [m.lines[i]] })))
     kids.push(line((m) => Text({ dimColor: m.dim, children: [(m.glyph + ' ' + m.role).padEnd(14)] })))
     kids.push(line((m) => Box({ width: 14, children: [m.model ? Text({ color: INK, backgroundColor: colorOf(m.model), children: [chip(m.model)] }) : Text({ dimColor: true, children: ['pane'] })] })))
     if (c.more > 0) kids.push(Text({ dimColor: true, children: ['+' + c.more + ' more'] }))

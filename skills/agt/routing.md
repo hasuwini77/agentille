@@ -16,7 +16,9 @@ First match wins; no model call.
 7. **refactor** — "refactor", "rename", "move", "extract", "split", "consolidate", "deduplicate" (whole words: "move" never matches "remove")
 8. **feature** — default
 
-Multipliers: **hasUI** (UI/UX/styling/component/page/screen, or a `.tsx/.css/.scss` file named) adds the design-reviewer, and the ui-prototyper on `design`/`feature`. **hasMulti** ("and", "also", "plus" joining verbs, or ≥3 deliverables) adds the planner.
+Multipliers: **hasUI** (UI/UX/styling/component/page/screen, or a `.tsx/.css/.scss` file named) adds the design-reviewer, and the ui-prototyper on `design`/`feature`, past the UI threshold below. **hasMulti** ("and", "also", "plus" joining verbs, or ≥3 deliverables) adds the planner.
+
+**UI threshold** (the cheap tier for small UI work). A `feature` or `bugfix` slice that is `size=small` and `risk=none` and changes one screen gets one executor plus the Sonnet code-reviewer: hasUI adds neither the ui-prototyper nor the design-reviewer. They join when the UI work spans more than one screen (a new page, a flow, a shared component used across screens), when the slice is `size=large`, when the run is `medium` or `heavy`, or when the person asks for a design review or a prototype. The `design` category is that ask, so it keeps both at any size, as does a `review` of UI code.
 
 ## Risk words
 
@@ -37,8 +39,8 @@ Only when the level table falls through. One inline Haiku call, never the planne
 |---|---|---|---|---|---|---|---|
 | planning | ✓ | ✓ | — | — | — | — | — |
 | research | ✓ (research prefix: comparison table, no code) | — | — | — | — | — | — |
-| feature | if hasMulti | if planner ran | if hasUI | ✓ (≤3 parallel) | ✓ | if hasUI | if auth/money/data |
-| bugfix | if ≥2 files | if planner ran | — | ✓ (debug discipline) | ✓ | if hasUI | — |
+| feature | if hasMulti | if planner ran | if hasUI, past the UI threshold | ✓ (≤3 parallel) | ✓ | if hasUI, past the UI threshold | if auth/money/data |
+| bugfix | if ≥2 files | if planner ran | — | ✓ (debug discipline) | ✓ | if hasUI, past the UI threshold | — |
 | refactor | if hasMulti | if planner ran | — | ✓ | ✓ (skip iff pure rename/move) | — | — |
 | design | — | — | ✓ | ✓ | if logic changed | ✓ | — |
 | debug | — | — | — | ✓ (debug loop) | after a fix lands | — | — |

@@ -89,6 +89,12 @@ check "the compact hook runs the re-entry script" 'matcher_block compact | grep 
 check "the re-entry script exists and is executable" '[ -x hooks/agentille-compact.sh ]'
 check "the update check still runs at startup and resume" 'matcher_block "startup|resume" | grep -qF "hooks/agentille-update-check.sh"'
 
+# the design-reviewer's hard rule and the cost ceiling agree: the ceiling demotes it (hooks/routing.js CEILING_ROLES),
+# so the hard rule names the ceiling as its second exception, and the ceiling bullet still lists the design-reviewer
+dr_rule() { grep -F "Never downgrade the design-reviewer" skills/agt/routing.md; }
+check "routing.md's design-reviewer rule names quick and the ceiling" 'dr_rule | grep -qF "thinkingDepth=quick" && dr_rule | grep -qiF "cost ceiling"'
+check "routing.md's ceiling bullet includes the design-reviewer" 'grep -F "Past the ceiling," skills/agt/routing.md | grep -qF "design-reviewer"'
+
 # setup skills that say "typed only" disable model invocation
 for f in skills/agentille-init/SKILL.md skills/agentille-project/SKILL.md; do
   check "$f disables model invocation" 'grep -qE "^disable-model-invocation: true$" "$f"'

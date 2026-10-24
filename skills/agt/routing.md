@@ -90,7 +90,7 @@ The mod logs the table's pick beside the model that ran, flags a drift (`/agt-in
 ## Hard rules
 
 - **Never use Haiku for the executor**, and never change its model (effort only). Haiku is for Stage 2 classify and read-only scouts (`SKILL.md` → "The contract") only.
-- **Never downgrade the design-reviewer** below opus · high, except under `thinkingDepth=quick`, where it runs sonnet · high like the other reviewers.
+- **Never downgrade the design-reviewer** below opus · high, except in two cases where it runs Sonnet like the other reviewers: under `thinkingDepth=quick` (sonnet · high), and past the cost ceiling ("Cost ceiling" below: sonnet at its routed effort).
 - **Declare `model:` on every dispatch** (fallback when the mod is off).
 
 ## Escalation ladder

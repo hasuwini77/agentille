@@ -26,7 +26,7 @@ recon: <level> · <solo|subagent|panes|workflow> · <one-clause reason>   [agent
 
 ## Progress spine
 
-Skip this section when the mod draws. Otherwise, before the first dispatch, seed TodoWrite with one todo per phase the roster actually has (e.g. plan · build · review · ship). Mark each in progress, then done, as it moves. That is the whole live view you write. With the mod loaded, the switchboard above the prompt shows a swarm line (every agent of the run by phase: plan · build · review) over the dispatch tree (each subagent `◇` and pane session `▣`, its model, live tool, elapsed and tokens; a slice's reviewers under its executor, each finished one showing its verdict) and the newest wire message, the run's plan and fix loops in the band header, each `Agent` call in the transcript is a live row, and a status line under the prompt keeps the run's totals in view; `/agt-deck` opens a fuller view, with the run's whole conversation (every dispatch and every answer). You do nothing for either.
+Skip this section when the mod draws. Otherwise, before the first dispatch, seed TodoWrite with one todo per phase the roster actually has (e.g. plan · build · review · ship). Mark each in progress, then done, as it moves. That is the whole live view you write. With the mod loaded, it draws the band instead and you do nothing.
 
 ## Agent heads
 
@@ -36,7 +36,7 @@ Every agent's output starts with a head; relay the head, never the body:
 - planner: `PLAN: <n> steps · <p> parallel-safe · <w> waves` · ui-prototyper: `BLUEPRINT: <name> ready · <stack>`
 - plan-reviewer: `VERDICT: APPROVE` or `VERDICT: REVISE · BLOCKER:n HIGH:n LOW:n`, then `FIX: <step> <one line>` per BLOCKER/HIGH
 - adversary: `BROKEN: n · HELD: n`, then `FIX:` per broken case
-- executor: `<what changed · files · verified yes/no>`, then `FIX:` per known remaining defect; or one stop line: `CONTEXT …`, `BLOCKED: <need>`, `CONTRACT: <what and why>`. Its `VERIFICATION:` block is body evidence the gate reads, not the head.
+- executor: `<what changed · files · verified yes/no>`, then `FIX:` per known remaining defect; or one stop line: `CONTEXT …`, `BLOCKED: <need>`, `STUCK: <the assumption that failed or the check that will not pass>`, `CONTRACT: <what and why>` (each routed in `factory.md` → "Early stop — resume once"). Its `VERIFICATION:` block is body evidence the gate reads, not the head. `RESUME:` is the lead's message to an executor that stopped early with none of these; it answers with its normal head.
 
 ## Final card
 
@@ -46,7 +46,7 @@ The only end-of-run output of a non-solo run, at most 8 lines:
 ✓ <what changed, one line>  ·  <level>  ·  <N> files  ·  <merged PR #n | branch>  ·  <m>m
 verify: <command> → <result>
 review: <PASS | CONCERNS: n P1 | FAIL: n P0> — <agents run>
-⚑ <only if something needs the user: escalated, PR ready, P0/P1 left; max 2 lines>
+⚑ <only if something needs the user: escalated, PR ready, P0/P1 left, plan not approved; max 2 lines>
 Open: ~/.agentille/state/run-<id>/report.md
 Next: <one concrete action>
 ```

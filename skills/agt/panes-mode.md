@@ -8,7 +8,7 @@ A multiplexer tracks one agent per pane, so pane workers have a readable lifecyc
 Panes only on the heavy level (detected, or typed `/agt heavy`) and for `/agt-spawn`. Only the executor (one per slice) and the adversary may be panes. Planners, plan-reviewers, the ui-prototyper and ALL reviewers are always subagents; a single executor is a subagent. `low` and `medium` never open panes.
 No pane transport: workflow if the `Workflow` tool exists, else subagent waves (`workflow-mode.md`).
 
-Pre-flight (the mod probes this once; manual equivalent): inside Herdr (`HERDR_ENV=1`, `herdr` on PATH) or tmux (`$TMUX`, `tmux` on PATH), Herdr first. Otherwise fall through silently. Never drive a session from outside one.
+Pre-flight: the mod probes the transport once (Herdr first, then tmux) and names it in the `## Pane transport` block; none → fall through silently. Never drive a session from outside one. Without the mod: `no-mod.md` → "Pane transport".
 
 ## Pool size
 
@@ -73,15 +73,7 @@ No wire message within the slice's expected time (a worker without the mod, a cr
 
 ## Spawning a worker
 
-Manual recipe, only when the mod is off (Herdr):
-
-```bash
-herdr worktree create --branch "feat/<slug>" --base "$BASE" --label "<slice>" --no-focus
-herdr pane split --current --direction right --cwd "<worktree>" --env "AGENTILLE_RUN=<run-id>" --no-focus
-herdr agent start "agt-<run-id>-exec-1" --kind claude --pane <pane-id>   # id: .result.pane.pane_id
-```
-
-`feat/<slug>` stands for the slice branch `factory.md` → "Integrate" names (`fix/<slug>`, or `agt/<slug>` off a feature branch), written out. Then send one prompt: `isolated: false`, `branch:` and `base:`, the task, the profile block, the slice's file set, its verification command, its exit criterion. Spawn the whole wave first, then wait. Never focus.
+With the tools live, `spawn_pane` above. With the mod off, the Herdr and tmux recipes: `no-mod.md` → "Spawning a pane worker".
 Names match `[a-z][a-z0-9_-]{0,31}`; keep the run id 6 chars. The `agt-` prefix is the reap authority.
 
 ## Harvest, then close
@@ -118,17 +110,9 @@ If `agent read` cannot recover a full response (alternate screen), ask that work
 
 Inside tmux but outside Herdr, same rules (disjoint slices, `agt-` ownership, harvest then reap) with a smaller toolbox: tmux has no per-agent lifecycle, so the worker reports completion itself.
 
-```bash
-tmux split-window -d -h -P -F '#{pane_id}' -t "$TMUX_PANE" -c <cwd> \
-  -e AGENTILLE_RUN=<run> "$SHELL" -ic 'claude "$@"' agt \
-  --model <model> -n <name> -- "<task>"
-tmux set-option -p -t <id> @agt <name>
-tmux set-option -p -t <id> @agt_vendor claude
-tmux set-option -p -t <id> allow-set-title off
-tmux select-pane -t <id> -T <name>
-```
+Workers open through `spawn_pane` ("Through the mod's tools"); the manual `tmux split-window` recipe: `no-mod.md` → "Spawning a pane worker".
 
-Keep the `--`, and escape `#` as `##` in `<cwd>`. The lead only sees panes in its own window: `tmux list-panes -a -F '#{pane_id}\t#{@agt}\t#{pane_dead}\t#{window_id}'`. Your pane is `$TMUX_PANE`; a pane with no `@agt` is the user's.
+The lead only sees panes in its own window: `tmux list-panes -a -F '#{pane_id}\t#{@agt}\t#{pane_dead}\t#{window_id}'`. Your pane is `$TMUX_PANE`; a pane with no `@agt` is the user's.
 
 **Done signal.** Each worker's last act is writing `~/.agentille/state/run-<run>/done-<role>`: put that instruction in the slice prompt. The mod polls the file; without it tmux workers never read as done. A pane is `done` when that file exists (written after the mod first saw the pane) or the pane is dead. Delete `done-<role>` before (re)spawning a role.
 There is no `blocked` or `idle` state, so reap only on the done file or a dead pane, never on silence. Read an overdue worker with `tmux capture-pane -p -t <id> -S -200` first: an approval prompt looks like "still working". Two leads in one window can reap each other's workers; run one lead per window.

@@ -398,5 +398,9 @@ describe('typed proof', () => {
     expect(asksSessions('open sessions: 2 claude, 1 codex')).toBe(true)
     expect(asksSessions('open panes 2 claude')).toBe(true) // a count or kind right after the noun
     expect(asksSessions('open a shell `npm test`')).toBe(true)
+    expect(asksSessions('open a terminal session')).toBe(true)
+    expect(asksSessions('open a terminal pane')).toBe(true)
+    expect(asksSessions('open a terminal window')).toBe(true)
+    expect(asksSessions('open a new terminal tab')).toBe(true)
   })
 })

@@ -3,7 +3,8 @@
 # non-zero exit from `claude plugin validate` or `claude plugin test` must FAIL the run, and a
 # passing pair must PASS it. A fake `claude` on PATH stands in for the CLI; the inner run skips
 # the hook tests (this file among them) through AGENTILLE_VALIDATE_SKIP_HOOK_TESTS so it does not
-# recurse. Exit 0 = all checks pass.
+# recurse. That skip is a FAIL under CI=true, so every inner run clears CI unless a check sets it.
+# Exit 0 = all checks pass.
 set -u
 cd "$(dirname "$0")/../.." || exit 2
 T=$(mktemp -d); trap 'rm -rf "$T"' EXIT
@@ -19,7 +20,7 @@ if [ "$1" = plugin ] && [ "$2" = test ]; then printf "%b\n" "${FAKE_TEST_OUT:- 5
 exit 0
 C
 chmod +x "$T/bin/claude"
-run() { ( export PATH="$T/bin:$PATH" AGENTILLE_VALIDATE_SKIP_HOOK_TESTS=1; for kv in "$@"; do export "$kv"; done; bash scripts/validate.sh 2>&1 ); }
+run() { ( export PATH="$T/bin:$PATH" AGENTILLE_VALIDATE_SKIP_HOOK_TESTS=1 CI=; for kv in "$@"; do export "$kv"; done; bash scripts/validate.sh 2>&1 ); }
 
 out=$(run FAKE_VALIDATE_RC=0 FAKE_TEST_RC=0); rc=$?
 check "both pass: exit 0" '[ "$rc" = 0 ]'
@@ -40,12 +41,27 @@ check "test output without a count: says so" 'printf "%s" "$out" | grep -q "prin
 out=$(run FAKE_TEST_OUT=" 12 pass"); rc=$?
 check "12 pass: run fails" '[ "$rc" != 0 ]'
 check "12 pass: names the floor" 'printf "%s" "$out" | grep -q "only 12 pass"'
+out=$(run "FAKE_TEST_OUT= 499 pass\n 0 fail"); rc=$?
+check "499 pass: run fails" '[ "$rc" != 0 ]'
+check "499 pass: says the floor is 500" 'printf "%s" "$out" | grep -q "only 499 pass (expected at least 500)"'
+out=$(run "FAKE_TEST_OUT= 500 pass\n 0 fail"); rc=$?
+check "500 pass: exit 0" '[ "$rc" = 0 ]'
+check "500 pass: reports the count" 'printf "%s" "$out" | grep -q "claude plugin test: 500 pass"'
 out=$(run "FAKE_TEST_OUT= 527 pass\n 0 fail"); rc=$?
 check "527 pass 0 fail: exit 0" '[ "$rc" = 0 ]'
 check "527 pass 0 fail: reports the count" 'printf "%s" "$out" | grep -q "claude plugin test: 527 pass"'
 out=$(run "FAKE_TEST_OUT= 527 pass\n 1 fail"); rc=$?
 check "527 pass 1 fail: run fails" '[ "$rc" != 0 ]'
 check "527 pass 1 fail: says 1 fail" 'printf "%s" "$out" | grep -q "claude plugin test: 1 fail"'
+
+# skipping the hook tests: a WARN on a developer machine, a FAIL under CI=true
+out=$(run); rc=$?
+check "hook tests skipped, dev machine: exit 0" '[ "$rc" = 0 ]'
+check "hook tests skipped, dev machine: WARN not FAIL" 'printf "%s" "$out" | grep -q "WARN.*hook tests skipped" && ! printf "%s" "$out" | grep -q "FAIL.*hook tests skipped"'
+out=$(run CI=true); rc=$?
+check "hook tests skipped, CI=true: run fails" '[ "$rc" != 0 ]'
+check "hook tests skipped, CI=true: FAIL names the variable" 'printf "%s" "$out" | grep -q "FAIL.*hook tests skipped (AGENTILLE_VALIDATE_SKIP_HOOK_TESTS set"'
+check "hook tests skipped, CI=true: the only FAIL" '[ "$(printf "%s\n" "$out" | grep -c "FAIL")" = 1 ]'
 
 # a failing mod import is a FAIL (the entry point is overridable for this test only)
 printf 'throw new Error("boom");\n' > "$T/bad-entry.mjs"

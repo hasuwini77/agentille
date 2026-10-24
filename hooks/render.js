@@ -2,7 +2,7 @@
 // band, built from the surface's own elements (`els`) and the state. Nothing here changes state; the one call
 // out is the ↗ button's jump to a pane.
 
-import { S, isLead, Timers, Wire, Profile, Display, Runs, Spawn, Panes } from './state.js'
+import { isLead, Timers, Wire, Profile, Display, Runs, Spawn, Panes, Session } from './state.js'
 import { ACCENT, FRAME_COLOR, DONE_COLOR, WIRE_COLOR, INK, hex, colorOf, chip, cast, boardRows, header, leadLine, wireRow, castColumns, routingLines, wireLines, tokenBars, swarm } from './board.js'
 import { focusLines } from './display.js'
 import { MARK, SPAN_COLOR, spans, bodyParts } from './highlight.js'
@@ -152,10 +152,10 @@ export const rule = (els, label) => els.Text({ dimColor: true, children: ['─�
 export function workerBand(els, e, now) {
   const { Box, Text } = els
   const mood = moodAt({ ...Display.mascot, now })
-  const cap = caption({ mood, ...S.worker, ms: mood === 'working' ? now - Display.mascot.start : Display.mascot.ms })
-  const capText = Text({ color: hex(MODEL_COLOR[modelKey(S.worker.model)]), wrap: 'truncate', children: [cap] })
+  const cap = caption({ mood, ...Session.worker, ms: mood === 'working' ? now - Display.mascot.start : Display.mascot.ms })
+  const capText = Text({ color: hex(MODEL_COLOR[modelKey(Session.worker.model)]), wrap: 'truncate', children: [cap] })
   if (mood === 'idle' || e.surface !== 'terminal' || (e.props.maxRows ?? 0) < 5) return [capText]
-  const [head, body, legs] = frame(mood, Timers.tick >> 1, S.worker.agent)
+  const [head, body, legs] = frame(mood, Timers.tick >> 1, Session.worker.agent)
   const orange = hex(MASCOT_COLOR)
   return [Text({ color: orange, children: [head] }), Text({ color: orange, children: [body] }), Box({ flexDirection: 'row', children: [Text({ color: orange, children: [legs + '   '] }), capText] })]
 }
@@ -171,8 +171,8 @@ export async function switchboard($, e, next) {
   if (scene.rows.length === 0 && isLead() && focus.length === 0 && !wire) return next(e)
   const els = $.ui.resolve(e)
   const kids = focus.map((l) => focusRow(els, l))
-  if (S.worker) kids.push(...workerBand(els, e, await $.clock.now()))
-  else if (S.selfName) kids.push(els.Text({ color: hex(MODEL_COLOR.opus), children: ['agentille worker · ' + S.selfName] }))
+  if (Session.worker) kids.push(...workerBand(els, e, await $.clock.now()))
+  else if (Session.selfName) kids.push(els.Text({ color: hex(MODEL_COLOR.opus), children: ['agentille worker · ' + Session.selfName] }))
   const theirs = await next(e)
   // No agent rows: the newest wire message alone, no frame.
   if (scene.rows.length === 0) return els.Box({ flexDirection: 'column', children: [...kids, ...(wire ? [wireLine(els, wire)] : []), theirs] })
@@ -183,9 +183,9 @@ export async function switchboard($, e, next) {
   const sw = swarm({ agents: Runs.live, routes: Runs.paneRoutes, run: Runs.lastRun, tick: Timers.tick })
   const room = Math.max(1, (e.props.maxRows ?? 10) - 4 - kids.length - (wire ? 1 : 0) - (sw ? 1 : 0))
   const waiting = rows.filter((r) => r.state === 'working').length
-  const inner = [boardHeader(els, header({ run: Runs.lastRun, formation: Runs.runs.get(Runs.lastRun)?.formation, squads: Profile.squads.map((q) => q.name), loops: loopText(Runs.runs.get(Runs.lastRun)) }), S.runningVersion)]
+  const inner = [boardHeader(els, header({ run: Runs.lastRun, formation: Runs.runs.get(Runs.lastRun)?.formation, squads: Profile.squads.map((q) => q.name), loops: loopText(Runs.runs.get(Runs.lastRun)) }), Session.runningVersion)]
   if (sw) inner.push(swarmLine(els, sw))
-  if (rows.length) inner.push(leadRow(els, leadLine({ model: S.leadModel, busy: e.props.isWorking, waiting })))
+  if (rows.length) inner.push(leadRow(els, leadLine({ model: Session.leadModel, busy: e.props.isWorking, waiting })))
   const shown = view.slice(0, room)
   const argvs = shown.map((r) => (r.pane ? focusArgv(Spawn.transport, rows.find((x) => x.id === r.id)) : null))
   const slot = argvs.some(Boolean)
@@ -205,7 +205,7 @@ export async function deck($, e) {
   const all = [...scene.rows, ...[...Runs.live.values()].filter((a) => a.run === Runs.lastRun && !scene.rows.includes(a))]
   const rows = cast({ rows: all.map((r) => (r.kind === 'pane' && !r.model ? { ...r, model: Wire.wireStatus.get(r.name)?.model ?? null } : r)), tally: { working: 0 } }, Runs.live, Runs.lastRun)
   const cols = e.props.bodyColumns ?? 80
-  const kids = [boardHeader(els, header({ run: Runs.lastRun, formation: Runs.runs.get(Runs.lastRun)?.formation, squads: Profile.squads.map((q) => q.name), loops: loopText(Runs.runs.get(Runs.lastRun)) }), S.runningVersion)]
+  const kids = [boardHeader(els, header({ run: Runs.lastRun, formation: Runs.runs.get(Runs.lastRun)?.formation, squads: Profile.squads.map((q) => q.name), loops: loopText(Runs.runs.get(Runs.lastRun)) }), Session.runningVersion)]
   if (rows.length === 0 && Runs.decisions.length === 0 && Wire.wireLog.length === 0) {
     kids.push(Text({ dimColor: true, children: ['No agents yet. Type /agt "task": every dispatch shows up here.'] }))
     return Box({ flexDirection: 'column', children: kids })

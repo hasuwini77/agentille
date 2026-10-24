@@ -1,7 +1,7 @@
 // agentille mod entry: wires the hooks. The state is in state.js; routing, panes, sessions, the reaper, the
 // timers, the worker's wire, display settings, drawing and run files each have a module beside this one.
 
-import { S, ctx, isLead, Profile, Display, Runs, Spawn, Panes, Proofs } from './state.js'
+import { ctx, isLead, Profile, Display, Runs, Spawn, Panes, Proofs, Session, setRunningVersion, markSkewToasted, setHostVersion, markHostOld, setIdentity, setWeeklyPct, setLeadModel, setLeadTurn } from './state.js'
 import { registerAutocomplete } from './autocomplete.js'
 import { toolLabel, runPhases } from './board.js'
 import { cleanText } from './clean.js'
@@ -40,27 +40,27 @@ export function register(on) {
     await loadProfile($)
     await loadSquads($)
     try {
-      S.runningVersion = JSON.parse(await $.fs.read($.plugin.root + '/.claude-plugin/plugin.json')).version ?? null
+      setRunningVersion(JSON.parse(await $.fs.read($.plugin.root + '/.claude-plugin/plugin.json')).version ?? null)
     } catch {
-      S.runningVersion = null
+      setRunningVersion(null)
     }
     const skew = await installedSkew($)
     if (skew) {
-      S.skewToasted = true
-      $.ui.toast('agt ⚑ ' + skewMessage(skew, S.runningVersion))
+      markSkewToasted()
+      $.ui.toast('agt ⚑ ' + skewMessage(skew, Session.runningVersion))
     }
     // The host's own version: too old for the mod's pane tools → one toast, and ensureTools registers none.
-    S.hostVersion = hostVersionOf(await Promise.resolve().then(() => $.session.version()).catch(() => null))
-    if (S.hostVersion && hostTooOld(S.hostVersion)) {
-      S.hostOld = true
-      $.ui.toast('agt ⚑ ' + hostMessage(S.hostVersion))
+    setHostVersion(hostVersionOf(await Promise.resolve().then(() => $.session.version()).catch(() => null)))
+    if (Session.hostVersion && hostTooOld(Session.hostVersion)) {
+      markHostOld()
+      $.ui.toast('agt ⚑ ' + hostMessage(Session.hostVersion))
     }
     await probeTransport($)
-    S.worker = parseWorker(await $.env.get('AGENTILLE_WORKER'))
-    S.sessionId = validLead(await $.session.id().catch(() => null))
-    S.wireName = /^agt-[A-Za-z0-9_-]+$/.test((await $.env.get('AGENTILLE_NAME')) ?? '') ? await $.env.get('AGENTILLE_NAME') : null
-    S.leadSession = S.wireName ? validLead(await $.env.get('AGENTILLE_LEAD')) : null
-    if (S.worker) pubRoute(S.worker.model, S.worker.effort)
+    const worker = parseWorker(await $.env.get('AGENTILLE_WORKER'))
+    const sessionId = validLead(await $.session.id().catch(() => null))
+    const wireName = /^agt-[A-Za-z0-9_-]+$/.test((await $.env.get('AGENTILLE_NAME')) ?? '') ? await $.env.get('AGENTILLE_NAME') : null
+    setIdentity({ worker, sessionId, wireName, leadSession: wireName ? validLead(await $.env.get('AGENTILLE_LEAD')) : null })
+    if (Session.worker) pubRoute(Session.worker.model, Session.worker.effort)
     await $.command.register({ name: 'agt-deck', description: 'Open the agentille deck: the cast, routing timeline, wire log and tokens. auto = open on every /agt (saved as display.deck) · off', argumentHint: '[auto|off]', immediate: true })
     await $.command.register({ name: 'agt-tell', description: 'Send a message to a worker pane over the wire', argumentHint: '<worker> <message>', immediate: true })
     await $.command.register({ name: 'agt-spawn', description: 'Open a routed claude pane beside this one (Herdr or tmux); it closes itself once its answer is saved', argumentHint: '"task" [--model sonnet|opus|haiku|fable]' })
@@ -86,7 +86,7 @@ export function register(on) {
       if (Panes.panes.length && isLead()) void cleanWorkspace($, { auto: true, panesOnly: true }).catch(() => {})
     }
     if (working()) ensureTicker($)
-    if (S.wireName) await publish($, true)
+    if (Session.wireName) await publish($, true)
     await refreshAgents($)
     return next(e)
   })
@@ -122,7 +122,7 @@ export function register(on) {
     if (a.view === 'routing') return { text: routingView() }
     if (a.view === 'ledger') return { text: ledgerView() }
     if (a.view === 'squads') return { text: await squadsView($) }
-    if (a.view === 'route') return { text: routeText({ ...a, depth: a.depth ?? Profile.depth }, Profile.settings, S.weeklyPct) }
+    if (a.view === 'route') return { text: routeText({ ...a, depth: a.depth ?? Profile.depth }, Profile.settings, Session.weeklyPct) }
     await loadSquads($)
     const log = Runs.runs.get(Runs.lastRun)?.log ?? []
     return { text: overviewText({ display: Display.display, squads: squadsSummary(Profile.squadRows), routing: routingSummary(log), ledger: ledgerSummary(ledger(Runs.live, Runs.lastRun, Runs.paneRoutes)) }) }
@@ -182,7 +182,7 @@ export function register(on) {
       if (hit) { const r = P.rec(hit.id); r.harvested = true; r.wireDone = true }
       const route = w.kind === 'done' ? Runs.paneRoutes.findLast((r) => r.name === w.from) : null
       if (route) route.verdict = verdictChip(route.agent, w.summary)
-      noteWire({ from, to: S.wireName ? shortName(S.wireName) : 'lead', kind: w.kind, summary: w.summary, at: Date.now() })
+      noteWire({ from, to: Session.wireName ? shortName(Session.wireName) : 'lead', kind: w.kind, summary: w.summary, at: Date.now() })
       $.ui.toast('⇄ ' + from + ' ' + w.kind)
       $.ui.invalidate('ui.render')
     }
@@ -215,7 +215,7 @@ export function register(on) {
           a.heard = Date.now()
         }
       }
-    } else if (S.wireName) {
+    } else if (Session.wireName) {
       pubTool(toolLabel(e.tool, e))
       void publish($).catch(() => {})
     }
@@ -224,7 +224,7 @@ export function register(on) {
 
   on('session.measure', async ($, e, next) => {
     const week = e.rateLimits.find((r) => r.kind === 'seven_day')
-    if (week) S.weeklyPct = week.percentUsed
+    if (week) setWeeklyPct(week.percentUsed)
     return next(e)
   })
 
@@ -238,9 +238,9 @@ export function register(on) {
 
   on('turn.step', async function* ($, e, next) {
     const a = e.agentId ? Runs.live.get(e.agentId) : undefined
-    if (!e.agentId) S.leadModel = e.model
+    if (!e.agentId) setLeadModel(e.model)
     const result = yield* next(a && a.routed ? { ...e, effort: a.effort } : e)
-    if (!e.agentId && S.wireName && result?.usage) {
+    if (!e.agentId && Session.wireName && result?.usage) {
       pubStep(result.usage, e.model)
       await publish($)
     }
@@ -256,19 +256,19 @@ export function register(on) {
 
   // A main-loop turn began (a subagent's run raises none). A worker's first one plays hello.
   on('turn.start', async ($, e, next) => {
-    S.leadTurn = true
+    setLeadTurn(true)
     if (e.agentId === undefined) setLastAnswer(null)
-    if (S.worker) {
+    if (Session.worker) {
       const now = await $.clock.now()
       if (mascotHello(now)) {
         // tmux tags the pane name after the split, so the first poll can miss it: look once more.
-        if (!S.selfName && Spawn.transport && Spawn.transport !== 'none') await pollNow($, Spawn.transport)
+        if (!Session.selfName && Spawn.transport && Spawn.transport !== 'none') await pollNow($, Spawn.transport)
       }
       mascotWorking(now)
       ensureTicker($)
       $.ui.invalidate('ui.render')
     }
-    if (S.wireName) {
+    if (Session.wireName) {
       pubWorking()
       await publish($, true)
     }

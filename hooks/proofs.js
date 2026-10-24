@@ -17,7 +17,7 @@
 //
 // and the gates read them through spawnAllowed, sessionsAllowed, fableProof and runHeld.
 
-import { S, isLead, Display, Runs, Panes } from './state.js'
+import { isLead, Display, Runs, Panes, Session } from './state.js'
 import { makeStore } from './store.js'
 import { SAFE_RUN } from './panes.js'
 import * as P from './panerec.js'
@@ -74,7 +74,7 @@ export function typedPrompt(text, origin, at = NO_MOMENT) {
     my.agtRun = null
   }
   // A worker's proof is its first prompt: the lead already rewrote fable=forced there when nobody typed --fable.
-  if (S.worker && !my.workerProved) {
+  if (Session.worker && !my.workerProved) {
     my.workerProved = true
     my.fableTyped = parseHeader(text)?.fable === 'forced' || typedFable(text)
   }

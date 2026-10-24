@@ -1,7 +1,7 @@
 // agentille run bookkeeping: per-run counters, the routing log and ledger under ~/.agentille/state/run-<id>/,
 // each subagent's raw report, and the Agents section the mod adds to a finished report.md.
 
-import { S, Profile, Panes, Proofs } from './state.js'
+import { Profile, Panes, Proofs, Session } from './state.js'
 import { makeStore } from './store.js'
 import { reportRun, reportTail } from './drawing.js'
 import { pieceOf, party, taskLine } from './links.js'
@@ -161,7 +161,7 @@ export async function dispatchAgent($, e, next) {
     if (named && (my.lastRun === 'adhoc' || !busy)) my.lastRun = named
     agtTurnFromDispatch()
     // The table pick follows the run in progress (its REVISEs); `run` is only where the log goes.
-    const d = decide({ role, hdr, run: { ...runState(runId), fixes: ladderFixes(runState(runId), pieceOf(hdr)) }, depth: Profile.depth, settings: Profile.settings, weeklyPct: S.weeklyPct })
+    const d = decide({ role, hdr, run: { ...runState(runId), fixes: ladderFixes(runState(runId), pieceOf(hdr)) }, depth: Profile.depth, settings: Profile.settings, weeklyPct: Session.weeklyPct })
     const res = await next(e)
     if (res.deny) return res
     const off = short(res.model) !== short(d.model)
@@ -199,7 +199,7 @@ export async function dispatchAgent($, e, next) {
 
   // The run's spend so far, estimated from its agents' tokens, only when a maxRunUsd ceiling is set.
   const spent = maxRunUsdOf(Profile.settings) == null ? null : estimateRunUsd(my.live, runId)
-  const d = decide({ role, hdr, run: { ...run, fixes: ladderFixes(run, pieceOf(hdr)), usd: spent }, depth: Profile.depth, settings: Profile.settings, weeklyPct: S.weeklyPct })
+  const d = decide({ role, hdr, run: { ...run, fixes: ladderFixes(run, pieceOf(hdr)), usd: spent }, depth: Profile.depth, settings: Profile.settings, weeklyPct: Session.weeklyPct })
   const res = await next({ ...e, model: d.model })
   if (res.deny) return res
 

@@ -1,7 +1,7 @@
 // agentille display: the three display settings (deck, focus, highlight) read from profile.json or the mod
 // store and written back, the agent flags above the prompt, and the memo of which message closed an answer.
 
-import { S, Profile, Panes } from './state.js'
+import { Profile, Panes } from './state.js'
 import { makeStore } from './store.js'
 import { mergeFlags, paneFlags, parseFocusArgs, focusText } from './focus.js'
 import { isAnswerBlock, panel, parseHighlightArgs, highlightText } from './highlight.js'

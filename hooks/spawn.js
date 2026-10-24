@@ -2,7 +2,7 @@
 // lead (split or run tab), the startup dialogs it clears, the run tabs a lead records, and the pane tools'
 // registration on the typed prompt that unlocks them.
 
-import { S, isLead, Profile } from './state.js'
+import { isLead, Profile, Session } from './state.js'
 import { makeStore } from './store.js'
 import { PROBE, HERDR_START_TIMEOUT, pickTransport, splitName, paneKey, answerFile, advisorEnv, tmuxSplitArgv, tmuxEvenArgv, tmuxTagArgvs, tmuxPaneIdOf, tmuxKillArgv, herdrSplitArgv, herdrPaneIdOf, herdrTabArgv, herdrTabOf, herdrTabListArgv, herdrTabIds, tabsFile, panesFile, startupDialog, dialogKeys, herdrReadArgv, herdrKeysArgv, agentStatusOf, herdrGetArgv, screenLine, codexTask, herdrStartArgv, herdrPromptArgv, herdrCloseArgv, herdrMetaArgv, SPAWN_TOOL, CLOSE_TOOL, OPEN_SESSIONS_TOOL } from './panes.js'
 import { wireEnv, shortName } from './wire.js'
@@ -344,7 +344,7 @@ export async function openPane($, t, o) {
     if (!lead) throw new Error('TMUX_PANE is not set')
     const target = o.split?.target ?? lead
     const shell = (await $.env.get('SHELL')) ?? ''
-    const id = tmuxPaneIdOf((await runOk($, tmuxSplitArgv({ ...o, target, shell, direction: o.split?.direction, env: [...wireEnv({ name: o.name, lead: S.sessionId }), ...advisorEnv(o.model, Profile.settings)] }), PROBE)).stdout)
+    const id = tmuxPaneIdOf((await runOk($, tmuxSplitArgv({ ...o, target, shell, direction: o.split?.direction, env: [...wireEnv({ name: o.name, lead: Session.sessionId }), ...advisorEnv(o.model, Profile.settings)] }), PROBE)).stdout)
     if (!id) throw new Error('tmux gave no pane id')
     try {
       for (const argv of tmuxTagArgvs(id, o.name)) await runOk($, argv, PROBE)
@@ -358,11 +358,11 @@ export async function openPane($, t, o) {
   }
   const lead = await $.env.get('HERDR_PANE_ID')
   if (!lead) throw new Error('HERDR_PANE_ID is not set')
-  const env = [...wireEnv({ name: o.name, lead: S.sessionId }), ...advisorEnv(o.model, Profile.settings)]
+  const env = [...wireEnv({ name: o.name, lead: Session.sessionId }), ...advisorEnv(o.model, Profile.settings)]
   let id
   let tab = o.split?.tab ?? null
   if (o.newTab) {
-    const workspace = S.selfWorkspace ?? (await $.env.get('HERDR_WORKSPACE_ID'))
+    const workspace = Session.selfWorkspace ?? (await $.env.get('HERDR_WORKSPACE_ID'))
     if (!workspace) throw new Error('HERDR_WORKSPACE_ID is not set')
     const made = herdrTabOf((await runOk($, herdrTabArgv({ workspace, cwd: o.cwd, run: o.run, agent: o.agent, model: o.model, effort: o.effort, env }), PROBE)).stdout)
     if (!made) throw new Error('herdr gave no tab id')
@@ -400,7 +400,7 @@ export async function openPane($, t, o) {
 // and a host without a pane transport gets none. A tool registered while a prompt is submitted is in that
 // turn's list.
 export async function ensureTools($, which) {
-  if (!isLead() || S.hostOld) return
+  if (!isLead() || Session.hostOld) return
   if ((which === 'panes' ? my.paneTools : my.sessionTools) || (await transportOf($)) === 'none') return
   try {
     await $.tool.register(which === 'panes' ? SPAWN_TOOL : OPEN_SESSIONS_TOOL)

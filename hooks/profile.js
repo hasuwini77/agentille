@@ -1,7 +1,7 @@
 // agentille session load: the profile and its voice, the squads of this repo, the installed-version skew and
 // the one-time tip. Read at session start; the squads again on /agt-info.
 
-import { S } from './state.js'
+import { Session } from './state.js'
 import { makeStore } from './store.js'
 import { TIP } from './drawing.js'
 import { DEFAULTS } from './routing.js'
@@ -28,15 +28,15 @@ export const Profile = view
 // stays in the cache with an .orphaned_at marker; it is not installed, so only a newer folder without
 // one counts (one lookup per newer folder).
 export async function installedSkew($) {
-  if (!S.runningVersion) return null
+  if (!Session.runningVersion) return null
   try {
     const dir = cacheDirOf($.plugin.root)
     if (!dir) return null
     const newer = []
     for (const e of await $.fs.list(dir)) {
-      if (e.kind === 'dir' && compareVersions(e.name, S.runningVersion) > 0 && !(await $.fs.exists(dir + '/' + e.name + '/.orphaned_at'))) newer.push(e.name)
+      if (e.kind === 'dir' && compareVersions(e.name, Session.runningVersion) > 0 && !(await $.fs.exists(dir + '/' + e.name + '/.orphaned_at'))) newer.push(e.name)
     }
-    return newerInstalled(S.runningVersion, newer)
+    return newerInstalled(Session.runningVersion, newer)
   } catch {
     return null
   }

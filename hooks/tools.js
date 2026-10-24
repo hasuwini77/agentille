@@ -2,7 +2,7 @@
 // the mod holds (proofs.js: spawnAllowed, sessionsAllowed), the installed version and the transport before it touches a pane;
 // register.js only wires them to tool.call.
 
-import { S, isLead, Profile, Spawn, Panes, Sessions, Proofs } from './state.js'
+import { isLead, Profile, Spawn, Panes, Sessions, Proofs, Session, markSkewToasted } from './state.js'
 import { demoteToast, runState, writeRunFile, setLastRun, addRoute, addDecision } from './dispatch.js'
 import { pieceOf, party, taskLine } from './links.js'
 import { PROBE, newRunId, doneFile, paneKey, answerFile, tmuxKillArgv, placePlan, codexNote, herdrCloseArgv, paneRole, spawnToolInput, closeTarget, sessionName, sessionsToolInput, sessionsNote, droppedNote } from './panes.js'
@@ -23,13 +23,13 @@ let opened = []
 
 // spawn_pane: the /agt heavy level's worker pane, the same openPane as /agt-spawn, with the input validated here.
 export async function spawnPane($, e) {
-  if (!isLead()) return { deny: 'This is a worker pane (' + (S.selfName ?? S.worker.agent) + '); workers do not open panes.' }
+  if (!isLead()) return { deny: 'This is a worker pane (' + (Session.selfName ?? Session.worker.agent) + '); workers do not open panes.' }
   // An update since this session started leaves it on old code: its workers would never report.
   const skew = await installedSkew($)
   if (skew) {
-    if (!S.skewToasted) $.ui.toast('agt ⚑ ' + skewMessage(skew, S.runningVersion))
-    S.skewToasted = true
-    return { deny: skewMessage(skew, S.runningVersion) }
+    if (!Session.skewToasted) $.ui.toast('agt ⚑ ' + skewMessage(skew, Session.runningVersion))
+    markSkewToasted()
+    return { deny: skewMessage(skew, Session.runningVersion) }
   }
   const t = await transportOf($)
   if (t === 'none') return { deny: 'No pane transport here: run the slice as a subagent.' }
@@ -68,7 +68,7 @@ export async function spawnPane($, e) {
   const fixes = ladderFixes(run, pieceOf(a.hdr)) + (isFix ? 1 : 0)
   run.fable = Math.max(run.fable, Number((await $.store.get('fable:' + a.run)) ?? 0))
   // Codex runs on the person's own config: no routed model or effort, no Fable count.
-  const d = codex ? { model: 'codex', effort: '', reason: 'table', fable: false } : decide({ role: a.agent, hdr: a.hdr, run: { ...run, fixes }, depth: Profile.depth, settings: Profile.settings, weeklyPct: S.weeklyPct })
+  const d = codex ? { model: 'codex', effort: '', reason: 'table', fable: false } : decide({ role: a.agent, hdr: a.hdr, run: { ...run, fixes }, depth: Profile.depth, settings: Profile.settings, weeklyPct: Session.weeklyPct })
   const r = paneRole(a.agent)
   if (!r.pane) return { deny: r.why }
   await pollNow($, t)
@@ -126,12 +126,12 @@ export async function spawnPane($, e) {
 // (agentille-sweep.sh, from the lead's lead-<pane>.sessions list). A first prompt the person did not type is dropped
 // (panes.js sessionsToolInput): the session opens without it and the result says so.
 export async function openSessions($, e) {
-  if (!isLead()) return { deny: 'This is a worker pane (' + (S.selfName ?? S.worker.agent) + '); workers do not open sessions.' }
+  if (!isLead()) return { deny: 'This is a worker pane (' + (Session.selfName ?? Session.worker.agent) + '); workers do not open sessions.' }
   const skew = await installedSkew($)
   if (skew) {
-    if (!S.skewToasted) $.ui.toast('agt ⚑ ' + skewMessage(skew, S.runningVersion))
-    S.skewToasted = true
-    return { deny: skewMessage(skew, S.runningVersion) }
+    if (!Session.skewToasted) $.ui.toast('agt ⚑ ' + skewMessage(skew, Session.runningVersion))
+    markSkewToasted()
+    return { deny: skewMessage(skew, Session.runningVersion) }
   }
   const t = await transportOf($)
   if (t === 'none') return { deny: 'No pane transport here: sessions open as panes only inside Herdr or tmux.' }
@@ -172,7 +172,7 @@ export async function openSessions($, e) {
 
 // close_pane: one of this lead's own worker panes or sessions, by name.
 export async function closePane($, e) {
-  if (!isLead()) return { deny: 'This is a worker pane (' + (S.selfName ?? S.worker.agent) + '); workers do not close panes.' }
+  if (!isLead()) return { deny: 'This is a worker pane (' + (Session.selfName ?? Session.worker.agent) + '); workers do not close panes.' }
   const t = await transportOf($)
   if (t === 'none') return { deny: 'No pane transport here.' }
   const s = Sessions.sessions.find((x) => x.name === (typeof e.name === 'string' ? e.name.trim() : ''))
@@ -182,7 +182,7 @@ export async function closePane($, e) {
     return { result: c === 'closed' ? 'Closed ' + s.name + '.' : s.name + ' is already closed.' }
   }
   await pollNow($, t)
-  const c = closeTarget(e, Panes.panes, t === 'herdr' && S.selfTab ? [S.selfTab, ...Spawn.ownedTabs] : null, Spawn.openedNames)
+  const c = closeTarget(e, Panes.panes, t === 'herdr' && Session.selfTab ? [Session.selfTab, ...Spawn.ownedTabs] : null, Spawn.openedNames)
   if (c.gone) return { result: c.gone + ' is already closed (the reaper closed it after its answer was saved).' }
   if (c.error) return { deny: c.error }
   const r = await $.process.run(t === 'herdr' ? herdrCloseArgv(c.pane.id) : tmuxKillArgv(c.pane.id), PROBE).catch(() => null)

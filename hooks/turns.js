@@ -2,7 +2,7 @@
 // prompt.submit and turn.complete here; the per-turn proofs, the answer memo, the run-end tidy, the worker's
 // publish and a subagent's report and ledger all start from these two. The proofs themselves are proofs.js's.
 
-import { S, isLead, Wire, Display, Runs, Proofs } from './state.js'
+import { isLead, Wire, Display, Runs, Proofs, Session, setLeadTurn } from './state.js'
 import { runState, writeRunFile, writeReport, fileRunOf } from './dispatch.js'
 import { DECK, addFlag, clearFlags, setLastAnswer, mascotRest } from './display.js'
 import { flagOf, flagKey } from './focus.js'
@@ -34,7 +34,7 @@ export async function onPromptSubmit($, e) {
 // A turn ended: a main-loop answer (raw copy, run-end tidy, the worker's band and report) or a subagent's.
 export async function onTurnComplete($, e) {
   const a = e.agentId ? Runs.live.get(e.agentId) : undefined
-  if (!e.agentId) S.leadTurn = false
+  if (!e.agentId) setLeadTurn(false)
   if (!e.agentId && e.reason === 'answer' && typeof e.answer === 'string') {
     setLastAnswer({ text: e.answer, ms: e.durationMs, id: null, shaped: Proofs.shapedTurn, raw: Proofs.rawTurn })
     if (Display.highlightOn && (Proofs.agtTurn || Display.highlightAll)) $.ui.invalidate('ui.render')
@@ -55,20 +55,20 @@ export async function onTurnComplete($, e) {
     } else if (card && runHeld()) endRun() // a card after the person typed in between still ends the run's guard
 
   }
-  if (!e.agentId && S.worker && Display.mascot.working) {
+  if (!e.agentId && Session.worker && Display.mascot.working) {
     const now = await $.clock.now()
     mascotRest(now, e.reason === 'answer')
     ensureTicker($)
     $.ui.invalidate('ui.render')
   }
-  if (!e.agentId && S.wireName && Wire.pub.state === 'working') {
+  if (!e.agentId && Session.wireName && Wire.pub.state === 'working') {
     pubDone()
     await publish($, true)
     if (e.reason === 'answer') await reportDone($, e.answer)
-  } else if (!e.agentId && !S.wireName && S.selfName && e.reason === 'answer') {
+  } else if (!e.agentId && !Session.wireName && Session.selfName && e.reason === 'answer') {
     // A lead that gave this pane no wire identity (an older agentille, a hand-made pane) never hears from
     // it; the saved answer is all it can leave, and what the lead reads before closing the pane.
-    await saveAnswer($, S.selfName, e.answer)
+    await saveAnswer($, Session.selfName, e.answer)
   }
   if (a) {
     a.tool = null

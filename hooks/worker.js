@@ -1,7 +1,7 @@
 // agentille worker side of the wire: what this pane publishes about itself, the answer it saves under the run,
 // the done message it sends its lead, and (lead side) the status each visible worker last published.
 
-import { S, Profile, Spawn, Panes } from './state.js'
+import { Profile, Spawn, Panes, Session } from './state.js'
 import { makeStore } from './store.js'
 import { writeRunFile } from './dispatch.js'
 import { short, elapsed } from './live.js'
@@ -53,18 +53,18 @@ export function publish($, force = false) {
 }
 
 export async function publishNow($, force) {
-  if (!S.wireName) return
+  if (!Session.wireName) return
   const now = Date.now()
   if (!force && now - my.pub.at < PUBLISH_MS) return
   my.pub.at = now
-  await $.store.set(statusKey(S.wireName), workerStatus({ name: S.wireName, session: S.sessionId, ...my.pub, now })).catch(() => {})
+  await $.store.set(statusKey(Session.wireName), workerStatus({ name: Session.wireName, session: Session.sessionId, ...my.pub, now })).catch(() => {})
   if (Spawn.transport !== 'herdr') return
   // Herdr's sidebar follows the worker: its route, then what it is doing. Changes only.
   const title = my.pub.state === 'done' ? '✓ done ' + elapsed(my.pub.ms ?? 0) : my.pub.tool ?? my.pub.state
   if (title === lastMeta) return
   lastMeta = title
   const pane = await $.env.get('HERDR_PANE_ID')
-  const argv = pane && herdrMetaArgv(pane, { display: '▣ ' + shortName(S.wireName) + ' · ' + (S.worker?.model ?? short(my.pub.model)), title })
+  const argv = pane && herdrMetaArgv(pane, { display: '▣ ' + shortName(Session.wireName) + ' · ' + (Session.worker?.model ?? short(my.pub.model)), title })
   if (argv) await $.process.run(argv, PROBE).catch(() => {})
 }
 
@@ -83,11 +83,11 @@ export async function saveAnswer($, name, answer) {
 // Worker: a finished turn saves the full answer under the run and messages the lead its head,
 // so the lead wakes on its own and never scrapes the pane.
 export async function reportDone($, answer) {
-  const reportPath = await saveAnswer($, S.wireName, answer)
-  if (!S.leadSession) return
-  const text = doneMessage({ name: S.wireName, ms: my.pub.ms ?? 0, model: S.worker?.model ?? short(my.pub.model), effort: S.worker?.effort || my.pub.effort, tok: my.pub.tok, answer, reportPath })
-  const r = await $.session.send({ to: { sessionId: S.leadSession }, text }).catch((err) => ({ isDelivered: false, reason: String(err?.message ?? err) }))
-  if (r.isDelivered) noteWire({ from: shortName(S.wireName), to: 'lead', kind: 'done', summary: parseWire(text)?.summary || 'done', at: Date.now() })
+  const reportPath = await saveAnswer($, Session.wireName, answer)
+  if (!Session.leadSession) return
+  const text = doneMessage({ name: Session.wireName, ms: my.pub.ms ?? 0, model: Session.worker?.model ?? short(my.pub.model), effort: Session.worker?.effort || my.pub.effort, tok: my.pub.tok, answer, reportPath })
+  const r = await $.session.send({ to: { sessionId: Session.leadSession }, text }).catch((err) => ({ isDelivered: false, reason: String(err?.message ?? err) }))
+  if (r.isDelivered) noteWire({ from: shortName(Session.wireName), to: 'lead', kind: 'done', summary: parseWire(text)?.summary || 'done', at: Date.now() })
   else $.ui.toast('agt wire: the lead did not get the result (' + String(r.reason).slice(0, 80) + ')')
 }
 

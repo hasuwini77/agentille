@@ -1,7 +1,7 @@
 // agentille sessions: the person's own Herdr or tmux panes opened through open_sessions. No worker env, no
 // agt- name, no wire; a lead lists its Herdr ones so the SessionEnd sweep can close the idle ones.
 
-import { S, Profile } from './state.js'
+import { Profile, Session } from './state.js'
 import { makeStore } from './store.js'
 import { PROBE, tmuxEvenArgv, tmuxPaneIdOf, tmuxKillArgv, herdrPaneIdOf, herdrTabOf, herdrPromptArgv, herdrCloseArgv, herdrMetaArgv, herdrSessionSplitArgv, herdrSessionTabArgv, herdrSessionStartArgv, herdrRunArgv, herdrPaneGetArgv, herdrTerminalOf, tmuxSessionSplitArgv, tmuxTitleArgvs, tmuxTypeArgvs, sessionsFile } from './panes.js'
 import { runOk, startAgent } from './spawn.js'
@@ -83,7 +83,7 @@ export async function openSession($, t, o) {
   let terminal
   let tab = o.after?.tab ?? null
   if (o.newTab) {
-    const workspace = S.selfWorkspace ?? (await $.env.get('HERDR_WORKSPACE_ID'))
+    const workspace = Session.selfWorkspace ?? (await $.env.get('HERDR_WORKSPACE_ID'))
     if (!workspace) throw new Error('HERDR_WORKSPACE_ID is not set')
     const r = await runOk($, herdrSessionTabArgv({ workspace, cwd: o.cwd, label: 'sessions' }), PROBE)
     const made = herdrTabOf(r.stdout)

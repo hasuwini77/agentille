@@ -10,7 +10,7 @@ Each layer you ran, with the counts it printed. Say why when one was skipped.
 
 - [ ] Structural: `bash scripts/validate.sh` → _ fail(s), _ warning(s)
 - [ ] Mod: `claude plugin test .` → _ pass, _ fail
-- [ ] Behavioral (needed for changes to `skills/agt/` or `hooks/routing.js`): the eval suite → score _
+- [ ] Behavioral (needed for changes to `skills/agt/` or `hooks/routing.js`): the eval suite → _ of _ cases passed
 
 ## Checklist
 

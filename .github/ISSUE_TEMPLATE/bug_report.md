@@ -35,7 +35,7 @@ Tick what you ran on a clone of this repo, with the counts it printed. None of t
 
 - [ ] Structural: `bash scripts/validate.sh` → _ fail(s), _ warning(s)
 - [ ] Mod: `claude plugin test .` → _ pass, _ fail
-- [ ] Behavioral: the eval suite in `evals/` (flags in `.claude/CLAUDE.md` → Conventions) → score _
+- [ ] Behavioral: the eval suite in `evals/` (flags in `.claude/CLAUDE.md` → Conventions) → _ of _ cases passed
 
 ## Anything else
 

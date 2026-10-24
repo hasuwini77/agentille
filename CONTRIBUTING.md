@@ -27,7 +27,7 @@ Three layers. Run the first two on every change.
 
 - **Mod:** `claude plugin test .` runs every `tests/mod/*.test.ts` in an environment like the one the hooks run in. It exits 1 when a test fails. A test that walks the mock clock or boots a full session can take longer than the default limit on a busy machine: give it `{ timeoutMs: 20_000 }`.
 - **Structural:** `bash scripts/validate.sh` is a linter. It checks version consistency, that agent roles, the routing table and the docs agree, that `→ "Section"` cross-references point at real headings, that every hook module imports on its own, and it scans tracked files for paths and emails. It also runs the shell tests in `tests/hooks/` (the session-end sweep, the update check, the guard and worktree script against a real git repo, tmux against a private server). Run one alone with `bash tests/hooks/<name>.sh`. A test that cannot run here prints `SKIP: <reason>`.
-- **Behavioral:** the eval suite in `evals/` scores how `/agt` picks a level, roster and model. It is local and manual, never in CI, because every run spends your own credential. Run it before a change to `skills/agt/` or `hooks/routing.js`; the exact command is in `.claude/CLAUDE.md` → "Conventions".
+- **Behavioral:** the eval suite in `evals/` checks how `/agt` picks a level, roster and model. It is local and manual, never in CI, because every run spends your own credential. Run it before a change to `skills/agt/` or `hooks/routing.js`; the exact command is in `.claude/CLAUDE.md` → "Conventions".
 
 If you run the shell tests from inside a git hook, unset `GIT_DIR` and `GIT_WORK_TREE` first. A hook exports them, and a test that makes a throwaway repo would then act on this one.
 

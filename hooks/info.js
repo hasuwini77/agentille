@@ -42,7 +42,7 @@ export function parseInfoArgs(args) {
   return { view: 'route', role, hdr, depth }
 }
 
-const pick = (d) => (d.stop ? 'denied (routing.stopAtCeiling)' : d.model + (d.effort ? ' · ' + d.effort : '') + ' · ' + d.reason)
+const pick = (d) => (d.stop ? 'denied (' + (/seven-day/.test(d.stop) ? 'routing.stopAtWeeklyPct' : 'routing.stopAtCeiling') + ')' : d.model + (d.effort ? ' · ' + d.effort : '') + ' · ' + d.reason)
 
 // Dry-run of decide() with fresh run state under the person's routing settings, then each escalation
 // rung that changes the pick. Nothing here touches a live run.

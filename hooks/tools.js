@@ -107,13 +107,13 @@ export async function spawnPane($, e) {
   const slice = sliceOf(a.hdr)
   addRoute({ name: a.name, run: a.run, role: a.role, agent: a.agent, model: d.model, effort: d.effort, reason: d.reason, start: Date.now(), end: null, slice, verdict: null })
   noteWire({ from: 'lead', to: party(shortName(a.name), slice), kind: 'task', summary: taskLine(a.task) || a.agent, at: Date.now() })
-  const rec = { at: new Date().toISOString(), role: a.agent, model: d.model, effort: d.effort, reason: d.reason, asked: a.asked, agentId: null, kind: 'pane', pane: a.name, ...(d.capped && { capped: true }) }
+  const rec = { at: new Date().toISOString(), role: a.agent, model: d.model, effort: d.effort, reason: d.reason, asked: a.asked, agentId: null, kind: 'pane', pane: a.name, ...(d.capped && { capped: true }), ...(d.pastCeiling && { pastCeiling: true }) }
   await logDecision($, a.run, rec)
   await markRun($, a.run)
   await pollNow($, t)
   ensurePolling($)
   ensureTicker($)
-  if (d.capped) ceilingOnce($, a.run, spent, a.agent, d)
+  if (d.capped || d.pastCeiling) ceilingOnce($, a.run, spent, a.agent, d)
   else if (d.reason !== 'table') $.ui.toast('agt ↑ ' + a.agent + ' → ' + d.model + ' · ' + d.effort + ' — ' + d.reason)
   return { result: 'Opened ' + a.name + ' · ' + d.model + (codex ? '' : ' · ' + d.effort) + ' · ' + t + ' pane.' + (d.reason === 'table' ? '' : ' (' + d.reason + ')') + (codex ? codexNote(a.name, answerFile(Profile.home, a.run, a.role, paneKey(id))) : '') }
 }

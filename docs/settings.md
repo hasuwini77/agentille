@@ -54,8 +54,9 @@ The design-reviewer keeps opus · high under `complex-only` and `always`, and th
 | `maxFablePerRun` | `1` | How many Fable spawns the ladder may make in one run. |
 | `fableWeeklyCeiling` | `60` | The ladder reaches Fable only while your weekly plan usage is below this percent. |
 | `advisorOnOpus` | `true` | `false` starts Opus and Fable pane workers without Claude Code's advisor tool; Sonnet workers keep it. |
-| `maxRunUsd` | `15` | A per-run cost ceiling in US dollars (`null` turns it off), estimated from the agents' tokens, the lead's own tokens on the run and pane minutes. Past it, every later role but the executor that would run Opus runs Sonnet, with one toast and a band flag. How the estimate works and what it demotes: [routing-cost.md](./routing-cost.md) and the README's [Routing](../README.md#routing) section. |
-| `stopAtCeiling` | `false` | `true` refuses every dispatch, subagent or pane and whatever the role, once the run's estimate reaches `maxRunUsd`, instead of moving later roles to Sonnet. The deny line names the estimate and the ceiling. |
+| `maxRunUsd` | `15` | A per-run cost ceiling in US dollars (`null` turns it off), estimated from the agents' tokens, the lead's own tokens on the run and pane minutes. Past it, every later role but the executor that would run Opus runs Sonnet, with one toast and a band flag; a typed `--fable` passes it, and the toast says so. It is an API-list-price estimate, not your plan's quota. How the estimate works and what it demotes: [routing-cost.md](./routing-cost.md) and the README's [Routing](../README.md#routing) section. |
+| `stopAtCeiling` | `false` | `true` refuses every dispatch, subagent, pane or workflow agent and whatever the role, once the run's estimate reaches `maxRunUsd`, instead of moving later roles to Sonnet. The deny line names the estimate and the ceiling. |
+| `stopAtWeeklyPct` | `0` (off) | A number from 1 to 100 refuses every later dispatch once your subscription's seven-day usage percent is at or above it. This is the quota gate; `maxRunUsd` is a price estimate. Details: [routing-cost.md](./routing-cost.md). |
 
 The mod holds the model to `autoFable`: a dispatch header claiming `fable=forced` in a session where you did not type `--fable` is rewritten to `fable=auto`, with a toast.
 

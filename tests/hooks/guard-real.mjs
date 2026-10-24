@@ -293,6 +293,8 @@ try {
     for (const [line, text] of [
       ['npm run ship', 'its preship script'],
       ['npm run a', 'tools/push.sh runs a script that calls git push'],
+      ['npm run rel', 'imports ./lib.js, which calls git push'],
+      ['node tools/rel.mjs', 'imports ./lib.js, which calls git push'],
       ['npm run gone', 'cannot read'],
       ['npm run mod', 'runs a module that calls git push'],
       ['python3 -m tools.rel', 'runs a module that calls git push'],

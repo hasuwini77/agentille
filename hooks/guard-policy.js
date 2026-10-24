@@ -5,7 +5,7 @@
 import { Profile, Proofs } from './state.js'
 import { PROBE } from './panes.js'
 import { base, commands, commandSteps, joinPath, lineMovesHead, protectedPath, SCRIPT_RISK, MAKE_RISK } from './guard-lex.js'
-import { PLAIN_MODULE, moduleFiles, scriptChain } from './script-refs.js'
+import { PLAIN_MODULE, jsCandidates, jsImports, moduleFiles, scriptChain } from './script-refs.js'
 
 // The gh and curl/wget step readers live in a leaf the lexer shares; the policy keeps carrying their names.
 export { ghStep, httpStep } from './guard-steps.js'
@@ -252,6 +252,30 @@ async function textRisk($, text, dir, what, label, depth, seen, lang = 'sh') {
 // it runs are read). The line said so (node x.js, sh x.sh), else the shebang does; no shebang is a shell script.
 const langOf = (c, text) => c.lang && c.lang !== 'other' ? c.lang : c.lang === 'other' ? 'other' : /^#!.*\b(node|nodejs|bun|deno|tsx|ts-node)\b/.test(text) ? 'node' : /^#!.*\bpython/.test(text) ? 'python' : /^#!/.test(text) && !/^#!.*\b(ba|z|da|k)?sh\b/.test(text) ? 'other' : 'sh'
 
+// A node file's relative imports, one level deep: each must be found and read (unless the file was reached from a
+// shell script, `from` 'shell'), and none may call a tool that can push, merge, tag or release.
+async function importRisk($, c, text, from) {
+  const dir = c.path.slice(0, c.path.lastIndexOf('/')) || '/'
+  for (const spec of jsImports(text)) {
+    let found = null
+    for (const cand of jsCandidates(spec)) {
+      const p = joinPath(dir, cand)
+      const t = await $.fs.read(p).catch(() => null)
+      if (t !== null) {
+        found = { p, t }
+        break
+      }
+    }
+    if (!found) {
+      if (lenient(from)) continue
+      return c.what + ' imports ' + spec + ', which the guard cannot read'
+    }
+    if (INSTALLED.test(found.p)) continue
+    if (SCRIPT_RISK.test(found.t)) return c.what + ' imports ' + spec + RISK_TAIL.replace(' that', ', which')
+  }
+  return null
+}
+
 // python -m pkg.mod: the module is looked for where python looks first, the command's folder, then each PYTHONPATH
 // entry; its parent packages' __init__.py and its own file are read. Not there, python is asked where the module
 // lives (by its top-level name, isolated from the folder and PYTHONPATH, so no repo code runs): a module inside
@@ -349,7 +373,8 @@ async function fileRisk($, c, depth = 0, seen = new Set(), from = 'line') {
   // pieces (`G=git; $G ${P}sh`) is seen too.
   const lang = langOf(c, text)
   const why = await textRisk($, text, c.dir, c.what, 'script', depth, seen, lang)
-  return why
+  if (why || lang !== 'node') return why
+  return importRisk($, c, text, from)
 }
 
 

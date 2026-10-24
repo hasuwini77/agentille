@@ -5,7 +5,7 @@
 import { S, isLead } from './state.js'
 import { demoteToast, runState, writeRunFile } from './dispatch.js'
 import { pieceOf, party, taskLine } from './links.js'
-import { PROBE, newRunId, doneFile, paneKey, answerFile, tmuxKillArgv, placePlan, codexNote, herdrCloseArgv, paneRole, spawnToolInput, closeTarget, sessionName, sessionsToolInput, sessionsNote } from './panes.js'
+import { PROBE, newRunId, doneFile, paneKey, answerFile, tmuxKillArgv, placePlan, codexNote, herdrCloseArgv, paneRole, spawnToolInput, closeTarget, sessionName, sessionsToolInput, sessionsNote, droppedNote } from './panes.js'
 import { installedSkew } from './profile.js'
 import { pollNow } from './reaper.js'
 import { spawnAllowed, sessionsAllowed, fableProof, moment, startRun } from './proofs.js'
@@ -120,7 +120,8 @@ export async function spawnPane($, e) {
 // open_sessions: panes the person asked for, their own, like ones opened by hand. No worker env, no agt- name and
 // no wire, so the band and the worker reaper leave them alone; each one is a lead of its own. On Herdr a Claude or
 // Codex session is closed when idle: after SESSION_IDLE_MS unfocused (panes.js → sessionSweep), and at session end
-// (agentille-sweep.sh, from the lead's lead-<pane>.sessions list).
+// (agentille-sweep.sh, from the lead's lead-<pane>.sessions list). A first prompt the person did not type is dropped
+// (panes.js sessionsToolInput): the session opens without it and the result says so.
 export async function openSessions($, e) {
   if (!isLead()) return { deny: 'This is a worker pane (' + (S.selfName ?? S.worker.agent) + '); workers do not open sessions.' }
   const skew = await installedSkew($)
@@ -163,7 +164,7 @@ export async function openSessions($, e) {
   ensurePolling($)
   const what = a.kind === 'claude' ? 'Claude' + (a.model ? ' · ' + a.model : '') : a.kind === 'codex' ? 'Codex' : 'shell'
   const stop = failed ? ' Session ' + (names.length + 1) + ' failed: ' + failed : ''
-  return { result: 'Opened ' + names.join(', ') + ' · ' + what + ' · ' + t + (names.length > 1 ? ' panes.' : ' pane.') + stop + sessionsNote(t, a.kind) }
+  return { result: 'Opened ' + names.join(', ') + ' · ' + what + ' · ' + t + (names.length > 1 ? ' panes.' : ' pane.') + stop + droppedNote(a.dropped, names) + sessionsNote(t, a.kind) }
 }
 
 // close_pane: one of this lead's own worker panes or sessions, by name.

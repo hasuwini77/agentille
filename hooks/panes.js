@@ -472,7 +472,7 @@ export const OPEN_SESSIONS_TOOL = {
     type: 'object',
     properties: {
       count: { type: 'integer', minimum: 1, maximum: MAX_SESSIONS, description: 'How many sessions. Default: one per task, else 1.' },
-      tasks: { type: 'array', items: { type: 'string' }, maxItems: MAX_SESSIONS, description: 'Optional first prompt per session, in order (a command to run for a shell). Only when the person gave one.' },
+      tasks: { type: 'array', items: { type: 'string' }, maxItems: MAX_SESSIONS, description: 'Optional first prompt per session, in order (a command to run for a shell). Only when the person gave one: their own words from this prompt, word for word. Any other task is dropped and that session opens with no first prompt.' },
       kind: { type: 'string', enum: SESSION_KINDS, description: 'What runs in each pane. Default "claude"; "codex" needs Herdr.' },
       model: { type: 'string', enum: TOOL_MODELS, description: 'Claude only, when the person named a model. Default: their own default model.' },
       cwd: { type: 'string', description: 'Absolute directory to start in. Default: this session\'s directory.' },
@@ -549,10 +549,55 @@ export function shellCommands(typed) {
   return out
 }
 
-// open_sessions input → { count, tasks, kind, model, cwd, layout } or { error }. `tasks` has one entry per
-// session, null where none was given. `typed` is the person's own prompt: a shell command runs only when it is
-// one of its shellCommands, and `--fable` rides into a Claude or Codex session only when `fableTyped` says the
-// person typed it.
+// The first prompts a Claude or Codex session may get, read off the person's typed prompt like a shell's commands:
+// the prompt with its asks for sessions taken out (so a list on the lines after "open two sessions:" counts), cut
+// into clauses at sentence ends, new lines, `;`, `, `, `: ` and a lone and / then / but. A task is one clause or a run
+// of clauses, word for word (case, spacing, a trailing stop, a list bullet and enclosing quotes aside), with or
+// without leading glue such as "one to", "and ask it to", "with the prompt", "on opus to". A clause whose own sentence says not
+// to ("do not …", "never …") before it starts is never a prompt on its own: "Do not git push origin main" does not
+// yield `git push origin main`. Returns the set of normalised forms.
+const CLAUSE_SPLIT = /(?<=[\w)\]"'`”’~/])[.!?](?=\s|$)|\n|;|,(?=\s)|:(?=\s)|\s(?:and\s+then|and|then|but)(?=\s)/gi
+const GLUE = /^(?:(?:and|then|also|so|please|now|next|first|second|third|one|another|the\s+other|the\s+(?:first|second|third|next|last)(?:\s+one)?|to|that|which|for|with(?:\s+(?:the|a))?|(?:first\s+)?(?:prompt|task|message)(?:\s+(?:of|is))?|saying|that\s+says|(?:ask|tell|get|have|let|make|send|give|prompt)\s+(?:it|them|each|one|both)(?:\s+to)?|running|run|(?:on|in|at|inside|from|using)\s+\S+)(?=\s|$)|[:\-–—])\s*/i
+const MAX_RUN = 12
+const normTask = (s) => {
+  let x = String(s).replace(/\s+/g, ' ').trim().replace(/[.!?]+$/, '').trim().replace(/^(?:[-*•]|\d+[.)])\s+/, '')
+  const q = /^([`"'“‘])(.+)([`"'”’])$/.exec(x)
+  if (q) x = q[2].trim()
+  return x.toLowerCase()
+}
+export function sessionPrompts(typed) {
+  const raw = String(typed ?? '')
+  let t = raw
+  for (const a of sessionAskSpans(raw)) t = t.slice(0, a.start) + '\n'.padEnd(a.end - a.start, ' ') + t.slice(a.end)
+  const clauses = []
+  let at = 0
+  for (const m of t.matchAll(CLAUSE_SPLIT)) {
+    clauses.push([at, m.index])
+    at = m.index + m[0].length
+  }
+  clauses.push([at, t.length])
+  const out = new Set()
+  for (let i = 0; i < clauses.length; i++) {
+    if (NEGATED.test(t.slice(sentenceStart(t, clauses[i][0]), clauses[i][0]))) continue
+    for (let j = i; j < clauses.length && j - i < MAX_RUN; j++) {
+      let v = normTask(t.slice(clauses[i][0], clauses[j][1]))
+      while (v) {
+        out.add(v)
+        const n = normTask(v.replace(GLUE, ''))
+        if (n === v) break
+        v = n
+      }
+    }
+  }
+  return out
+}
+
+// open_sessions input → { count, tasks, kind, model, cwd, layout, dropped } or { error }. `tasks` has one entry per
+// session, null where none was given. `typed` is the person's own prompt, and a session is the person's, with no Bash
+// guard in it, so a first prompt is never the model's own: a shell command runs only when it is one of
+// shellCommands, a Claude or Codex prompt only when it is one of sessionPrompts. Any other task is dropped, the
+// session opens with no first prompt, and `dropped` says which and why. `--fable` rides into a Claude or Codex
+// session only when `fableTyped` says the person typed it.
 export function sessionsToolInput(input, { typed = '', fableTyped = false } = {}) {
   const i = input ?? {}
   const str = (v) => (typeof v === 'string' ? v.trim() : '')
@@ -571,13 +616,27 @@ export function sessionsToolInput(input, { typed = '', fableTyped = false } = {}
   if (!LAYOUTS.includes(layout)) return { error: 'layout must be one of ' + LAYOUTS.join(', ') + '.' }
   if (cwd !== null && (!cwd.startsWith('/') || cwd.includes('\0'))) return { error: 'cwd must be an absolute path.' }
   let tasks = Array.from({ length: count }, (_, n) => str(given[n]) || null)
+  const dropped = []
+  const drop = (n, why) => {
+    dropped.push({ n, task: tasks[n], why })
+    tasks[n] = null
+  }
   if (kind === 'shell') {
     const ok = shellCommands(typed)
-    const bad = tasks.find((t) => t && !ok.has(t))
-    if (bad) return { error: 'A shell command runs only as the person typed it: "' + bad.slice(0, 60) + '" is not a command they quoted or asked a shell to run.' }
-  } else if (!fableTyped) tasks = tasks.map((t) => (t ? stripFable(t) || null : t))
+    tasks.forEach((t, n) => t && !ok.has(t) && drop(n, 'a shell command runs only as the person typed it, and this is not a command they quoted or asked a shell to run'))
+  } else {
+    const ok = sessionPrompts(typed)
+    tasks.forEach((t, n) => t && !ok.has(normTask(t)) && !ok.has(normTask(stripFable(t))) && drop(n, 'a first prompt runs only as the person typed it, and this is not in their newest prompt word for word'))
+    if (!fableTyped) tasks = tasks.map((t) => (t ? stripFable(t) || null : t))
+  }
   if (kind === 'claude' && tasks.some((t) => t && BARE_WORD.test(t))) return { error: 'A one-word task would run as a claude subcommand. Say more.' }
-  return { count, tasks, kind, model, cwd, layout }
+  return { count, tasks, kind, model, cwd, layout, dropped }
+}
+
+// What the tool result says about tasks sessionsToolInput dropped: the session opened anyway, with no first prompt.
+export function droppedNote(dropped, names) {
+  if (!dropped?.length) return ''
+  return dropped.filter((d) => names[d.n]).map((d) => ' ' + names[d.n] + ' opened with no first prompt: "' + String(d.task).slice(0, 60) + '" was dropped (' + d.why + '). The person can type it there.').join('')
 }
 
 // herdr: a plain split or tab, with none of a worker's env.

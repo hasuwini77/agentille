@@ -36,8 +36,9 @@ export function formationOf(hdr) {
 
 // autoFable is opt-in: Fable costs about twice Opus, so the ladder may only reach it when profile.routing.autoFable is true.
 // maxRunUsd is the run's cost ceiling in US dollars (see runCeiling below): 15 by default, about two heavy runs' worth
-// of Opus review at list prices; the person's `null` (or anything but a positive number) turns it off.
-export const DEFAULTS = { autoFable: false, maxFablePerRun: 1, fableWeeklyCeiling: 60, advisorOnOpus: true, maxRunUsd: 15 }
+// of Opus review at list prices; the person's `null` (or anything but a positive number) turns it off. stopAtCeiling
+// true turns the ceiling from a demotion into a stop: every later dispatch of the run is denied (runStop below).
+export const DEFAULTS = { autoFable: false, maxFablePerRun: 1, fableWeeklyCeiling: 60, advisorOnOpus: true, maxRunUsd: 15, stopAtCeiling: false }
 
 // US dollars per million tokens, by model family, at the current generation's first-party API list price (Fable 5.1,
 // Opus 5.5, Sonnet 5.5, Haiku 5.5 up to 100K-token prompts). An estimate, not a bill: a plan subscription is not billed
@@ -288,8 +289,19 @@ export function ladderFixes(run, piece) {
 // run: { revise, fixes, fable, usd? } observed so far (usd: estimateRunUsd, for the maxRunUsd ceiling) · settings:
 // profile.routing merged over DEFAULTS · weeklyPct: seven_day percent used, or null when unknown. A typed --fable is
 // the person's choice and passes the ceiling; every other pick goes through runCeiling last.
+// With `stopAtCeiling: true`, a run at or past maxRunUsd dispatches nothing more: every role (the executor and a
+// typed --fable included) gets `stop`, the line the dispatch is denied with. Off (the default), runCeiling demotes.
+export function runStop(run, settings) {
+  const max = maxRunUsdOf(settings)
+  if (max == null || settings?.stopAtCeiling !== true) return null
+  if (!(typeof run?.usd === 'number' && run.usd >= max)) return null
+  return 'agt ✗ run ~' + usd(run.usd) + ' reached its cost ceiling, maxRunUsd ' + usd(max) + ', and routing.stopAtCeiling is on: no more dispatches this run. Raise routing.maxRunUsd in ~/.agentille/profile.json (or set stopAtCeiling to false) to go on.'
+}
+
 export function decide(o) {
   const { forced, ...d } = pick(o)
+  const stop = runStop(o.run ?? {}, o.settings ?? DEFAULTS)
+  if (stop) return { ...d, fable: false, stop }
   return forced ? d : runCeiling(d, o.role, o.run ?? {}, o.settings ?? DEFAULTS)
 }
 

@@ -9,7 +9,7 @@ import { PROBE, newRunId, doneFile, paneKey, answerFile, tmuxKillArgv, placePlan
 import { installedSkew } from './profile.js'
 import { pollNow } from './reaper.js'
 import { spawnAllowed, sessionsAllowed, fableProof, moment, startRun, agtTurnFromDispatch, flight } from './proofs.js'
-import { formationOf, mentionsCodex, mentionsFable, proveHeader, demoteHeaderText, ladderFixes, decide } from './routing.js'
+import { formationOf, mentionsCodex, mentionsFable, proveHeader, demoteHeaderText, ladderFixes, decide, runStop } from './routing.js'
 import { saveSessions, closeSession, openSession, addSession } from './sessions.js'
 import { skewMessage } from './skew.js'
 import { transportOf, openPane, savePanes, ownName } from './spawn.js'
@@ -72,6 +72,9 @@ export async function spawnPane($, e) {
   // The ceiling counts this run's subagents and its pane workers (estimated from their minutes open).
   const spent = runSpend(a.run)
   const d = codex ? { model: 'codex', effort: '', reason: 'table', fable: false } : decide({ role: a.agent, hdr: a.hdr, run: { ...run, fixes, usd: spent }, depth: Profile.depth, settings: Profile.settings, weeklyPct: Session.weeklyPct })
+  // routing.stopAtCeiling: a run at its ceiling opens no more panes, a Codex one included.
+  const stop = d.stop ?? runStop({ usd: spent }, Profile.settings)
+  if (stop) return { deny: stop }
   const r = paneRole(a.agent)
   if (!r.pane) return { deny: r.why }
   await pollNow($, t)

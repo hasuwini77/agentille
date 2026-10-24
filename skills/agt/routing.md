@@ -104,6 +104,7 @@ Evidence is observed by the mod, not claimed by the lead.
 ### Cost ceiling
 
 `profile.routing.maxRunUsd` (default `15`; `null`, `0` or anything but a positive number turns it off) caps a run's estimated spend in US dollars. Subagents are priced from their tokens at API list prices; a pane worker reports no tokens, so `paneUsd` in `hooks/routing.js` estimates it from its role, routed model and minutes open (a Codex pane counts $0). The lead's own tokens on the run count too, priced at the lead's model.
+With `profile.routing.stopAtCeiling: true` (default `false`), a run at or past the ceiling dispatches nothing more: every later subagent or pane, the executor included, is denied with one line that names the ceiling, the estimate and how to raise it.
 The price table, the pane formula and what the estimate leaves out: `docs/routing-cost.md` at the plugin root.
 
 - **Past the ceiling,** every later dispatch, subagent or pane, of a role the table or the ladder puts on Opus (or a ladder Fable) runs Sonnet at the same effort: the planner, the plan-reviewer, every reviewer (design-reviewer and a duel's judge included), the ui-prototyper and the adversary. Only the executor, which never changes model, and a typed `--fable` keep their route.

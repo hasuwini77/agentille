@@ -240,6 +240,8 @@ export async function dispatchAgent($, e, next) {
   // The run's spend so far, estimated from its agents' tokens and its panes' minutes, only when a ceiling is set.
   const spent = runSpend(runId)
   const d = decide({ role, hdr, run: { ...run, fixes: ladderFixes(run, pieceOf(hdr)), usd: spent }, depth: Profile.depth, settings: Profile.settings, weeklyPct: Session.weeklyPct })
+  // routing.stopAtCeiling: the run is at its ceiling, so nothing more is dispatched, whatever the role.
+  if (d.stop) return { deny: d.stop }
   const res = await next({ ...e, model: d.model })
   if (res.deny) return res
 

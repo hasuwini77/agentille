@@ -49,7 +49,8 @@ Print the recon line before anything else: `recon: <level> · <transport> · <on
 1. **Profile.** Read `~/.agentille/profile.json`. Missing or unreadable → defaults (`deliveryStyle: direct`, `tone: peer-to-peer`, `preTaskQuestioning: ambiguous-only`, `thinkingDepth: complex-only`); never stop.
    With no voice keys (`name`, `role`, `deliveryStyle`, `tone`, `preTaskQuestioning`, `neverDo`) and no `~/.agentille/state/.tip-shown`, print `tip: /agentille-init makes agents sound like you` once and create that marker, unless the mod draws (`display.md`).
 2. **Level.** Resolve it with "Levels" and print the recon line.
-3. **Solo steps aside.** Do the task yourself: no run dir, no agents, no card.
+3. **Solo steps aside.** Do the task yourself: no run dir, no agents (no reviewer either), no card.
+   Before the push (under `local`, before you report), review your own full diff once: it does what the task asked, nothing outside it changed, and the check you ran (build, test or the real command) passed. Fix what you find in place and re-run that check.
    The fix lands on a new `fix/<slug>` branch, or `agt/<slug>` when the current branch is a feature branch. It lands on the current branch only when the person's typed words name it, and never on main. Under `pr` it opens a PR; every other mode works as `factory.md` → "Integrate" says.
    A solo bug follows the executor's loop: reproduce with the real command and quote the failing line, form one hypothesis ("X because Y"), make the smallest change, re-run.
    Three misses → stop, name the assumption that may be wrong, and say so. Never try a fourth blind fix. This is the executor's own rule (`agents/agentille-executor.md` → "Debugging"); `/agt debug` runs the full loop.

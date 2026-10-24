@@ -28,7 +28,7 @@ They join when the UI work spans more than one screen (a new page, a flow, a sha
 - **auth** — session, token, JWT, cookie, OAuth, password hashing or reset, 2FA, CSRF, permission, role check, middleware guard, API key, secret
 - **money** — payment, checkout, price, subscription, invoice, refund, webhook, billing, Stripe
 - **data** — migration, schema, drop, truncate, backfill, production data, PII export
-- **none** — a screen named after one of those with no logic behind it: a login, sign-in or checkout form, page, button, copy or styling change that calls an existing endpoint and stores nothing. It runs solo or low like any other UI change, with the code-reviewer. The security-reviewer joins only when the diff turns out to touch a guard, a token or a secret. The gauntlet never runs for it.
+- **none** — a screen named after one of those with no logic behind it: a login, sign-in or checkout form, page, button, copy or styling change that calls an existing endpoint and stores nothing. It runs like any other UI change: solo, or low with the reviewers the roster gives it. The security-reviewer joins only when the diff turns out to touch a guard, a token or a secret (then the task is auth work, which never runs solo). The gauntlet never runs for it.
 
 ## Stage 2 classify
 
@@ -48,6 +48,7 @@ Malformed JSON → `low` plus a one-line note; never crash. If the level hinges 
 | debug | — | — | — | ✓ (debug loop) | after a fix lands | — | — |
 | review | — | — | — | — | ✓ | if UI code | if auth/money/data |
 
+- A solo run dispatches no role in this table: the lead builds alone and reviews its own diff before it pushes (`SKILL.md` → "The contract" step 3).
 - The ui-prototyper runs **before** the executor; pass its Blueprint into the executor prompt as the design contract.
 - Skip the plan-reviewer on `thinkingDepth=quick` and for a ≤3-step fully sequential plan. Its `quick` cell in "Default routing" is the route a plan-reviewer still dispatched under `quick` gets.
 - Design-reviewer viewports: the ones the user names, else `profile.viewports`, else desktop + mobile.
@@ -90,7 +91,7 @@ The mod logs the table's pick beside the model that ran, flags a drift (`/agt-in
 ## Hard rules
 
 - **Never use Haiku for the executor**, and never change its model (effort only). Haiku is for Stage 2 classify and read-only scouts (`SKILL.md` → "The contract") only.
-- **Never downgrade the design-reviewer** below opus · high, except under `thinkingDepth=quick`, where it runs sonnet · high like the other reviewers.
+- **Never downgrade the design-reviewer** below opus · high, except in two cases where it runs Sonnet like the other reviewers: under `thinkingDepth=quick` (sonnet · high), and past the cost ceiling ("Cost ceiling" below: sonnet at its routed effort).
 - **Declare `model:` on every dispatch** (fallback when the mod is off).
 
 ## Escalation ladder

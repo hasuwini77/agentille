@@ -42,14 +42,14 @@ CONTEXT-PACK: per step, so executors do not re-explore the repo:
 The CONTEXT-PACK is mandatory whenever the plan has executor steps. With ≥2 PARALLEL-OK steps, also emit (omit for a fully sequential plan; do not rename the headers):
 
 ```
-BUCKET-GRAPH
+SLICE-GRAPH
   id: B1 | name: <short> | files: <exact disjoint list> | depends-on: [] | done-criteria: <runnable check>
 WAVES
   Wave 1 (parallel): B1, B3
   Wave 2 (sequential): B2      ← depends-on all met by earlier waves
 ```
 
-Each bucket maps 1:1 to a step; keep them in sync. Waves hold buckets whose dependencies sit in earlier waves, at most ≤3 executors per wave.
+Each slice maps 1:1 to a step; keep them in sync. Waves hold slices whose dependencies sit in earlier waves, at most ≤3 executors per wave.
 
 ## Rules
 
@@ -57,13 +57,13 @@ Each bucket maps 1:1 to a step; keep them in sync. Waves hold buckets whose depe
   Put product or business guesses (pricing, public copy, free vs paid) under ASSUMPTIONS: they make the gate escalate.
 - **Goal-backward.** State the goal and verification first, then derive steps. List outcomes, not activities; no "consider/explore/investigate" steps. Every step ends in a concrete artifact.
 - **Mark parallelism honestly.** Parallel-safe only if the steps touch different files AND neither needs the other's output; when in doubt, SEQUENTIAL.
-- **Slice vertically** (one thin end-to-end capability plus its test), not by layer, with exact disjoint file sets. Two chunks sharing a file are SEQUENTIAL or merged.
+- **Slice vertically** (one thin end-to-end capability plus its test), not by layer, with exact disjoint file sets. Two slices sharing a file are SEQUENTIAL or merged.
 - **Freeze shared hotspots first.** Before marking anything PARALLEL-OK, list the files two or more slices would change: package manifests and lockfiles, schema and migrations, shared types and barrel `index` files, route/nav/DI registries, global config (tsconfig, env schema, theme), i18n catalogs.
   If any exist, step 1 is a SEQUENTIAL `B0 contract` that lands them all (dependencies, schema, types, registry entries, stubs) in wave 1 alone; every parallel slice depends on B0 and only consumes it, and no other slice touches a lockfile. B0 is frozen like a relay contract: a slice that needs it changed reports `CONTRACT:`.
 - **Coupled by an interface, not files?** Mark `coupled-by: <interface>`; the lead can run a relay: one executor first commits the shared types, stubs and contract tests, then the coupled slices build in parallel from that commit with the contract frozen. State the shared contract once.
 - **Every slice builds alone.** A removed or renamed file lives in the same slice as every importer, and a changed export with its callers. A slice that cannot build without a sibling means the split is wrong.
-- **Size chunks to ≤ ~20% of an executor's context** (about 2,500 lines of read set on a 200k window). Prefer small vertical slices to fat ones, but never split below break-even: a 3-line edit is not its own chunk.
-- **End every chunk at a committable boundary**: code plus its test committed, verification run.
+- **Size slices to ≤ ~20% of an executor's context** (about 2,500 lines of read set on a 200k window). Prefer small vertical slices to fat ones, but never split below break-even: a 3-line edit is not its own slice.
+- **End every slice at a committable boundary**: code plus its test committed, verification run.
 - **Adaptive count.** As many slices as the work has natural seams; at most 3 executors run per wave, so extra seams shrink context, not wall-clock.
 - Match the prefix's `Depth:` (`quick` → ≤5 steps; `always` → reasoning notes per step) and `deliveryStyle` (`direct` = no preamble).
 

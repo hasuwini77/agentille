@@ -416,6 +416,17 @@ describe('maxRunUsd: a per-run cost ceiling', () => {
     }
   })
 
+  test('the design-reviewer drops below opus · high only under quick or past the ceiling, where it runs Sonnet like the other reviewers', async () => {
+    for (const hdr of [{}, { size: 'large' }, { risk: 'auth' }, { risk: 'money' }, { size: 'large', risk: 'data' }]) {
+      expect(decide({ role: 'design-reviewer', hdr, run: under, settings: C })).toEqual({ model: 'opus', effort: 'high', reason: 'table', fable: false })
+      expect(decide({ role: 'design-reviewer', hdr, run: under, depth: 'quick', settings: C })).toEqual({ model: 'sonnet', effort: 'high', reason: 'table', fable: false })
+      expect(decide({ role: 'design-reviewer', hdr, run: over, settings: C })).toMatchObject({ model: 'sonnet', effort: 'high', fable: false, capped: true, from: 'opus' })
+    }
+    expect(CEILING_ROLES.has('design-reviewer')).toBe(true)
+    // A typed --fable is the person's choice and holds past the ceiling, as for every other Fable role.
+    expect(decide({ role: 'design-reviewer', hdr: { fable: 'forced' }, run: over, settings: C })).toMatchObject({ model: 'fable', fable: true })
+  })
+
   test('a pane worker is estimated from its role, its routed model and its minutes open', async () => {
     const t0 = 1_000_000
     const exec = { run: 'r1', agent: 'executor', model: 'sonnet', start: t0, end: t0 + 10 * 60_000 }

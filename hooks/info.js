@@ -55,11 +55,11 @@ export function routeText({ role, hdr = {}, depth = null }, settings, weeklyPct 
     ['2nd REVISE', ask(hdr, { revise: 2 })],
     ['fix attempt 2', ask({ ...hdr, mode: 'fix' }, { fixes: 2 })],
     ['fix attempt 3', ask({ ...hdr, mode: 'fix' }, { fixes: 3 })],
-    ['diagnose, 3 failed fixes', ask({ ...hdr, mode: 'diagnose' }, { fixes: 3 })],
+    ['diagnose, 2 failed fixes', ask({ ...hdr, mode: 'diagnose' }, { fixes: 2 })],
   ].filter(([, d]) => d.model !== base.model || d.effort !== base.effort || d.reason !== base.reason)
   const lines = [head + ' → ' + pick(base)]
   if (rungs.length === 0) lines.push('  no escalation rungs for this role')
-  for (const [label, d] of rungs) lines.push('  ' + label.padEnd(24) + pick(d))
+  for (const [label, d] of rungs) lines.push('  ' + label.padEnd(26) + pick(d))
   return lines.join('\n')
 }
 

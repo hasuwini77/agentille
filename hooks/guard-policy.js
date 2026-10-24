@@ -16,6 +16,8 @@ export const DENY_INTEGRATION = 'integration auto is not set in your profile for
 
 export const DENY_PUSH = 'integration auto is not set in your profile for this repo: a run pushes only its own branch (one it made a worktree on or created on the remote, its agt/* slice branch, or the branch checked out where /agt was typed), never the base branch (main, master, the remote default, the checkout upstream), a tag, a force push (--force-with-lease only on its own agt/* branch), a branch deletion or every branch. Write the branch name and the directory out (no variables) and push again.'
 
+export const DENY_PUBLISH = 'integration auto is not set in your profile for this repo: a deploy, a publish or a destructive repo change (a package or release published, an image pushed, a production deploy, a secret or collaborator written, a repo deleted, renamed or transferred) needs integration auto, or the person runs it.'
+
 export const DENY_LOCAL = 'integration is local for this repo: the run pushes nothing and opens no PR.'
 
 export const denyHidden = (what) => 'integration auto is not set in your profile for this repo, and ' + what + ', where the guard cannot judge a push, merge, tag or release. Run those steps as plain commands, with the branch and directory written out.'
@@ -135,7 +137,7 @@ export function integrationIn(line, { cwd = null, current = null, pushDst = null
   if (mode === 'auto') return null
   for (const c of commandSteps(line, cwd, 0, Profile.home ? [Profile.home] : [])) {
     if (c.kind === 'protected') return c.what
-    if (c.kind === 'step') return c.what
+    if (c.kind === 'step' || c.kind === 'publish') return c.what
     if (c.kind === 'ref') {
       const why = judgeRef(c.ref, { current, bases: new Set(['main', 'master', b].filter(Boolean)) })
       if (why) return why
@@ -251,6 +253,8 @@ async function textRisk($, text, dir, what, label, depth, seen, lang = 'sh') {
   }
   for (const s of steps) {
     if (s.kind === 'protected') return what + ' runs a ' + label + ' that writes ' + s.what
+    // A merge, tag, release or publish named in the text, read as a command (gh workflow run, npm publish, release-it).
+    if (s.kind === 'step' || s.kind === 'publish') return what + ' runs a ' + label + ' that runs ' + s.what
     // A step the reader could not read at all (an unresolved program or subcommand, nesting past the caps): the
     // script may push through it, so it refuses whatever the label.
     if (s.kind === 'hidden' && s.unread) return what + ' runs a ' + label + ' where ' + s.what
@@ -1032,6 +1036,7 @@ async function judgeCands($, cands, ctx, depth) {
     }
     if (c.kind === 'protected') return denyProtected(c.what)
     if (c.kind === 'step') return DENY_INTEGRATION
+    if (c.kind === 'publish') return DENY_PUBLISH + ' Refused: ' + c.what + '.'
     if (c.kind === 'hidden') return denyHidden(c.what)
     if (c.kind === 'file') {
       const why = await fileRisk($, c)

@@ -1,5 +1,5 @@
 import { describe, expect, mock, test } from 'claude-code/testing'
-import { DENY_INTEGRATION, DENY_LOCAL, DENY_PUSH, DENY_UNREAD, capsOf, claimedTrees, integrationIn, integrationOf, joinPath, judgePush, newTrees, normSlug, normUrl, parseOwned, recordTrees, sameRemote, scriptSlugs, scriptTrees, splitCommands, worktreeAdds } from '../../hooks/guard.js'
+import { DENY_INTEGRATION, DENY_LOCAL, DENY_PUBLISH, DENY_PUSH, DENY_UNREAD, capsOf, claimedTrees, integrationIn, integrationOf, joinPath, judgePush, newTrees, normSlug, normUrl, parseOwned, recordTrees, sameRemote, scriptSlugs, scriptTrees, splitCommands, worktreeAdds } from '../../hooks/guard.js'
 import { parseWorktrees } from '../../hooks/clean.js'
 import { DEFAULT_PROFILE, guardLine as judge, loadRunProfile } from '../../hooks/guard.js'
 import { setRunProfile } from '../../hooks/proofs.js'
@@ -1766,6 +1766,48 @@ describe('guard: --force-with-lease on the run\'s own agt/* branch', () => {
     expect((await bash($, 'cd /work/repo-x && git push --force origin agt/x')).deny).toContain('git push --force')
     expect((await bash($, 'cd /work/repo-x && git push --force-with-lease=main origin agt/x')).deny).toContain('not an agt/* branch of this run')
     expect(ran).toEqual(['cd /work/repo-x && git push --force-with-lease origin agt/x', 'cd /work/repo-x && git push --force-with-lease=agt/x --force-if-includes origin HEAD', 'git worktree add ../repo-x -b agt/x', 'git push --force-with-lease origin agt/x'])
+  })
+})
+
+describe('guard: publish, deploy and destructive repo changes are auto only', () => {
+  const PUB = ['npm publish', 'pnpm publish --access public', 'yarn npm publish', 'bun publish', 'npm dist-tag add p@1.2.0 latest', 'npm unpublish p@1.0.0',
+    'cargo publish', 'twine upload dist/*', 'python3 -m twine upload dist/*', 'gem push p.gem', 'docker push img:1', 'docker image push img', 'podman push img',
+    'docker buildx build --push -t img .', 'vercel --prod', 'vercel deploy --prod', 'railway up', 'fly deploy', 'flyctl deploy', 'release-it', 'semantic-release',
+    'changeset publish', 'lerna publish', 'gh repo delete o/r --yes', 'gh repo archive o/r', 'gh repo rename x', 'gh secret set TOKEN', 'gh secret delete TOKEN',
+    'gh variable set V --body 1', 'gh ruleset create', 'gh api -X PUT repos/o/r/collaborators/bot', 'gh api -X PATCH repos/o/r -F allow_auto_merge=true',
+    'gh api -X PATCH repos/o/r -f delete_branch_on_merge=true', 'gh api -X DELETE repos/o/r', 'gh api -X PUT repos/o/r/actions/secrets/X -f encrypted_value=v',
+    'curl -X DELETE https://api.github.com/repos/o/r', 'curl -X PUT https://api.github.com/repos/o/r/collaborators/bot']
+
+  test('each is refused below auto; the reads beside them are not', () => {
+    for (const line of PUB) expect([line, integrationIn(line, onSlice)]).toEqual([line, expect.any(String)])
+    for (const line of ['npm dist-tag ls', 'npm pack --dry-run', 'docker build -t img .', 'vercel', 'vercel deploy', 'railway logs', 'fly status', 'gh repo view',
+      'gh secret list', 'gh variable list', 'gh ruleset list', 'gh ruleset view 3', 'cargo build', 'gh api repos/o/r', 'changeset version', 'npm run publish-docs']) {
+      expect([line, integrationIn(line, onSlice)]).toEqual([line, null])
+    }
+  })
+
+  test('in the mod the deny says publish needs auto or the person; a package script or recipe that publishes refuses too', async ($, on) => {
+    const { ran } = setup(on, { profile: { integration: 'pr' }, files: { '/work/repo/package.json': JSON.stringify({ name: 'p', scripts: { release: 'release-it', ship: 'npm run build && npm publish', wf: 'gh workflow run deploy.yml', build: 'tsc' } }) } })
+    await boot($)
+    await typed($)
+    const d = await bash($, 'npm publish')
+    expect(d.deny).toContain(DENY_PUBLISH)
+    expect(d.deny).toContain('needs integration auto, or the person runs it')
+    expect((await bash($, 'railway up --service web')).deny).toContain('railway up')
+    expect((await bash($, 'npm run release')).deny).toContain('runs release-it (a release tool')
+    expect((await bash($, 'npm run ship')).deny).toContain('runs npm publish')
+    expect((await bash($, 'npm run wf')).deny).toContain('runs gh workflow run')
+    expect((await bash($, 'npm run build')).result).toBe('ok')
+    expect(ran).toEqual(['npm run build'])
+  })
+
+  test('under auto they run', async ($, on) => {
+    const { ran } = setup(on, { profile: { projects: [{ id: 'repo', integration: 'auto' }] } })
+    await boot($)
+    await typed($)
+    expect((await bash($, 'npm publish')).result).toBe('ok')
+    expect((await bash($, 'gh secret set X --body y')).result).toBe('ok')
+    expect(ran).toEqual(['npm publish', 'gh secret set X --body y'])
   })
 })
 

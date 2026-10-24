@@ -881,6 +881,54 @@ function pkgScript(p, args) {
 }
 
 
+// Tools that publish a release or a package, tag and push on their own: as `npm publish` is, auto only. Bare names a
+// package script runs from node_modules/.bin, or a line runs from PATH.
+const RELEASE_TOOLS = new Set(['release-it', 'semantic-release', 'np', 'standard-version', 'commit-and-tag-version', 'release-please', 'bumpp', 'auto', 'gh-release', 'publish-please', 'lerna-changelog'])
+
+// The positionals of a tool's argv, the values of the flags in `takes` left out.
+const positionals = (args, takes = new Set()) => {
+  const out = []
+  for (let i = 0; i < args.length; i++) {
+    if (takes.has(args[i])) i++
+    else if (!args[i].startsWith('-')) out.push(args[i])
+  }
+  return out
+}
+
+// A command that publishes a package or a release, pushes an image or deploys to production: { kind: 'publish' },
+// or null. Below auto these are the person's, whatever the repo's integration says about pushes.
+export function publishStep(w, dir) {
+  const p = base(w[0])
+  const args = w.slice(1)
+  const has = (...f) => args.some((x) => f.includes(x) || f.some((g) => g.startsWith('--') && x.startsWith(g + '=')))
+  const pub = (what) => ({ kind: 'publish', what, dir, slug: null })
+  if (Object.hasOwn(PKG_FILE, p)) {
+    const pos = positionals(args.slice(0, args.indexOf('--') < 0 ? args.length : args.indexOf('--')), VALUE_FLAGS)
+    if (pos[0] === 'publish' || (p === 'yarn' && pos[0] === 'npm' && pos[1] === 'publish')) return pub(p + ' publish')
+    if (p === 'npm' && ['unpublish', 'deprecate', 'undeprecate'].includes(pos[0])) return pub('npm ' + pos[0])
+    if (p === 'npm' && /^dist-tags?$/.test(pos[0] ?? '') && ['add', 'rm', 'set'].includes(pos[1])) return pub('npm dist-tag ' + pos[1])
+    if (p === 'npm' && pos[0] === 'owner' && ['add', 'rm'].includes(pos[1])) return pub('npm owner ' + pos[1])
+    return null
+  }
+  const pos = positionals(args)
+  if (RELEASE_TOOLS.has(p)) return pub(p + ' (a release tool: it tags, pushes or publishes)')
+  if (p === 'changeset' && ['publish', 'tag'].includes(pos[0])) return pub('changeset ' + pos[0])
+  if (p === 'lerna' && ['publish', 'version'].includes(pos[0])) return pub('lerna ' + pos[0])
+  if (p === 'cargo' && ['publish', 'yank', 'owner'].includes(pos[0])) return pub('cargo ' + pos[0])
+  if (p === 'twine' && pos[0] === 'upload') return pub('twine upload')
+  if (/^(python[0-9.]*|pypy3?)$/.test(p) && pythonModule(args) === 'twine' && args.slice(args.indexOf('twine') + 1).includes('upload')) return pub(p + ' -m twine upload')
+  if ((p === 'gem' && ['push', 'yank', 'owner'].includes(pos[0])) || (p === 'poetry' && pos[0] === 'publish') || (p === 'flit' && pos[0] === 'publish') || (p === 'uv' && pos[0] === 'publish') || (p === 'hatch' && pos[0] === 'publish')) return pub(p + ' ' + pos[0])
+  if (/^(docker|podman)$/.test(p) && (pos[0] === 'push' || (['image', 'manifest'].includes(pos[0]) && pos[1] === 'push') || (pos[0] === 'buildx' && has('--push')) || (pos[0] === 'compose' && pos[1] === 'push'))) return pub(p + ' push')
+  if (p === 'vercel' && (has('--prod', '--production') || ['promote', 'rollback'].includes(pos[0]))) return pub('vercel ' + (pos[0] && pos[0] !== 'deploy' ? pos[0] : '--prod'))
+  if (p === 'railway' && ['up', 'deploy', 'redeploy'].includes(pos[0])) return pub('railway ' + pos[0])
+  if ((p === 'fly' || p === 'flyctl') && ['deploy', 'launch'].includes(pos[0])) return pub(p + ' ' + pos[0])
+  if (p === 'netlify' && pos[0] === 'deploy' && has('--prod', '-p', '--prodIfUnlocked')) return pub('netlify deploy --prod')
+  if (p === 'wrangler' && ['deploy', 'publish'].includes(pos[0])) return pub('wrangler ' + pos[0])
+  if (p === 'firebase' && pos[0] === 'deploy') return pub('firebase deploy')
+  return null
+}
+
+
 // A run of code the reader cannot follow: an interpreter's code string → { kind: 'hidden' } when it reaches a
 // tool or spawns a process; a script file, a sourced file, a package script or a make target → { kind: 'file' }
 // for guardLine to read; an opener it cannot introspect → { kind: 'hidden' }.
@@ -1080,6 +1128,8 @@ export function commandSteps(line, cwd = null, depth = 0, homes = [], { strict =
       const k = httpStep(w, at)
       if (k) out.push(k)
     } else if (p !== 'gh' && p !== 'git' && p !== 'hub') {
+      const pub = publishStep(w, at)
+      if (pub) out.push(pub)
       const k = codeStep(w, at, c.stdin, c.piped, c.env)
       if (k) out.push(k)
       // `npm version <x>` commits and tags: a tag, as `git tag` is.

@@ -9,7 +9,7 @@ import os from 'node:os'
 const root = process.argv[2]
 const { Profile, Spawn, Session } = await import(root + '/hooks/state.js')
 const { seed } = await import(root + '/hooks/store.js')
-const { bashCall, loadRunProfile, DENY_INTEGRATION, DENY_LOCAL } = await import(root + '/hooks/guard.js')
+const { bashCall, loadRunProfile, DENY_INTEGRATION, DENY_LOCAL, DENY_PUBLISH } = await import(root + '/hooks/guard.js')
 const { agtTurnStart } = await import(root + '/hooks/proofs.js')
 const { sameConfig } = await import(root + '/hooks/trust.js')
 
@@ -595,6 +595,18 @@ try {
     const l = await run('git push -q --force-with-lease origin agt/x')
     check('--force-with-lease origin agt/x (the slice checked out): allowed and landed', !l?.deny && refOf('origin.git', 'agt/x') === sh('git rev-parse agt/x', APP) && refOf('origin.git', 'agt/x') !== x0, JSON.stringify(l))
     check('... origin/main unchanged', refOf('origin.git', 'main') === w.main)
+  }
+  {
+    // Publish, deploy and destructive repo changes are auto only. None reaches the network: the next step is a stub.
+    const w = world()
+    fs.writeFileSync(APP + '/package.json', JSON.stringify({ name: 'p', version: '1.0.0', scripts: { release: 'release-it', prepublishOnly: 'git push -q origin HEAD:main' } }))
+    const ran = []
+    const stub = async (e) => { ran.push(e.command); return { result: 'stub', exit: 0 } }
+    for (const line of ['npm publish', 'npm run release', 'docker push img:1', 'vercel --prod', 'gh repo delete o/r --yes', 'gh secret set TOKEN --body x', 'gh api -X PUT repos/o/r/collaborators/bot']) {
+      const r = await bashCall($, { command: line }, stub)
+      check(line + ': denied', r?.deny?.startsWith(DENY_PUBLISH) || r?.deny?.includes('release tool'), JSON.stringify(r))
+    }
+    check('... none of them ran, origin/main unchanged', ran.length === 0 && refOf('origin.git', 'main') === w.main, JSON.stringify(ran))
   }
   {
     // Controls below auto: the run's own branch and ordinary writes still pass.

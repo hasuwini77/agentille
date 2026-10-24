@@ -47,3 +47,5 @@ When a session with an `/agt` run in flight compacts, a hook prints a short `[ag
 - A run with 3+ pane workers gets its own tab, so your tab stays whole.
 - Ask for Codex in the task ("codex builds the API slice") and that slice runs as a Codex pane on your own Codex config.
 - tmux works with the same band; without a multiplexer you get the subagent tree.
+
+Each of these surfaces has its own off switch in `~/.agentille/profile.json`: `docs/settings.md` → "Display switches".

@@ -139,8 +139,7 @@ describe('wire: in the mod', () => {
     on('ui.render', async () => ({ type: 'engine', ref: 0 }) as never)
     const clock = mock.clock(on, { now: 1_000_000 })
     await $.session.start({ cwd: '/w', surface: null, isInteractive: false })
-    await clock.advance(5000)
-    await new Promise((r) => setTimeout(r, 1100)) // the publish throttle reads Date.now()
+    await clock.advance(5000) // past the publish throttle, which runs on the host clock
     gate = true
     await $.tool.call({ tool: 'Read', input: { file_path: 'a.ts' } } as never)
     expect(stored['wire:agt-r1-exec-1'].tool).toBeNull()

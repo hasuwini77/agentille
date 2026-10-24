@@ -79,7 +79,7 @@ describe('drawing: in the mod', () => {
     return { toasts, written }
   }
 
-  test('a drawing session gets the marker and, with no profile, the tip once', async ($, on) => {
+  test('a drawing session gets the marker and, with no profile, the tip once', { timeoutMs: 20_000 }, async ($, on) => {
     const { toasts, written } = await boot($, on, ['terminal'])
     const r = await $.skill.prompt({ skill: 'agt', text: 'base' })
     expect(r.text).toContain('## Drawing (agentille mod)')

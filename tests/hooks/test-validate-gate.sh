@@ -63,6 +63,26 @@ check "hook tests skipped, CI=true: run fails" '[ "$rc" != 0 ]'
 check "hook tests skipped, CI=true: FAIL names the variable and the fix" 'printf "%s" "$out" | grep -q "FAIL.*hook tests skipped (AGENTILLE_VALIDATE_SKIP_HOOK_TESTS set.*unset it on the runner"'
 check "hook tests skipped, CI=true: the only FAIL" '[ "$(printf "%s\n" "$out" | grep -c "FAIL")" = 1 ]'
 
+# a hook test that cannot run says `SKIP: <reason>` and exits 3: a WARN on a developer machine, a FAIL under
+# CI=true. Exit 3 without the SKIP line is a failure, so a broken test cannot pass itself off as a skip.
+mkdir -p "$T/hooks-skip" "$T/hooks-bad3" "$T/hooks-pass"
+printf 'echo "SKIP: needs a tool this runner lacks"; exit 3\n' > "$T/hooks-skip/test-skip.sh"
+printf 'echo "something broke"; exit 3\n' > "$T/hooks-bad3/test-bad3.sh"
+printf 'echo "fixture: 1 check passes"\n' > "$T/hooks-pass/test-pass.sh"
+out=$(run AGENTILLE_VALIDATE_SKIP_HOOK_TESTS= AGENTILLE_VALIDATE_HOOK_TESTS_DIR="$T/hooks-pass"); rc=$?
+check "hook test passes: exit 0" '[ "$rc" = 0 ]'
+check "hook test passes: PASS with its last line" 'printf "%s" "$out" | grep -q "PASS.*test-pass.sh: fixture: 1 check passes"'
+out=$(run AGENTILLE_VALIDATE_SKIP_HOOK_TESTS= AGENTILLE_VALIDATE_HOOK_TESTS_DIR="$T/hooks-skip"); rc=$?
+check "hook test skips, dev machine: exit 0" '[ "$rc" = 0 ]'
+check "hook test skips, dev machine: WARN with the reason, not PASS" 'printf "%s" "$out" | grep -q "WARN.*test-skip.sh skipped: needs a tool this runner lacks" && ! printf "%s" "$out" | grep -q "PASS.*test-skip.sh"'
+out=$(run CI=true AGENTILLE_VALIDATE_SKIP_HOOK_TESTS= AGENTILLE_VALIDATE_HOOK_TESTS_DIR="$T/hooks-skip"); rc=$?
+check "hook test skips, CI=true: run fails" '[ "$rc" != 0 ]'
+check "hook test skips, CI=true: FAIL names the test and the reason" 'printf "%s" "$out" | grep -q "FAIL.*test-skip.sh skipped: needs a tool this runner lacks (CI=true"'
+check "hook test skips, CI=true: the only FAIL" '[ "$(printf "%s\n" "$out" | grep -c "FAIL")" = 1 ]'
+out=$(run AGENTILLE_VALIDATE_SKIP_HOOK_TESTS= AGENTILLE_VALIDATE_HOOK_TESTS_DIR="$T/hooks-bad3"); rc=$?
+check "exit 3 without a SKIP line: run fails" '[ "$rc" != 0 ]'
+check "exit 3 without a SKIP line: FAIL with the exit code" 'printf "%s" "$out" | grep -q "FAIL.*test-bad3.sh failed (exit 3)"'
+
 # a failing mod import is a FAIL (the entry point is overridable for this test only)
 printf 'throw new Error("boom");\n' > "$T/bad-entry.mjs"
 out=$(run AGENTILLE_VALIDATE_MOD_ENTRY="$T/bad-entry.mjs"); rc=$?

@@ -20,9 +20,12 @@ export function publish($, force = false) {
 
 export async function publishNow($, force) {
   if (!S.wireName) return
+  // The throttle runs on the host clock, so a test's fake clock drives it; the record keeps wall time for the lead.
+  const clock = await Promise.resolve().then(() => $.clock.now()).catch(() => null)
+  const tick = typeof clock === 'number' ? clock : Date.now()
+  if (!force && tick - pub.at < PUBLISH_MS) return
+  pub.at = tick
   const now = Date.now()
-  if (!force && now - pub.at < PUBLISH_MS) return
-  pub.at = now
   await $.store.set(statusKey(S.wireName), workerStatus({ name: S.wireName, session: S.sessionId, ...pub, now })).catch(() => {})
   if (S.transport !== 'herdr') return
   // Herdr's sidebar follows the worker: its route, then what it is doing. Changes only.

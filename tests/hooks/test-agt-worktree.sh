@@ -2,7 +2,9 @@
 # Real-git test of scripts/agt-worktree.sh in a throwaway repo: what it prints, re-attach (directory, then
 # branch), what it refuses, which .env files it copies, node_modules copied and never linked. Then
 # tests/hooks/tidy-real.mjs drives the mod's own guard and reaper over the same repo under node (skipped, and
-# said so, where node is missing or older than 22.7). Exit 0 = all checks pass.
+# said so, where node is missing or older than 22.7). Exit 0 = all checks pass; exit 3 with a `SKIP: <reason>`
+# line = the shell checks pass but the node half could not run (scripts/validate.sh: a WARN on a developer
+# machine, a FAIL under CI=true). A failed check exits 1 either way.
 set -u
 # A git hook (pre-push runs this suite) exports GIT_DIR and friends; they would point every git call at the
 # real repo instead of the throwaway one.
@@ -97,6 +99,7 @@ if [ -z "$skip" ]; then
 fi
 
 note=""; [ -n "$skip" ] && note=" (mod checks skipped: $skip)"
-# CI must never go green with the mod checks skipped (the validator's own rule for skipped hook tests).
-[ -n "$skip" ] && [ "${CI:-}" = "true" ] && { echo "FAIL mod checks skipped under CI=true: $skip"; exit 1; }
-[ "$bad" = 0 ] && echo "$n checks passed$note" || { echo "$bad of $n checks failed$note"; exit 1; }
+[ "$bad" = 0 ] || { echo "$bad of $n checks failed$note"; exit 1; }
+# A skip is never a pass: the validator decides what it costs (WARN here, FAIL under CI=true).
+[ -n "$skip" ] && { echo "$n checks passed$note"; echo "SKIP: agt-worktree mod checks need node 22.7 or newer ($skip)"; exit 3; }
+echo "$n checks passed"

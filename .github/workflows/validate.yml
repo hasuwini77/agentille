@@ -32,6 +32,14 @@ jobs:
           node-version: 22
       - name: Check python3 and node are present
         run: python3 --version && node --version
+      # tests/hooks/test-tmux-real.sh opens a real pane on a private tmux server; without tmux it SKIPs,
+      # which validate.sh records as a FAIL under CI=true.
+      - name: Install tmux (ubuntu)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y tmux && tmux -V
+      - name: Install tmux (macOS)
+        if: runner.os == 'macOS'
+        run: (command -v tmux || brew install tmux) && tmux -V
       - name: Install the Claude Code CLI (plugin validate + mod test harness, no credential needed)
         run: npm install -g @anthropic-ai/claude-code@2.1.309  # pinned: see the header comment
       - name: Structural validator, hook tests, mod tests

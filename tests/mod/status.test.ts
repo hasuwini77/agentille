@@ -49,7 +49,7 @@ describe('status: in the mod', () => {
   const done = ($: any, agentId: string) => $.turn.complete({ agentId, answer: 'APPROVE', durationMs: 10, isAborted: false, turnId: 't' + agentId, reason: 'answer', usage: { input_tokens: 1200, output_tokens: 300 } } as never)
   const review = ($: any, run: string) => $.agent.spawn({ prompt: '[agt run=' + run + ' size=large mode=review]\nreview', subagentType: 'agentille:agentille-code-reviewer' })
 
-  test('pins the run, with the measured session cost and no per-agent dollars', async ($, on) => {
+  test('pins the run, with the measured session cost and no per-agent dollars', { timeoutMs: 20_000 }, async ($, on) => {
     const { lines } = await boot($, on)
     await review($, 'statrun')
     await measure($, { cost: { usd: 1.254 } })

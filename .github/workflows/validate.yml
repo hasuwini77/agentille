@@ -9,8 +9,8 @@ name: validate
 # The CLI is pinned: the mod tests run against the harness of one known Claude Code version, so a
 # CLI release cannot turn main red on its own. Bump the pin on purpose (and run the suite locally
 # on that version first); the README's minimum (2.1.294) is a floor, this is the tested version.
-# The dispatch-decision evals (evals/, `claude plugin eval`) stay local: each run is a real
-# claude session on a credential. See .claude/CLAUDE.md.
+# The dispatch-decision evals (evals/, `claude plugin eval`) never run here: each run is a real
+# claude session on a credential. They run budget-capped in evals.yml (weekly, on tags, by hand).
 
 on:
   push:

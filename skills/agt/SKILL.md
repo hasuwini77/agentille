@@ -16,8 +16,7 @@ One command. Do it yourself when it is small, fan out when it is not, merge or e
 - **Level:** how big the crew is: low, medium or heavy ("Levels"). **Transport:** how its workers run: `solo`, `subagent`, `panes` or `workflow`. **Recon:** the run's first line, which names both.
 - **The mod:** agentille's code that runs inside Claude Code. It routes models, draws the live views, carries messages between panes and closes finished panes. `/agt` works without it.
 - **Band:** the mod's live status block above the prompt: one row per agent of the run, and `⚑` flags.
-- **Wire:** the mod's messages between panes. A pane worker that finishes sends its result to the lead as a message.
-- **Harvest:** reading a finished worker's answer (its wire message or answer file); its pane closes right after.
+- **Wire:** the mod's messages between panes. A pane worker that finishes sends its result to the lead as a message. **Harvest:** reading a finished worker's answer (its wire message or answer file); its pane closes right after.
 - **Card:** the run's final summary, at most 8 lines (`display.md` → "Final card").
 - **⚑:** a flag for something that needs the person: on the band as it happens (a REVISE, a FAIL, a blocked pane) and on the card's `⚑` line (escalated, PR ready, a P0/P1 left).
 - **Formation:** an optional run shape that changes how workers relate: gauntlet, duel or relay (`formations.md`). **Gauntlet:** the formation where an adversary writes tests that try to break a slice before it integrates.
@@ -105,7 +104,7 @@ Ask: <preTaskQuestioning>. Depth: <thinkingDepth>.
 - **Never commit to `main` directly** (a direct commit skips the review gate and the person's integration mode). Work lands through a branch and a PR or a local merge (`factory.md` → "Integrate").
 - **Never let an agent push through context pressure** (an agent near a full window writes subtly worse code). An executor that reports `CONTEXT …` is replaced by a fresh one seeded from its checkpoint and slice.
 - **At most 3 executors at once** (each is a full session, ~500–700 MB as a pane, and slices still merge one at a time). Batch the rest in waves; the mod flags a fourth on the band and in `routing.jsonl` but does not block it.
-- **Executor is never Haiku** (it writes the code that ships); Haiku only classifies and scouts (read-only). Fable comes only from the ladder or `--fable`.
+- **Executor is never Haiku** (it writes the code that ships); Haiku only classifies and scouts (read-only). Fable comes only from the ladder or `--fable` (Fable costs about twice Opus).
 - **Foreground when it gates** (the next step cannot start without that result, and independent ones lose nothing by going out together). A dispatch whose result feeds the next step runs in the foreground; independent dispatches go out as one message of background calls, then one wait.
 - **Mods off still works** (the skill also runs where the mod is off or cannot draw, such as `claude -p`). The mod only adds the band, routing, the wire between panes and the automatic pane cleanup. What the lead does itself without it: `no-mod.md`.
 - **Never close a pane you did not open** (a pane the person opened holds their own work). The `agt-` prefix is ownership.

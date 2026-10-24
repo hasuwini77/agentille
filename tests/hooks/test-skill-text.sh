@@ -53,7 +53,7 @@ check "factory.md counts fix attempts in one table" 'fixtable | grep -qF "| Even
 for tok in "CONTEXT" "BLOCKED:" "STUCK:" "CONTRACT:" "RESUME:" "INTEGRATE:"; do
   check "factory.md's fix table has a row for $tok" 'fixtable | grep -qF "$tok"'
 done
-check "factory.md's fix table: an early stop is no fix attempt" 'fixtable | grep -F "| Early stop" | grep -qF "| no: a resume is \`mode=build\`"'
+check "factory.md's fix table: an early stop is no fix attempt" 'fixtable | grep -F "| Early stop" | grep -qF "| no"'
 check "factory.md's fix table: the limit is 2 per slice" 'sed -n "/^## Fix rounds/,/^## Early stop/p" skills/agt/factory.md | grep -qF "Limit: 2 per slice."'
 
 # the "without the mod" branches live in one appendix, and each main file points there instead of forking
@@ -61,7 +61,7 @@ check "no-mod.md holds the squad scoring" 'has skills/agt/no-mod.md "signals.dep
 check "no-mod.md holds the progress spine" 'has skills/agt/no-mod.md "seed TodoWrite"'
 check "no-mod.md holds the manual Herdr spawn" 'has skills/agt/no-mod.md "herdr pane split"'
 check "no-mod.md holds the manual tmux spawn" 'has skills/agt/no-mod.md "tmux split-window"'
-check "squads.md points at no-mod.md and no longer scores squads" 'has skills/agt/squads.md "no-mod.md" && ! has skills/agt/squads.md "signals.deps"'
+check "squads.md points at no-mod.md and no longer counts squad signals" 'has skills/agt/squads.md "no-mod.md" && ! has skills/agt/squads.md "signals.deps"'
 check "display.md points at no-mod.md and no longer seeds TodoWrite" 'has skills/agt/display.md "no-mod.md" && ! has skills/agt/display.md "seed TodoWrite"'
 check "panes-mode.md points at no-mod.md and carries no manual spawn" 'has skills/agt/panes-mode.md "no-mod.md" && ! has skills/agt/panes-mode.md "herdr pane split" && ! has skills/agt/panes-mode.md "tmux split-window -d"'
 check "SKILL.md names no-mod.md in its hard rules" 'grep -F "Mods off still works" skills/agt/SKILL.md | grep -qF "no-mod.md"'

@@ -50,9 +50,13 @@ for f in skills/agt/factory.md agents/agentille-executor.md; do
 done
 check "the worktree script exists and is executable" '[ -x scripts/agt-worktree.sh ]'
 
-# 4. one vocabulary: "slice" in prose; "piece" only as the header key
+# 4. one vocabulary: "slice" in prose; "piece" only as the header key, never "chunk" or "bucket"
 for f in skills/agt/*.md agents/agentille-*.md README.md; do
   check "$f says slice, not piece (except piece=)" '! grep -v "piece=" "$f" | grep -qiE "\bpieces?\b"'
+done
+# "chunk" and "bucket" were two more names for the same unit (a plan step is a different unit and keeps its name)
+for f in skills/agt/*.md agents/agentille-*.md; do
+  check "$f says slice, not chunk or bucket" '! grep -qiE "\b(chunks?|buckets?)\b" "$f"'
 done
 
 # 5. agreement, not only presence: the files that hand a value over and the files that use it say the same

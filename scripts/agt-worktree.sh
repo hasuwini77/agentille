@@ -103,11 +103,11 @@ for f in "$ROOT"/.env*; do
 done
 shopt -u nullglob dotglob
 
-# node_modules: copy-on-write (APFS clonefile, then a reflink), else a plain copy. A failed attempt leaves no half
-# tree for the next one to merge into.
+# node_modules: copy-on-write (a GNU reflink, then an APFS clonefile), else a plain copy. GNU first: its own `-c`
+# means something else. A failed attempt leaves no half tree for the next one to merge into.
 if [ ! -e "$WT/node_modules" ] && [ -d "$ROOT/node_modules" ] && [ ! -L "$ROOT/node_modules" ]; then
-  cp -c -R "$ROOT/node_modules" "$WT/" 2>/dev/null \
-    || { rm -rf "$WT/node_modules"; cp --reflink=auto -a "$ROOT/node_modules" "$WT/" 2>/dev/null; } \
+  cp --reflink=auto -a "$ROOT/node_modules" "$WT/" 2>/dev/null \
+    || { rm -rf "$WT/node_modules"; cp -c -R "$ROOT/node_modules" "$WT/" 2>/dev/null; } \
     || { rm -rf "$WT/node_modules"; cp -R "$ROOT/node_modules" "$WT/" >&2 2>&1; } \
     || { rm -rf "$WT/node_modules"; printf 'agt-worktree: node_modules not copied: run the project install\n' >&2; }
 fi

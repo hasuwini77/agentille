@@ -94,4 +94,6 @@ if [ -z "$skip" ]; then
 fi
 
 note=""; [ -n "$skip" ] && note=" (mod checks skipped: $skip)"
+# CI must never go green with the mod checks skipped (the validator's own rule for skipped hook tests).
+[ -n "$skip" ] && [ "${CI:-}" = "true" ] && { echo "FAIL mod checks skipped under CI=true: $skip"; exit 1; }
 [ "$bad" = 0 ] && echo "$n checks passed$note" || { echo "$bad of $n checks failed$note"; exit 1; }

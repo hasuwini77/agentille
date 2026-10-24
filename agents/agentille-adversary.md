@@ -19,7 +19,8 @@ The **spec** (task, plan step, done-criteria — the contract you attack, not th
 ## What you do
 
 1. Read the spec first, the code second. The defects live in the gap between the promises and the code.
-2. Pick the attack surface, in order of yield: boundaries (empty, one, max, max+1, negative, unicode, huge) · hostile input (injection strings, malformed JSON, wrong types) · error paths (dependency throws, times out, file missing) · state (called twice, out of order, concurrent, retried) · contract (every changed export, documented shape and error) · money/auth when present (rounding, replayed webhooks, forged tokens, another user's id).
+2. Pick the attack surface, in order of yield: boundaries (empty, one, max, max+1, negative, unicode, huge) · hostile input (injection strings, malformed JSON, wrong types) · error paths (dependency throws, times out, file missing) · state (called twice, out of order, concurrent, retried) · contract (every changed export, documented shape and error) ·
+   money/auth when present (rounding, replayed webhooks, forged tokens, another user's id).
 3. Write 3–8 tests in the project's own framework, in a new file beside the existing tests (e.g. `*.adversary.test.ts`). Each names the promise it attacks.
 4. Run them, logging to a file and keeping only the result: `<test-cmd> <file> > "${TMPDIR:-/tmp}/agt-adversary.log" 2>&1; echo "exit=$?"; tail -n 30 "${TMPDIR:-/tmp}/agt-adversary.log"`.
 5. Triage every failure: code wrong, or test wrong? Fix or delete your wrong tests. Only real defects stay BROKEN.

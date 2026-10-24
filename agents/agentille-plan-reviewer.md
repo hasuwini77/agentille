@@ -26,7 +26,8 @@ Instruction files (CLAUDE.md / AGENTS.md) are not preloaded for you. When a step
 5. **Scope.** Gold-plating in STEPS (do less)? OUT-OF-SCOPE hiding something the user needs (do more)?
 6. **Ordering.** Does a step consume what a later step produces?
 7. **Chunk size.** Could a step's read + write set exceed ~20% of an executor's context (about 2,500 lines)? → REVISE: split at a committable boundary.
-8. **Acceptance is checkable.** Every step is covered by at least one ACCEPTANCE criterion (its `(step <n>)` tag). Each is observable (a command and its result, a file and what it holds, a screen and what it shows, a measurable number), none restates the task or a step, and each maps to evidence the run can produce: the executor's `ACCEPTANCE <n>:` VERIFICATION line from a command or file (it runs headless), or the design-reviewer's screenshot for a screen. A step with no criterion, or one like "works well" → HIGH (REVISE), naming the step.
+8. **Acceptance is checkable.** Every step is covered by at least one ACCEPTANCE criterion (its `(step <n>)` tag). Each is observable (a command and its result, a file and what it holds, a screen and what it shows, a measurable number), none restates the task or a step,
+   and each maps to evidence the run can produce: the executor's `ACCEPTANCE <n>:` VERIFICATION line from a command or file (it runs headless), or the design-reviewer's screenshot for a screen. A step with no criterion, or one like "works well" → HIGH (REVISE), naming the step.
 
 ## Output
 

@@ -134,8 +134,11 @@ Everything lives in `~/.agentille/profile.json`. Every key is optional, and a mi
   - **A repo can only lower it** (auto → pr → push → local): its `.agentille/config.json` `{"integration": …}` (`/agentille-project` writes it), a CLAUDE.md or AGENTS.md saying `no-mistakes` (at most `pr`) or `local-only` (`local`).
   - **Guards:** below `auto` the mod refuses merges, tags, releases and API merges from a run, and lets through only a push of the run's own branch. Under `local` it refuses pushes and PRs too. How it reads a command: [docs/guards.md](./docs/guards.md).
   - **Risky diffs stop at the PR** under every setting: a diff that touches auth, payments, deploy, migrations, dependencies or a business assumption, and the card says `⚑ escalated`.
-- `thinkingDepth` (default `complex-only`; set it by hand): `complex-only` and `always` route by the table in Routing, and `always` also asks the planner for a reasoning note per step. `quick` trades depth for cost: the planner, ui-prototyper, code- and perf-reviewer and the adversary run sonnet · medium, the security, payments and design reviewers sonnet · high, the SEO reviewer sonnet · low, the plan-reviewer and formations are skipped and the plan stays at 5 steps or fewer. The design-reviewer keeps opus · high under `complex-only` and `always`, and the executor stays on Sonnet either way.
-- `routing.autoFable`: `true` lets the escalation ladder reach Fable (about twice the cost of Opus) after two plan REVISEs, or for the diagnose planner after two failed fixes, at most `maxFablePerRun` times and only under `fableWeeklyCeiling` percent of your weekly plan. Default `false`: Fable only when you type `--fable`. The mod holds the model to that: a dispatch header claiming `fable=forced` in a session where you did not type `--fable` is rewritten to `fable=auto`, with a toast.
+- `thinkingDepth` (default `complex-only`; set it by hand): `complex-only` and `always` route by the table in Routing, and `always` also asks the planner for a reasoning note per step.
+  `quick` trades depth for cost: the planner, ui-prototyper, code- and perf-reviewer and the adversary run sonnet · medium, the security, payments and design reviewers sonnet · high, the SEO reviewer sonnet · low, the plan-reviewer and formations are skipped and the plan stays at 5 steps or fewer.
+  The design-reviewer keeps opus · high under `complex-only` and `always`, and the executor stays on Sonnet either way.
+- `routing.autoFable`: `true` lets the escalation ladder reach Fable (about twice the cost of Opus) after two plan REVISEs, or for the diagnose planner after two failed fixes, at most `maxFablePerRun` times and only under `fableWeeklyCeiling` percent of your weekly plan. Default `false`: Fable only when you type `--fable`.
+  The mod holds the model to that: a dispatch header claiming `fable=forced` in a session where you did not type `--fable` is rewritten to `fable=auto`, with a toast.
 - `routing.maxRunUsd` (default `null`, off): a per-run cost ceiling in US dollars.
   - **The estimate:** the mod prices the run's agent tokens at API list prices. It is an estimate: a subscription is not billed per token, and pane workers report no tokens. Prices and the formula: [docs/routing-cost.md](./docs/routing-cost.md).
   - **Past the ceiling,** every later planner, plan-reviewer and code-, security-, payments-, SEO- or perf-reviewer that would run Opus (or a ladder Fable) runs Sonnet at the same effort. The executor, the design-reviewer, the ui-prototyper, the adversary and a typed `--fable` keep their routes.
@@ -183,7 +186,8 @@ Kinds, follow-ups, which ones close on their own and how to get one back: [docs/
 
 ## Routing
 
-Each role gets a model and an effort. The mod picks them from the dispatch header's `size` and `risk` and the profile's `thinkingDepth` (`hooks/routing.js`); without the mod the lead passes the same models as a fallback. The first column that applies wins, in this order: `thinkingDepth=quick`, then `risk` auth or money, then `size=large`, then the default. A `—` means that column changes nothing for the role, and `risk=data` changes no route. This table is a copy of `skills/agt/routing.md` → "Default routing":
+Each role gets a model and an effort. The mod picks them from the dispatch header's `size` and `risk` and the profile's `thinkingDepth` (`hooks/routing.js`); without the mod the lead passes the same models as a fallback. The first column that applies wins, in this order: `thinkingDepth=quick`, then `risk` auth or money, then `size=large`, then the default.
+A `—` means that column changes nothing for the role, and `risk=data` changes no route. This table is a copy of `skills/agt/routing.md` → "Default routing":
 
 | role | default | size=large | risk auth/money | thinkingDepth=quick |
 |---|---|---|---|---|
@@ -246,7 +250,8 @@ Before you type anything the mod does four small things:
 
 Everything else waits for a typed `/agt`, `/storm` or a session ask. When you do:
 
-- **Your repo:** a branch per slice (`feat/<slug>`, `fix/<slug>`, or `agt/<slug>` off a feature branch), atomic commits, one PR per slice, and with `auto` a merge commit plus a version tag. `/agt next` and `/storm --next` keep `.agentille/backlog.md` (gitignored on first use). `/storm` writes `docs/storm/<date>.md` and commits it on a feature branch; on main, master or a detached HEAD it leaves the file uncommitted.
+- **Your repo:** a branch per slice (`feat/<slug>`, `fix/<slug>`, or `agt/<slug>` off a feature branch), atomic commits, one PR per slice, and with `auto` a merge commit plus a version tag. `/agt next` and `/storm --next` keep `.agentille/backlog.md` (gitignored on first use).
+  `/storm` writes `docs/storm/<date>.md` and commits it on a feature branch; on main, master or a detached HEAD it leaves the file uncommitted.
 - **On GitHub:** with `gh`, one issue per slice and one PR per slice; with `auto`, merged PRs and pushed tags.
 - **Beside your repo:** each parallel executor works in a sibling worktree `../<project>-<slug>` with your `.env*` files copied in and `node_modules` copied (never linked).
   - The worktree stays until the slice is merged or escalated, then the lead removes it (the branch stays).

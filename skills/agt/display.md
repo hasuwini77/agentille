@@ -46,7 +46,7 @@ The only end-of-run output of a non-solo run, at most 8 lines:
 ✓ <what changed, one line>  ·  <level>  ·  <N> files  ·  <merged PR #n | branch>  ·  <m>m
 verify: <command> → <result>
 review: <PASS | CONCERNS: n P1 | FAIL: n P0> — <agents run>
-⚑ <only if something needs the user: escalated, PR ready, P0/P1 left, plan not approved; max 2 lines>
+⚑ <only if something needs the user: escalated, PR ready, P0/P1 left, plan not approved, cost ceiling reached (`capped` lines in routing.jsonl); max 2 lines>
 Open: ~/.agentille/state/run-<id>/report.md
 Next: <one concrete action>
 ```

@@ -101,7 +101,7 @@ Everything lives in `~/.agentille/profile.json`. Every key is optional, and a mi
   "integration": "pr",
   "thinkingDepth": "complex-only",
   "projects": [{ "url": "https://github.com/you/my-app", "integration": "auto" }],
-  "routing": { "autoFable": false, "maxFablePerRun": 1, "fableWeeklyCeiling": 60 },
+  "routing": { "autoFable": false, "maxFablePerRun": 1, "fableWeeklyCeiling": 60, "maxRunUsd": null },
   "display": { "deck": "off", "focus": true, "highlight": "off" }
 }
 ```
@@ -231,7 +231,7 @@ Everything else waits for a typed `/agt`, `/storm` or a session ask. When you do
 - **Beside your repo:** each parallel executor works in a sibling worktree `../<project>-<slug>` with your `.env*` files copied in and `node_modules` copied (never linked).
   - The worktree stays until the slice is merged or escalated, then the lead removes it (the branch stays).
   - The run-end tidy and `/agt-clean` remove only merged, clean `agt/*` worktrees this session's runs made, and never one made under 10 minutes ago or with no commits of its own.
-  - Copied `.env*` files are deleted from those worktrees when the run ends.
+  - Copied `.env*` files are deleted from every worktree the run made when it ends, whatever the branch; only untracked copies git ignores go, a tracked or un-ignored `.env.example` stays.
 - **In your home:** `~/.agentille/state/run-<id>/` (plan, checkpoints, every agent's report, `report.md`), `~/.agentille/profile.json` when you save a setting, and `~/.agentille/.update-check.json`.
 - **Network:** once a day at session start the hook fetches this repo's `plugin.json` from GitHub to compare versions (3 s timeout, nothing sent). `AGENTILLE_UPDATE_CHECK=0` turns it off.
   - Research agents (`/storm`) read the web.
@@ -244,7 +244,7 @@ Everything else waits for a typed `/agt`, `/storm` or a session ask. When you do
 - **Models and cost:** every non-solo run costs more than a plain prompt.
   - By default Opus runs the planner, the ui-prototyper and the design, security and payments reviewers; Sonnet runs the executor, the adversary and the plan-, code-, SEO- and perf-reviewers.
   - A large slice moves the plan-, code- and perf-reviewers to Opus; auth or money risk moves the code-reviewer and the adversary to Opus.
-  - The executor never leaves Sonnet and the design-reviewer never leaves Opus; `thinkingDepth: quick` moves the other roles to Sonnet and skips the plan-reviewer.
+  - The executor never leaves Sonnet; the design-reviewer stays on Opus except under `thinkingDepth: quick`, which moves every reviewer and the planner to Sonnet and skips the plan-reviewer. `routing.maxRunUsd` demotes later Opus planners and reviewers to Sonnet once a run's estimated spend passes it.
   - Haiku only classifies and scouts. Fable never, unless `--fable` or `routing.autoFable: true`. Every cell: Routing.
 
 ## Contributing

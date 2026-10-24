@@ -7,10 +7,12 @@ The README's Settings and "What it touches" sections give the short version. Thi
 `integration` sets the most a run may do (`auto` → `pr` → `push` → `local`; the README's Settings section says how your profile and the repo decide it).
 
 - **Below `auto`** the mod refuses merges, tags, releases and API merges from a run.
-  - It catches them however they are spelled: `gh`, `git`, `gh api` or `curl`, and wrapped in `env`, `timeout`, `xargs`, `bash -c` or `eval` alike.
-  - It judges each line by what it does in the repo it targets (`cd`, `git -C`, `gh -R`), not in the directory the session started in.
-  - It lets through only a push of the run's own branch: never the base branch, a tag, a force push or a ref it cannot read.
-  - Write branch names and directories out in a push line: a variable the guard cannot expand is refused with a retry hint.
+  - It catches them however they are spelled: `gh`, `hub`, `git`, `gh api` (REST or GraphQL, from a file too) or `curl`/`wget`, and wrapped in `env`, `timeout`, `xargs`, `sudo`, `script`, `watch`, `flock`, `caffeinate`, `stdbuf`, `arch`, `coproc`, `ssh`, `parallel`, `find -exec`, `bash -c`, `fish -c` or `eval` alike. Below `auto` it also refuses interpreter code (`python -c`, `node -e`, `perl -e`, …) that calls git, gh or curl, and reads a script, a sourced file or a make target before it runs, refusing it when it pushes, merges, tags or releases.
+  - Git and gh aliases defined on the line, `send-pack`, `http-push`, `subtree push`, and `update-ref`/`symbolic-ref` on a tag or the base branch are refused below `auto`.
+  - It judges each line by the repo the write lands in: `cd`, `git -C`, `gh -R`, `GH_REPO`/`GITHUB_REPOSITORY`, `gh repo set-default`, and for a push the URL git would push to (pushurl, insteadOf, a URL or a path), not the directory the session started in. A profile entry with only a name never grants `auto` to a repo that has a remote.
+  - It lets through only a push of the run's own branch: never the base branch, a tag, a force push, a remote branch deletion or a ref it cannot read. A `checkout`, `switch`, `branch -m/-M/-f`, `reset` or `gh pr checkout` earlier on the same line makes HEAD unreadable, so `git checkout main && git push origin HEAD` is refused.
+  - Write branch names and directories out in a push line: a variable the guard cannot expand is refused with a retry hint. When the guard cannot read the repo at all, it refuses rather than letting the command run.
+  - The lead stays guarded from the moment its run names an id until the run's ✓/✗ card, with no time or typed-reply cutoff.
 - **Under `local`** it refuses pushes and PRs too.
 - **Under every setting** a diff that touches auth, payments, deploy, migrations, dependencies or a business assumption stops at the PR, and the card says `⚑ escalated`.
 
@@ -33,9 +35,9 @@ A plain session has no pane tools.
 
 ### Shells and trust
 
-- A shell session's first command must be one you quoted right after the ask, in the same sentence ("open a shell and run `npm test`"). A command quoted after "why" or "explain" is not a task.
-- A worker pane opened in your own checkout answers Claude's "trust this folder?" prompt for you. So does one opened in an `agt/` worktree this session's runs recorded, when its `.mcp.json`, `.claude` settings, agents and commands match your checkout's.
-- Any other folder must be opened by hand once.
+- A session's first prompt, whatever its kind, must be your own words from the prompt that asked for it: for a shell, a command quoted right after the ask, in the same sentence ("open a shell and run `npm test`"); a command quoted after "why" or "explain", prose, or a task the model wrote itself is dropped, the session opens empty and the tool result says why. `/storm`'s hand-off line is the one exception.
+- A worker pane opened at the root of your own checkout answers Claude's "trust this folder?" prompt for you. So does one opened at the root of an `agt/` worktree this session's runs recorded by exact path, when its `.mcp.json` (server scripts included), `.claude` settings and the hook, status-line and helper scripts they run, agents, commands, skills, hooks, `CLAUDE.md` and `AGENTS.md` are absent on both sides or identical to your checkout's.
+- Any other folder, a subfolder included, must be opened by hand once.
 
 ### Closing
 

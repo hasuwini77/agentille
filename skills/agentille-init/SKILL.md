@@ -29,7 +29,7 @@ description: Optional setup for agentille. Asks up to 5 skippable questions (nam
 | `preTaskQuestioning` | `never` / `ambiguous-only` / `always` | `ambiguous-only` |
 | `neverDo` | list of hard prohibitions, passed to every agent | `[]` |
 | `thinkingDepth` | `always` / `complex-only` / `quick`; edit by hand | `complex-only` |
-| `routing` | `{autoFable, maxFablePerRun, fableWeeklyCeiling, advisorOnOpus}`; edit by hand | built-in |
+| `routing` | `{autoFable, maxFablePerRun, fableWeeklyCeiling, maxRunUsd, advisorOnOpus}`; edit by hand | built-in |
 | `display` | `{deck: auto\|off, focus: true\|false, highlight: on\|all\|off}`; edit by hand | `{off, true, on}` |
 | `viewports` | design-reviewer default, any of `desktop` / `tablet` / `mobile`; edit by hand | desktop + mobile |
 | `projects[]` | repos registered by `/agentille-project` | `[]` |

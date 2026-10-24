@@ -28,7 +28,7 @@ The first word may force a level; otherwise detect it. First match wins.
 - **medium**: planner, then up to 3 executor subagents at once (each in its own worktree), then the review fan-out.
 - **heavy**: planner, then one pane per slice through `spawn_pane` (`panes-mode.md`), at most 3 at once like medium; planners and reviewers stay subagents; serial merge. Heavy differs from medium by panes (a real session per slice in its own worktree, the live wire, resume), not by width. A task that asks for Codex workers runs heavy (`panes-mode.md` → "Codex workers").
 - **Risk gate:** auth, money or data work (`routing.md` → "Risk words") never runs solo, and runs the gauntlet when the repo has a test runner (`formations.md`). A screen merely named login or checkout is `risk=none`.
-- `--fable` is the only flag (`routing.md` → "Escalation ladder"). Deprecated, still honored, never suggested, removed in v4: `--mode solo|subagent|panes|herdr` (= low|medium|heavy|heavy), `--plan` (stop after the plan review; "go" resumes it), `--formation <f>` (that formation).
+- `--fable` is the only flag (`routing.md` → "Escalation ladder"). Older flags still work: "Deprecated" at the end.
 
 Print the recon line before anything else: `recon: <level> · <transport> · <one-clause reason>`, where transport is `solo`, `subagent`, `panes` or `workflow` (`display.md` → "Mid-run lines").
 
@@ -56,7 +56,7 @@ Every `agentille:agentille-*` dispatch prompt starts with one line:
 - `risk`: `routing.md` → "Risk words" (sessions, tokens, guards → `auth`; payments, webhooks → `money`; migrations → `data`; a form or page with no such logic → `none`).
 - `mode=fix` on every fix round, including a `SendMessage` to the kept executor (a `RESUME:` after an early stop stays `mode=build`); `diagnose` for the read-only root-cause planner.
 - `fable=forced` only when the user typed `--fable`.
-- `slice=<slug>` (lowercase, ≤24 chars) names the slice: its executor, adversary and reviewers share it. Omit it for planning roles and single-slice runs. The mod accepts the older `piece=` too for one release; write `slice=`.
+- `slice=<slug>` (lowercase, ≤24 chars) names the slice: its executor, adversary and reviewers share it. Omit it for planning roles and single-slice runs.
 
 With the mod loaded it routes model + effort from this line. Still pass `model:` every time: the skill must work with mods off.
 
@@ -81,3 +81,10 @@ Ask: <preTaskQuestioning>. Depth: <thinkingDepth>.
 - **Never close a pane you did not open.** The `agt-` prefix is ownership.
 - **Re-enter from the files, not from memory.** After a compaction or a `/clear`, or whenever you cannot name the current slice and its state, re-read before the next dispatch: the sections you need of this file, `routing.md` and `factory.md`, then `run-<id>/context-pack.md`, the mod's `ledger.json` and `routing.jsonl` when present, and `git log $BASE..<branch>` per slice branch.
 - **Never re-dispatch a finished slice.** A slice whose branch is merged into `$BASE` or has a PR (`gh pr list --head <branch>`) is done; one whose executor report under `run-<id>/agents/` carries `VERIFICATION:` is built and goes to review, not to a new executor.
+
+## Deprecated
+
+Still honored when typed, never suggested:
+
+- `--mode solo|subagent|panes|herdr` (= low|medium|heavy|heavy), `--plan` (stop after the plan review; "go" resumes it), `--formation <f>` (that formation). All three go away in v4.
+- `piece=` in the dispatch header: the mod still reads it for one release; write `slice=`.

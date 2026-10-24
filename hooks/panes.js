@@ -3,7 +3,7 @@
 // Pure on purpose — the hooks loader never follows `$` across an import — so every
 // $.process / $.env / $.fs call lives in register.js and only feeds these helpers.
 
-import { ROLES, parseHeader } from './routing.js'
+import { ROLES, parseHeader, sessionAskSpans } from './routing.js'
 
 export const SAFE_RUN = /^[A-Za-z0-9_-]{1,64}$/
 export const NAME_RE = /^[a-z][a-z0-9_-]{0,31}$/
@@ -447,9 +447,14 @@ export function closeTarget(input, live = [], tab = null, mine = new Set()) {
 // ── sessions: interactive panes the person asked for, not workers ──────────────
 
 // What open_sessions can start. A session is the person's own, like a pane they opened by hand: no agt- name,
-// no worker env and no wire, so the band, the reaper, the SessionEnd sweep and /agt-clean never touch it.
+// no worker env and no wire, so the band and the worker reaper never touch it. Only a Herdr Claude or Codex session
+// is ever closed for the person: by the lead after SESSION_IDLE_MS idle and unfocused (sessionSweep), at session end
+// when idle (the SessionEnd sweep, from the lead's own lead-<pane>.sessions list), and by /agt-clean when idle after
+// its lead died. A shell, and any tmux session, closes only on request.
 export const SESSION_KINDS = ['claude', 'codex', 'shell']
 export const MAX_SESSIONS = 8
+// A resting session closes after this long: time to read an answer and type the next prompt.
+export const SESSION_IDLE_MS = 10 * 60_000
 
 // s-<run>-<n>: unique per herdr server through the run id, and never agt-.
 export function sessionName(run, i) {
@@ -460,7 +465,7 @@ export function sessionName(run, i) {
 export const OPEN_SESSIONS_TOOL = {
   name: 'open_sessions',
   isDeferred: false,
-  description: 'Open interactive sessions beside this one as Herdr or tmux panes, never focused: Claude by default, or Codex or a plain shell. Use it whenever the person asks to open or start sessions, panes, terminals, Claudes or Codexes ("open three sessions"): that is a direct action, not orchestration, so never answer it with subagents. Each session belongs to the person, like one opened by hand: no worker, no reaper, no reports. Not for delegating work.',
+  description: 'Open interactive sessions beside this one as Herdr or tmux panes, never focused: Claude by default, or Codex or a plain shell. Use it whenever the person asks to open or start sessions, panes, terminals, Claudes or Codexes ("open three sessions"): that is a direct action, not orchestration, so never answer it with subagents. Each session belongs to the person, like one opened by hand: no worker and no reports. On Herdr a Claude or Codex session is closed after ' + SESSION_IDLE_MS / 60_000 + ' minutes idle and unfocused, and at session end when idle; a shell, or any session on tmux, closes only on request. Not for delegating work.',
   inputSchema: {
     type: 'object',
     properties: {
@@ -480,9 +485,55 @@ export function stripFable(text) {
   return String(text ?? '').replace(/(^|\s)--fable(?=\s|$)/g, '$1').replace(/\s{2,}/g, ' ').trim()
 }
 
+// The commands a shell session may run, read off the person's typed prompt: a span they quoted (backticks, straight
+// or curly quotes), the rest of the sentence after an ask for a session with its connector dropped ("open a shell and
+// run npm run dev" → npm run dev), or the whole prompt minus the ask. Appearing somewhere in the prompt is not enough:
+// "open a shell. Do NOT run rm -rf ~/x" names a command nobody asked for, so a span in a sentence that says not to
+// run it ("do not run …", "never …", "don't …") is never one.
+const NEGATED = /\b(?:not|never|don'?t|dont|doesn'?t|won'?t|mustn'?t|shouldn'?t|avoid|without|nor)\b|\b(?:don|doesn|won|mustn|shouldn)[’']t\b/i
+const QUOTED = /`([^`\n]+)`|"([^"\n]+)"|“([^”\n]+)”|‘([^’\n]+)’|(?<=^|[\s(])'([^'\n]+)'(?!\w)/g
+const SENTENCE_END = /(?<=[\w)\]"'`”’~/])[.!?](?=\s|$)|\n/g
+function sentenceStart(t, pos) {
+  let s = 0
+  for (const m of t.slice(0, pos).matchAll(SENTENCE_END)) s = m.index + 1
+  return s
+}
+function sentenceEnd(t, pos) {
+  for (const m of t.slice(pos).matchAll(SENTENCE_END)) return pos + m.index
+  return t.length
+}
+function bareCommand(s) {
+  let c = String(s).trim().replace(/^(?:in|at|inside|from)\s+\S+(?=\s|$)/i, '').trim()
+  for (;;) {
+    const n = c.replace(/^[,:;\-–—]\s*/, '').replace(/^(?:and|then|to|that|which|so|also|please)\s+/i, '').replace(/^(?:runs?|running|execute|exec)\s+/i, '')
+    if (n === c) break
+    c = n
+  }
+  c = c.replace(/\s+(?:in\s+it|in\s+there|there|for\s+me|please|now)$/i, '').replace(/(?<=\w)[.!?]$/, '').trim()
+  const q = /^([`"'\u201c\u2018])([^`"'\u201c\u201d\u2018\u2019]+)([`"'\u201d\u2019])$/.exec(c) // a quoted command runs bare
+  return q ? q[2].trim() : c
+}
+export function shellCommands(typed) {
+  const t = String(typed ?? '')
+  const out = new Set()
+  for (const m of t.matchAll(QUOTED)) {
+    const span = (m[1] ?? m[2] ?? m[3] ?? m[4] ?? m[5]).trim()
+    if (span && !NEGATED.test(t.slice(sentenceStart(t, m.index), m.index))) out.add(span)
+  }
+  for (const a of sessionAskSpans(t)) {
+    const rest = t.slice(a.end, sentenceEnd(t, a.end))
+    const c = bareCommand(rest)
+    if (c && !NEGATED.test(t.slice(sentenceStart(t, a.start), a.end) + rest)) out.add(c)
+    const whole = t.slice(0, a.start) + ' ' + t.slice(a.end)
+    const w = bareCommand(whole)
+    if (w && !NEGATED.test(whole)) out.add(w)
+  }
+  return out
+}
+
 // open_sessions input → { count, tasks, kind, model, cwd, layout } or { error }. `tasks` has one entry per
-// session, null where none was given. `typed` is the person's own prompt: a shell command runs only when it
-// appears in it verbatim, and `--fable` rides into a Claude or Codex session only when `fableTyped` says the
+// session, null where none was given. `typed` is the person's own prompt: a shell command runs only when it is
+// one of its shellCommands, and `--fable` rides into a Claude or Codex session only when `fableTyped` says the
 // person typed it.
 export function sessionsToolInput(input, { typed = '', fableTyped = false } = {}) {
   const i = input ?? {}
@@ -503,8 +554,9 @@ export function sessionsToolInput(input, { typed = '', fableTyped = false } = {}
   if (cwd !== null && (!cwd.startsWith('/') || cwd.includes('\0'))) return { error: 'cwd must be an absolute path.' }
   let tasks = Array.from({ length: count }, (_, n) => str(given[n]) || null)
   if (kind === 'shell') {
-    const bad = tasks.find((t) => t && !String(typed ?? '').includes(t))
-    if (bad) return { error: 'A shell command runs only as the person typed it: "' + bad.slice(0, 60) + '" is not in their prompt.' }
+    const ok = shellCommands(typed)
+    const bad = tasks.find((t) => t && !ok.has(t))
+    if (bad) return { error: 'A shell command runs only as the person typed it: "' + bad.slice(0, 60) + '" is not a command they quoted or asked a shell to run.' }
   } else if (!fableTyped) tasks = tasks.map((t) => (t ? stripFable(t) || null : t))
   if (kind === 'claude' && tasks.some((t) => t && BARE_WORD.test(t))) return { error: 'A one-word task would run as a claude subcommand. Say more.' }
   return { count, tasks, kind, model, cwd, layout }
@@ -548,9 +600,6 @@ export const tmuxTitleArgvs = (id, name) => [
 ]
 export const tmuxTypeArgvs = (id, command) => [['tmux', 'send-keys', '-t', id, '-l', '--', command], ['tmux', 'send-keys', '-t', id, 'Enter']]
 
-// A resting session closes after this long: time to read an answer and type the next prompt.
-export const SESSION_IDLE_MS = 10 * 60_000
-
 // The Herdr sessions a lead closes now: an agent idle (its answer seen) and unfocused for SESSION_IDLE_MS. A `done`
 // agent holds an answer nobody has looked at yet, so it stays. A shell is never closed for the person, and neither is a
 // session whose agent left (claude exited to a bare shell the person may be using). `since` maps name → when it was
@@ -578,6 +627,6 @@ export function sessionsFile(home, leadPane) {
 
 // What the lead may do next with the sessions it opened, without any tool of ours.
 export function sessionsNote(transport, kind) {
-  if (transport === 'herdr' && kind !== 'shell') return ' Each closes itself after ' + SESSION_IDLE_MS / 60_000 + ' minutes idle and when this session ends. To send one a prompt: herdr agent prompt <name> "…". To read it: herdr agent read <name> --source recent-unwrapped --lines 120. close_pane <name> closes one now when the person asks.'
+  if (transport === 'herdr' && kind !== 'shell') return ' Each is closed after ' + SESSION_IDLE_MS / 60_000 + ' minutes idle and unfocused, and at session end when idle. To send one a prompt: herdr agent prompt <name> "…". To read it: herdr agent read <name> --source recent-unwrapped --lines 120. close_pane <name> closes one now when the person asks.'
   return ' They close only on request: close_pane <name> when the person asks.'
 }

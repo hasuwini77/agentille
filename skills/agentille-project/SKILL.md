@@ -28,7 +28,7 @@ Run inside a repo to register it and seed its `./CLAUDE.md`. Never auto-trigger.
 
    Slug: lowercase, non-alphanumeric to `-`, trimmed; empty → `project-<random>`.
 5. **Render** `./CLAUDE.md` from `claude-md-template.md`, pulling `name`, `deliveryStyle`, `tone`, `neverDo` from the profile.
-6. **Write** `./.agentille/config.json` as `{ "integration": "<chosen>" }` (repo-local, authoritative for this repo's runs). Print the three paths and suggest adding `.agentille/` to `.gitignore` if it should not be committed.
+6. **Write** `./.agentille/config.json` as `{ "integration": "<chosen>" }` (repo-local; it can only lower the mode your profile sets, never raise it: `auto` comes from the profile alone). Print the three paths and suggest adding `.agentille/` to `.gitignore` if it should not be committed.
 
 ## Hard rules
 

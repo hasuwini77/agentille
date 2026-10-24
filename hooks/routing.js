@@ -51,6 +51,8 @@ export function parseHeader(prompt) {
     const i = pair.indexOf('=')
     if (i > 0) h[pair.slice(0, i)] = pair.slice(i + 1)
   }
+  // `slice=<slug>` is the docs' name for `piece=`: both parse, and `piece=` wins when a header carries the two.
+  if (h.slice !== undefined && h.piece === undefined) h.piece = h.slice
   return h
 }
 
@@ -80,6 +82,28 @@ export function mentionsFable(text) {
   return /(^|\s)--fable(?=\s|$)/.test(String(text ?? ''))
 }
 
+// A typed /agt is proof for its own run, not for the session. The run is in flight while one of this lead's worker
+// panes still works (an /agt-spawn pane is the person's, not the run's), while a subagent of the run is working and
+// was heard from lately (a cancelled one raises no turn.complete), or, until its ✓/✗ card clears the proof, for
+// fewer than AGT_GRACE_TYPED typed prompts after the /agt: the person answering a question the run asked. Turns the
+// run itself wakes (a worker's report, a task notification) do not count, so a fix round after a quiet gap still
+// opens its pane. `st` is the mod's state record (S); `now` is Date.now(), the clock agents are heard by.
+export const AGT_GRACE_TYPED = 3
+export const AGENT_SILENT_MS = 10 * 60_000
+export function runInFlight(st, now = Date.now()) {
+  if (!st?.agtTyped) return false
+  if ((st.panes ?? []).some((p) => p.role !== 'spawn' && !['done', 'idle', 'dead'].includes(p.state))) return true
+  const run = st.lastRun
+  if (run && run !== 'adhoc' && [...(st.live?.values() ?? [])].some((a) => a.run === run && a.state === 'working' && now - (a.heard ?? a.start ?? 0) < AGENT_SILENT_MS)) return true
+  return (st.agtTypedSince ?? 0) < AGT_GRACE_TYPED
+}
+
+// The person named Codex in a typed prompt ("codex builds the API slice", "use Codex"): the only proof a worker pane
+// may run on vendor codex. A word on its own: "/codex-reviewer" and "codex-cli" name something else.
+export function mentionsCodex(text) {
+  return /(?<![\w/-])codex(?:es)?(?![\w-])/i.test(String(text ?? ''))
+}
+
 // A header's `fable=forced` holds only with that proof; without it the ladder applies (`fable=auto`)
 // and the caller says so once. `demoted` is true when the header was rewritten.
 export function proveHeader(hdr, { fableTyped = false } = {}) {
@@ -101,16 +125,32 @@ export function demoteHeaderText(text) {
 // open_sessions may run. The ask starts the prompt or a sentence (after "please", "can you", "then" …),
 // takes at most a count and a kind before the noun, and the noun must stand alone: "why does my app
 // start two shells", "give me a summary of the sessions middleware", "open the sessions file" and
-// "spawn the pane handler" talk about a thing, not a pane to open.
+// "spawn the pane handler" talk about a thing, not a pane to open. What follows the noun decides: the end,
+// punctuation, a linking word ("for", "in", "running", "here" …) or a count or kind ("sessions: 2 claude").
+// A noun followed by another noun names a thing ("a terminal emulator project", "a shell injection test").
 const SESSION_NOUN = '(sessions?|panes?|terminals?|claudes?|codex(?:es)?|shells?)'
-const NOT_A_PANE = '(?!\\s+(?:file|script|config|cookie|build|table|folder|handler|store|id|token|state|list|middleware|module|log)s?\\b|\\.\\w)'
+const NOT_A_PANE = '(?!\\s+(?:file|script|config|cookie|build|table|folder|handler|store|id|token|state|list|middleware|module|log|project|emulator|summary|summaries|test|suite|injection|manager|timeout|storage|replay|hijack|hijacking|fixation|key|data|history|variable|output|command|app|library|lib|layout|component|logic|bug|issue|leak|support|type|class|api|code|feature|ticket|recording)s?\\b|\\.\\w)'
+const FOLLOW = '(?=\\s*$|\\s*[,!?;:)\\]`"“‘(]|\\.(?!\\w)|\\s+[-–—]\\s|\\s+(?:for|with|in|at|on|named|called|running|that|to|and|so|here|there|beside|next|below|under|alongside|inside|from|then|now|please|too|which|where|each|via|using)\\b|\\s+(?:\\d+|one|two|three|four|five|six|seven|eight|claude|codex|shell|windows?|tabs?)\\b)'
 const LEAD_IN = '(?:^|[.!?;:\\n]\\s*)(?:(?:please|pls|now|then|also|and|next|first|ok|okay)[,\\s]+)*(?:(?:can|could|would|will)\\s+you\\s+(?:please\\s+)?|i\\s+(?:want|need|\\u0027d\\s+like)\\s+(?:you\\s+to\\s+)?|let\\u0027?s\\s+)?'
-const COUNT = '(?:(?:me\\s+)?(?:a|an|another|one|two|three|four|five|six|seven|eight|nine|ten|\\d+|some|a\\s+few|a\\s+couple\\s+of)\\s+)?(?:(?:new|fresh|more|extra|other|separate|parallel|plain|interactive|claude|codex|shell|tmux|herdr)\\s+)*'
-const SESSION_ASK = new RegExp(LEAD_IN + '(open|start|spawn|launch|fire\\s+up|give\\s+me|get\\s+me|bring\\s+up)\\s+(?:up\\s+)?' + COUNT + SESSION_NOUN + '\\b' + NOT_A_PANE, 'i')
+const COUNT = '(?:(?:me\\s+)?(?:a|an|another|one|two|three|four|five|six|seven|eight|nine|ten|\\d+|some|a\\s+few|a\\s+couple\\s+of)\\s+)?(?:(?:new|fresh|more|extra|other|separate|parallel|plain|interactive|claude|codex|shell|terminal|tmux|herdr)\\s+)*'
+const SESSION_ASK = new RegExp(LEAD_IN + '(open|start|spawn|launch|fire\\s+up|give\\s+me|get\\s+me|bring\\s+up)\\s+(?:up\\s+)?' + COUNT + SESSION_NOUN + '\\b' + NOT_A_PANE + FOLLOW, 'i')
 const STORM_TYPED = /^\s*\/(agentille:)?storm\b/
 export function asksSessions(text) {
   const t = String(text ?? '')
   return STORM_TYPED.test(t) || SESSION_ASK.test(t)
+}
+
+// Every ask for sessions in a typed prompt, as { start, end } offsets: start at the verb, end right after the noun.
+const SESSION_ASKS = new RegExp(SESSION_ASK.source, 'gi')
+export function sessionAskSpans(text) {
+  const t = String(text ?? '')
+  const out = []
+  for (const m of t.matchAll(SESSION_ASKS)) {
+    const end = m.index + m[0].length
+    const verb = m.index + m[0].toLowerCase().lastIndexOf(m[1].toLowerCase(), m[0].length - 1)
+    out.push({ start: Math.max(m.index, verb), end })
+  }
+  return out
 }
 
 // A plan-reviewer's verdict, or null. Its `VERDICT: APPROVE|REVISE` line (markdown emphasis tolerated)

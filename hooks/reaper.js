@@ -2,21 +2,17 @@
 // which closes, which is flagged, the wake it sends itself, and the cleaner behind /agt-clean.
 
 import { S } from './state.js'
-import { herdrOrphans, tmuxOrphans, orphanPlan, staleTabs, parseWorktrees, worktreePlan, cleanText } from './clean.js'
+import { herdrOrphans, tmuxOrphans, orphanPlan, staleTabs, parseWorktrees, worktreePlan, cleanText, FRESH_MS } from './clean.js'
+import { ownedWorktrees, forgetOwned } from './guard.js'
 import { writeRunFile } from './dispatch.js'
 import { paneAgents, reapPlan, ledger, panesLeft, endRoute } from './live.js'
 import { SAFE_RUN, PROBE, SPAWN_ROLE, splitName, doneFile, paneKey, answerFile, parseTmuxList, scopeRows, isFreshDone, quietSpawn, tmuxPaneAgents, isLead, TMUX_LIST_ARGV, reapPool, tmuxKillArgv, herdrCloseArgv, herdrPaneGetArgv, herdrTerminalOf, SESSION_IDLE_MS, sessionSweep } from './panes.js'
 import { closeSession, forgetSession } from './sessions.js'
 import { pruneTabs } from './spawn.js'
 import { wakeDue, wakeMessage } from './wire.js'
-const { runs, live, paneRoutes, restingSince, staged, paneSeen, harvested, wireDone, woken, strandedNow, strandedToasted, firstSeen, openedNames } = S
-
-// A pane that left the list takes its bookkeeping with it, so a reused pane id never inherits a harvest.
-export function forgetGone(listed) {
-  const gone = (id) => !listed.some((p) => p.id === id)
-  for (const id of [...firstSeen.keys()]) if (gone(id)) firstSeen.delete(id)
-  for (const s of [harvested, wireDone, woken, strandedToasted]) for (const id of [...s]) if (gone(id)) s.delete(id)
-}
+import * as P from './panerec.js'
+const { runs, live, paneRoutes, openedNames } = S
+const { restingSince, staged, strandedNow } = P
 
 // Panes that left the stage this poll: end their route and refresh the ledger.
 export async function notePaneExits($) {
@@ -33,7 +29,7 @@ export async function notePaneExits($) {
 export async function freshAnswer($, file, p) {
   if (!file) return false
   try {
-    return isFreshDone(await $.fs.stat(file), firstSeen.get(p.id))
+    return isFreshDone(await $.fs.stat(file), P.get(p.id)?.firstSeen)
   } catch {
     return false // missing or unreadable
   }
@@ -55,9 +51,9 @@ export async function answerOf($, p) {
 }
 
 export async function isHarvested($, p) {
-  if (harvested.has(p.id)) return true
+  if (P.get(p.id)?.harvested) return true
   if (!(await answerOf($, p))) return false
-  harvested.add(p.id)
+  P.rec(p.id).harvested = true
   return true
 }
 
@@ -65,8 +61,8 @@ export async function isHarvested($, p) {
 // the pane and how to read it, so the lead does not wait blind. Once per pane. A blocked pane waits on the person.
 export async function wakeLead($, pool, now, t) {
   if (!S.sessionId) return
-  for (const p of wakeDue(pool.filter((q) => q.role !== SPAWN_ROLE), paneSeen, wireDone, woken, now)) { // a spawn pane has no lead run to wake
-    woken.add(p.id)
+  for (const p of wakeDue(pool.filter((q) => q.role !== SPAWN_ROLE), P.seen, P.wireDone, P.woken, now)) { // a spawn pane has no lead run to wake
+    P.rec(p.id).woken = true
     const text = wakeMessage({ name: p.name, transport: t, id: p.id, answerPath: await answerOf($, p) })
     const r = await $.session.send({ to: { sessionId: S.sessionId }, text }).catch((err) => ({ isDelivered: false, reason: String(err?.message ?? err) }))
     if (!r.isDelivered) $.ui.toast('agt ⚑ ' + p.name + ' ' + p.state + ' with no report. ' + text.slice(text.indexOf('. ') + 2).slice(0, 120))
@@ -78,12 +74,12 @@ export async function wakeLead($, pool, now, t) {
 export async function sweep($, pool, now, t, close) {
   const ok = new Set()
   for (const p of pool) if ((p.state === 'done' || p.state === 'idle') && (await isHarvested($, p))) ok.add(p.id)
-  const plan = reapPlan(pool, paneSeen, now, S.leadTurn, (p) => ok.has(p.id))
+  const plan = reapPlan(pool, P.seen, now, S.leadTurn, (p) => ok.has(p.id))
   strandedNow.clear()
   for (const p of plan.stranded) {
     strandedNow.add(p.name)
-    if (strandedToasted.has(p.id)) continue
-    strandedToasted.add(p.id)
+    if (P.get(p.id)?.strandedToasted) continue
+    P.rec(p.id).strandedToasted = true
     $.ui.toast('agt ⚑ ' + p.name + ' ' + p.state + ', not harvested')
   }
   for (const p of plan.reap) {
@@ -116,8 +112,8 @@ export async function pollHerdr($) {
   const owned = S.selfName ? real : real.filter((p) => openedNames.has(p.name))
   S.panes = quietSpawn(owned) // the band shows a spawn pane as `open`; the reaper below sees its real state
   const now = await $.clock.now()
-  for (const p of S.panes) if (!firstSeen.has(p.id)) firstSeen.set(p.id, now)
-  forgetGone(S.panes)
+  for (const p of S.panes) if (P.get(p.id)?.firstSeen === undefined) P.rec(p.id).firstSeen = now
+  P.forgetGone(S.panes)
   await notePaneExits($)
   if (me && !S.selfName) {
     await pruneTabs($, me.workspace_id)
@@ -153,8 +149,8 @@ export async function pollTmux($) {
   // only if it was written after the pane was first listed.
   const now = await $.clock.now()
   const scoped = me ? scopeRows(rows, selfPane).filter((r) => S.selfName || openedNames.has(r.agt)) : []
-  for (const r of scoped) if (!firstSeen.has(r.id)) firstSeen.set(r.id, now)
-  forgetGone(rows)
+  for (const r of scoped) if (P.get(r.id)?.firstSeen === undefined) P.rec(r.id).firstSeen = now
+  P.forgetGone(rows)
   const done = new Map()
   for (const r of scoped) {
     const n = splitName(r.agt)
@@ -162,7 +158,7 @@ export async function pollTmux($) {
     const file = n && !r.dead && (n.role === SPAWN_ROLE ? answerFile(S.home, n.run, n.role, paneKey(r.id)) : doneFile(S.home, n.run, n.role))
     if (!file) continue
     try {
-      done.set(r.agt, isFreshDone(await $.fs.stat(file), firstSeen.get(r.id)))
+      done.set(r.agt, isFreshDone(await $.fs.stat(file), P.get(r.id)?.firstSeen))
     } catch {
       // missing or unreadable counts as not done
     }
@@ -204,7 +200,8 @@ async function withAnswer($, plan) {
 // ── the cleaner ──────────────────────────────────────────────────────────────
 // Panes: agt-* panes no live lead owns (their lead died before its SessionEnd sweep) close once
 // finished; a typed /agt-clean also closes this lead's stranded panes (done, answer never read). Run-tab files of gone leads are dropped.
-// Git (not on `panes` alone): agt/* worktrees merged and clean are removed, merged agt/* branches deleted.
+// Git (not on `panes` alone): agt/* worktrees this session's runs opened, merged and clean, are removed and
+// their merged branches deleted; at a run's end (auto) the .env* copies in them go first.
 // Clean means done/idle/dead panes, merged branches and clean checkouts only; the rest is reported, never touched.
 export async function cleanWorkspace($, { all = false, auto = false, panesOnly = false } = {}) {
   const r = { closed: [], tabs: 0, removed: [], branches: [], runs: 0, keep: [] }
@@ -221,7 +218,7 @@ export async function cleanWorkspace($, { all = false, auto = false, panesOnly =
     const tabs = new Map()
     for (const k of keys) tabs.set(k, String(await $.fs.read(dir + '/lead-' + k + '.tabs').catch(() => '')).split('\n').filter(Boolean))
     const plan = orphanPlan(herdrOrphans(list, (id) => tabs.get(paneKey(id))))
-    const close = [...(await withAnswer($, plan)), ...(all ? S.panes.filter((p) => strandedNow.has(p.id) && !plan.close.some((c) => c.id === p.id)) : [])]
+    const close = [...(await withAnswer($, plan)), ...(all ? S.panes.filter((p) => strandedNow.has(p.name) && !plan.close.some((c) => c.id === p.id)) : [])]
     for (const p of close) if ((await run(herdrCloseArgv(p.id)))?.exitCode === 0) r.closed.push(p.name)
     r.keep.push(...plan.keep)
     for (const k of staleTabs(keys, list, paneKey)) if ((await run(['rm', '-f', dir + '/lead-' + k + '.tabs']))?.exitCode === 0) r.tabs += 1
@@ -246,12 +243,12 @@ export async function cleanWorkspace($, { all = false, auto = false, panesOnly =
       if (file && (await $.fs.exists(file).catch(() => false))) done.add(row.id)
     }
     const plan = orphanPlan(tmuxOrphans(rows, (row) => done.has(row.id)))
-    const close = [...(await withAnswer($, plan)), ...(all ? S.panes.filter((p) => strandedNow.has(p.id) && !plan.close.some((c) => c.id === p.id)) : [])]
+    const close = [...(await withAnswer($, plan)), ...(all ? S.panes.filter((p) => strandedNow.has(p.name) && !plan.close.some((c) => c.id === p.id)) : [])]
     for (const p of close) if ((await run(tmuxKillArgv(p.id)))?.exitCode === 0) r.closed.push(p.name)
     r.keep.push(...plan.keep)
   }
-  if (!all) for (const p of S.panes) if (strandedNow.has(p.id)) r.keep.push({ what: p.name, why: 'answer not read · /agt-clean closes it' })
-  if (!panesOnly) await cleanGit($, run, r)
+  if (!all) for (const p of S.panes) if (strandedNow.has(p.name)) r.keep.push({ what: p.name, why: 'answer not read · /agt-clean closes it' })
+  if (!panesOnly) await cleanGit($, run, r, { sweepEnv: auto })
   if (all && !panesOnly) await pruneRuns($, run, r)
   if (r.closed.length) $.ui.invalidate('ui.render')
   if (auto && (r.closed.length || r.removed.length || r.branches.length)) $.ui.toast(cleanText({ ...r, keep: [] }))
@@ -277,24 +274,52 @@ export async function pruneRuns($, run, r) {
   }
 }
 
-export async function cleanGit($, run, r) {
+// Only what this session's runs opened (guard.js records each `git worktree add`): another session's
+// worktree, even a merged-looking fresh one, is listed as kept and never read. An owned tree goes once it is
+// merged, clean, has commits of its own and is FRESH_MS old. sweepEnv (a run's end) first deletes the
+// untracked .env* copies in every owned worktree, so secrets never outlive the run.
+export async function cleanGit($, run, r, { sweepEnv = false } = {}) {
   const cwd = await $.session.cwd().catch(() => null)
   if (!cwd) return
   const git = (...a) => run(['git', '-C', cwd, ...a])
   const wl = await git('worktree', 'list', '--porcelain')
   if (wl?.exitCode !== 0) return
   const trees = parseWorktrees(wl.stdout)
+  const mine = await ownedWorktrees($).catch(() => [])
+  const paths = new Set(mine.map((o) => o.path))
+  const names = new Set(mine.map((o) => o.branch).filter(Boolean))
+  const born = new Map(mine.map((o) => [o.path, o.head]))
+  const owned = (t) => (t.path && paths.has(t.path)) || (!!t.branch && names.has(t.branch))
+  const linked = trees.slice(1).filter((t) => !t.prunable && t.path !== cwd)
+  // Ages first: deleting a .env copy touches the directory, and would make every swept tree look fresh.
+  const ages = new Map()
+  for (const t of linked.filter(owned)) ages.set(t.path, (await $.fs.stat(t.path).catch(() => null))?.mtimeMs)
+  if (sweepEnv) for (const t of linked.filter(owned)) await run(['git', '-C', t.path, 'clean', '-fqx', '--', '.env*'])
   const lines = (x) => (x?.exitCode === 0 ? String(x.stdout).split('\n').map((l) => l.trim()).filter(Boolean) : [])
   const base = lines(await git('symbolic-ref', '--short', 'refs/remotes/origin/HEAD'))[0]
   const merged = new Set()
-  for (const ref of [base, 'HEAD'].filter(Boolean)) for (const b of lines(await git('branch', '--merged', ref, '--format=%(refname:short)', '--list', 'agt/*'))) merged.add(b)
+  const tips = new Set()
+  for (const ref of [base, 'HEAD'].filter(Boolean)) {
+    for (const b of lines(await git('branch', '--merged', ref, '--format=%(refname:short)', '--list', 'agt/*'))) merged.add(b)
+    const tip = lines(await git('rev-parse', ref))[0]
+    if (tip) tips.add(tip)
+  }
   const dirty = new Set()
+  const empty = new Set()
+  const fresh = new Set()
   for (const t of trees.slice(1)) {
-    if (!t.branch?.startsWith('agt/') || t.prunable || !merged.has(t.branch)) continue
+    if (!t.branch?.startsWith('agt/') || t.prunable || !merged.has(t.branch) || !owned(t)) continue
     const st = await run(['git', '-C', t.path, 'status', '--porcelain'])
     if (st?.exitCode !== 0 || String(st.stdout).trim()) dirty.add(t.path)
+    // No commits of its own: the tip is still where it forked (recorded at `worktree add`); a tree with no
+    // recorded fork point counts as empty while its tip is the base's or HEAD's (a fast-forward looks the same).
+    const fork = born.get(t.path)
+    if (!t.head || (fork ? fork === t.head : tips.has(t.head))) empty.add(t.path)
+    const at = ages.get(t.path)
+    if (typeof at !== 'number' || Date.now() - at < FRESH_MS) fresh.add(t.path)
   }
-  const plan = worktreePlan(trees, merged, dirty, lines(await git('branch', '--format=%(refname:short)', '--list', 'agt/*')))
+  const branches = lines(await git('branch', '--format=%(refname:short)', '--list', 'agt/*'))
+  const plan = worktreePlan(trees, merged, dirty, branches, { owned, empty, fresh })
   r.keep.push(...plan.keep)
   for (const t of plan.remove) {
     if ((await git('worktree', 'remove', t.path))?.exitCode === 0) r.removed.push(t.branch)
@@ -305,4 +330,8 @@ export async function cleanGit($, run, r) {
     if ((await git('branch', '-d', b))?.exitCode === 0) r.branches.push(b)
   }
   if (plan.prune) await git('worktree', 'prune')
+  if (mine.length) {
+    const gone = new Set([...plan.remove.filter((t) => r.removed.includes(t.branch)).map((t) => t.path)])
+    await forgetOwned($, trees.filter((t) => !gone.has(t.path)), branches.filter((b) => !r.branches.includes(b))).catch(() => {})
+  }
 }

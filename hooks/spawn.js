@@ -76,15 +76,56 @@ export async function sameRepo($, a, b) {
   return !!x && x === y
 }
 
+// Whether the mod may accept the folder-trust prompt for `cwd` on the person's behalf. Sharing the lead's git
+// common dir is not enough: a worktree of a contributor's branch can carry its own .claude/settings.json hooks.
+// Trusted: the lead's own checkout (or a folder in it), or a worktree of the same repo on an agt/*, feat/* or fix/*
+// branch that this lead made. The lead's lead-<pane>.worktrees list (guard.js: JSON records with path and branch;
+// a plain one-per-line list is read too) says which it made; with no list, the worktree must carry no .claude/settings.json or settings.local.json that
+// differs from the lead checkout's.
+const OWN_BRANCH = /^(?:agt|feat|fix)\/[A-Za-z0-9._/-]+$/
+const SETTINGS = ['.claude/settings.json', '.claude/settings.local.json']
+// Does a lead-<pane>.worktrees file name this worktree: a JSON array of { path, branch } records (guard.js), or
+// one path or branch per line.
+export function ownedWorktree(listed, top, branch) {
+  try {
+    const recs = JSON.parse(listed)
+    if (Array.isArray(recs)) return recs.some((r) => r && (r.path === top || (branch && r.branch === branch)))
+  } catch {}
+  return String(listed).split('\n').some((l) => l.trim().split(/\s+/).some((f) => f === top || (branch && f === branch)))
+}
+
+export async function trustable($, cwd, leadCwd) {
+  if (cwd === leadCwd) return true
+  if (!(await sameRepo($, cwd, leadCwd))) return false
+  const git = async (d, ...a) => {
+    const r = await $.process.run(['git', '-C', d, ...a], PROBE).catch(() => null)
+    return r?.exitCode === 0 ? String(r.stdout).trim() : ''
+  }
+  const [top, leadTop] = await Promise.all([git(cwd, 'rev-parse', '--show-toplevel'), git(leadCwd, 'rev-parse', '--show-toplevel')])
+  if (!top || !leadTop) return false
+  if (top === leadTop) return true
+  const branch = await git(cwd, 'symbolic-ref', '--short', 'HEAD')
+  if (!OWN_BRANCH.test(branch)) return false
+  const file = String(panesFile(S.home, await leadPane($)) ?? '').replace(/\.panes$/, '.worktrees')
+  const listed = file ? await $.fs.read(file).catch(() => null) : null
+  if (typeof listed === 'string') return ownedWorktree(listed, top, branch)
+  for (const f of SETTINGS) {
+    const mine = await $.fs.read(top + '/' + f).catch(() => null)
+    if (typeof mine !== 'string') continue
+    if (mine !== (await $.fs.read(leadTop + '/' + f).catch(() => null))) return false
+  }
+  return true
+}
+
 // A fresh worker stopped on a startup screen (agent_not_ready): classify it, press the keys that clear it, up to
-// 3 times. A trust prompt is accepted only for the lead's own repo; anything else throws and the pane is closed.
+// 3 times. A trust prompt is accepted only where trustable says so; anything else throws and the pane is closed.
 export async function clearDialogs($, name, cwd) {
   for (let i = 0; i < 3; i++) {
     const read = await $.process.run(herdrReadArgv(name), PROBE)
     const screen = String(read.stdout ?? '')
     const kind = startupDialog(screen)
     if (!kind) throw new Error(screenLine(screen))
-    if (kind === 'trust' && !(await sameRepo($, cwd, await $.session.cwd()))) throw new Error(cwd + ' needs a one-time trust: open it once by hand.')
+    if (kind === 'trust' && !(await trustable($, cwd, await $.session.cwd()))) throw new Error(cwd + ' needs a one-time trust: open it once by hand.')
     const keys = dialogKeys(kind, screen)
     if (!keys.length) throw new Error(screenLine(screen))
     // One key at a time: a menu that has only just drawn drops keys sent in one burst.

@@ -1,6 +1,7 @@
 // agentille mod state: one record, read and written by register.js and the modules it wires. Everything
 // here lives for the session (a reload starts it over); nothing is persisted from here but through $.store
 // and the run files. Fields that are reassigned are read as S.name; the collections are destructured once.
+// What the lead keeps about each pane (harvest, wake, stranded, first seen, stage) is in panerec.js.
 
 import { DEFAULTS } from './routing.js'
 import { resolveDisplay } from './settings.js'
@@ -21,15 +22,6 @@ export const S = {
   opened: [],  // { id, name } of panes this lead opened via spawn_pane, in spawn order
   openedNames: new Set(),  // every pane name this lead opened, kept after the pane closes
   sessions: [],  // { id, name, kind, tab, terminal } of the sessions this lead opened via open_sessions, oldest first
-  restingSince: new Map(),  // session name → when it was first seen idle and unfocused (sessionSweep)
-  staged: new Map(),  // pane name → last pane seen on stage (live.js panesLeft)
-  paneSeen: new Map(),  // reaper bookkeeping
-  harvested: new Set(),  // pane ids whose answer the lead has in hand (a wire done message, a saved answer file, a close_pane)
-  wireDone: new Set(),  // pane ids whose wire done message reached this lead
-  woken: new Set(),  // pane ids the lead already woke itself for
-  strandedNow: new Set(),  // done/idle panes kept open because nothing was harvested from them
-  strandedToasted: new Set(),  // ... pane ids of which the person was told once
-  firstSeen: new Map(),  // pane id → when this session first listed it: a done-file or answer file older than that is a previous pane's
   selfName: null,  // this pane's name when it is an agt-* worker
   worker: null,  // { agent, model, effort } from AGENTILLE_WORKER: this session is a worker pane
   selfTab: null,  // herdr: the lead's own tab, where its workers split
@@ -49,10 +41,13 @@ export const S = {
   focusOn: true,  // agent flags show above the prompt
   flags: [],  // [{ text, key, at }] from agent results this run
   agtTurn: false,  // this turn is part of an /agt run
-  agtTyped: false,  // the person typed /agt in this session: only then may the lead open worker panes
+  worktrees: [],  // { path, branch, head, run, at } of the worktrees this session's runs made (guard.js), saved to lead-<pane>.worktrees
+  agtTyped: false,  // the person typed /agt and its run is not over (routing.js runInFlight): only then may the lead open worker panes
   fableTyped: false,  // ... and typed --fable on it: only then does a header's fable=forced hold
-  sessionsAsked: false,  // the newest typed prompt asked for sessions of the person's own (open_sessions)
-  lastTyped: '',  // the newest typed prompt: a shell session runs only a command that appears in it
+  agtTypedSince: 0,  // typed prompts other than /agt since the newest typed /agt (the run's grace, AGT_GRACE_TYPED)
+  sessionsAsked: false,  // this turn's prompt was typed and asked for sessions of the person's own (open_sessions)
+  lastTyped: '',  // the newest typed prompt: a shell session runs only a command it asks for
+  agtPrompt: '',  // the newest typed /agt prompt: a worker pane runs on Codex only when it or lastTyped names Codex
   workerProved: false,  // worker: its first typed prompt decided whether fable=forced holds here
   demotedToasted: new Set(),  // run ids told once that fable=forced was dropped for want of a typed --fable
   leadTurn: false,  // a main-loop turn is running: its idle panes are waiting for review

@@ -353,15 +353,15 @@ else
   fi
   tout=$(claude plugin test . 2>&1); trc=$?
   # Exit 0 is not enough: an empty or truncated run must not read as green. Need a pass count
-  # at or above the floor (there are ~527 tests) and no failures.
+  # at or above the floor (there are ~534 tests) and no failures.
   tpass=$(printf '%s\n' "$tout" | grep -oE '[0-9]+ pass' | tail -1 | grep -oE '[0-9]+')
   tfail=$(printf '%s\n' "$tout" | grep -oE '[0-9]+ fail' | tail -1 | grep -oE '[0-9]+')
   if [ "$trc" != 0 ]; then
     fail "claude plugin test failed (exit $trc)"
   elif [ -z "$tpass" ]; then
     fail "claude plugin test printed no 'N pass' count — cannot tell it ran"
-  elif [ "$tpass" -lt 400 ]; then
-    fail "claude plugin test: only $tpass pass (expected at least 400)"
+  elif [ "$tpass" -lt 500 ]; then
+    fail "claude plugin test: only $tpass pass (expected at least 500)"
   elif [ -n "$tfail" ] && [ "$tfail" != 0 ]; then
     fail "claude plugin test: $tfail fail"
   else
@@ -372,9 +372,14 @@ fi
 # ── 6d. Hook scripts: deterministic shell tests (fake HOME, file:// fixtures) ─
 hdr "Hook scripts"
 # tests/hooks/test-validate-gate.sh runs this script with a fake claude; it sets this so the inner
-# run does not run the hook tests again. Nothing else should set it.
+# run does not run the hook tests again. Nothing else should set it, and under CI=true it is a FAIL:
+# the runner must never go green with the hook tests skipped.
 for t in tests/hooks/test-*.sh; do
-  [ -n "${AGENTILLE_VALIDATE_SKIP_HOOK_TESTS:-}" ] && { warn "hook tests skipped (AGENTILLE_VALIDATE_SKIP_HOOK_TESTS set: inner run of test-validate-gate.sh)"; break; }
+  if [ -n "${AGENTILLE_VALIDATE_SKIP_HOOK_TESTS:-}" ]; then
+    m="hook tests skipped (AGENTILLE_VALIDATE_SKIP_HOOK_TESTS set: inner run of test-validate-gate.sh)"
+    if [ "${CI:-}" = "true" ]; then fail "$m: CI=true, unset it on the runner"; else warn "$m"; fi
+    break
+  fi
   [ -e "$t" ] || { warn "no tests/hooks/test-*.sh found"; break; }
   tout=$(bash "$t" 2>&1); trc=$?
   if [ "$trc" = 0 ]; then pass "$t: $(printf '%s\n' "$tout" | tail -1)"; else fail "$t failed:"; printf '%s\n' "$tout" | tail -12 | sed 's/^/    /'; fi

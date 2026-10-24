@@ -5,29 +5,30 @@ import { S, ctx } from './state.js'
 import { registerAutocomplete } from './autocomplete.js'
 import { toolLabel, runPhases } from './board.js'
 import { cleanText } from './clean.js'
-import { runState, routingView, ledgerView, writeRunFile, writeReport, fileRunOf, completeReport, dispatchAgent } from './dispatch.js'
-import { DECK, applyDisplay, addFlag, answerPanel, deckCommand, focusCommand, highlightCommand } from './display.js'
+import { routingView, ledgerView, completeReport, dispatchAgent } from './dispatch.js'
+import { DECK, applyDisplay, answerPanel, deckCommand, focusCommand, highlightCommand } from './display.js'
 import { canDraw, drawingBlock, reportRun } from './drawing.js'
-import { flagOf, flagKey } from './focus.js'
-import { highlightFor, litFor, ANSWER_STYLE, isRawPrompt, RAW_STYLE } from './highlight.js'
+import { highlightFor, litFor } from './highlight.js'
 import { parseInfoArgs, routeText, routingSummary, ledgerSummary, squadsSummary, overviewText } from './info.js'
-import { verdictChip, party, answerLine } from './links.js'
-import { addUsage, finish, ledger, isAgtPrompt } from './live.js'
-import { HELLO_MS, BYE_MS, parseWorker } from './mascot.js'
+import { verdictChip } from './links.js'
+import { addUsage, ledger } from './live.js'
+import { HELLO_MS, parseWorker } from './mascot.js'
 import { PROBE, SPAWN_ROLE, transportBlock, paneName, newRunId, paneKey, parseSpawnArgs, herdrPromptArgv } from './panes.js'
 import { installedSkew, loadProfile, loadSquads, squadsView, tipOnce } from './profile.js'
+import { bashCall } from './guard.js'
 import { pollNow, cleanWorkspace } from './reaper.js'
 import { cardBox, answerBox, switchboard, deck } from './render.js'
-import { parseHeader, typedFable, asksSessions, verdictOf } from './routing.js'
 import { registerRows } from './rows.js'
 import { hostMessage, hostTooOld, hostVersionOf, skewMessage } from './skew.js'
-import { detectTransport, transportOf, openPane, ensureTools, loadOwned, savePanes } from './spawn.js'
+import { detectTransport, transportOf, openPane, loadOwned, savePanes } from './spawn.js'
 import { spawnPane, openSessions, closePane } from './tools.js'
 import { registerStatus } from './status.js'
 import { refreshAgents, working, ensurePolling, ensureTicker } from './ticker.js'
 import { statusKey, freshStatus, validLead, parseWire, shortName, logWire, parseTellArgs } from './wire.js'
-import { publish, saveAnswer, reportDone } from './worker.js'
-const { runs, live, decisions, paneRoutes, openedNames, paneSeen, harvested, wireDone, woken, strandedToasted, firstSeen, ownedTabs, mascot, litMemo, hlMemo, rawIds, wireLog, pub } = S
+import { publish } from './worker.js'
+import { onPromptSubmit, onTurnComplete } from './turns.js'
+import * as P from './panerec.js'
+const { runs, live, paneRoutes, openedNames, mascot, litMemo, hlMemo, rawIds, wireLog, pub } = S
 
 export function register(on) {
   on('session.start', async ($, e, next) => {
@@ -67,7 +68,7 @@ export function register(on) {
     applyDisplay()
     await $.command.register({ name: 'agt-info', description: 'Settings in effect, routing, ledger, squads, or a route dry-run: routing | ledger | squads | route <role>', argumentHint: '[routing|ledger|squads|route <role> [size=…] [risk=…] [depth=…]]', immediate: true })
     await $.command.register({ name: 'agt-highlight', description: 'Highlight replies: on (/agt replies lit; a paste-ready ask gets a plain-text note) · all (every typed question gets the answer shape) · off (nothing added to any prompt). Saved as display.highlight in profile.json; goes away in v4', argumentHint: '[on|all|off]', immediate: true })
-    await $.command.register({ name: 'agt-clean', description: 'Tidy up now: close finished agt panes, remove merged agt/* worktrees and branches, drop run folders untouched for 14 days. Anything still working or unmerged stays', immediate: true })
+    await $.command.register({ name: 'agt-clean', description: 'Tidy up now: close finished agt panes, remove merged agt/* worktrees and branches this session\'s runs made, drop run folders untouched for 14 days. Anything still working, unmerged or made elsewhere stays', immediate: true })
     await $.command.register({ name: 'agt-focus', description: 'Agent flags above the prompt (a REVISE, a FAIL, a blocked pane): on · off. Saved as display.focus in profile.json; goes away in v4', argumentHint: '[on|off]', immediate: true })
     if (S.transport !== 'none') {
       // One look now: a lead restarted mid-run takes back the panes it opened (lead-<pane>.panes) and no other
@@ -145,40 +146,15 @@ export function register(on) {
   on('tool.call', { tool: 'mcp__agentille__spawn_pane' }, spawnPane)
   on('tool.call', { tool: 'mcp__agentille__open_sessions' }, openSessions)
   on('tool.call', { tool: 'mcp__agentille__close_pane' }, closePane)
+  on('tool.call', { tool: 'Bash' }, bashCall)  // guard.js: integration guard + worktree ownership
 
   on('command.run', { command: 'agt-clean' }, async ($, e) => {
     if (S.selfName || S.worker) return { text: 'agt clean runs in the lead session, not in a worker pane.' }
     return { text: cleanText(await cleanWorkspace($, { all: true })) }
   })
 
-  // A typed /agt starts a clean run; a task notification, plugin or peer turn is not the person's prompt,
-  // and neither is one whose origin the host did not name.
-  on('prompt.submit', async ($, e, next) => {
-    const k = e.origin?.kind
-    if (k !== 'composer' && k !== 'bridge') return next(e)
-    S.lastTyped = String(e.text ?? '')
-    S.agtTurn = isAgtPrompt(e.text)
-    if (S.agtTurn) S.flags = []   // a new run starts with a clean slate
-    // What the person typed is the only proof the dispatch headers get: a typed /agt unlocks spawn_pane
-    // for the session, --fable on it is what makes fable=forced hold, and only a typed ask opens sessions.
-    if (S.agtTurn) { S.agtTyped = true; S.fableTyped = typedFable(e.text) }
-    if (S.agtTurn) await ensureTools($, 'panes')
-    // A worker's proof is its first prompt: the lead already rewrote fable=forced there when nobody typed --fable.
-    if (S.worker && !S.workerProved) { S.workerProved = true; S.fableTyped = parseHeader(e.text)?.fable === 'forced' || typedFable(e.text) }
-    S.sessionsAsked = !S.agtTurn && !S.selfName && !S.worker && asksSessions(e.text)
-    if (S.sessionsAsked) await ensureTools($, 'sessions')
-    if (S.agtTurn && S.deckAuto) void $.ui.open({ id: DECK, title: 'agentille' })
-    // Under display.highlight: all, a typed question in the lead session asks for the panel's shape.
-    // Never in a worker pane (the lead parses its report) and never for a slash command or an /agt run.
-    const typed = !S.agtTurn && !S.selfName && !S.worker && !String(e.text ?? '').trimStart().startsWith('/')
-    // Asked for text to paste as is: no panel and no answer style. Under display.highlight: off nothing is
-    // added to any prompt and nothing is copied, so the raw style needs highlight on or all.
-    S.rawTurn = typed && S.highlightOn && isRawPrompt(e.text)
-    S.shapedTurn = !S.rawTurn && typed && S.highlightOn && S.highlightAll
-    if (S.rawTurn) return next({ ...e, context: [...(e.context ?? []), RAW_STYLE] })
-    if (S.shapedTurn) return next({ ...e, context: [...(e.context ?? []), ANSWER_STYLE] })
-    return next(e)
-  })
+  // A typed /agt starts a clean run, and the turn's proofs are set or dropped: turns.js.
+  on('prompt.submit', async ($, e, next) => next(await onPromptSubmit($, e)))
 
   on('skill.prompt', async ($, e, next) => {
     if (!/(^|:)agt$/.test(e.skill)) return next(e)
@@ -198,7 +174,7 @@ export function register(on) {
       const from = shortName(w.from)
       // Only the pane whose key the message names: a stale list or a respawned role must not harvest the older pane.
       const hit = w.kind === 'done' && w.key ? S.panes.find((p) => paneKey(p.id) === w.key && p.name === w.from) : null
-      if (hit) { harvested.add(hit.id); wireDone.add(hit.id) }
+      if (hit) { const r = P.rec(hit.id); r.harvested = true; r.wireDone = true }
       const route = w.kind === 'done' ? paneRoutes.findLast((r) => r.name === w.from) : null
       if (route) route.verdict = verdictChip(route.agent, w.summary)
       logWire(wireLog, { from, to: S.wireName ? shortName(S.wireName) : 'lead', kind: w.kind, summary: w.summary, at: Date.now() })
@@ -299,58 +275,7 @@ export function register(on) {
   })
 
   on('turn.complete', async ($, e, next) => {
-    const a = e.agentId ? live.get(e.agentId) : undefined
-    if (!e.agentId) S.leadTurn = false
-    if (!e.agentId && e.reason === 'answer' && typeof e.answer === 'string') {
-      S.lastAnswer = { text: e.answer, ms: e.durationMs, id: null, shaped: S.shapedTurn, raw: S.rawTurn }
-      if (S.highlightOn && (S.agtTurn || S.highlightAll)) $.ui.invalidate('ui.render')
-      // A raw answer goes on the clipboard once; a later turn the person did not type is not raw.
-      if (S.rawTurn) {
-        S.rawTurn = false
-        const r = await $.ui.copy({ text: e.answer.trim() }).catch(() => null)
-        $.ui.toast(r?.isCopied ? 'Copied to the clipboard: paste it as is.' : 'agentille: could not copy the answer (' + (r?.reason ?? 'error') + ')')
-      }
-      // A run's ✓/✗ card ends it: its own ⚑ lines carry what is left, so the band's flags come down,
-      // what the run leaves behind is tidied (finished orphans, merged worktrees), and the typed proof
-      // lapses: the next worker pane needs the next typed /agt. A run nobody typed /agt for tidies nothing.
-      if (S.agtTurn && S.agtTyped && !S.selfName && !S.worker && /^[✓✗]/.test(e.answer.trimStart())) {
-        S.flags = []
-        S.agtTyped = false
-        S.fableTyped = false
-        void cleanWorkspace($, { auto: true }).catch(() => {})
-      }
-    }
-    if (!e.agentId && S.worker && mascot.working) {
-      const now = await $.clock.now()
-      mascot.working = false
-      mascot.ms = now - mascot.start
-      if (e.reason === 'answer') mascot.byeUntil = now + BYE_MS
-      ensureTicker($)
-      $.ui.invalidate('ui.render')
-    }
-    if (!e.agentId && S.wireName && pub.state === 'working') {
-      Object.assign(pub, { state: 'done', tool: null, ms: Date.now() - (pub.start ?? Date.now()) })
-      await publish($, true)
-      if (e.reason === 'answer') await reportDone($, e.answer)
-    } else if (!e.agentId && !S.wireName && S.selfName && e.reason === 'answer') {
-      // A lead that gave this pane no wire identity (an older agentille, a hand-made pane) never hears from
-      // it; the saved answer is all it can leave, and what the lead reads before closing the pane.
-      await saveAnswer($, S.selfName, e.answer)
-    }
-    if (a) {
-      a.tool = null
-      if (a.routed) addFlag($, flagKey(a.role, a.piece), flagOf(a.role, e.answer))
-      a.verdict = verdictChip(a.role, e.answer)
-      if (a.routed && a.run !== 'adhoc') logWire(wireLog, { from: party(a.role, a.piece), to: 'lead', kind: 'done', summary: answerLine(a.role, e.answer), at: Date.now(), via: 'sub' })
-      if (a.role === 'plan-reviewer' && verdictOf(e.answer) === 'REVISE') runState(fileRunOf(a)).revise += 1
-      if (a.input + a.output === 0) addUsage(a, e.usage)
-      finish(a, Date.now(), e.durationMs)
-      await writeReport($, a, e.answer)
-      await writeRunFile($, fileRunOf(a), 'ledger.json', JSON.stringify(ledger(live, fileRunOf(a), paneRoutes), null, 2) + '\n')
-      ensureTicker($)
-      void refreshAgents($)
-      $.ui.invalidate('ui.render')
-    }
+    await onTurnComplete($, e)
     return next(e)
   })
 

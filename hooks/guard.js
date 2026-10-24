@@ -94,10 +94,21 @@ export async function loadRunProfile($) {
 
 // ── the non-Bash write hooks ─────────────────────────────────────────────────
 // A write (Write, Edit, MultiEdit, NotebookEdit) to the trust root or the repo's own git state, refused below
-// auto exactly as a Bash write is. Returns the deny reason, or null to let it through.
+// auto exactly as a Bash write is. Returns the deny reason, or null to let it through. Only a run is judged, as
+// for Bash; inside one, a judgement that throws refuses the write instead of letting it through unread.
+export const denyUnjudged = (path) => 'The guard could not judge this write to ' + String(path) + ', so it refused it. Retry, or make the change yourself.'
+
 async function editDeny($, e) {
   const path = e.file_path ?? e.notebook_path ?? e.path ?? null
-  if (!path || !fromRun(e, await moment($))) return null
+  if (path == null || !fromRun(e, await moment($))) return null
+  try {
+    return await judgeEdit($, path)
+  } catch {
+    return denyUnjudged(path)
+  }
+}
+
+async function judgeEdit($, path) {
   const cwd = await $.session.cwd().catch(() => null)
   const abs = path.startsWith('/') ? joinPath('/', path) : !/[$`~]/.test(path) && cwd ? joinPath(cwd, path) : null
   const lbl = protectedPath(path, abs)
@@ -108,7 +119,7 @@ async function editDeny($, e) {
 
 // The Write hook: refuse a protected write; else let it through, then observe a run's report write for the band.
 export async function writeCall($, e, next) {
-  const deny = await editDeny($, e).catch(() => null)
+  const deny = await editDeny($, e)
   if (deny) return { deny }
   const r = await next(e)
   if (!e.agentId && reportRun(e.file_path)) await completeReport($, e.file_path).catch(() => {})
@@ -117,6 +128,6 @@ export async function writeCall($, e, next) {
 
 // The Edit / MultiEdit / NotebookEdit hook: refuse a protected write, else let it through.
 export async function editCall($, e, next) {
-  const deny = await editDeny($, e).catch(() => null)
+  const deny = await editDeny($, e)
   return deny ? { deny } : next(e)
 }

@@ -991,6 +991,19 @@ describe('guard: protected writes and package scripts in the mod', () => {
     expect((await $.tool.call({ tool: 'Write', file_path: '/work/repo/notes.md', content: 'x' } as never))?.deny).toBeUndefined()
   })
 
+  test('inside a run a Write/Edit the guard cannot judge is refused; outside a run it goes through', async ($, on) => {
+    const { ran } = setup(on)
+    await boot($)
+    // A path that is no string makes the judgement throw.
+    expect((await $.tool.call({ tool: 'Write', file_path: 42, content: 'x' } as never))?.deny).toBeUndefined()
+    expect((await $.tool.call({ tool: 'Edit', file_path: 42, old_string: 'a', new_string: 'b' } as never))?.deny).toBeUndefined()
+    await typed($)
+    expect((await $.tool.call({ tool: 'Write', file_path: 42, content: 'x' } as never)).deny).toBe('The guard could not judge this write to 42, so it refused it. Retry, or make the change yourself.')
+    expect((await $.tool.call({ tool: 'Edit', file_path: 42, old_string: 'a', new_string: 'b' } as never)).deny).toContain('could not judge this write to 42')
+    expect((await $.tool.call({ tool: 'NotebookEdit', notebook_path: 42, new_source: 'x' } as never)).deny).toContain('could not judge')
+    expect(ran).toHaveLength(2)
+  })
+
   test('under auto the profile and config are writable again', async ($, on) => {
     setup(on, { profile: { integration: 'auto' } })
     await boot($)

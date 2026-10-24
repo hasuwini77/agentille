@@ -54,7 +54,7 @@ Every `agentille:agentille-*` dispatch prompt starts with one line:
 
 - `size=large`: plan ≥6 steps or a shared contract, or a diff with logic in >1 file, >~150 LoC, or a public API/schema change.
 - `risk`: `routing.md` → "Risk words" (sessions, tokens, guards → `auth`; payments, webhooks → `money`; migrations → `data`; a form or page with no such logic → `none`).
-- `mode=fix` on every fix round, including a resumed executor's message; `diagnose` for the read-only root-cause planner.
+- `mode=fix` on every fix round, including a `SendMessage` to the kept executor (a `RESUME:` after an early stop stays `mode=build`); `diagnose` for the read-only root-cause planner.
 - `fable=forced` only when the user typed `--fable`.
 - `slice=<slug>` (lowercase, ≤24 chars) names the slice: its executor, adversary and reviewers share it. Omit it for planning roles and single-slice runs. The mod accepts the older `piece=` too for one release; write `slice=`.
 

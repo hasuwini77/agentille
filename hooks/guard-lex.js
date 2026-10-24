@@ -2,7 +2,7 @@
 // backticks, heredocs/here-strings, wrappers (env, timeout, xargs, sudo, …), `bash -c`/`eval`, and the
 // variables set on the line; then turns a line into the simple commands it runs and each command into an
 // integration candidate (commandSteps/codeStep). Policy (guard-policy.js) judges those candidates.
-import { Profile } from './state.js'
+import { Profile } from './profile.js'
 import { ghStep, httpStep } from './guard-policy.js'
 
 

@@ -17,7 +17,7 @@ export const CLOSE_TOOL_TEXT = line(
   'by a typed /agt-spawn (the reaper closes those) and panes of other sessions are refused.',
 )
 
-// `idleMin`: how long a resting Herdr session waits before it is closed (panes.js SESSION_IDLE_MS, in minutes).
+// `idleMin`: how long a resting Herdr session waits before it is closed (panes-base.js SESSION_IDLE_MS, in minutes).
 export const sessionsToolText = (idleMin) => line(
   'Open interactive sessions beside this one as Herdr or tmux panes, never focused: Claude by default, or Codex or a',
   'plain shell. Use it whenever the person asks to open or start sessions, panes, terminals, Claudes or Codexes',

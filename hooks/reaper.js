@@ -1,15 +1,16 @@
 // agentille reaper: what the lead sees of its panes (herdr or tmux poll), which finished worker is harvested,
 // which closes, which is flagged, the wake it sends itself, and the cleaner behind /agt-clean.
 
-import { Profile, Runs, Spawn, Sessions, Session, setSelfName, setSelfPlace } from './state.js'
+import { Session, setSelfName, setSelfPlace, ctxSource } from './session.js'
+import { Profile } from './profile.js'
 import { makeStore } from './store.js'
 import { herdrOrphans, tmuxOrphans, orphanPlan, staleTabs, parseWorktrees, worktreePlan, cleanText, FRESH_MS } from './clean.js'
 import { ownedWorktrees, forgetOwned } from './guard.js'
-import { writeRunFile } from './dispatch.js'
-import { paneAgents, reapPlan, ledger, panesLeft, endRoute } from './live.js'
+import { Runs, writeRunFile, endPaneRoute } from './dispatch.js'
+import { paneAgents, reapPlan, ledger, panesLeft } from './live.js'
 import { SAFE_RUN, PROBE, SPAWN_ROLE, splitName, doneFile, paneKey, answerFile, parseTmuxList, scopeRows, isFreshDone, quietSpawn, tmuxPaneAgents, rowIsLead, TMUX_LIST_ARGV, reapPool, tmuxKillArgv, herdrCloseArgv, herdrPaneGetArgv, herdrTerminalOf, SESSION_IDLE_MS, sessionSweep } from './panes.js'
-import { closeSession, forgetSession } from './sessions.js'
-import { pruneTabs } from './spawn.js'
+import { Sessions, closeSession, forgetSession } from './sessions.js'
+import { Spawn, pruneTabs } from './spawn.js'
 import { wakeDue, wakeMessage } from './wire.js'
 import * as P from './panerec.js'
 const { restingSince, staged, strandedNow } = P
@@ -20,13 +21,14 @@ const { s: my, view } = makeStore('reaper.js', {
   panes: [],
 })
 export const Panes = view
+ctxSource({ panes: view })
 
 // Panes that left the stage this poll: end their route and refresh the ledger.
 export async function notePaneExits($) {
   const touched = new Set()
   for (const name of panesLeft(staged, my.panes)) {
-    const r = endRoute(Runs.paneRoutes, name, Date.now())
-    if (r) touched.add(r.run)
+    const run = endPaneRoute(name, Date.now())
+    if (run != null) touched.add(run)
   }
   for (const run of touched) await writeRunFile($, run, 'ledger.json', JSON.stringify(ledger(Runs.live, run, Runs.paneRoutes), null, 2) + '\n')
 }
@@ -60,7 +62,7 @@ export async function answerOf($, p) {
 export async function isHarvested($, p) {
   if (P.get(p.id)?.harvested) return true
   if (!(await answerOf($, p))) return false
-  P.rec(p.id).harvested = true
+  P.harvest(p.id)
   return true
 }
 
@@ -69,7 +71,7 @@ export async function isHarvested($, p) {
 export async function wakeLead($, pool, now, t) {
   if (!Session.sessionId) return
   for (const p of wakeDue(pool.filter((q) => q.role !== SPAWN_ROLE), P.seen, P.wireDone, P.woken, now)) { // a spawn pane has no lead run to wake
-    P.rec(p.id).woken = true
+    P.markWoken(p.id)
     const text = wakeMessage({ name: p.name, transport: t, id: p.id, answerPath: await answerOf($, p) })
     const r = await $.session.send({ to: { sessionId: Session.sessionId }, text }).catch((err) => ({ isDelivered: false, reason: String(err?.message ?? err) }))
     if (!r.isDelivered) $.ui.toast('agt ⚑ ' + p.name + ' ' + p.state + ' with no report. ' + text.slice(text.indexOf('. ') + 2).slice(0, 120))
@@ -82,11 +84,10 @@ export async function sweep($, pool, now, t, close) {
   const ok = new Set()
   for (const p of pool) if ((p.state === 'done' || p.state === 'idle') && (await isHarvested($, p))) ok.add(p.id)
   const plan = reapPlan(pool, P.seen, now, Session.leadTurn, (p) => ok.has(p.id))
-  strandedNow.clear()
+  P.setStranded(plan.stranded.map((p) => p.name))
   for (const p of plan.stranded) {
-    strandedNow.add(p.name)
     if (P.get(p.id)?.strandedToasted) continue
-    P.rec(p.id).strandedToasted = true
+    P.markStrandedToasted(p.id)
     $.ui.toast('agt ⚑ ' + p.name + ' ' + p.state + ', not harvested')
   }
   for (const p of plan.reap) {
@@ -118,7 +119,7 @@ export async function pollHerdr($) {
   const owned = Session.selfName ? real : real.filter((p) => Spawn.openedNames.has(p.name))
   my.panes = quietSpawn(owned) // the band shows a spawn pane as `open`; the reaper below sees its real state
   const now = await $.clock.now()
-  for (const p of my.panes) if (P.get(p.id)?.firstSeen === undefined) P.rec(p.id).firstSeen = now
+  for (const p of my.panes) P.noteFirstSeen(p.id, now)
   P.forgetGone(my.panes)
   await notePaneExits($)
   if (me && !Session.selfName) {
@@ -155,7 +156,7 @@ export async function pollTmux($) {
   // only if it was written after the pane was first listed.
   const now = await $.clock.now()
   const scoped = me ? scopeRows(rows, selfPane).filter((r) => Session.selfName || Spawn.openedNames.has(r.agt)) : []
-  for (const r of scoped) if (P.get(r.id)?.firstSeen === undefined) P.rec(r.id).firstSeen = now
+  for (const r of scoped) P.noteFirstSeen(r.id, now)
   P.forgetGone(rows)
   const done = new Map()
   for (const r of scoped) {

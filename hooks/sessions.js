@@ -1,15 +1,16 @@
 // agentille sessions: the person's own Herdr or tmux panes opened through open_sessions. No worker env, no
 // agt- name, no wire; a lead lists its Herdr ones so the SessionEnd sweep can close the idle ones.
 
-import { Profile, Session } from './state.js'
+import { Session } from './session.js'
+import { Profile } from './profile.js'
 import { makeStore } from './store.js'
 import { PROBE, tmuxEvenArgv, tmuxPaneIdOf, tmuxKillArgv, herdrPaneIdOf, herdrTabOf, herdrPromptArgv, herdrCloseArgv, herdrMetaArgv, herdrSessionSplitArgv, herdrSessionTabArgv, herdrSessionStartArgv, herdrRunArgv, herdrPaneGetArgv, herdrTerminalOf, tmuxSessionSplitArgv, tmuxTitleArgvs, tmuxTypeArgvs, sessionsFile } from './panes.js'
 import { runOk, startAgent } from './spawn.js'
-import { restingSince } from './panerec.js'
+import { forgetResting } from './panerec.js'
 
 // The person's sessions this lead opened: { id, name, kind, tab, terminal }, oldest first. Read through the Sessions
 // view; written only here.
-const { s: my, view } = makeStore('sessions.js', {
+const { s: my, view, raw } = makeStore('sessions.js', {
   sessions: [],
 })
 export const Sessions = view
@@ -43,9 +44,11 @@ export async function closeSession($, t, s) {
   return r?.exitCode === 0 ? 'closed' : 'gone'
 }
 
+// `s` may be a record read through the Sessions view: raw() gives back the record itself.
 export async function forgetSession($, s) {
+  s = raw(s)
   my.sessions = my.sessions.filter((x) => x !== s)
-  restingSince.delete(s.name)
+  forgetResting(s.name)
   if (s.terminal) await saveSessions($)
 }
 

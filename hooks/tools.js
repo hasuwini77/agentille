@@ -3,13 +3,13 @@
 // register.js only wires them to tool.call.
 
 import { isLead, Profile, Spawn, Panes, Sessions, Proofs, Session, markSkewToasted } from './state.js'
-import { demoteToast, runState, writeRunFile, runSpend, ceilingOnce, setLastRun, addRoute, addDecision, markRun } from './dispatch.js'
+import { demoteToast, runState, runSpend, ceilingOnce, setLastRun, addRoute, noteFormation, countFix, syncFable, countFable, logDecision, markRun } from './dispatch.js'
 import { sliceOf, party, taskLine } from './links.js'
 import { PROBE, newRunId, doneFile, paneKey, answerFile, tmuxKillArgv, placePlan, codexNote, herdrCloseArgv, paneRole, spawnToolInput, closeTarget, sessionName, sessionsToolInput, sessionsNote, droppedNote } from './panes.js'
 import { installedSkew } from './profile.js'
 import { pollNow } from './reaper.js'
 import { spawnAllowed, sessionsAllowed, fableProof, moment, startRun, agtTurnFromDispatch, flight } from './proofs.js'
-import { formationOf, mentionsCodex, mentionsFable, proveHeader, demoteHeaderText, ladderFixes, decide } from './routing.js'
+import { mentionsCodex, mentionsFable, proveHeader, demoteHeaderText, ladderFixes, decide } from './routing.js'
 import { saveSessions, closeSession, openSession, addSession } from './sessions.js'
 import { skewMessage } from './skew.js'
 import { transportOf, openPane, savePanes, ownName } from './spawn.js'
@@ -60,13 +60,12 @@ export async function spawnPane($, e) {
   }
   agtTurnFromDispatch()
   setLastRun(a.run)
+  noteFormation(a.run, a.hdr)
+  await syncFable($, a.run)
   const run = runState(a.run)
-  run.formation = formationOf(a.hdr) ?? run.formation
   // Counted only once the pane opens: a failed split is not a fix attempt. The ladder sees this slice's rounds only.
   const isFix = a.agent === 'executor' && a.hdr.mode === 'fix'
-  const fixKey = sliceOf(a.hdr) ?? ''
   const fixes = ladderFixes(run, sliceOf(a.hdr)) + (isFix ? 1 : 0)
-  run.fable = Math.max(run.fable, Number((await $.store.get('fable:' + a.run)) ?? 0))
   // Codex runs on the person's own config: no routed model or effort, no Fable count.
   // The ceiling counts this run's subagents and its pane workers (estimated from their minutes open).
   const spent = runSpend(a.run)
@@ -94,16 +93,9 @@ export async function spawnPane($, e) {
   // keyed by pane id and the list call above may have failed, so wipe whatever the id carries: the new pane starts with
   // nothing harvested and only files written from now on count as its own.
   const now = await $.clock.now()
-  P.forget(id)
-  P.rec(id).firstSeen = now
-  if (isFix) {
-    run.fixes += 1
-    run.fixesBySlice[fixKey] = (run.fixesBySlice[fixKey] ?? 0) + 1
-  }
-  if (d.fable) {
-    run.fable += 1
-    await $.store.set('fable:' + a.run, run.fable)
-  }
+  P.opened(id, now)
+  if (isFix) countFix(a.run, sliceOf(a.hdr))
+  if (d.fable) await countFable($, a.run)
   startRun(a.run)
   opened.push({ id, name: a.name, run: a.run, tab })
   ownName(a.name)
@@ -112,14 +104,12 @@ export async function spawnPane($, e) {
   addRoute({ name: a.name, run: a.run, role: a.role, agent: a.agent, model: d.model, effort: d.effort, reason: d.reason, start: Date.now(), end: null, slice, verdict: null })
   noteWire({ from: 'lead', to: party(shortName(a.name), slice), kind: 'task', summary: taskLine(a.task) || a.agent, at: Date.now() })
   const rec = { at: new Date().toISOString(), role: a.agent, model: d.model, effort: d.effort, reason: d.reason, asked: a.asked, agentId: null, kind: 'pane', pane: a.name, ...(d.capped && { capped: true }) }
-  addDecision(rec)
-  run.log.push(JSON.stringify(rec))
-  await writeRunFile($, a.run, 'routing.jsonl', run.log.join('\n') + '\n')
+  await logDecision($, a.run, rec)
   await markRun($, a.run)
   await pollNow($, t)
   ensurePolling($)
   ensureTicker($)
-  if (d.capped) ceilingOnce($, a.run, run, spent, a.agent, d)
+  if (d.capped) ceilingOnce($, a.run, spent, a.agent, d)
   else if (d.reason !== 'table') $.ui.toast('agt ↑ ' + a.agent + ' → ' + d.model + ' · ' + d.effort + ' — ' + d.reason)
   return { result: 'Opened ' + a.name + ' · ' + d.model + (codex ? '' : ' · ' + d.effort) + ' · ' + t + ' pane.' + (d.reason === 'table' ? '' : ' (' + d.reason + ')') + (codex ? codexNote(a.name, answerFile(Profile.home, a.run, a.role, paneKey(id))) : '') }
 }
@@ -128,7 +118,7 @@ export async function spawnPane($, e) {
 // no wire, so the band and the worker reaper leave them alone; each one is a lead of its own. On Herdr a Claude or
 // Codex session is closed when idle: after SESSION_IDLE_MS unfocused (panes.js → sessionSweep), and at session end
 // (agentille-sweep.sh, from the lead's lead-<pane>.sessions list). A first prompt the person did not type is dropped
-// (panes.js sessionsToolInput): the session opens without it and the result says so.
+// (panes-schema.js sessionsToolInput): the session opens without it and the result says so.
 export async function openSessions($, e) {
   if (!isLead()) return { deny: 'This is a worker pane (' + (Session.selfName ?? Session.worker.agent) + '); workers do not open sessions.' }
   const skew = await installedSkew($)
@@ -191,7 +181,7 @@ export async function closePane($, e) {
   if (c.error) return { deny: c.error }
   const r = await $.process.run(t === 'herdr' ? herdrCloseArgv(c.pane.id) : tmuxKillArgv(c.pane.id), PROBE).catch(() => null)
   if (!r || r.exitCode !== 0) return { deny: 'Could not close ' + c.pane.name + '.' }
-  P.rec(c.pane.id).harvested = true
+  P.harvest(c.pane.id)
   await pollNow($, t)
   return { result: 'Closed ' + c.pane.name + '.' }
 }

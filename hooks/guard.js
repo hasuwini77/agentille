@@ -24,12 +24,12 @@
 // a cooperative model's mistakes, not a sandbox against one that sets out to evade it; it fails closed on what
 // it cannot read. See docs/guards.md.
 
-import { Runs, Proofs, Session } from './state.js'
+import { Session } from './session.js'
 import { ROLES } from './routing.js'
 import { SPAWN_ROLE, splitName } from './panes.js'
-import { moment, inFlight, runHeld, flight, setRunProfile } from './proofs.js'
+import { Proofs, moment, inFlight, runHeld, flight, setRunProfile } from './proofs.js'
 import { reportRun } from './drawing.js'
-import { completeReport } from './dispatch.js'
+import { Runs, completeReport } from './dispatch.js'
 import { joinPath, protectedPath } from './guard-lex.js'
 import { DENY_UNREAD, denyProtected, guardLine, integrationAllowed, readProfile } from './guard-policy.js'
 import { WT_SCRIPT, listTrees, newTrees, claimedTrees, scriptTrees, scriptSlugs, worktreeAdds, saveOwned, runOf } from './guard-own.js'

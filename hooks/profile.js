@@ -1,7 +1,7 @@
 // agentille session load: the profile and its voice, the squads of this repo, the installed-version skew and
 // the one-time tip. Read at session start; the squads again on /agt-info.
 
-import { Session } from './state.js'
+import { Session } from './session.js'
 import { makeStore } from './store.js'
 import { TIP } from './drawing.js'
 import { DEFAULTS } from './routing.js'

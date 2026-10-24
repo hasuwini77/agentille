@@ -3,7 +3,7 @@ import * as state from '../../hooks/state.js'
 import { Session, Proofs, Runs, Spawn, Panes, Sessions, Profile, Display, Wire, Timers, Worktrees, ctx, isLead, setLeadModel } from '../../hooks/state.js'
 import { makeStore, seed } from '../../hooks/store.js'
 import { agtTurnStart } from '../../hooks/proofs.js'
-import { setLastRun, addDecision, adoptAgents } from '../../hooks/dispatch.js'
+import { setLastRun, addDecision, adoptAgents, noteAgentTool } from '../../hooks/dispatch.js'
 import { probeTransport, ownName } from '../../hooks/spawn.js'
 import { pollNow } from '../../hooks/reaper.js'
 import { addSession, forgetSession } from '../../hooks/sessions.js'
@@ -46,6 +46,87 @@ describe('stores: a module writes only its own', () => {
     expect(seed(view, { n: 4 })).toEqual({ n: 2 })
     expect(view.n).toBe(4)
     expect(() => seed({ n: 1 } as any, { n: 2 })).toThrow(TypeError)
+  })
+})
+
+describe('stores: the view is deep', () => {
+  const fresh = () => makeStore('deep.js', { rec: { n: 1, inner: { m: 1 } }, list: [{ k: 1 }], byId: new Map([['a', { v: 1 }]]), names: new Set(['x']), when: new Date(0) })
+
+  test('a nested object, array, Map or Set read through a view throws on every write, naming the owner', () => {
+    const { view } = fresh() as any
+    const owner = /read-only here: deep\.js writes it through its transitions/
+    expect(() => { view.rec.n = 2 }).toThrow(owner)
+    expect(() => { view.rec.inner.m = 2 }).toThrow(owner)
+    expect(() => { delete view.rec.n }).toThrow(owner)
+    expect(() => Object.defineProperty(view.rec, 'n', { value: 3 })).toThrow(owner)
+    expect(() => Object.assign(view.rec, { n: 4 })).toThrow(owner)
+    expect(() => view.list.push({ k: 2 })).toThrow(owner)
+    expect(() => { view.list[0].k = 2 }).toThrow(owner)
+    expect(() => view.list.splice(0, 1)).toThrow(owner)
+    expect(() => view.byId.set('b', { v: 2 })).toThrow(owner)
+    expect(() => view.byId.delete('a')).toThrow(owner)
+    expect(() => view.byId.clear()).toThrow(owner)
+    expect(() => { view.byId.get('a').v = 2 }).toThrow(owner)
+    expect(() => { for (const [, x] of view.byId) x.v = 2 }).toThrow(owner)
+    expect(() => { view.byId.forEach((x: any) => { x.v = 2 }) }).toThrow(owner)
+    expect(() => view.names.add('y')).toThrow(owner)
+    expect(() => view.names.delete('x')).toThrow(owner)
+    expect(view.rec).toEqual({ n: 1, inner: { m: 1 } }) // nothing landed
+    expect(view.list).toEqual([{ k: 1 }])
+    expect(view.byId.get('a')).toEqual({ v: 1 })
+    expect([...view.names]).toEqual(['x'])
+  })
+
+  test('reads work as on the record: Map and Set get, has, size and iteration; one view per object', () => {
+    const { s, view } = fresh() as any
+    expect(view.byId.size).toBe(1)
+    expect(view.byId.has('a')).toBe(true)
+    expect(view.byId.get('a').v).toBe(1)
+    expect([...view.byId.keys()]).toEqual(['a'])
+    expect([...view.byId.values()].map((x: any) => x.v)).toEqual([1])
+    expect(new Map(view.byId).get('a')).toEqual({ v: 1 })
+    expect(view.byId instanceof Map).toBe(true)
+    expect(view.names.has('x')).toBe(true)
+    expect(view.list.map((x: any) => x.k)).toEqual([1])
+    expect(Array.isArray(view.list)).toBe(true)
+    expect(JSON.parse(JSON.stringify(view.rec))).toEqual({ n: 1, inner: { m: 1 } })
+    expect({ ...view.rec }.n).toBe(1)
+    expect(view.rec).toBe(view.rec)
+    expect(view.byId.get('a')).toBe(view.byId.get('a'))
+    expect(view.rec).not.toBe(s.rec)
+    expect(view.when).toBe(s.when) // a Date is handed out as it is
+  })
+
+  test('the owner\'s own record writes at any depth, and the view follows; raw gives the owner its object back', () => {
+    const { s, view, raw } = fresh() as any
+    s.rec.inner.m = 5
+    s.list.push({ k: 2 })
+    s.byId.get('a').v = 7
+    s.names.add('y')
+    expect(view.rec.inner.m).toBe(5)
+    expect(view.list.at(-1).k).toBe(2)
+    expect(view.byId.get('a').v).toBe(7)
+    expect(view.names.has('y')).toBe(true)
+    expect(raw(view.rec)).toBe(s.rec)
+    expect(raw(view.byId.get('a'))).toBe(s.byId.get('a'))
+    expect(raw(42)).toBe(42)
+    // Another store's raw never unwraps this one's views.
+    const other = makeStore('other.js', {}) as any
+    expect(other.raw(view.rec)).toBe(view.rec)
+  })
+
+  test('a store put back by seed from a copy of its view stays writable by its owner', () => {
+    const saved = { live: new Map(Runs.live) }
+    try {
+      adoptAgents([{ id: 'st-deep-1', name: 'helper', status: 'running' }], 1000)
+      const copy = new Map(Runs.live) // values are views
+      seed(Runs, { live: copy })
+      expect(noteAgentTool('st-deep-1', 'Read')).toBe(true) // the owner writes the record, not a view of it
+      expect(Runs.live.get('st-deep-1').tool).toBe('Read')
+      expect(() => { (Runs.live.get('st-deep-1') as any).tool = 'x' }).toThrow(/dispatch\.js writes it/)
+    } finally {
+      seed(Runs, saved)
+    }
   })
 })
 
@@ -139,9 +220,18 @@ describe('stores: each view follows its owner\'s transitions', () => {
   test('Sessions: addSession and forgetSession', async () => {
     const s = { id: 'w1:p9', name: 's-st1-1', kind: 'shell', tab: null, terminal: null }
     addSession(s)
-    expect(Sessions.sessions.at(-1)).toBe(s)
+    expect(Sessions.sessions.at(-1)).toEqual(s)
     await forgetSession({} as never, s)
-    expect(Sessions.sessions.includes(s)).toBe(false)
+    expect(Sessions.sessions.some((x: any) => x.name === s.name)).toBe(false)
+  })
+
+  test('Sessions: a session read through the view is forgotten too', async () => {
+    const s = { id: 'w1:p8', name: 's-st1-2', kind: 'shell', tab: null, terminal: null }
+    addSession(s)
+    const read = Sessions.sessions.find((x: any) => x.name === s.name)
+    expect(read).not.toBe(s) // a view of the record, not the record
+    await forgetSession({} as never, read)
+    expect(Sessions.sessions.some((x: any) => x.name === s.name)).toBe(false)
   })
 
   test('Profile: loadProfile reads home and marks a missing profile', async () => {

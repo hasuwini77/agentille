@@ -13,18 +13,21 @@
 //   integration — `auto` (merge, tag and push with no human step) holds only where the person's own
 //                 ~/.agentille/profile.json says so for the repo the command targets; the repo may lower it,
 //                 never raise it, and a profile read mid-run can lower but never raise the run's snapshot.
-//                 Below `auto`, a run's merge, tag, release and API merge are denied, so is any push but one of
-//                 its own branch, and so is a write to the trust root (~/.agentille) or the repo's own git state.
+//                 Below `auto`, a run's merge, tag, release, API merge, publish and deploy are denied, so is any
+//                 push but one of its own branch (one it made, never a base-like one), and so is a write to the
+//                 trust root (~/.agentille), the repo's own git state or config that runs code.
 //   ownership   — every worktree a run's `git worktree add` created is recorded, so the cleaner removes
 //                 only those and never another session's fresh checkout.
 //
 // A session where /agt was never typed is untouched: its Bash and writes run as the engine runs them.
 //
 // What it reads: the Bash tool line (wrappers, heredocs/here-strings, interpreters and scripts it can read,
-// package scripts it can read) and the Write/Edit/MultiEdit/NotebookEdit tools. It does not judge any other
-// tool (a GitHub MCP merge, say), and a Codex worker pane runs outside the mod. The guard is a seatbelt against
-// a cooperative model's mistakes, not a sandbox against one that sets out to evade it; it fails closed on what
-// it cannot read. See docs/guards.md.
+// package and lifecycle scripts, recipes, local bins and test files it can read) and the Write/Edit/MultiEdit/
+// NotebookEdit tools. It does not judge any other tool (a GitHub MCP merge, say), a Codex worker pane runs outside
+// the mod, and the remote's own protection is the remote's. The guard is a seatbelt against a cooperative model's
+// mistakes, not a sandbox against one that sets out to evade it: it fails closed on what it reads but cannot
+// follow, and what it does not read at all (installed programs a script runs by bare name, code a script builds
+// at run time) is listed in docs/guards.md.
 
 import { Session } from './session.js'
 import { ROLES } from './routing.js'

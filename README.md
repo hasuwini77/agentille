@@ -136,6 +136,8 @@ Kinds, follow-ups, which ones close on their own and how to get one back: [docs/
 
 No profile file is needed. macOS and Linux; the shell hooks are bash.
 
+How the plugin is tested (credential-free CI on every PR, a capped eval run weekly and on each release): [docs/testing.md](./docs/testing.md).
+
 ## Releases
 
 One tag a day at most and fixes batched into the next minor. From v3.23.0 (2026-10-23) on, nothing is removed outside a major that deprecated it first; before that, v3.14.0 removed `/agt-routing`, `/agt-ledger` and `/agt-squads` in a minor. What each version number promises and how to pin one: `docs/releasing.md`.

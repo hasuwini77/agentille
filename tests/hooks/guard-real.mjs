@@ -12,6 +12,8 @@ const { seed } = await import(root + '/hooks/store.js')
 const { bashCall, loadRunProfile, DENY_INTEGRATION, DENY_LOCAL, DENY_PUBLISH } = await import(root + '/hooks/guard.js')
 const { agtTurnStart } = await import(root + '/hooks/proofs.js')
 const { sameConfig } = await import(root + '/hooks/trust.js')
+const { cleanGit } = await import(root + '/hooks/reaper.js')
+const { Worktrees } = await import(root + '/hooks/guard-own.js')
 
 const T = fs.realpathSync(fs.mkdtempSync(os.tmpdir() + '/agt-guard-real-'))
 const HOME = T + '/home'
@@ -710,6 +712,29 @@ try {
       CWD = APP
       seed(Session, { worker: null })
       sh('git checkout -q agt/x', APP)
+    }
+  }
+  {
+    // The tidy owns a tree only at a recorded path: a record left from a tree that is gone, naming agt/z, does not
+    // claim another session's merged, clean, hour-old tree on agt/z.
+    world()
+    const Z = T + '/w/app-z'
+    sh('git worktree add -q -b agt/z ' + Z + ' main', APP)
+    sh('echo z > z && git add z && git commit -qm z', Z)
+    sh('git merge -q --no-edit agt/z', APP)
+    const old = new Date(Date.now() - 3_600_000)
+    fs.utimesSync(Z, old, old)
+    seed(Worktrees, { worktrees: [{ path: T + '/w/gone', branch: 'agt/z', head: null, run: 'r1', at: Date.now(), src: 'add' }] })
+    try {
+      const r = { keep: [], removed: [], branches: [] }
+      await cleanGit($, (argv) => $.process.run(argv), r)
+      check('tidy: a tree whose branch only a stale record names is kept', fs.existsSync(Z) && !r.removed.includes('agt/z') && r.keep.some((k) => k.what === 'agt/z' && /not opened/.test(k.why)), JSON.stringify(r))
+      seed(Worktrees, { worktrees: [{ path: Z, branch: 'agt/z', head: null, run: 'r1', at: Date.now(), src: 'add' }] })
+      const r2 = { keep: [], removed: [], branches: [] }
+      await cleanGit($, (argv) => $.process.run(argv), r2)
+      check('control: the same tree recorded at its path is removed', !fs.existsSync(Z) && r2.removed.includes('agt/z'), JSON.stringify(r2))
+    } finally {
+      seed(Worktrees, { worktrees: [] })
     }
   }
   {

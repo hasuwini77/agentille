@@ -509,12 +509,12 @@ describe('guard: worktree ownership and the run-end tidy', () => {
     expect(early.text).toContain('agt/other (not opened by this session)')
     expect(seen.some((a) => a.join(' ') === 'git -C /work/repo-other status --porcelain')).toBe(false)
     // A typed /agt-clean sweeps the run's .env copies even while it keeps the tree (an aborted run's go too).
-    expect(seen.filter((a) => a.includes('clean')).map((a) => a.join(' '))).toEqual(['git -C /work/repo-x clean -fqx -- .env*'])
+    expect(seen.filter((a) => a.includes('clean')).map((a) => a.join(' '))).toEqual(['git -C /work/repo-x clean -fqX -- .env*'])
     // The slice commits and merges; the run ends on its card.
     git.committed = true
     seen.length = 0
     await card($)
-    const sweep = seen.findIndex((a) => a.join(' ') === 'git -C /work/repo-x clean -fqx -- .env*')
+    const sweep = seen.findIndex((a) => a.join(' ') === 'git -C /work/repo-x clean -fqX -- .env*')
     const removed = seen.findIndex((a) => a.join(' ') === 'git -C /work/repo worktree remove /work/repo-x')
     expect(sweep).toBeGreaterThan(-1)
     expect(removed).toBeGreaterThan(sweep)
@@ -522,18 +522,57 @@ describe('guard: worktree ownership and the run-end tidy', () => {
     expect(seen.some((a) => a.includes('/work/repo-other') && (a.includes('remove') || a.includes('clean')))).toBe(false)
     expect(seen).not.toContainEqual(['git', '-C', '/work/repo', 'branch', '-d', 'agt/other'])
     // The main checkout's own .env is never swept.
-    expect(seen.some((a) => a.join(' ') === 'git -C /work/repo clean -fqx -- .env*')).toBe(false)
+    expect(seen.some((a) => a.includes('/work/repo') && a.includes('clean'))).toBe(false)
   })
 
-  test('the run-end sweep leaves an owned feat/* tree\'s .env alone; only agt/* trees are swept', async ($, on) => {
+  test('the run-end sweep deletes the ignored .env copies in every owned tree, a feat/* one included', async ($, on) => {
     const { seen, git } = setup(on)
     await boot($)
     await typed($)
     await bash($, 'git worktree add ../repo-x -b agt/x main && git worktree add ../repo-f -b feat/f main')
     git.committed = true
     await card($)
-    expect(seen).toContainEqual(['git', '-C', '/work/repo-x', 'clean', '-fqx', '--', '.env*'])
-    expect(seen.some((a) => a.includes('/work/repo-f') && a.includes('clean'))).toBe(false)
+    // -X: only untracked files git ignores, so a tracked or un-ignored .env.example stays
+    expect(seen).toContainEqual(['git', '-C', '/work/repo-x', 'clean', '-fqX', '--', '.env*'])
+    expect(seen).toContainEqual(['git', '-C', '/work/repo-f', 'clean', '-fqX', '--', '.env*'])
+    // the feat/* tree is swept, never removed: that is the lead's
+    expect(seen.some((a) => a.includes('remove') && a.includes('/work/repo-f'))).toBe(false)
+    expect(seen.some((a) => a.includes('clean') && (a.includes('/work/repo') || a.includes('/work/repo-other')))).toBe(false)
+  })
+
+  test('a tree agt-worktree.sh printed is recorded and swept, whatever its branch', async ($, on) => {
+    const { seen, ran, git } = setup(on)
+    await boot($)
+    await typed($)
+    // the guard lets the script through, written out with the plugin's absolute path
+    const r = await bash($, 'bash /opt/agentille/scripts/agt-worktree.sh f --branch feat/f --base main')
+    expect(r.deny).toBeUndefined()
+    expect(ran).toEqual(['bash /opt/agentille/scripts/agt-worktree.sh f --branch feat/f --base main'])
+    git.committed = true
+    await card($)
+    expect(seen).toContainEqual(['git', '-C', '/work/repo-f', 'clean', '-fqX', '--', '.env*'])
+  })
+
+  test('a re-attach by the script is recorded too; echoed lines naming another tree claim nothing', async ($, on) => {
+    const { seen, git } = setup(on)
+    git.made = true // the tree is already there: a fix round re-attaches it
+    await boot($)
+    await typed($)
+    await bash($, "bash /opt/agentille/scripts/agt-worktree.sh x; echo 'path=/work/repo-other'; echo 'branch=agt/other'")
+    const r = await $.command.run({ command: 'agt-clean', args: '', origin: { kind: 'composer' } } as never)
+    expect(seen).toContainEqual(['git', '-C', '/work/repo-x', 'clean', '-fqX', '--', '.env*'])
+    expect(r.text).toContain('agt/other (not opened by this session)')
+    expect(seen.some((a) => a.includes('/work/repo-other'))).toBe(false)
+  })
+
+  test('a hand-made tree with its path written out is still recorded without the script', async ($, on) => {
+    const { seen, git } = setup(on)
+    await boot($)
+    await typed($)
+    await bash($, 'git worktree add /work/repo-f -b feat/f main && cd /work/repo-f && cp /work/repo/.env.local .')
+    git.committed = true
+    await card($)
+    expect(seen).toContainEqual(['git', '-C', '/work/repo-f', 'clean', '-fqX', '--', '.env*'])
   })
 
   test('a session that recorded no worktree removes nothing', async ($, on) => {

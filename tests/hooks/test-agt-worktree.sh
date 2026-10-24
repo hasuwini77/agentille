@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
 # Real-git test of scripts/agt-worktree.sh in a throwaway repo: what it prints, re-attach (directory, then
-# branch), what it refuses, which .env files it copies, node_modules copied and never linked.
-# Exit 0 = all checks pass.
+# branch), what it refuses, which .env files it copies, node_modules copied and never linked. Then
+# tests/hooks/tidy-real.mjs drives the mod's own guard and reaper over the same repo under node (skipped, and
+# said so, where node is missing or older than 22.7). Exit 0 = all checks pass.
 set -u
 cd "$(dirname "$0")/../.." || exit 2
 SCRIPT="$PWD/scripts/agt-worktree.sh"
+DRIVER="$PWD/tests/hooks/tidy-real.mjs"
 T=$(mktemp -d); trap 'rm -rf "$T"' EXIT
 T=$(cd "$T" && pwd -P)
 export HOME="$T/home" GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1
@@ -72,4 +74,24 @@ check "refuse: the tree is on another branch" '[ "$rc" = 1 ] && [ -z "$o" ]'
 o=$(cd "$T" && bash "$SCRIPT" ui 2>/dev/null); rc=$?
 check "refuse: outside a repository" '[ "$rc" = 1 ] && [ -z "$o" ]'
 
-[ "$bad" = 0 ] && echo "$n checks passed" || { echo "$bad of $n checks failed"; exit 1; }
+# 6. the mod over the same repo: the guard records what the script printed, the sweep deletes the copies
+skip=""
+if ! command -v node >/dev/null 2>&1; then skip="node missing"
+else
+  v=$(node -e 'const [a,b]=process.versions.node.split(".").map(Number);process.stdout.write(a>22||(a===22&&b>=7)?"ok":process.versions.node)')
+  [ "$v" = ok ] || skip="node $v is older than 22.7"
+fi
+if [ -z "$skip" ]; then
+  dout=$(node "$DRIVER" "$R" "$SCRIPT" "$HOME" 2>&1); drc=$?
+  while IFS= read -r line; do
+    case "$line" in
+      ok\ *) n=$((n+1)) ;;
+      FAIL\ *) n=$((n+1)); bad=$((bad+1)); echo "$line" ;;
+    esac
+  done <<< "$dout"
+  check "mod: the driver ran to the end" '[ "$drc" = 0 ] || [ "$bad" -gt 0 ]'
+  [ "$drc" = 0 ] || [ "$bad" -gt 0 ] || printf '%s\n' "$dout" | tail -5
+fi
+
+note=""; [ -n "$skip" ] && note=" (mod checks skipped: $skip)"
+[ "$bad" = 0 ] && echo "$n checks passed$note" || { echo "$bad of $n checks failed$note"; exit 1; }

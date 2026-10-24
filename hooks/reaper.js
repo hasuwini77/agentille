@@ -201,8 +201,8 @@ async function withAnswer($, plan) {
 // Panes: agt-* panes no live lead owns (their lead died before its SessionEnd sweep) close once
 // finished; a typed /agt-clean also closes this lead's stranded panes (done, answer never read). Run-tab files of gone leads are dropped.
 // Git (not on `panes` alone): agt/* worktrees this session's runs opened, merged and clean, are removed and
-// their merged branches deleted; at a run's end (auto) and on a typed /agt-clean (all) the .env* copies in the
-// owned agt/* ones go first, so an aborted run's secret copies go too.
+// their merged branches deleted; at a run's end (auto) and on a typed /agt-clean (all) the ignored .env* copies
+// in every worktree the runs recorded go first, whatever its branch, so an aborted run's secret copies go too.
 // Clean means done/idle/dead panes, merged branches and clean checkouts only; the rest is reported, never touched.
 export async function cleanWorkspace($, { all = false, auto = false, panesOnly = false } = {}) {
   const r = { closed: [], tabs: 0, removed: [], branches: [], runs: 0, keep: [] }
@@ -275,11 +275,13 @@ export async function pruneRuns($, run, r) {
   }
 }
 
-// Only what this session's runs opened (guard.js records each `git worktree add`): another session's
-// worktree, even a merged-looking fresh one, is listed as kept and never read. An owned tree goes once it is
-// merged, clean, has commits of its own and is FRESH_MS old. sweepEnv (a run's end, /agt-clean) first deletes
-// the untracked .env* copies in every owned agt/* worktree, so secrets never outlive the run. An owned tree on
-// any other branch (a feat/* or fix/* slice, a tree the person may keep working in) is never swept.
+// Only what this session's runs opened (guard.js records each tree scripts/agt-worktree.sh printed or a
+// literal `git worktree add` named): another session's worktree, even a merged-looking fresh one, is listed as
+// kept and never read. An owned agt/* tree goes once it is merged, clean, has commits of its own and is FRESH_MS
+// old; a feat/* or fix/* tree stays for the lead. sweepEnv (a run's end, /agt-clean) first deletes the .env*
+// copies at the top of every tree recorded at that exact path, whatever its branch, so secrets never outlive the
+// run: `git clean -X` removes only untracked files git ignores, so a tracked or un-ignored .env.example stays.
+// The live checkout and a tree matched only by its branch name are never swept.
 export async function cleanGit($, run, r, { sweepEnv = false } = {}) {
   const cwd = await $.session.cwd().catch(() => null)
   if (!cwd) return
@@ -296,7 +298,7 @@ export async function cleanGit($, run, r, { sweepEnv = false } = {}) {
   // Ages first: deleting a .env copy touches the directory, and would make every swept tree look fresh.
   const ages = new Map()
   for (const t of linked.filter(owned)) ages.set(t.path, (await $.fs.stat(t.path).catch(() => null))?.mtimeMs)
-  if (sweepEnv) for (const t of linked.filter((x) => owned(x) && x.branch?.startsWith('agt/'))) await run(['git', '-C', t.path, 'clean', '-fqx', '--', '.env*'])
+  if (sweepEnv) for (const t of linked.filter((x) => paths.has(x.path))) await run(['git', '-C', t.path, 'clean', '-fqX', '--', '.env*'])
   const lines = (x) => (x?.exitCode === 0 ? String(x.stdout).split('\n').map((l) => l.trim()).filter(Boolean) : [])
   const base = lines(await git('symbolic-ref', '--short', 'refs/remotes/origin/HEAD'))[0]
   const merged = new Set()

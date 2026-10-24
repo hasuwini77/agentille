@@ -50,7 +50,7 @@ Once the estimate is at or over `maxRunUsd`, one of two things happens to every 
 
 ### A typed `--fable` passes the ceiling
 
-`--fable` typed on the `/agt` line is your own choice, so demotion leaves it alone: past the ceiling, a role you forced onto Fable still runs Fable. The run says so. The first such subagent dispatch in a run gets one toast and one band `⚑` line (`planner runs Fable anyway, since a typed --fable passes the ceiling`), and every such dispatch carries `"pastCeiling": true` in the run's `routing.jsonl`. The stop does not make this exception: with `stopAtCeiling` on, a typed `--fable` past the ceiling is denied like any other dispatch.
+`--fable` typed on the `/agt` line is your own choice, so demotion leaves it alone: past the ceiling, a role you forced onto Fable still runs Fable. The run says so. The first such dispatch in a run, subagent or pane, gets one toast and one band `⚑` line (`planner runs Fable anyway, since a typed --fable passes the ceiling`), and every such dispatch carries `"pastCeiling": true` in the run's `routing.jsonl`. The stop does not make this exception: with `stopAtCeiling` on, a typed `--fable` past the ceiling is denied like any other dispatch.
 
 ## The weekly gate: `stopAtWeeklyPct`
 

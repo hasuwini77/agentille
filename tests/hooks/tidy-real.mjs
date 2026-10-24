@@ -7,7 +7,9 @@
 import { spawnSync } from 'node:child_process'
 import fs from 'node:fs/promises'
 import { existsSync } from 'node:fs'
-import { S } from '../../hooks/state.js'
+import { Profile, Worktrees } from '../../hooks/state.js'
+import { seed } from '../../hooks/store.js'
+import { agtTurnFromDispatch } from '../../hooks/proofs.js'
 import { bashCall } from '../../hooks/guard.js'
 import { cleanGit } from '../../hooks/reaper.js'
 
@@ -49,8 +51,8 @@ const next = async (e) => {
   return { result: { stdout: r.stdout, stderr: r.stderr, interrupted: false }, isError: r.exitCode !== 0 }
 }
 
-S.home = home
-S.agtTurn = true // an /agt turn: the guard records this session's worktrees
+seed(Profile, { home })
+agtTurnFromDispatch() // an /agt turn: the guard records this session's worktrees
 
 const listed = () => sh(['git', '-C', repo, 'worktree', 'list', '--porcelain']).stdout
 const call = (command) => bashCall($, { tool: 'Bash', command }, next)
@@ -60,7 +62,7 @@ const out = String(res?.result?.stdout ?? '').trim().split('\n')
 const path = (out[0] ?? '').replace(/^path=/, '')
 check('the script prints exactly path= and branch=', out.length === 2 && out[0].startsWith('path=/') && out[1] === 'branch=feat/web')
 check('the printed path is the one git lists', listed().split('\n').includes('worktree ' + path))
-const rec = S.worktrees.find((r) => r.path === path)
+const rec = Worktrees.worktrees.find((r) => r.path === path)
 check('the tree is recorded as owned, by exact path, marked as the script\'s', !!rec && rec.branch === 'feat/web' && rec.src === 'script')
 const fork = rec?.head
 check('its fork point is the commit it was made from', !!fork && fork === sh(['git', '-C', repo, 'rev-parse', 'main']).stdout.trim())
@@ -68,7 +70,7 @@ check('its fork point is the commit it was made from', !!fork && fork === sh(['g
 // A commit in the slice, then a re-attach (a fix round): still one record, the fork point unchanged.
 sh(['git', '-C', path, 'commit', '-q', '--allow-empty', '-m', 'slice work'])
 await call('bash ' + script + ' web --branch feat/web')
-const recs = S.worktrees.filter((r) => r.path === path)
+const recs = Worktrees.worktrees.filter((r) => r.path === path)
 check('a re-attach keeps one record and the first fork point', recs.length === 1 && recs[0].head === fork)
 
 // What sits in the tree before the sweep: the ignored copies the script made, an untracked file git does not

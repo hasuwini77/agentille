@@ -2,7 +2,7 @@
 // repo caps, the snapshot taken at the typed /agt), judges pushes, merges, tags, releases, ref writes and the
 // GitHub REST/GraphQL API, and reads scripts and package/make recipes before they run. The lexer
 // (guard-lex.js) turns a line into the candidates these functions judge.
-import { S } from './state.js'
+import { Profile, Proofs } from './state.js'
 import { PROBE } from './panes.js'
 import { base, commands, commandSteps, joinPath, SCRIPT_RISK, MAKE_RISK } from './guard-lex.js'
 
@@ -464,7 +464,7 @@ async function localRepo($, dir, cache) {
 
 export async function readProfile($) {
   try {
-    return S.home ? JSON.parse(await $.fs.read(S.home + '/.agentille/profile.json')) : null
+    return Profile.home ? JSON.parse(await $.fs.read(Profile.home + '/.agentille/profile.json')) : null
   } catch {
     return null // no profile: the default holds
   }
@@ -487,18 +487,18 @@ async function repoCaps($, dirs) {
 
 // The integration mode for a repo, never above the snapshot taken at the typed /agt: a run can lower its own
 // ceiling (a repo config, a profile the person edits down) but never raise it, so a later profile read that reads
-// higher than the run started with is ignored. The snapshot (S.agtProfile) is set by the typed /agt's turn.
+// higher than the run started with is ignored. The snapshot (Proofs.agtProfile) is set by the typed /agt's turn.
 function capMode(profile, repo, caps) {
   const live = integrationOf(profile, repo, caps)
-  if (!S.agtProfile) return live
-  const snap = integrationOf(S.agtProfile, repo, caps)
+  if (!Proofs.agtProfile) return live
+  const snap = integrationOf(Proofs.agtProfile, repo, caps)
   return MODES.indexOf(snap) < MODES.indexOf(live) ? snap : live
 }
 
 
 // The mode for a repo the guard cannot place (a dir or remote a variable names, a target edited earlier on the
 // line): the profile's top-level integration, never a name or path match.
-const topMode = (profile) => capMode(profile, { url: null, paths: [], names: [], home: S.home }, [])
+const topMode = (profile) => capMode(profile, { url: null, paths: [], names: [], home: Profile.home }, [])
 
 
 // The mode for the repo a candidate targets: its dir's repo, or the repo it names (-R, GH_REPO, repos/o/r) when
@@ -511,8 +511,8 @@ async function modeFor($, profile, c, cwd, cache) {
   const named = c.slug ? normSlug(c.slug) : null
   // The dir's own repo is its main remote's (origin, else the first): a fork's upstream is another repo.
   const mine = local && (!named || (!!local.url && sameRemote(normUrl(local.url), named)))
-  if (mine) return capMode(profile, { url: local.url, paths: local.dirs, name: local.name, home: S.home }, await repoCaps($, local.dirs))
-  return capMode(profile, { url: named, paths: [], name: named ? base(named) : null, home: S.home }, [])
+  if (mine) return capMode(profile, { url: local.url, paths: local.dirs, name: local.name, home: Profile.home }, await repoCaps($, local.dirs))
+  return capMode(profile, { url: named, paths: [], name: named ? base(named) : null, home: Profile.home }, [])
 }
 
 
@@ -529,7 +529,7 @@ function remotePath(u, dir) {
   const s = String(u)
   if (/^file:\/\//i.test(s)) return joinPath('/', s.replace(/^file:\/\/[^/]*/i, ''))
   if (/^[a-z][a-z0-9+.-]*:\/\//i.test(s) || /^[^/]+:/.test(s)) return null
-  if (s.startsWith('~/')) return S.home ? joinPath('/', S.home + s.slice(1)) : null
+  if (s.startsWith('~/')) return Profile.home ? joinPath('/', Profile.home + s.slice(1)) : null
   return s.startsWith('/') ? joinPath('/', s) : dir ? joinPath(dir, s) : null
 }
 
@@ -557,7 +557,7 @@ async function pushMode($, profile, c, cwd, cache) {
   const path = remotePath(url, c.dir)
   const paths = path ? [path.replace(/\/\.git$/, '')] : []
   if (path && !local.url && local.dirs.includes(paths[0])) return modeFor($, profile, { ...c, slug: null }, cwd, cache)
-  return capMode(profile, { url: path ? null : url, paths, names: [], home: S.home }, [])
+  return capMode(profile, { url: path ? null : url, paths, names: [], home: Profile.home }, [])
 }
 
 

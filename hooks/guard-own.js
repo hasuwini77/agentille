@@ -1,7 +1,8 @@
 // agentille guard — worktree ownership. Records every worktree a run made (the one scripts/agt-worktree.sh
 // prints, or a literal `git worktree add`), so the cleaner and the .env sweep touch only those and never
 // another session's fresh checkout.
-import { S } from './state.js'
+import { Profile, Runs, Spawn, Session } from './state.js'
+import { makeStore } from './store.js'
 import { PROBE, SAFE_RUN, splitName, paneKey } from './panes.js'
 import { parseWorktrees } from './clean.js'
 import { leadPane } from './spawn.js'
@@ -161,20 +162,23 @@ export function parseOwned(text, now = Date.now()) {
   }
 }
 
+// The worktrees this session's runs made ({ path, branch, head, run, at, src }), saved to lead-<pane>.worktrees.
+// Read through the Worktrees view (guard.js and state.js re-export it); written only here.
+const { s: my, view } = makeStore('guard-own.js', { worktrees: [] })
+export const Worktrees = view
 
 export function worktreesFile(home, pane) {
   const key = paneKey(pane)
   return home && key ? home + '/.agentille/state/lead-' + key + '.worktrees' : null
 }
 
-
 // A worker pane records under its run, where the lead that opened it reads: the pane's own key is no lead's.
 async function ownFile($) {
-  if (!S.home) return null
-  const self = splitName(S.wireName ?? S.selfName)
+  if (!Profile.home) return null
+  const self = splitName(Session.wireName ?? Session.selfName)
   const key = paneKey(await leadPane($).catch(() => null))
-  if (self) return SAFE_RUN.test(self.run) && key ? S.home + '/.agentille/state/run-' + self.run + '/worktrees/' + self.role + '.' + key + '.json' : null
-  return worktreesFile(S.home, await leadPane($).catch(() => null))
+  if (self) return SAFE_RUN.test(self.run) && key ? Profile.home + '/.agentille/state/run-' + self.run + '/worktrees/' + self.role + '.' + key + '.json' : null
+  return worktreesFile(Profile.home, await leadPane($).catch(() => null))
 }
 
 
@@ -182,21 +186,21 @@ async function ownFile($) {
 // restart, a resume) saved is read in first, so a save never drops it and a re-attach keeps its fork point.
 export async function saveOwned($, made = []) {
   const file = await ownFile($)
-  if (file) for (const r of parseOwned(await $.fs.read(file).catch(() => ''))) if (!S.worktrees.some((m) => m.path === r.path)) S.worktrees.push(r)
-  recordTrees(S.worktrees, made)
-  if (file) await $.fs.write(file, JSON.stringify(S.worktrees, null, 2) + '\n').catch(() => {})
+  if (file) for (const r of parseOwned(await $.fs.read(file).catch(() => ''))) if (!my.worktrees.some((m) => m.path === r.path)) my.worktrees.push(r)
+  recordTrees(my.worktrees, made)
+  if (file) await $.fs.write(file, JSON.stringify(my.worktrees, null, 2) + '\n').catch(() => {})
 }
 
 
 // Everything this lead owns: what it recorded this session, its file (a restart), and what the worker panes
 // it opened recorded under their runs.
 export async function ownedWorktrees($) {
-  const all = [...S.worktrees]
-  const file = S.home ? worktreesFile(S.home, await leadPane($).catch(() => null)) : null
+  const all = [...my.worktrees]
+  const file = Profile.home ? worktreesFile(Profile.home, await leadPane($).catch(() => null)) : null
   if (file) all.push(...parseOwned(await $.fs.read(file).catch(() => '')))
-  const runs = new Set([...S.openedNames].map((n) => splitName(n)?.run).filter((r) => r && SAFE_RUN.test(r)))
+  const runs = new Set([...Spawn.openedNames].map((n) => splitName(n)?.run).filter((r) => r && SAFE_RUN.test(r)))
   for (const run of runs) {
-    const dir = S.home + '/.agentille/state/run-' + run + '/worktrees'
+    const dir = Profile.home + '/.agentille/state/run-' + run + '/worktrees'
     for (const f of await $.fs.list(dir).catch(() => [])) {
       if (f.kind === 'dir' || !f.name.endsWith('.json')) continue
       all.push(...parseOwned(await $.fs.read(dir + '/' + f.name).catch(() => '')))
@@ -212,11 +216,11 @@ export async function forgetOwned($, trees, branches) {
   const listed = new Set(trees.map((t) => t.path))
   const have = new Set(branches)
   const keep = (r) => listed.has(r.path) || (r.branch && have.has(r.branch))
-  const file = S.home ? worktreesFile(S.home, await leadPane($).catch(() => null)) : null
+  const file = Profile.home ? worktreesFile(Profile.home, await leadPane($).catch(() => null)) : null
   const saved = file ? parseOwned(await $.fs.read(file).catch(() => '')) : []
-  const mine = [...S.worktrees, ...saved.filter((r) => !S.worktrees.some((m) => m.path === r.path))]
-  S.worktrees.splice(0, S.worktrees.length, ...mine.filter(keep))
-  if (file && (saved.length || S.worktrees.length)) await $.fs.write(file, JSON.stringify(S.worktrees, null, 2) + '\n').catch(() => {})
+  const mine = [...my.worktrees, ...saved.filter((r) => !my.worktrees.some((m) => m.path === r.path))]
+  my.worktrees.splice(0, my.worktrees.length, ...mine.filter(keep))
+  if (file && (saved.length || my.worktrees.length)) await $.fs.write(file, JSON.stringify(my.worktrees, null, 2) + '\n').catch(() => {})
 }
 
 
@@ -227,6 +231,6 @@ export async function listTrees($, cwd) {
 
 
 export const runOf = (e) => {
-  const a = e.agentId ? S.live.get(e.agentId) : null
-  return a?.run ?? splitName(S.wireName ?? S.selfName)?.run ?? S.lastRun
+  const a = e.agentId ? Runs.live.get(e.agentId) : null
+  return a?.run ?? splitName(Session.wireName ?? Session.selfName)?.run ?? Runs.lastRun
 }

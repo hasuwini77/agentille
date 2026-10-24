@@ -24,10 +24,10 @@
 // a cooperative model's mistakes, not a sandbox against one that sets out to evade it; it fails closed on what
 // it cannot read. See docs/guards.md.
 
-import { S } from './state.js'
+import { Runs, Proofs, Session } from './state.js'
 import { ROLES } from './routing.js'
 import { SPAWN_ROLE, splitName } from './panes.js'
-import { moment, inFlight, runHeld } from './proofs.js'
+import { moment, inFlight, runHeld, flight, setRunProfile } from './proofs.js'
 import { reportRun } from './drawing.js'
 import { completeReport } from './dispatch.js'
 import { joinPath, protectedPath } from './guard-lex.js'
@@ -37,7 +37,7 @@ import { WT_SCRIPT, listTrees, newTrees, claimedTrees, scriptTrees, scriptSlugs,
 // Re-exports: every name ./guard.js used to carry still resolves here.
 export { protectedPath, SHELLS, commands, splitCommands, gitCall, commandSteps, joinPath, MENTIONS_TOOL, SCRIPT_RISK, MAKE_RISK } from './guard-lex.js'
 export { DENY_INTEGRATION, DENY_PUSH, DENY_LOCAL, DENY_UNREAD, denyHidden, denyProtected, judgePush, judgeRef, judgeLocal, integrationIn, integrationOf, integrationAllowed, guardLine, makeRecipe, normUrl, normSlug, sameRemote, capsOf } from './guard-policy.js'
-export { OWNED_TTL_MS, worktreeAdds, newTrees, WT_SCRIPT, scriptTrees, scriptSlugs, claimedTrees, recordTrees, parseOwned, worktreesFile, saveOwned, ownedWorktrees, forgetOwned } from './guard-own.js'
+export { OWNED_TTL_MS, worktreeAdds, newTrees, WT_SCRIPT, scriptTrees, scriptSlugs, claimedTrees, recordTrees, parseOwned, Worktrees, worktreesFile, saveOwned, ownedWorktrees, forgetOwned } from './guard-own.js'
 
 // ── who is a run ─────────────────────────────────────────────────────────────
 // An agentille subagent, a worker pane (not a /agt-spawn pane: that is the person's own task), or the lead
@@ -46,13 +46,13 @@ export { OWNED_TTL_MS, worktreeAdds, newTrees, WT_SCRIPT, scriptTrees, scriptSlu
 // proofs.js moment($) read): a question typed mid-run does not switch the guard off. A plain session has none.
 export function fromRun(e, at) {
   if (e.agentId) {
-    const a = S.live.get(e.agentId)
+    const a = Runs.live.get(e.agentId)
     if (a && ROLES.includes(a.role)) return true
   }
-  if (S.worker) return S.worker.agent !== SPAWN_ROLE
-  const self = splitName(S.wireName ?? S.selfName)
+  if (Session.worker) return Session.worker.agent !== SPAWN_ROLE
+  const self = splitName(Session.wireName ?? Session.selfName)
   if (self) return self.role !== SPAWN_ROLE
-  return !!S.agtTurn || runHeld() || inFlight(S, at)
+  return !!Proofs.agtTurn || runHeld() || inFlight(flight, at)
 }
 
 // ── the Bash hook ────────────────────────────────────────────────────────────
@@ -86,7 +86,7 @@ export async function bashCall($, e, next) {
 // ── the profile snapshot ─────────────────────────────────────────────────────
 // The profile the run started with: read at the typed /agt so a later read cannot raise the mode mid-run (capMode).
 export async function loadRunProfile($) {
-  S.agtProfile = await readProfile($)
+  setRunProfile(await readProfile($))
 }
 
 // ── the non-Bash write hooks ─────────────────────────────────────────────────

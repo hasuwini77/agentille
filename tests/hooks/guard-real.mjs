@@ -7,7 +7,8 @@ import fs from 'node:fs'
 import os from 'node:os'
 
 const root = process.argv[2]
-const { S } = await import(root + '/hooks/state.js')
+const { Profile, Spawn, Session } = await import(root + '/hooks/state.js')
+const { seed } = await import(root + '/hooks/store.js')
 const { bashCall, DENY_INTEGRATION } = await import(root + '/hooks/guard.js')
 const { agtTurnStart } = await import(root + '/hooks/proofs.js')
 
@@ -50,7 +51,9 @@ const $ = {
 }
 const next = async (e) => { const r = spawnSync('bash', ['-c', e.command], { cwd: APP, env, encoding: 'utf8' }); return { result: (r.stdout + r.stderr).trim(), exit: r.status } }
 
-Object.assign(S, { home: HOME, transport: 'none', worker: null, selfName: null, wireName: null })
+seed(Profile, { home: HOME })
+seed(Spawn, { transport: 'none' })
+seed(Session, { worker: null, selfName: null, wireName: null })
 agtTurnStart(true) // the lead on its typed /agt turn
 
 let n = 0

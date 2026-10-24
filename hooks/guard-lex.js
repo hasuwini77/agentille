@@ -2,7 +2,7 @@
 // backticks, heredocs/here-strings, wrappers (env, timeout, xargs, sudo, …), `bash -c`/`eval`, and the
 // variables set on the line; then turns a line into the simple commands it runs and each command into an
 // integration candidate (commandSteps/codeStep). Policy (guard-policy.js) judges those candidates.
-import { S } from './state.js'
+import { Profile } from './state.js'
 import { ghStep, httpStep } from './guard-policy.js'
 
 
@@ -16,7 +16,7 @@ export function protectedPath(raw, abs) {
   if (/\$\{?GIT_DIR\}?/.test(r)) return '$GIT_DIR'
   if (/^~\/\.agentille(\/|$)/.test(r)) return '~/.agentille'
   if (/^(\$HOME|\$\{HOME\})\/\.agentille(\/|$)/.test(r)) return '~/.agentille'
-  if (S.home && (a === S.home + '/.agentille' || a.startsWith(S.home + '/.agentille/'))) return '~/.agentille'
+  if (Profile.home && (a === Profile.home + '/.agentille' || a.startsWith(Profile.home + '/.agentille/'))) return '~/.agentille'
   const git = (s) =>
     /(^|\/)\.git\/config$/.test(s) ? '.git/config'
     : /(^|\/)\.git\/hooks(\/|$)/.test(s) ? '.git/hooks'

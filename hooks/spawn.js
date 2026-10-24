@@ -2,12 +2,36 @@
 // lead (split or run tab), the startup dialogs it clears, the run tabs a lead records, and the pane tools'
 // registration on the typed prompt that unlocks them.
 
-import { S, isLead } from './state.js'
+import { isLead, Profile, Session } from './state.js'
+import { makeStore } from './store.js'
 import { PROBE, HERDR_START_TIMEOUT, pickTransport, splitName, paneKey, answerFile, advisorEnv, tmuxSplitArgv, tmuxEvenArgv, tmuxTagArgvs, tmuxPaneIdOf, tmuxKillArgv, herdrSplitArgv, herdrPaneIdOf, herdrTabArgv, herdrTabOf, herdrTabListArgv, herdrTabIds, tabsFile, panesFile, startupDialog, dialogKeys, herdrReadArgv, herdrKeysArgv, agentStatusOf, herdrGetArgv, screenLine, codexTask, herdrStartArgv, herdrPromptArgv, herdrCloseArgv, herdrMetaArgv, SPAWN_TOOL, CLOSE_TOOL, OPEN_SESSIONS_TOOL } from './panes.js'
 import { wireEnv, shortName } from './wire.js'
 import { sameConfig } from './trust.js'
 export { sameConfig, commandPaths } from './trust.js'
-const { ownedTabs, openedNames } = S
+
+// The pane transport's store: the transport probed for this session, every pane name this lead opened, the run tabs
+// it made and which pane tools are registered. Read through the Spawn view; written only here.
+const { s: my, view } = makeStore('spawn.js', {
+  transport: null,  // 'herdr' | 'tmux' | 'none', probed once at session start
+  openedNames: new Set(),  // every pane name this lead opened, kept after the pane closes
+  ownedTabs: new Set(),  // herdr: run tabs this session created; its panes are reaped, closed and swept like the lead's tab's
+  paneTools: false,  // spawn_pane (and close_pane) registered: a typed /agt arrived in this lead session
+  sessionTools: false,  // open_sessions (and close_pane) registered: a typed ask for sessions arrived
+  closeTool: false,  // close_pane registered, by whichever of the two came first
+  trustUnresolvedTold: false,  // the once-per-session note that a worktree's config runs a command the mod cannot follow
+})
+export const Spawn = view
+
+// Session start: probe the transport afresh.
+export async function probeTransport($) {
+  my.transport = await detectTransport($)
+  return my.transport
+}
+
+// A pane this lead opened (spawn_pane, /agt-spawn): it is the lead's to reap, close and sweep from now on.
+export function ownName(name) {
+  my.openedNames.add(name)
+}
 
 export async function probeOk($, argv) {
   try {
@@ -26,15 +50,15 @@ export async function detectTransport($) {
 }
 
 export async function transportOf($) {
-  S.transport ??= await detectTransport($)
-  return S.transport
+  my.transport ??= await detectTransport($)
+  return my.transport
 }
 
 // The run tabs this lead made, one id per line where the SessionEnd sweep reads them. A failed write loses
 // only the sweep's reach, so it never blocks.
 export async function saveTabs($) {
-  const file = tabsFile(S.home, await $.env.get('HERDR_PANE_ID'))
-  if (file) await $.fs.write(file, [...ownedTabs].map((t) => t + '\n').join('')).catch(() => {})
+  const file = tabsFile(Profile.home, await $.env.get('HERDR_PANE_ID'))
+  if (file) await $.fs.write(file, [...my.ownedTabs].map((t) => t + '\n').join('')).catch(() => {})
 }
 
 // The lead's pane id in this transport: where its tabs, panes and sessions files are keyed.
@@ -45,25 +69,25 @@ export async function leadPane($) {
 // The worker panes this lead opened, one name per line, where the SessionEnd sweep reads them. Ownership is by
 // name (agt-<run>-<role>, the run id is random), so a restarted lead takes its own panes back and no other.
 export async function savePanes($) {
-  const file = panesFile(S.home, await leadPane($))
-  if (file) await $.fs.write(file, [...openedNames].map((n) => n + '\n').join('')).catch(() => {})
+  const file = panesFile(Profile.home, await leadPane($))
+  if (file) await $.fs.write(file, [...my.openedNames].map((n) => n + '\n').join('')).catch(() => {})
 }
 
 export async function loadOwned($) {
-  const file = panesFile(S.home, await leadPane($))
+  const file = panesFile(Profile.home, await leadPane($))
   if (!file) return
   const text = await $.fs.read(file).catch(() => '')
-  for (const n of String(text ?? '').split('\n')) if (splitName(n)) openedNames.add(n)
+  for (const n of String(text ?? '').split('\n')) if (splitName(n)) my.openedNames.add(n)
 }
 
 // A run tab herdr no longer lists is gone (its last pane closed): forget it.
 export async function pruneTabs($, workspace) {
-  if (!ownedTabs.size || !workspace) return
+  if (!my.ownedTabs.size || !workspace) return
   const r = await $.process.run(herdrTabListArgv(workspace), PROBE).catch(() => null)
   const ids = r?.exitCode === 0 ? herdrTabIds(r.stdout) : null
   if (!ids) return
-  const gone = [...ownedTabs].filter((t) => !ids.includes(t))
-  for (const t of gone) ownedTabs.delete(t)
+  const gone = [...my.ownedTabs].filter((t) => !ids.includes(t))
+  for (const t of gone) my.ownedTabs.delete(t)
   if (gone.length) await saveTabs($)
 }
 
@@ -127,7 +151,7 @@ export async function trustable($, cwd, leadCwd, why = {}) {
   if (top === leadTop) return true
   const branch = await gitOutOrNull($, cwd, 'symbolic-ref', '--short', 'HEAD')
   if (!branch || !OWN_BRANCH.test(branch)) return false
-  const file = String(panesFile(S.home, await leadPane($)) ?? '').replace(/\.panes$/, '.worktrees')
+  const file = String(panesFile(Profile.home, await leadPane($)) ?? '').replace(/\.panes$/, '.worktrees')
   const listed = file ? await $.fs.read(file).catch(() => null) : null
   if (typeof listed !== 'string' || !(await listsRoot($, listed, top))) return false
   return sameConfig($, top, leadTop, why)
@@ -136,8 +160,8 @@ export async function trustable($, cwd, leadCwd, why = {}) {
 // Once per session: a worktree whose config runs a command the mod cannot follow to files (an npx package no lockfile
 // pins, a script that reads another package folder) is never trusted for the person. One toast says so and names it.
 function unresolvedOnce($, cwd, what) {
-  if (S.trustUnresolvedTold) return
-  S.trustUnresolvedTold = true
+  if (my.trustUnresolvedTold) return
+  my.trustUnresolvedTold = true
   Promise.resolve($.ui.toast('agt ⚑ ' + cwd + ': ' + what[0] + ' could not be followed to files, so the folder is not trusted for you; open it once by hand to trust it')).catch(() => {})
 }
 
@@ -202,7 +226,7 @@ export async function openPane($, t, o) {
     if (!lead) throw new Error('TMUX_PANE is not set')
     const target = o.split?.target ?? lead
     const shell = (await $.env.get('SHELL')) ?? ''
-    const id = tmuxPaneIdOf((await runOk($, tmuxSplitArgv({ ...o, target, shell, direction: o.split?.direction, env: [...wireEnv({ name: o.name, lead: S.sessionId }), ...advisorEnv(o.model, S.settings)] }), PROBE)).stdout)
+    const id = tmuxPaneIdOf((await runOk($, tmuxSplitArgv({ ...o, target, shell, direction: o.split?.direction, env: [...wireEnv({ name: o.name, lead: Session.sessionId }), ...advisorEnv(o.model, Profile.settings)] }), PROBE)).stdout)
     if (!id) throw new Error('tmux gave no pane id')
     try {
       for (const argv of tmuxTagArgvs(id, o.name)) await runOk($, argv, PROBE)
@@ -216,17 +240,17 @@ export async function openPane($, t, o) {
   }
   const lead = await $.env.get('HERDR_PANE_ID')
   if (!lead) throw new Error('HERDR_PANE_ID is not set')
-  const env = [...wireEnv({ name: o.name, lead: S.sessionId }), ...advisorEnv(o.model, S.settings)]
+  const env = [...wireEnv({ name: o.name, lead: Session.sessionId }), ...advisorEnv(o.model, Profile.settings)]
   let id
   let tab = o.split?.tab ?? null
   if (o.newTab) {
-    const workspace = S.selfWorkspace ?? (await $.env.get('HERDR_WORKSPACE_ID'))
+    const workspace = Session.selfWorkspace ?? (await $.env.get('HERDR_WORKSPACE_ID'))
     if (!workspace) throw new Error('HERDR_WORKSPACE_ID is not set')
     const made = herdrTabOf((await runOk($, herdrTabArgv({ workspace, cwd: o.cwd, run: o.run, agent: o.agent, model: o.model, effort: o.effort, env }), PROBE)).stdout)
     if (!made) throw new Error('herdr gave no tab id')
     id = made.pane
     tab = made.tab
-    ownedTabs.add(tab)
+    my.ownedTabs.add(tab)
     await saveTabs($)
   } else {
     const pane = o.split?.target ?? lead
@@ -236,12 +260,12 @@ export async function openPane($, t, o) {
   try {
     await startAgent($, herdrStartArgv({ name: o.name, pane: id, model: o.model, effort: o.effort, agent: o.agent, vendor: o.vendor }), o.name, o.cwd)
     // Codex has no pane tools of ours: it saves its answer where the harvest, reaper and wake paths look.
-    const task = o.vendor === 'codex' ? codexTask(o.task, answerFile(S.home, o.run, splitName(o.name).role, paneKey(id))) : o.task
+    const task = o.vendor === 'codex' ? codexTask(o.task, answerFile(Profile.home, o.run, splitName(o.name).role, paneKey(id))) : o.task
     await runOk($, herdrPromptArgv(o.name, task), PROBE)
   } catch (err) {
     await $.process.run(herdrCloseArgv(id), PROBE).catch(() => {})
     if (o.newTab) {
-      ownedTabs.delete(tab) // a run tab's only pane closing takes the tab with it
+      my.ownedTabs.delete(tab) // a run tab's only pane closing takes the tab with it
       await saveTabs($)
     }
     throw err
@@ -258,16 +282,16 @@ export async function openPane($, t, o) {
 // and a host without a pane transport gets none. A tool registered while a prompt is submitted is in that
 // turn's list.
 export async function ensureTools($, which) {
-  if (!isLead() || S.hostOld) return
-  if ((which === 'panes' ? S.paneTools : S.sessionTools) || (await transportOf($)) === 'none') return
+  if (!isLead() || Session.hostOld) return
+  if ((which === 'panes' ? my.paneTools : my.sessionTools) || (await transportOf($)) === 'none') return
   try {
     await $.tool.register(which === 'panes' ? SPAWN_TOOL : OPEN_SESSIONS_TOOL)
-    if (!S.closeTool) {
+    if (!my.closeTool) {
       await $.tool.register(CLOSE_TOOL)
-      S.closeTool = true
+      my.closeTool = true
     }
-    if (which === 'panes') S.paneTools = true
-    else S.sessionTools = true
+    if (which === 'panes') my.paneTools = true
+    else my.sessionTools = true
   } catch {
     // an older host without $.tool.register: /agt runs its heavy level as subagent waves
   }

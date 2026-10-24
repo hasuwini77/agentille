@@ -10,7 +10,8 @@ import fs from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 
 const [root, sock, leadPane, home, cwd] = process.argv.slice(2)
-const { S } = await import(root + '/hooks/state.js')
+const { Profile, Spawn, Panes, Session } = await import(root + '/hooks/state.js')
+const { seed } = await import(root + '/hooks/store.js')
 const { onPromptSubmit } = await import(root + '/hooks/turns.js')
 const { spawnPane, closePane } = await import(root + '/hooks/tools.js')
 
@@ -62,7 +63,8 @@ const $ = {
   ui: { toast: () => {}, invalidate: () => {}, open: async () => {} },
   agent: { list: async () => [] },
 }
-Object.assign(S, { home, sessionId: 'tmux-real-lead', worker: null, selfName: null, wireName: null })
+seed(Profile, { home })
+seed(Session, { sessionId: 'tmux-real-lead', worker: null, selfName: null, wireName: null })
 
 const rows = () => tmux('list-panes', '-a', '-F', ['#{pane_id}', '#{@agt}', '#{pane_title}', '#{pane_current_command}'].join('\t')).stdout
   .split('\n').filter(Boolean).map((l) => { const [id, agt, title, cmd] = l.split('\t'); return { id, agt, title, cmd } })
@@ -71,7 +73,7 @@ const RUN = 'tmx1ab'
 const NAME = 'agt-' + RUN + '-exec-1'
 try {
   await onPromptSubmit($, { text: '/agt heavy build the two slices', origin: { kind: 'composer' } })
-  check('the typed /agt finds the tmux transport', S.transport === 'tmux', String(S.transport))
+  check('the typed /agt finds the tmux transport', Spawn.transport === 'tmux', String(Spawn.transport))
   check('... and registers spawn_pane and close_pane', registered.includes('spawn_pane') && registered.includes('close_pane'), JSON.stringify(registered))
 
   const r = await spawnPane($, { run: RUN, role: 'exec-1', task: 'build slice one', agent: 'executor', header: '[agt run=' + RUN + ' size=small mode=build]' })
@@ -89,7 +91,7 @@ try {
   check('... running the placeholder worker, not the claude CLI', cmd === 'sleep', String(cmd))
   const panes = await fs.readFile(home + '/.agentille/state/lead-' + leadPane.replace(/^%/, '') + '.panes', 'utf8').catch(() => '')
   check('the lead records the pane under the test HOME', panes.split('\n').includes(NAME), JSON.stringify(panes))
-  check('the mod sees the pane as working', S.panes.some((p) => p.name === NAME && p.state === 'working'), JSON.stringify(S.panes))
+  check('the mod sees the pane as working', Panes.panes.some((p) => p.name === NAME && p.state === 'working'), JSON.stringify(Panes.panes))
 
   const c = await closePane($, { name: NAME })
   check('close_pane closes it', c?.result === 'Closed ' + NAME + '.', JSON.stringify(c))

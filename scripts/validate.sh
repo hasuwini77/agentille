@@ -364,8 +364,22 @@ else
     else
       fail "hooks/register.js failed to import:"; printf '%s\n' "$imp" | head -8 | sed 's/^/    /'
     fi
+    # Each owner module makes its store at load time and the modules import one another in a cycle, so a module
+    # that reads another's store at top level breaks only when it happens to load first. Import each one alone.
+    mod_bad=0
+    for m in hooks/*.js; do
+      imp=$(node -e "import(process.argv[1]).then(()=>{},e=>{console.error(e&&e.message||e);process.exit(1)})" "./$m" 2>&1) || { fail "$m failed to import on its own: $(printf '%s' "$imp" | head -1)"; mod_bad=1; }
+    done
+    [ "$mod_bad" = 0 ] && pass "every hooks/*.js module imports cleanly on its own"
   fi
 fi
+
+# ── 6b'''. Stores: a module writes only its own (hooks/store.js) ────────────
+# store.js seed() writes a store past its owner's transitions; it exists for tests only.
+hdr "Mod stores"
+seeded=$(grep -lE '\bseed\(' hooks/*.js 2>/dev/null | grep -v '^hooks/store\.js$')
+if [ -n "$seeded" ]; then fail "store.js seed() is for tests only; called in: $(printf '%s' "$seeded" | tr '\n' ' ')"
+else pass "no hooks module writes a store through store.js seed()"; fi
 
 # ── 6c. The mod: Claude Code's own validator + its tests ────────────────────
 # WARN where the claude CLI is absent on a developer machine; in CI (CI=true) its absence is a

@@ -17,7 +17,7 @@ Pre-flight (the mod probes this once; manual equivalent): inside Herdr (`HERDR_E
 When the `## Pane transport` block says the tools are live, open every claude worker with `mcp__agentille__spawn_pane` and close it with `mcp__agentille__close_pane`, on Herdr and tmux alike:
 
 ```
-spawn_pane { run: "<run-id>", role: "exec-1", agent: "executor", header: "[agt run=<run-id> size=small mode=build piece=<slug>]", cwd: "<worktree>", task: "<full slice prompt>" }
+spawn_pane { run: "<run-id>", role: "exec-1", agent: "executor", header: "[agt run=<run-id> size=small mode=build slice=<slug>]", cwd: "<worktree>", task: "isolated: false\nbranch: agt/<slug>\nbase: <base>\n<full slice prompt>" }
 → Opened agt-<run-id>-exec-1 · sonnet · medium · herdr pane.
 close_pane { name: "agt-<run-id>-exec-1" }
 → Closed agt-<run-id>-exec-1.
@@ -29,11 +29,13 @@ Layout is the mod's call: the first worker splits right of the lead; later worke
 
 The mod enforces the `agt-<run>-<role>` name (32 chars max), no duplicate name, an absolute existing `cwd`, no focus change. `close_pane` reaches only `agt-` panes in your own tab or window, never a `/agt-spawn` pane. Worker panes get no tools, so they cannot fan out.
 
-Pane answers never reach the mod's result hook, so a pane worker raises no `⚑`: read the harvest yourself. Still yours: isolation (one worktree per slice) and the tmux done-file instruction.
+Pane answers never reach the mod's result hook, so a pane worker raises no `⚑`: read the harvest yourself. Still yours: the tmux done-file instruction and isolation, one worktree per slice.
+
+**Who makes the worktree.** In panes mode the lead does, before each `spawn_pane`, with the recipe in `factory.md` → "Worktree lifecycle" (run from the main checkout; it re-attaches on a fix round or resume), and passes that path as `cwd`. In subagent mode the executor makes its own. Every executor dispatch states `isolated:` in its task text, never left to the default: `isolated: false` on every `spawn_pane` (the lead already made the tree; `isolated` is an executor input, not a `spawn_pane` field, so it goes in `task`), and `isolated: true` on an `Agent` executor (it has no `cwd`, and its recipe finds a tree the lead already made). Pass `branch:` and `base:` with it, so a re-run worker computes the same branch and target.
 
 ## Codex workers
 
-Only when the person's task asks for Codex ("codex builds the API slice"); never picked on your own. Herdr only, executor only: `spawn_pane { …, agent: "executor", vendor: "codex" }`. Codex runs on the person's own Codex config (model, sandbox, approvals) and cannot load the agentille executor or the mod, so its `task` carries the whole contract: the slice, its file set, `branch:`/`base:`/`issue:`, the ACCEPTANCE criteria, the executor's Output format with `VERIFICATION:`, and the `BLOCKED:` rule (`agents/agentille-executor.md`). The mod adds one line telling it to write its report to its answer file. No wire message comes, so the `spawn_pane` result tells you to start `herdr agent wait <name> --until done --until blocked` as a background command: its exit wakes you. Then read the answer file and `close_pane` if the pane is still open (the mod closes it ~10 s after it is done). Review, gate and merge are the same as for a Claude slice. On tmux, or without Codex installed, the spawn is refused: say so in one line and run the slice on Claude.
+Only when the person's task asks for Codex ("codex builds the API slice"); never picked on your own. Herdr only, executor only: `spawn_pane { …, agent: "executor", vendor: "codex" }`. Codex runs on the person's own Codex config (model, sandbox, approvals) and cannot load the agentille executor or the mod, so its `task` carries the whole contract: the slice, its file set, `isolated: false` with `branch:`/`base:`/`issue:`, the ACCEPTANCE criteria, the executor's Output format with `VERIFICATION:`, and the `BLOCKED:` rule (`agents/agentille-executor.md`). The mod adds one line telling it to write its report to its answer file. No wire message comes, so the `spawn_pane` result tells you to start `herdr agent wait <name> --until done --until blocked` as a background command: its exit wakes you. Then read the answer file and `close_pane` if the pane is still open (the mod closes it ~10 s after it is done). Review, gate and merge are the same as for a Claude slice. On tmux, or without Codex installed, the spawn is refused: say so in one line and run the slice on Claude.
 
 **Startup prompts.** The mod accepts the folder-trust prompt only for the lead's own repo and its worktrees, and skips Codex's update notice. Any other startup prompt fails the spawn: the slice falls back to a subagent.
 
@@ -63,7 +65,7 @@ herdr pane split --current --direction right --cwd "<worktree>" --env "AGENTILLE
 herdr agent start "agt-<run-id>-exec-1" --kind claude --pane <pane-id>   # id: .result.pane.pane_id
 ```
 
-Then send one prompt: the task, the profile block, the slice's file set, its verification command, its exit criterion. Spawn the whole wave first, then wait. Never focus. Names match `[a-z][a-z0-9_-]{0,31}`; keep the run id 6 chars. The `agt-` prefix is the reap authority.
+Then send one prompt: `isolated: false`, `branch:` and `base:`, the task, the profile block, the slice's file set, its verification command, its exit criterion. Spawn the whole wave first, then wait. Never focus. Names match `[a-z][a-z0-9_-]{0,31}`; keep the run id 6 chars. The `agt-` prefix is the reap authority.
 
 ## Harvest, then close
 
@@ -119,7 +121,7 @@ Keep the `--`, and escape `#` as `##` in `<cwd>`. The lead only sees panes in it
 
 ## Consolidation
 
-Branches, PRs, the ownership check, merge order and tags: `factory.md` → "Integrate". After a slice merges, remove its worktree (`herdr worktree remove --workspace <id> --force` on Herdr, else `git worktree remove --force <path>`).
+Branches, PRs, the ownership check, merge order and tags: `factory.md` → "Integrate". Each slice's worktree stays until the gate decides its outcome, then the lead removes it (`factory.md` → "Worktree lifecycle").
 
 Peers never message each other; everything routes through the lead.
 

@@ -11,11 +11,7 @@ One typed command runs the work. Type `/agt "task"` in Claude Code and that one 
    ```
 2. **Check that the mod loaded:** type `/agt-info`. Its first line reads `display (profile.json → display):`, followed by the display settings in effect and the last run's routing. Every `/agt-*` command comes from the module `hooks/hooks.json` loads, so if Claude Code does not know `/agt-info`, the mod did not load.
    - `/agt` still works without the mod; its recon line then ends in `[agentille v<version>]`, and you get the plain subagent tree instead of the band.
-3. **Smoke test, kept local:** put `"integration": "local"` in `~/.agentille/profile.json` (create the file with the line below, or add the key to the one you have), so the first run pushes nothing and opens no PR.
-   ```json
-   { "integration": "local" }
-   ```
-   Then type `/agt "fix the typo in the footer"`. It prints `recon: low · solo · <reason>`, then Claude makes the fix itself on a new `fix/<slug>` branch, with no agents and no card. The default is `integration: "pr"`, which pushes that branch and opens a PR; remove the key when you want that.
+3. **Smoke test, kept local:** type `/agt --local "fix the typo in the footer"`. `--local` runs that one `/agt` under `integration: "local"`, so it pushes nothing and opens no PR, with no profile file. It prints `recon: low · solo · <reason>`, then Claude makes the fix itself on a new `fix/<slug>` branch, with no agents and no card. The default is `integration: "pr"`, which pushes that branch and opens a PR; `{ "integration": "local" }` in `~/.agentille/profile.json` makes local permanent.
 4. **Run a bigger one:** `/agt "add a CSV export endpoint and a download button on the reports page"`. It reads your repo and picks a level: low (it just does it, or one builder), medium (2–3 builders in parallel) or heavy (one Herdr or tmux pane per part). The recon line names the level it picked (`medium · subagent`, say), and the band above your prompt fills with the planner, executors and reviewers. Risky changes (auth, payments, data) get a red-team pass, under `pr` you get one reviewed PR per part to merge (merging on green is opt-in, see "What it touches"), and every pane it opened is closed.
 5. **Read the card** it ends on (solo runs have none). Everything else (plan, findings, each agent's full report) is in that `report.md`. A one-part feature's card under `pr` looks like this:
    ```
@@ -70,7 +66,7 @@ Every command and its arguments (`--fable`, `/agt-spawn`, `/agt-clean`, `/agt-te
 
 ## Settings
 
-Everything lives in `~/.agentille/profile.json`. Every key is optional and no profile file is needed. The key most people set first is `integration`, what a finished slice becomes: `pr` (the default) pushes a branch and opens a PR per slice, `auto` also merges each PR on green and pushes a version tag, `push` pushes the branch only, `local` pushes nothing. A repo can only lower it, and a risky diff (auth, payments, deploy, migrations, dependencies) stops at the PR under every setting. `/agt-info` shows the `display` values in effect and where each came from.
+Everything lives in `~/.agentille/profile.json`. Every key is optional and no profile file is needed. The key most people set first is `integration`, what a finished slice becomes: `pr` (the default) pushes a branch and opens a PR per slice, `auto` also merges each PR on green and pushes a version tag, `push` pushes the branch only, `local` pushes nothing (`/agt --local "task"` runs one run that way, with no profile). A repo can only lower it, and a risky diff (auth, payments, deploy, migrations, dependencies) stops at the PR under every setting. `/agt-info` shows the `display` values in effect and where each came from.
 
 Every key, its default and what is checked (`integration`, `thinkingDepth`, `projects[]`, `routing.*`, `display.*`, the voice keys, `viewports`): [docs/settings.md](./docs/settings.md).
 

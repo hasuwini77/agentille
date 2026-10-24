@@ -28,6 +28,7 @@ What a finished slice becomes.
   - `push` pushes each slice branch, no PR, no merge.
   - `local` merges locally and pushes nothing.
   - Without `gh`, `pr` behaves as `push`.
+- **For one run:** `/agt --local "task"` runs that one `/agt` under `local`, whatever the profile says (`projects[]` entries included): the mod snapshots `local` at the typed `/agt` and the guard refuses every push and PR for the lead and its subagents until the run's card. The next `/agt` is back on the profile. No profile file is needed.
 - **Your profile decides:** that repo's `projects[].integration` entry (matched by `url`, the `origin` remote, or `path`; `/agentille-project` writes both), then the top-level `integration`, then `pr`.
   - An entry with only an `id` matches a repo with no remote and can only lower the integration mode, so a clone of someone else's repo with the same folder name never inherits `auto`.
 - **A repo can only lower it** (auto → pr → push → local): its `.agentille/config.json` `{"integration": …}` (`/agentille-project` writes it), a CLAUDE.md or AGENTS.md saying `no-mistakes` (at most `pr`) or `local-only` (`local`).

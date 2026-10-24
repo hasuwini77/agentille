@@ -1,5 +1,5 @@
 import { describe, expect, mock, test } from 'claude-code/testing'
-import { DEFAULTS, asksSessions, decide, demoteHeaderText, formationOf, ladderFixes, mentionsCodex, mentionsFable, parseHeader, proveHeader, roleOf, typedFable, verdictOf } from '../../hooks/routing.js'
+import { AGENT_SILENT_MS, AGT_GRACE_TYPED, DEFAULTS, asksSessions, decide, demoteHeaderText, formationOf, ladderFixes, mentionsCodex, mentionsFable, parseHeader, proveHeader, roleOf, runInFlight, typedFable, verdictOf } from '../../hooks/routing.js'
 import { pieceOf } from '../../hooks/links.js'
 
 const fresh = () => ({ revise: 0, fixes: 0, fable: 0 })
@@ -311,6 +311,26 @@ describe('typed proof', () => {
     expect(demoteHeaderText('[agt run=a1 fable=forced piece=x]')).toBe('[agt run=a1 fable=auto piece=x]')
     expect(demoteHeaderText('no header\nfable=forced')).toBe('no header\nfable=forced')
     expect(demoteHeaderText(undefined)).toBe('')
+  })
+
+  test('runInFlight: a typed /agt proves its own run, not the session', async () => {
+    const now = 1_000_000
+    const st = (o: Record<string, unknown> = {}) => ({ agtTyped: true, panes: [], live: new Map(), lastRun: 'r1', agtTypedSince: AGT_GRACE_TYPED, ...o })
+    const pane = (role: string, state: string) => ({ name: 'agt-r1-' + role, role, state })
+    const agent = (o: Record<string, unknown>) => new Map([['a1', { run: 'r1', state: 'working', start: now, heard: now, ...o }]])
+    expect(runInFlight(st({ agtTyped: false, agtTypedSince: 0 }), now)).toBe(false)
+    expect(runInFlight(st({ agtTypedSince: 0 }), now)).toBe(true)
+    expect(runInFlight(st({ agtTypedSince: AGT_GRACE_TYPED - 1 }), now)).toBe(true)
+    expect(runInFlight(st(), now)).toBe(false)
+    expect(runInFlight(st({ panes: [pane('exec-1', 'working')] }), now)).toBe(true)
+    expect(runInFlight(st({ panes: [pane('exec-1', 'blocked')] }), now)).toBe(true)
+    expect(runInFlight(st({ panes: [pane('exec-1', 'done'), pane('exec-2', 'idle')] }), now)).toBe(false)
+    expect(runInFlight(st({ panes: [pane('spawn', 'working')] }), now)).toBe(false)
+    expect(runInFlight(st({ live: agent({}) }), now)).toBe(true)
+    expect(runInFlight(st({ live: agent({ state: 'done' }) }), now)).toBe(false)
+    expect(runInFlight(st({ live: agent({ run: 'r0' }) }), now)).toBe(false)
+    expect(runInFlight(st({ live: agent({ run: 'adhoc' }), lastRun: 'adhoc' }), now)).toBe(false)
+    expect(runInFlight(st({ live: agent({ heard: now - AGENT_SILENT_MS }) }), now)).toBe(false) // cancelled: never completes
   })
 
   test('mentionsCodex: the word on its own, not a tool or flag that contains it', async () => {

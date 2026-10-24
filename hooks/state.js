@@ -49,9 +49,10 @@ export const S = {
   focusOn: true,  // agent flags show above the prompt
   flags: [],  // [{ text, key, at }] from agent results this run
   agtTurn: false,  // this turn is part of an /agt run
-  agtTyped: false,  // the person typed /agt in this session: only then may the lead open worker panes
+  agtTyped: false,  // the person typed /agt and its run is not over (routing.js runInFlight): only then may the lead open worker panes
   fableTyped: false,  // ... and typed --fable on it: only then does a header's fable=forced hold
-  sessionsAsked: false,  // the newest typed prompt asked for sessions of the person's own (open_sessions)
+  agtTypedSince: 0,  // typed prompts other than /agt since the newest typed /agt (the run's grace, AGT_GRACE_TYPED)
+  sessionsAsked: false,  // this turn's prompt was typed and asked for sessions of the person's own (open_sessions)
   lastTyped: '',  // the newest typed prompt: a shell session runs only a command it asks for
   agtPrompt: '',  // the newest typed /agt prompt: a worker pane runs on Codex only when it or lastTyped names Codex
   workerProved: false,  // worker: its first typed prompt decided whether fable=forced holds here

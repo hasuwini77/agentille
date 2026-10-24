@@ -82,6 +82,22 @@ export function mentionsFable(text) {
   return /(^|\s)--fable(?=\s|$)/.test(String(text ?? ''))
 }
 
+// A typed /agt is proof for its own run, not for the session. The run is in flight while one of this lead's worker
+// panes still works (an /agt-spawn pane is the person's, not the run's), while a subagent of the run is working and
+// was heard from lately (a cancelled one raises no turn.complete), or, until its ✓/✗ card clears the proof, for
+// fewer than AGT_GRACE_TYPED typed prompts after the /agt: the person answering a question the run asked. Turns the
+// run itself wakes (a worker's report, a task notification) do not count, so a fix round after a quiet gap still
+// opens its pane. `st` is the mod's state record (S); `now` is Date.now(), the clock agents are heard by.
+export const AGT_GRACE_TYPED = 3
+export const AGENT_SILENT_MS = 10 * 60_000
+export function runInFlight(st, now = Date.now()) {
+  if (!st?.agtTyped) return false
+  if ((st.panes ?? []).some((p) => p.role !== 'spawn' && !['done', 'idle', 'dead'].includes(p.state))) return true
+  const run = st.lastRun
+  if (run && run !== 'adhoc' && [...(st.live?.values() ?? [])].some((a) => a.run === run && a.state === 'working' && now - (a.heard ?? a.start ?? 0) < AGENT_SILENT_MS)) return true
+  return (st.agtTypedSince ?? 0) < AGT_GRACE_TYPED
+}
+
 // The person named Codex in a typed prompt ("codex builds the API slice", "use Codex"): the only proof a worker pane
 // may run on vendor codex. A word on its own: "/codex-reviewer" and "codex-cli" name something else.
 export function mentionsCodex(text) {

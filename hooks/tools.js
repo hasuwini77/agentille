@@ -8,7 +8,7 @@ import { pieceOf, party, taskLine } from './links.js'
 import { PROBE, newRunId, doneFile, paneKey, answerFile, tmuxKillArgv, placePlan, codexNote, herdrCloseArgv, paneRole, spawnToolInput, closeTarget, sessionName, sessionsToolInput, sessionsNote } from './panes.js'
 import { installedSkew } from './profile.js'
 import { pollNow } from './reaper.js'
-import { formationOf, mentionsCodex, mentionsFable, proveHeader, demoteHeaderText, ladderFixes, decide } from './routing.js'
+import { formationOf, mentionsCodex, mentionsFable, proveHeader, demoteHeaderText, ladderFixes, decide, runInFlight } from './routing.js'
 import { saveSessions, closeSession, openSession } from './sessions.js'
 import { skewMessage } from './skew.js'
 import { transportOf, openPane, savePanes } from './spawn.js'
@@ -29,6 +29,8 @@ export async function spawnPane($, e) {
   const t = await transportOf($)
   if (t === 'none') return { deny: 'No pane transport here: run the slice as a subagent.' }
   if (!S.agtTyped) return { deny: 'spawn_pane opens worker panes only in a session where /agt was typed.' }
+  await pollNow($, t) // the panes as they are now: one that closed since the last poll no longer keeps the run going
+  if (!runInFlight(S)) return { deny: 'spawn_pane opens worker panes only while the typed /agt run is in flight; the next run needs the next typed /agt.' }
   const a = spawnToolInput(e, S.panes)
   if (a.error) return { deny: a.error }
   // Codex is the person's pick, never the lead's: their /agt prompt or their newest typed prompt names it.

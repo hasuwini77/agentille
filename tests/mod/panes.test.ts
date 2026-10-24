@@ -742,6 +742,48 @@ describe('pane tools: in the mod', () => {
     expect((await $.tool.call({ tool: 'mcp__agentille__spawn_pane', run: 'k7f2ab', role: 'exec-1', task: 'build the filter', ...EXEC })).result).toContain('Opened agt-k7f2ab-exec-1')
   })
 
+  test('spawn_pane lasts while the typed /agt run is in flight, not for the session', async ($, on) => {
+    setup(on, TMUX, { 'tmux split-window': { stdout: '%9\n' } })
+    const call = (role: string) => $.tool.call({ tool: 'mcp__agentille__spawn_pane', run: 'k7f2ab', role, task: 'build the filter', ...EXEC })
+    const plain = (text: string, kind = 'composer') => $.prompt.submit({ text, origin: { kind } } as never)
+    await typed($)
+    // The run asked a question and the person answered: still the run's.
+    await plain('the second option')
+    expect((await call('exec-1')).result).toContain('Opened agt-k7f2ab-exec-1')
+    // Turns the run wakes itself (a worker report, a notification) never end it.
+    for (let n = 0; n < 6; n++) await plain('[agt wire] done', 'notification')
+    expect((await call('exec-2')).result).toContain('Opened agt-k7f2ab-exec-2')
+    // No card came (an error, an interrupt), no pane is listed and the person moved on: the proof lapses.
+    await plain('thanks')
+    await plain('now fix the login form')
+    expect((await call('exec-3')).deny).toContain('/agt was typed')
+    await plain('[agt wire] done', 'notification')
+    expect((await call('exec-3')).deny).toContain('/agt was typed')
+    // The next typed /agt starts a new proof.
+    await typed($, '/agt ship the rest')
+    expect((await call('exec-3')).result).toContain('Opened agt-k7f2ab-exec-3')
+  })
+
+  test('a worker pane still working keeps the run in flight; an /agt-spawn pane does not', async ($, on) => {
+    let rows = [['%1', '', 'claude', '0', '@1']]
+    setup(on, TMUX, { 'tmux split-window': { stdout: '%9\n' }, 'tmux list-panes': () => ({ stdout: rows.map((r) => r.join(T)).join('\n') + '\n' }) })
+    await $.session.start({ cwd: '/work/repo', surface: null, isInteractive: false })
+    const call = (role: string) => $.tool.call({ tool: 'mcp__agentille__spawn_pane', run: 'k7f2ab', role, task: 'build the filter', ...EXEC })
+    const plain = (text: string) => $.prompt.submit({ text, origin: { kind: 'composer' } } as never)
+    await typed($)
+    rows = [...rows, ['%9', 'agt-k7f2ab-exec-1', 'claude', '0', '@1']]
+    expect((await call('exec-1')).result).toContain('Opened agt-k7f2ab-exec-1')
+    for (const t of ['one', 'two', 'three', 'four']) await plain(t)
+    expect((await call('exec-2')).result).toContain('Opened agt-k7f2ab-exec-2')
+    // exec-1 and exec-2 close; only a pane the person opened with /agt-spawn is left, and it is not the run's.
+    const opened = (await $.command.run({ command: 'agt-spawn', args: '"look around"', origin: { kind: 'composer' } } as never)).text
+    const name = opened.match(/agt-[a-z0-9]{6}-spawn/)[0]
+    rows = [rows[0], ['%7', name, 'claude', '0', '@1']]
+    expect((await call('exec-3')).deny).toBe('spawn_pane opens worker panes only while the typed /agt run is in flight; the next run needs the next typed /agt.')
+    await plain('five')
+    expect((await call('exec-3')).deny).toContain('/agt was typed')
+  })
+
   test('fable=forced without a typed --fable is dropped from the worker task, once per run', async ($, on) => {
     const toasts: string[] = []
     const { seen } = setup(on, TMUX, { 'tmux split-window': { stdout: '%9\n' } })
@@ -1692,6 +1734,18 @@ describe('sessions: in the mod', () => {
     // The ask does not carry over to the next typed prompt.
     await asked($, 'now fix the login form')
     expect((await $.tool.call({ tool: 'mcp__agentille__open_sessions', count: 1 })).deny).toContain('typed a request for sessions')
+  })
+
+  test('the ask is per turn: a notification turn after it opens nothing', async ($, on) => {
+    next = 4
+    const { seen } = setup(on, HERDR, { 'herdr pane split': herdrSplit })
+    await asked($, 'open a session')
+    expect((await $.tool.call({ tool: 'mcp__agentille__open_sessions', count: 1 })).result).toMatch(/^Opened s-/)
+    await $.prompt.submit({ text: 'background task finished', origin: { kind: 'notification' } } as never)
+    expect((await $.tool.call({ tool: 'mcp__agentille__open_sessions', count: 3 })).deny).toContain('typed a request for sessions')
+    await $.prompt.submit({ text: 'peer message', origin: { kind: 'peer' } } as never)
+    expect((await $.tool.call({ tool: 'mcp__agentille__open_sessions', count: 3 })).deny).toContain('typed a request for sessions')
+    expect(seen.filter((a) => a.slice(0, 3).join(' ') === 'herdr pane split')).toHaveLength(1)
   })
 
   test('open_sessions is registered on the typed ask, with close_pane once; a later /agt adds spawn_pane only', async ($, on) => {

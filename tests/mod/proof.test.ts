@@ -75,6 +75,37 @@ describe('typed proof: in the mod', () => {
     await plan($)
     expect(spawned.map((e) => e.model)).toEqual(['fable', 'opus'])
   })
+
+  // A run that ends in a question, an error or an interrupt prints no ✓/✗ card: its proof lapses once the run is
+  // over (no agent of it working, no worker pane) and the person has typed AGT_GRACE_TYPED plain prompts since.
+  test('fable=forced after a plain prompt holds only while the --fable run is in flight', async ($, on) => {
+    const { spawned } = setup(on)
+    on('turn.complete', async ($: any, e: any) => ({ text: e.answer }))
+    const done = (agentId: string) => $.turn.complete({ agentId, answer: 'done', durationMs: 1, isAborted: false, turnId: 't-' + agentId, reason: 'answer' } as never)
+    const plain = (text: string) => $.prompt.submit({ text, origin: { kind: 'composer' } } as never)
+    await $.prompt.submit({ text: '/agt --fable ship it', origin: { kind: 'composer' } } as never)
+    await plan($)
+    await done('p1')
+    await plain('yes, the second option') // the person answers the run's question: still its run
+    await plan($)
+    await done('p2')
+    await plain('thanks')
+    await plain('now fix the typo in the README')
+    await plan($) // the run is over: a model-written fable=forced proves nothing
+    await $.prompt.submit({ text: 'task finished', origin: { kind: 'notification' } } as never)
+    await plan($)
+    expect(spawned.map((e) => e.model)).toEqual(['fable', 'fable', 'opus', 'opus'])
+  })
+
+  test('a working subagent of the run keeps its proof across plain prompts', async ($, on) => {
+    const { spawned } = setup(on)
+    const plain = (text: string) => $.prompt.submit({ text, origin: { kind: 'composer' } } as never)
+    await $.prompt.submit({ text: '/agt --fable ship it', origin: { kind: 'composer' } } as never)
+    await plan($) // p1 is still working
+    for (const t of ['one', 'two', 'three', 'four']) await plain(t)
+    await plan($)
+    expect(spawned.map((e) => e.model)).toEqual(['fable', 'fable'])
+  })
 })
 
 // A worker pane's proof is the first prompt it is typed: the lead already rewrote fable=forced there when

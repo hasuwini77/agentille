@@ -1355,3 +1355,27 @@ describe('guard: an alias is looked up in the config the line points git at', ()
     expect(ran).toEqual(['GIT_CONFIG_GLOBAL=/etc/g.cfg git st'])
   })
 })
+
+describe('guard: a script step it cannot read refuses', () => {
+  const files = {
+    '/work/repo/package.json': JSON.stringify({ scripts: { ship: 'git pu${X:-sh} origin agt/x:main', gh: 'gh ${CMD} 4', build: 'tsc && "$NODE" tools/x.js', deep: 'echo $($($($($(x)))))' } }),
+    '/work/repo/s.sh': 'c=$(printf gi)t; $c push origin agt/x:main\n',
+    '/work/repo/run.sh': '#!/bin/sh\nexec "$@"\n',
+  }
+
+  test('an unresolved subcommand, program or nesting in a package script or a script file is refused', async ($, on) => {
+    const { ran } = setup(on, { files })
+    await boot($)
+    await typed($)
+    expect((await bash($, 'npm run ship')).deny).toContain('git runs a subcommand the guard cannot read')
+    expect((await bash($, 'npm run gh')).deny).toContain('gh runs a subcommand the guard cannot read')
+    expect((await bash($, 'npm run deep')).deny).toContain('nests deeper than the guard reads')
+    expect((await bash($, 'sh s.sh')).deny).toContain('a program the guard cannot read')
+    expect((await bash($, '$(printf gi)t push origin agt/x:main')).deny).toContain('a program the guard cannot read')
+    // A variable program with no integration word after it is not judged: `"$@"`, `"$NODE" x.js`, `"$EDITOR" f`.
+    expect((await bash($, 'npm run build')).result).toBe('ok')
+    expect((await bash($, 'sh run.sh npm test')).result).toBe('ok')
+    expect((await bash($, '"$EDITOR" notes.md')).result).toBe('ok')
+    expect(ran).toEqual(['npm run build', 'sh run.sh npm test', '"$EDITOR" notes.md'])
+  })
+})

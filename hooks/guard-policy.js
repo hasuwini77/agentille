@@ -238,6 +238,9 @@ async function textRisk($, text, dir, what, label, depth, seen, lang = 'sh') {
   }
   for (const s of steps) {
     if (s.kind === 'protected') return what + ' runs a ' + label + ' that writes ' + s.what
+    // A step the reader could not read at all (an unresolved program or subcommand, nesting past the caps): the
+    // script may push through it, so it refuses whatever the label.
+    if (s.kind === 'hidden' && s.unread) return what + ' runs a ' + label + ' where ' + s.what
     if (s.kind === 'alias') {
       // A git alias the script runs (`git pom`): its expansion is read as the script's own text, one hop on.
       if (depth + 1 > READ_DEPTH) {

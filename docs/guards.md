@@ -51,6 +51,7 @@ It fails closed and refuses. That covers:
 - a package script run pointed at another package folder (`--prefix`, `--filter`, `-w`, `-r`, `--workspaces`), since it cannot tell which `package.json` is read;
 - a `package.json` that does not parse, or a `run x` with no script `x`;
 - inside a package script's own text, a step it cannot place, find or read, or a chain more than five hops deep;
+- inside a package script or a script file, a git or gh subcommand built from a variable or a substitution (`git pu${X:-sh}`), or a program word built that way with a git or gh word after it (`c=$(printf gi)t; $c push`): it does not run `$( )` to learn the word, so it refuses the step;
 - a relative import of a `node` file that it cannot find (in a file a shell script runs, it is skipped);
 - a `python -m` module found nowhere, or a `PYTHONPATH` entry it cannot read before the module is found;
 - a git alias it cannot look up, one in a repo it cannot place, or one whose config the line names with a relative path or a variable;
@@ -66,7 +67,7 @@ The guard is a seatbelt against a cooperative model's honest mistakes, not a san
 
 What it reads has limits, and these are the known ones:
 
-- Inside a shell script file it follows each step it can place and read, and skips a step named through a variable, one after a `cd` it cannot follow, or one whose file is not there. A script file the Bash line names that is not there, or is not text, is not judged: the shell fails on it.
+- Inside a shell script file it follows each step it can place and read, and skips a script file named through a variable, one after a `cd` it cannot follow, or one whose file is not there. A program named through a variable is judged only by the words after it: `"$@"` or `"$NODE" x.js` runs unread, `$c push` is refused. A script file the Bash line names that is not there, or is not text, is not judged: the shell fails on it.
 - It checks a script's text for a push, merge, tag or GitHub call by pattern. A make recipe is checked the same way. It does not refuse an opener such as `npx` inside a script.
 - It does not read installed code: anything under `node_modules`, a bare package import, or a module in the standard library or site-packages.
 - It reads a node file's relative static imports one level deep. An import built at run time is not followed, and neither are a Python file's imports.

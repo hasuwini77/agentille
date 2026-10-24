@@ -882,6 +882,9 @@ function codeStep(w, here, stdin = null, piped = false, env = null) {
 }
 
 
+// The words after an unreadable program that say it may integrate: git's and gh's own.
+const INTEGRATION_WORD = /^(push|merge|tag|release|send-pack|http-push|update-ref|symbolic-ref|subtree|api|pr|alias|workflow)$/
+
 // A line → its integration candidates, each with the dir it runs in (cd, pushd, git -C, env -C followed).
 export function commandSteps(line, cwd = null, depth = 0, homes = []) {
   const out = []
@@ -892,8 +895,10 @@ export function commandSteps(line, cwd = null, depth = 0, homes = []) {
   let curBranch = null // the branch a checkout/switch on the line left behind: what a later merge/reset writes
   const aliases = new Map() // shell aliases defined earlier on the line (alias g=git): the program word is expanded
   for (const c of commands(line)) {
+    // `unread`: a part of the line the guard could not read at all, which a script reader refuses too (guard-policy.js
+    // textRisk), unlike an opener it merely does not follow.
     if (c.unreadable) {
-      out.push({ kind: 'hidden', what: c.unreadable, dir: here, slug: null })
+      out.push({ kind: 'hidden', what: c.unreadable, dir: here, slug: null, unread: true })
       continue
     }
     let w = c.words
@@ -903,6 +908,12 @@ export function commandSteps(line, cwd = null, depth = 0, homes = []) {
       continue
     }
     if (aliases.has(p)) { w = [...aliases.get(p).split(/\s+/).filter(Boolean), ...w.slice(1)]; p = base(w[0]) }
+    // A program word built by a substitution or a variable the line does not set (`$c push`, c=$(printf gi)t): which
+    // program runs cannot be read. With an integration word after it, it may be git or gh.
+    if (/[$`]/.test(w[0] ?? '') && w.slice(1).some((x) => INTEGRATION_WORD.test(x))) {
+      out.push({ kind: 'hidden', what: 'a program the guard cannot read (' + w[0] + ') runs ' + w.slice(1).find((x) => INTEGRATION_WORD.test(x)), dir: here, slug: null, unread: true })
+      continue
+    }
     if (p === 'cd' || p === 'pushd') {
       here = cdTo(here, w.slice(1))
       continue
@@ -936,7 +947,7 @@ export function commandSteps(line, cwd = null, depth = 0, homes = []) {
     if (p === 'gh' || p === 'hub') {
       // A subcommand word built by a substitution or an unresolved expansion cannot be read.
       const sub = w.slice(1).filter((x) => !x.startsWith('-')).slice(0, 2)
-      if (sub.some((x) => /[$`]/.test(x))) { out.push({ kind: 'hidden', what: p + ' runs a subcommand the guard cannot read', dir: at, slug: null }); continue }
+      if (sub.some((x) => /[$`]/.test(x))) { out.push({ kind: 'hidden', what: p + ' runs a subcommand the guard cannot read', dir: at, slug: null, unread: true }); continue }
       // hub is gh's elder: the same release and api steps, `pull-request` for a PR, and git's own commands.
       const k = p === 'hub' && w[1] === 'pull-request' ? { kind: 'pr', what: 'hub pull-request', dir: at, slug: null } : ghStep(w, at, c.env)
       if (k) out.push({ ...k, gh: true, slugUnknown: ghEdited })
@@ -953,7 +964,7 @@ export function commandSteps(line, cwd = null, depth = 0, homes = []) {
       const g = gitCall(w)
       if (!g) continue
       // A subcommand word built by a substitution or an unresolved expansion cannot be read.
-      if (/[$`]/.test(String(g.sub ?? ''))) { out.push({ kind: 'hidden', what: 'git runs a subcommand the guard cannot read', dir: at, slug: null }); continue }
+      if (/[$`]/.test(String(g.sub ?? ''))) { out.push({ kind: 'hidden', what: 'git runs a subcommand the guard cannot read (' + g.sub + ')', dir: at, slug: null, unread: true }); continue }
       // GIT_DIR / GIT_WORK_TREE set on the line name the repo as --git-dir does.
       const envDir = c.env?.get('GIT_WORK_TREE') || (c.env?.get('GIT_DIR') ?? '').replace(/\/\.git\/?$/, '') || c.env?.get('GIT_DIR') || null
       const named = g.dir ?? envDir

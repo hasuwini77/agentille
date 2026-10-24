@@ -351,6 +351,17 @@ try {
     fs.rmSync(T + '/evil', { recursive: true, force: true })
   }
   {
+    // A package script or script file step whose program or subcommand cannot be read refuses: it may be a push.
+    const w = world()
+    fs.writeFileSync(APP + '/package.json', JSON.stringify({ scripts: { ship: 'git pu${X:-sh} -q origin agt/x:main' } }))
+    fs.writeFileSync(APP + '/s.sh', 'c=$(printf gi)t; $c push -q origin agt/x:main\n')
+    const a = await run('npm run -s ship')
+    check('npm run ship (git pu${X:-sh}): denied as unreadable', a?.deny?.includes('cannot read'), JSON.stringify(a))
+    const b = await run('sh s.sh')
+    check('sh s.sh ($(printf gi)t push): denied as unreadable', b?.deny?.includes('cannot read'), JSON.stringify(b))
+    check('... origin/main unchanged', refOf('origin.git', 'main') === w.main)
+  }
+  {
     // Controls below auto: the run's own branch and ordinary writes still pass.
     world()
     const ok = await run('git push -q -u origin agt/x')

@@ -49,12 +49,15 @@ export function protectedPath(raw, abs, homes = []) {
     : /(^|\/)\.claude\/settings(\.local)?\.json$/i.test(s) ? 'Claude Code settings (' + /\.claude\/[^/]+$/i.exec(s)[0] + ')'
     : /(^|\/)\.git$/i.test(s) ? 'the worktree .git file'
     : /(^|\/)\.gitattributes$/i.test(s) ? '.gitattributes (it names the filters and diff drivers git runs)'
+    : /(^|\/)\.mcp\.json$/i.test(s) ? '.mcp.json (the MCP servers Claude Code starts)'
     : null
   return git(a) ?? git(r)
 }
 
-// Files under the home folder (relative to it) that a run may not write below auto.
-const HOME_CONFIG = /^(\.gitconfig|\.config\/git\/(config|attributes)|\.config\/gh\/(config|hosts)\.yml)$/i
+// Files under the home folder (relative to it) that a run may not write below auto: git's and gh's config, the shell
+// startup files (every new shell runs them), ssh's config and authorized keys, npm's user config (it can name the
+// shell scripts run in), and Claude Code's user config (it holds the person's MCP servers).
+const HOME_CONFIG = /^(\.gitconfig|\.config\/git\/(config|attributes)|\.config\/gh\/(config|hosts)\.yml|\.(zshrc|zshenv|zprofile|zlogin|bashrc|bash_profile|bash_login|profile)|\.ssh\/(config|authorized_keys2?)|\.npmrc|\.claude\.json)$/i
 
 // A submodule's git dir under the repo's: its config, hooks and refs (`.git/modules/a/modules/b/config` too).
 const MODULE_GIT = /(^|\/)\.git\/modules\/(?:[^/]+\/)+?(config$|hooks(\/|$)|refs(\/|$)|packed-refs$)/i
@@ -65,7 +68,7 @@ const MODULE_GIT = /(^|\/)\.git\/modules\/(?:[^/]+\/)+?(config$|hooks(\/|$)|refs
 // an external diff or textconv, the pager, the editors, a gpg program, a credential helper, a diff or merge tool),
 // an include (it pulls in any of these), a remote's push URL or refspec, push.default, URL rewriting, receive.* —
 // anything that runs code or changes where or how a push lands.
-const PROTECT_CFG = /^(alias\.|core\.(hookspath|fsmonitor|sshcommand|pager|editor|askpass|gitproxy|attributesfile)$|push\.default$|remote\..*\.(push|pushurl)$|url\..*\.(push)?insteadof$|receive\.|filter\.|diff\.external$|diff\..+\.(textconv|command)$|merge\..+\.driver$|pager\.|sequence\.editor$|gpg\.(.+\.)?program$|credential\.(.+\.)?helper$|include\.path$|includeif\..+\.path$|(diff|merge)tool\..+\.cmd$|uploadpack\.packobjectshook$|sendemail\.(.+\.)?(tocmd|cccmd|sendmailcmd)$)/i
+const PROTECT_CFG = /^(alias\.|core\.(hookspath|fsmonitor|sshcommand|pager|editor|askpass|gitproxy|attributesfile)$|push\.default$|remote\..*\.(push|pushurl)$|url\..*\.(push)?insteadof$|receive\.|push\.followtags$|filter\.|diff\.external$|diff\..+\.(textconv|command)$|merge\..+\.driver$|pager\.|sequence\.editor$|gpg\.(.+\.)?program$|credential\.(.+\.)?helper$|include\.path$|includeif\..+\.path$|(diff|merge)tool\..+\.cmd$|uploadpack\.packobjectshook$|sendemail\.(.+\.)?(tocmd|cccmd|sendmailcmd)$)/i
 
 // Keys that name a pager or an editor: setting one to a program that runs nothing else (`-c core.pager=cat`,
 // `-c core.editor=true`, as a run does to keep git from waiting) is allowed.
@@ -86,7 +89,7 @@ function safeCodeVar(k, v) {
 // A config key set to a value: refused below auto, unless it is a viewer set to a harmless program.
 const protectedCfg = (k, v) => PROTECT_CFG.test(k) && !(VIEWER_CFG.test(k) && v !== undefined && SAFE_PROGRAM.test(v))
 
-const CFG_WHAT = 'a git config key that runs code or moves a push (core.hooksPath, core.fsmonitor, core.sshCommand, a filter, diff or merge driver, the pager or editor, a credential helper, an include, push.default, remote push, URL rewriting or receive.*)'
+const CFG_WHAT = 'a git config key that runs code or moves a push (core.hooksPath, core.fsmonitor, core.sshCommand, a filter, diff or merge driver, the pager or editor, a credential helper, an include, push.default, push.followTags, remote push, URL rewriting or receive.*)'
 
 
 
@@ -223,8 +226,9 @@ function closeOf(s, j) {
 // here-string body becomes the command's stdin (so a PR body is text, never commands); redirections drop.
 function lex(s, at = 0, closer = null, depth = 0) {
   const cmds = []
-  let cmd = { words: [], stdin: null, redirects: [], piped: false }
+  let cmd = { words: [], bare: [], stdin: null, redirects: [], piped: false }
   let tok = null
+  let bare = false // the token holds an unquoted `$name`: the shell splits its value into words
   let target = null // what the next word is: 'drop' (an input redirection's file), 'redir' (an output file), 'stdin', 'heredoc' or 'heredoc-'
   const pending = [] // heredocs whose body starts after the next newline
   let parens = 0 // subshells opened inside a $( ): their ) is not the closer
@@ -233,14 +237,18 @@ function lex(s, at = 0, closer = null, depth = 0) {
     if (target === 'stdin') cmd.stdin = tok
     else if (target === 'heredoc' || target === 'heredoc-') pending.push({ cmd, delim: tok, strip: target === 'heredoc-' })
     else if (target === 'redir') cmd.redirects.push(tok)
-    else if (target !== 'drop') cmd.words.push(tok)
+    else if (target !== 'drop') {
+      cmd.words.push(tok)
+      cmd.bare.push(bare)
+    }
     target = null
     tok = null
+    bare = false
   }
   const cut = () => {
     word()
     if (cmd.words.length || cmd.stdin !== null) cmds.push(cmd)
-    cmd = { words: [], stdin: null, redirects: [], piped: false }
+    cmd = { words: [], bare: [], stdin: null, redirects: [], piped: false }
   }
   const nested = (j, close) => {
     // Past LEX_DEPTH the inner text is not read: it becomes an unreadable command (the policy refuses it below
@@ -346,7 +354,10 @@ function lex(s, at = 0, closer = null, depth = 0) {
       if (c === '|' && (s[i + 1] === '|' || s[i + 1] === '&')) i++
       cut()
       if (pipe) cmd.piped = true
-    } else tok = (tok ?? '') + c
+    } else {
+      if (c === '$') bare = true
+      tok = (tok ?? '') + c
+    }
   }
   cut()
   return { cmds, end: i }
@@ -356,6 +367,14 @@ function lex(s, at = 0, closer = null, depth = 0) {
 export const ASSIGN = /^([A-Za-z_][A-Za-z0-9_]*)=(.*)$/s
 
 const expand = (w, vars) => w.replace(/\$\{([A-Za-z_][A-Za-z0-9_]*)\}|\$([A-Za-z_][A-Za-z0-9_]*)/g, (m, a, b) => vars.get(a ?? b) ?? m)
+
+// A word as the shell hands it on: an unquoted `$name` the line set is expanded and its value split into words
+// (`c='git push origin x'; $c` runs git), a quoted one stays one word, and an assignment's value is never split.
+function fields(w, vars, bare) {
+  const x = expand(w, vars)
+  if (!bare || x === w || ASSIGN.test(w) || /[$`]/.test(x)) return [x]
+  return x.split(/[ \t\n]+/).filter(Boolean)
+}
 
 
 // Wrappers in front of the real program, and their options that take a value. `timeout` also takes a duration.
@@ -479,7 +498,7 @@ export function commands(line, depth = 0, vars = new Map()) {
       out.push(unreadCmd(c.unreadable))
       continue
     }
-    const words = c.words.map((w) => expand(w, vars))
+    const words = c.words.flatMap((w, k) => fields(w, vars, !!c.bare?.[k]))
     const lead = words[0] === 'export' || words[0] === 'local' || words[0] === 'declare' || words[0] === 'readonly' ? 1 : 0
     if (words.length > lead && words.slice(lead).every((w) => ASSIGN.test(w) || (lead && /^-/.test(w)))) {
       for (const w of words.slice(lead)) {
@@ -588,7 +607,7 @@ function tagListing(args) {
 
 // `git push …` args → what it would push.
 function parsePush(args) {
-  const p = { remote: null, specs: [], force: false, del: false, bulk: null, dry: false, mergeOpt: false }
+  const p = { remote: null, specs: [], force: false, lease: false, leaseRefs: [], del: false, bulk: null, dry: false, mergeOpt: false }
   let rest = false
   let positional = 0
   const opt = (v) => { if (/merge_when_pipeline_succeeds|auto_merge/i.test(v ?? '')) p.mergeOpt = true }
@@ -602,10 +621,15 @@ function parsePush(args) {
       if (k === '--repo') p.remote = v ?? args[++i] ?? null
       else if (k === '--push-option') opt(v ?? args[++i])
       else if (k === '--receive-pack' || k === '--exec') { if (v === undefined) i++ }
+      // --force-with-lease (and --force-if-includes, which only sharpens it) checks the remote first: the run may
+      // use it on its own agt/* branch. Plain --force may not.
+      else if (k === '--force-with-lease') { p.lease = true; if (v) p.leaseRefs.push(v.split(':')[0]) }
+      else if (k === '--force-if-includes') p.lease = true
       else if (k.startsWith('--force')) p.force = true
       else if (k === '--delete') p.del = true
       else if (['--all', '--branches', '--mirror', '--tags', '--follow-tags', '--prune'].includes(k)) p.bulk = k
       else if (k === '--dry-run') p.dry = true
+      else if (k === '--no-follow-tags') p.noFollow = true
     } else if (!rest && /^-[^-]/.test(a)) {
       for (let j = 1; j < a.length; j++) {
         if (a[j] === 'f') p.force = true
@@ -666,6 +690,17 @@ function localWrite(g, curBranch) {
     if (g.args.some((x) => x === '--move' || /^-[a-zA-Z]*[mM]/.test(x))) return pos.length ? (settled(pos[pos.length - 1]) ? pos[pos.length - 1] : null) : undefined
   }
   return undefined
+}
+
+
+// The branches a `git merge` merges in: its positionals, an option's value left out.
+function mergeSources(args) {
+  const out = []
+  for (let i = 0; i < args.length; i++) {
+    if (['-m', '-F', '-s', '-X', '--file', '--strategy', '--strategy-option', '--into-name'].includes(args[i])) i++
+    else if (!args[i].startsWith('-')) out.push(args[i])
+  }
+  return out
 }
 
 
@@ -755,7 +790,7 @@ function riskyCode(code) {
 }
 
 // Interpreter code that names the trust root or the repo's own git state: it may write them directly.
-const PROTECT_IN_CODE = /\.agentille(?![\w-])|\.gitattributes|\.claude\/settings|\.gitconfig|\.config\/(git|gh)\/|\.git\/HEAD|config\.worktree|\.git\/worktrees\/|\.git\/config|\.git\/hooks|\.git\/refs|\.git\/info|packed-refs|\.git\/modules\/\S*(config|hooks|refs)/i
+const PROTECT_IN_CODE = /\.agentille(?![\w-])|\.gitattributes|\.claude\/settings|\.claude\.json|\.mcp\.json|\.(zshrc|zshenv|zprofile|bashrc|bash_profile)\b|[~/]\.profile\b|\.ssh\/(config|authorized_keys)|\.npmrc|\.gitconfig|\.config\/(git|gh)\/|\.git\/HEAD|config\.worktree|\.git\/worktrees\/|\.git\/config|\.git\/hooks|\.git\/refs|\.git\/info|packed-refs|\.git\/modules\/\S*(config|hooks|refs)/i
 
 // A script that pushes, merges, tags or releases: per line, git with push/merge/tag/send-pack/update-ref, gh or
 // hub with a merge, release, api or alias, curl or wget at GitHub.
@@ -793,6 +828,35 @@ const PM_BUILTINS = new Set(('add remove rm uninstall un install i ci isntall in
 const PM_FOLDER_VALUE = new Set(['--prefix', '-C', '--dir', '--cwd', '--filter', '-F', '--workspace', '-w', '--location'])
 const isScriptWord = (w) => w === 'run' || w === 'run-script' || Object.hasOwn(NPM_SCRIPT_ALIASES, w)
 
+// The package's own lifecycle scripts a manager command runs, in the order npm runs them. A dependency's scripts
+// are installed code (not read); `--ignore-scripts` runs none.
+const INSTALL_LIFE = ['preinstall', 'install', 'postinstall', 'prepublish', 'preprepare', 'prepare', 'postprepare']
+const LIFECYCLE = {
+  install: INSTALL_LIFE,
+  rebuild: ['preinstall', 'install', 'postinstall', 'prepare'],
+  pack: ['prepack', 'prepare', 'postpack'],
+  publish: ['prepublishOnly', 'prepack', 'prepare', 'postpack', 'prepublish', 'publish', 'postpublish'],
+  version: ['preversion', 'version', 'postversion'],
+  'install-test': [...INSTALL_LIFE, 'pretest', 'test', 'posttest'],
+}
+const LIFE_WORDS = {
+  install: 'install', i: 'install', in: 'install', isntall: 'install', add: 'install', ci: 'install', 'clean-install': 'install', ic: 'install', 'install-clean': 'install', 'isntall-clean': 'install',
+  rebuild: 'rebuild', rb: 'rebuild', pack: 'pack', publish: 'publish', version: 'version',
+  it: 'install-test', 'install-test': 'install-test', cit: 'install-test', 'install-ci-test': 'install-test', 'clean-install-test': 'install-test', sit: 'install-test',
+}
+
+// A manager command that runs the package's lifecycle scripts → { lifecycle, what, tags }, or null. `npm version`
+// with no new version prints versions and runs nothing; with one it also makes a git tag unless told not to.
+function lifecycleOf(p, pos, own) {
+  // A global install runs no script of the package here.
+  if (own.some((a) => a === '--ignore-scripts' || a === '--ignore-scripts=true' || a === '-g' || a === '--global' || a === '--location=global')) return null
+  const sub = pos[0] === undefined && p === 'yarn' ? 'install' : pos[0] === 'pm' && p === 'bun' && pos[1] === 'pack' ? 'pack' : pos[0]
+  const life = Object.hasOwn(LIFE_WORDS, sub ?? '') ? LIFE_WORDS[sub] : null
+  if (!life || (life === 'version' && (p === 'npm' || p === 'pnpm') && !pos[1])) return null
+  const tags = life === 'version' && p === 'npm' && !own.some((a) => a === '--no-git-tag-version' || a === '--git-tag-version=false')
+  return { lifecycle: LIFECYCLE[life], what: p + ' ' + (pos[0] ?? 'install') + (life === 'version' && pos[1] ? ' ' + pos[1] : ''), tags }
+}
+
 function pkgScript(p, args) {
   // Words after `--` are the script's own arguments (`npm test -- -g adds`), never the manager's flags.
   const dd = args.indexOf('--')
@@ -806,8 +870,10 @@ function pkgScript(p, args) {
   }
   const sub = pos[0]
   if (sub === 'exec' || sub === 'dlx' || sub === 'x') return { deny: true, what: p + ' ' + sub + ' runs a package the guard cannot read' }
-  let r = null
-  if ((sub === 'run' || sub === 'run-script') && pos[1]) {
+  let r = lifecycleOf(p, pos, own)
+  if (r) {
+    // read below, like a run of each script
+  } else if ((sub === 'run' || sub === 'run-script') && pos[1]) {
     if (p === 'bun' && (pos[1].includes('/') || /\.[cm]?[jt]sx?$/.test(pos[1]))) return { file: pos[1], what: 'bun run ' + pos[1] }
     r = { script: pos[1], what: p + ' run ' + pos[1] }
   } else if (sub !== undefined && p !== 'bun' && Object.hasOwn(NPM_SCRIPT_ALIASES, sub)) r = { script: NPM_SCRIPT_ALIASES[sub], what: p + ' ' + sub, optional: true }
@@ -815,6 +881,54 @@ function pkgScript(p, args) {
   else if (sub !== undefined && p !== 'npm' && !PM_BUILTINS.has(sub)) r = { script: sub, what: p + ' ' + sub, optional: true }
   if (r && own.some((a) => ELSEWHERE.has(a.split('=')[0]))) return { deny: true, what: p + ' ' + own.join(' ') + ' runs a script in another package folder, which the guard cannot place' }
   return r
+}
+
+
+// Tools that publish a release or a package, tag and push on their own: as `npm publish` is, auto only. Bare names a
+// package script runs from node_modules/.bin, or a line runs from PATH.
+const RELEASE_TOOLS = new Set(['release-it', 'semantic-release', 'np', 'standard-version', 'commit-and-tag-version', 'release-please', 'bumpp', 'auto', 'gh-release', 'publish-please', 'lerna-changelog'])
+
+// The positionals of a tool's argv, the values of the flags in `takes` left out.
+const positionals = (args, takes = new Set()) => {
+  const out = []
+  for (let i = 0; i < args.length; i++) {
+    if (takes.has(args[i])) i++
+    else if (!args[i].startsWith('-')) out.push(args[i])
+  }
+  return out
+}
+
+// A command that publishes a package or a release, pushes an image or deploys to production: { kind: 'publish' },
+// or null. Below auto these are the person's, whatever the repo's integration says about pushes.
+export function publishStep(w, dir) {
+  const p = base(w[0])
+  const args = w.slice(1)
+  const has = (...f) => args.some((x) => f.includes(x) || f.some((g) => g.startsWith('--') && x.startsWith(g + '=')))
+  const pub = (what) => ({ kind: 'publish', what, dir, slug: null })
+  if (Object.hasOwn(PKG_FILE, p)) {
+    const pos = positionals(args.slice(0, args.indexOf('--') < 0 ? args.length : args.indexOf('--')), VALUE_FLAGS)
+    if (pos[0] === 'publish' || (p === 'yarn' && pos[0] === 'npm' && pos[1] === 'publish')) return pub(p + ' publish')
+    if (p === 'npm' && ['unpublish', 'deprecate', 'undeprecate'].includes(pos[0])) return pub('npm ' + pos[0])
+    if (p === 'npm' && /^dist-tags?$/.test(pos[0] ?? '') && ['add', 'rm', 'set'].includes(pos[1])) return pub('npm dist-tag ' + pos[1])
+    if (p === 'npm' && pos[0] === 'owner' && ['add', 'rm'].includes(pos[1])) return pub('npm owner ' + pos[1])
+    return null
+  }
+  const pos = positionals(args)
+  if (RELEASE_TOOLS.has(p)) return pub(p + ' (a release tool: it tags, pushes or publishes)')
+  if (p === 'changeset' && ['publish', 'tag'].includes(pos[0])) return pub('changeset ' + pos[0])
+  if (p === 'lerna' && ['publish', 'version'].includes(pos[0])) return pub('lerna ' + pos[0])
+  if (p === 'cargo' && ['publish', 'yank', 'owner'].includes(pos[0])) return pub('cargo ' + pos[0])
+  if (p === 'twine' && pos[0] === 'upload') return pub('twine upload')
+  if (/^(python[0-9.]*|pypy3?)$/.test(p) && pythonModule(args) === 'twine' && args.slice(args.indexOf('twine') + 1).includes('upload')) return pub(p + ' -m twine upload')
+  if ((p === 'gem' && ['push', 'yank', 'owner'].includes(pos[0])) || (p === 'poetry' && pos[0] === 'publish') || (p === 'flit' && pos[0] === 'publish') || (p === 'uv' && pos[0] === 'publish') || (p === 'hatch' && pos[0] === 'publish')) return pub(p + ' ' + pos[0])
+  if (/^(docker|podman)$/.test(p) && (pos[0] === 'push' || (['image', 'manifest'].includes(pos[0]) && pos[1] === 'push') || (pos[0] === 'buildx' && has('--push')) || (pos[0] === 'compose' && pos[1] === 'push'))) return pub(p + ' push')
+  if (p === 'vercel' && (has('--prod', '--production') || ['promote', 'rollback'].includes(pos[0]))) return pub('vercel ' + (pos[0] && pos[0] !== 'deploy' ? pos[0] : '--prod'))
+  if (p === 'railway' && ['up', 'deploy', 'redeploy'].includes(pos[0])) return pub('railway ' + pos[0])
+  if ((p === 'fly' || p === 'flyctl') && ['deploy', 'launch'].includes(pos[0])) return pub(p + ' ' + pos[0])
+  if (p === 'netlify' && pos[0] === 'deploy' && has('--prod', '-p', '--prodIfUnlocked')) return pub('netlify deploy --prod')
+  if (p === 'wrangler' && ['deploy', 'publish'].includes(pos[0])) return pub('wrangler ' + pos[0])
+  if (p === 'firebase' && pos[0] === 'deploy') return pub('firebase deploy')
+  return null
 }
 
 
@@ -857,6 +971,17 @@ function codeStep(w, here, stdin = null, piped = false, env = null) {
       const prog = w.slice(1).find((x) => !x.startsWith('-'))
       return prog ? judgeCode(prog, 'program') : null
     }
+    // node --test runs the files it is given (files, folders, globs) or, with none, the files node's own patterns
+    // find under the folder: guardLine lists and reads each one.
+    if ((ik === 'node' || ik === 'nodejs') && w.slice(1).some((x) => x === '--test' || x.startsWith('--test='))) {
+      const takes = new Set(['--test-reporter', '--test-reporter-destination', '--test-name-pattern', '--test-skip-pattern', '--test-concurrency', '--test-shard', '--test-timeout', '--import', '--require', '-r', '--loader', '--experimental-loader', '--env-file', '--conditions', '-C'])
+      const targets = []
+      for (let i = 1; i < w.length; i++) {
+        if (takes.has(w[i])) i++
+        else if (!w[i].startsWith('-')) targets.push(w[i])
+      }
+      return { kind: 'file', how: 'tests', what: p + ' --test' + (targets.length ? ' ' + targets.join(' ') : ''), targets, dir: here, slug: null }
+    }
     // No code flag: the first positional is a script file (a pipe into it is data), else it reads code from stdin.
     const pos = w.slice(1).filter((x) => !x.startsWith('-') || x === '-')
     const f = pos.find((x) => x !== '-')
@@ -879,6 +1004,7 @@ function codeStep(w, here, stdin = null, piped = false, env = null) {
     if (!r) return null // not a script-running form (install, a builtin): left alone
     if (r.deny) return hidden(r.what)
     if (r.file) return file(r.file, r.what, 'node')
+    if (r.lifecycle) return { kind: 'file', how: 'pkg', what: r.what, lifecycle: r.lifecycle, tags: r.tags, optional: true, path: here ? joinPath(here, PKG_FILE[p]) : null, dir: here, slug: null }
     return { kind: 'file', how: 'pkg', what: r.what, script: r.script, optional: !!r.optional, path: here ? joinPath(here, PKG_FILE[p]) : null, dir: here, slug: null }
   }
   if (Object.hasOwn(RUNNER_FILE, p)) {
@@ -919,8 +1045,21 @@ const shQuote = (w) => "'" + String(w).replace(/'/g, "'\\''") + "'"
 // The words after an unreadable program that say it may integrate: git's and gh's own.
 const INTEGRATION_WORD = /^(push|merge|tag|release|send-pack|http-push|update-ref|symbolic-ref|subtree|api|pr|alias|workflow)$/
 
+// A program word the line itself names through a variable or a substitution, once $HOME (the session's home) is
+// read: null when it is no such word, else the word as far as it can be read.
+function unreadProgram(w0, homes) {
+  const w = String(w0 ?? '')
+  if (!/[$`]/.test(w)) return null
+  const h = String(homes[0] ?? '').replace(/\/+$/, '')
+  const read = h ? w.replace(/^\$\{?HOME\}?(?=\/|$)/, h) : w
+  return /[$`]/.test(read) ? read : null
+}
+
 // A line → its integration candidates, each with the dir it runs in (cd, pushd, git -C, env -C followed).
-export function commandSteps(line, cwd = null, depth = 0, homes = []) {
+// `strict`: an unresolved program word refuses whatever follows it. The Bash line (depth 0) is read strictly; a
+// script's text (depth 1 and on) refuses one only with a git or gh word after it, as `exec "$@"` and `"$NODE" x.js`
+// are how scripts name their neighbours.
+export function commandSteps(line, cwd = null, depth = 0, homes = [], { strict = depth === 0 } = {}) {
   const out = []
   let here = cwd
   let moved = false // a step before this one switched branches, in any dir
@@ -943,10 +1082,24 @@ export function commandSteps(line, cwd = null, depth = 0, homes = []) {
     }
     if (aliases.has(p)) { w = [...aliases.get(p).split(/\s+/).filter(Boolean), ...w.slice(1)]; p = base(w[0]) }
     // A program word built by a substitution or a variable the line does not set (`$c push`, c=$(printf gi)t): which
-    // program runs cannot be read. With an integration word after it, it may be git or gh.
-    if (/[$`]/.test(w[0] ?? '') && w.slice(1).some((x) => INTEGRATION_WORD.test(x))) {
-      out.push({ kind: 'hidden', what: 'a program the guard cannot read (' + w[0] + ') runs ' + w.slice(1).find((x) => INTEGRATION_WORD.test(x)), dir: here, slug: null, unread: true })
-      continue
+    // program runs cannot be read. On the Bash line it refuses (`"$EDITOR" f` too); in a script's text, only with an
+    // integration word after it, where it may be git or gh. A variable the line sets was expanded already.
+    // `$(npm bin)/x` is the package's own local bin folder: read as node_modules/.bin/x.
+    if (/^\$\((npm|pnpm|yarn) bin\)\//.test(w[0] ?? '')) {
+      w = [String(w[0]).replace(/^\$\((npm|pnpm|yarn) bin\)\//, 'node_modules/.bin/'), ...w.slice(1)]
+      p = base(w[0])
+    }
+    if (/[$`]/.test(w[0] ?? '')) {
+      const hidden = unreadProgram(w[0], homes)
+      const after = w.slice(1).find((x) => INTEGRATION_WORD.test(x))
+      if (hidden !== null && (strict || after)) {
+        out.push({ kind: 'hidden', what: 'a program the guard cannot read (' + w[0] + ')' + (after ? ' runs ' + after : ''), dir: here, slug: null, unread: true })
+        continue
+      }
+      if (hidden === null) {
+        w = [String(w[0]).replace(/^\$\{?HOME\}?(?=\/|$)/, String(homes[0] ?? '').replace(/\/+$/, '')), ...w.slice(1)]
+        p = base(w[0])
+      }
     }
     if (p === 'cd' || p === 'pushd') {
       here = cdTo(here, w.slice(1))
@@ -994,8 +1147,12 @@ export function commandSteps(line, cwd = null, depth = 0, homes = []) {
       const k = httpStep(w, at)
       if (k) out.push(k)
     } else if (p !== 'gh' && p !== 'git' && p !== 'hub') {
+      const pub = publishStep(w, at)
+      if (pub) out.push(pub)
       const k = codeStep(w, at, c.stdin, c.piped, c.env)
       if (k) out.push(k)
+      // `npm version <x>` commits and tags: a tag, as `git tag` is.
+      if (k?.tags) out.push({ kind: 'step', what: k.what + ' (it makes a git tag)', dir: at, slug: null })
       // The words passed to a script are read as a command too: a wrapper that runs `exec "$@"` runs them.
       if (k?.rest?.length) {
         if (depth >= LINE_DEPTH) out.push({ kind: 'hidden', what: LINE_TOO_DEEP, dir: at, slug: null, unread: true })
@@ -1005,7 +1162,7 @@ export function commandSteps(line, cwd = null, depth = 0, homes = []) {
       const g = gitCall(w)
       if (!g) continue
       // A subcommand word built by a substitution or an unresolved expansion cannot be read.
-      if (/[$`]/.test(String(g.sub ?? ''))) { out.push({ kind: 'hidden', what: 'git runs a subcommand the guard cannot read (' + g.sub + ')', dir: at, slug: null, unread: true }); continue }
+      if (/[$`\s]/.test(String(g.sub ?? ''))) { out.push({ kind: 'hidden', what: 'git runs a subcommand the guard cannot read (' + g.sub + ')', dir: at, slug: null, unread: true }); continue }
       // GIT_DIR / GIT_WORK_TREE set on the line name the repo as --git-dir does.
       const envDir = c.env?.get('GIT_WORK_TREE') || (c.env?.get('GIT_DIR') ?? '').replace(/\/\.git\/?$/, '') || c.env?.get('GIT_DIR') || null
       const named = g.dir ?? envDir
@@ -1038,7 +1195,7 @@ export function commandSteps(line, cwd = null, depth = 0, homes = []) {
         if (k >= 0 && g.args.slice(0, k).every((x) => x.startsWith('-'))) {
           const rest = g.args.slice(k + 1)
           while (rest.length && /^(--recursive|-q|--quiet)$/.test(rest[0])) rest.shift()
-          if (rest.length && depth < LINE_DEPTH) for (const x of commandSteps(rest.join(' '), null, depth + 1, homes)) out.push({ ...x, what: x.what + ' (in git submodule foreach)' })
+          if (rest.length && depth < LINE_DEPTH) for (const x of commandSteps(rest.join(' '), null, depth + 1, homes, { strict })) out.push({ ...x, what: x.what + ' (in git submodule foreach)' })
           else if (rest.length) out.push({ kind: 'hidden', what: 'git submodule foreach nests deeper than the guard reads', dir, slug: null })
         }
       }
@@ -1049,10 +1206,20 @@ export function commandSteps(line, cwd = null, depth = 0, homes = []) {
       if (['send-pack', 'http-push'].includes(g.sub) || (g.sub === 'subtree' && g.args[0] === 'push')) out.push({ kind: 'step', what: 'git ' + g.sub, dir, slug: null })
       const ref = refWrite(g)
       if (ref) out.push({ kind: 'ref', what: 'git ' + g.sub + ' ' + ref, dir, slug: null, ref })
-      if (g.sub === 'push') out.push({ kind: 'push', what: 'git push', dir, slug: null, push: { ...parsePush(g.args), headMoved: moved, remoteEdited: edited || retarget } })
+      if (g.sub === 'push') {
+        // The variables that decide which config git reads (push.followTags among it), as for an alias.
+        const genv = {}
+        for (const [k, v] of c.env ?? []) if (ALIAS_ENV.test(k)) genv[k] = v
+        out.push({ kind: 'push', what: 'git push', dir, slug: null, genv, push: { ...parsePush(g.args), headMoved: moved, remoteEdited: edited || retarget } })
+      }
       // A merge, reset --hard, rebase or branch -f/-M onto the base branch, judged where it runs.
       const lw = localWrite(g, curBranch)
-      if (lw !== undefined) out.push({ kind: 'local', what: 'git ' + g.sub, dir, slug: null, branch: lw })
+      if (lw !== undefined) out.push({ kind: 'local', what: 'git ' + g.sub, dir, slug: null, branch: lw, ...(g.sub === 'merge' ? { merge: true, from: mergeSources(g.args) } : {}) })
+      // `git pull <remote> <branch>` merges that branch into the one checked out: a merge, unless it is its own.
+      if (g.sub === 'pull') {
+        const pos = g.args.filter((x) => !x.startsWith('-'))
+        if (pos.length > 1) out.push({ kind: 'local', what: 'git pull', dir, slug: null, branch: curBranch, merge: true, from: pos.slice(1).map((r) => (pos[0] === 'origin' ? 'origin/' : pos[0] + '/') + r.replace(/^refs\/heads\//, '').replace(/:.*$/, '')) })
+      }
       if (movesHead(g)) moved = true
       const co = checkoutTarget(g)
       if (co !== undefined) curBranch = co

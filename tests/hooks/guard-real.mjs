@@ -9,9 +9,11 @@ import os from 'node:os'
 const root = process.argv[2]
 const { Profile, Spawn, Session } = await import(root + '/hooks/state.js')
 const { seed } = await import(root + '/hooks/store.js')
-const { bashCall, loadRunProfile, DENY_INTEGRATION } = await import(root + '/hooks/guard.js')
+const { bashCall, loadRunProfile, DENY_INTEGRATION, DENY_LOCAL, DENY_PUBLISH } = await import(root + '/hooks/guard.js')
 const { agtTurnStart } = await import(root + '/hooks/proofs.js')
 const { sameConfig } = await import(root + '/hooks/trust.js')
+const { cleanGit } = await import(root + '/hooks/reaper.js')
+const { Worktrees } = await import(root + '/hooks/guard-own.js')
 
 const T = fs.realpathSync(fs.mkdtempSync(os.tmpdir() + '/agt-guard-real-'))
 const HOME = T + '/home'
@@ -24,6 +26,7 @@ const sh = (cmd, cwd = T) => {
   return r.stdout.trim()
 }
 const APP = T + '/app'
+let CWD = APP // the session's folder: a worker pane's case moves it into its slice worktree
 const refOf = (bare, ref) => spawnSync('git', ['--git-dir=' + T + '/' + bare, 'rev-parse', '-q', '--verify', ref], { env, encoding: 'utf8' }).stdout.trim() || null
 
 // A fresh scratch world per case: origin.git (main), prod.git (empty, someone else's), app on agt/x one commit ahead.
@@ -53,13 +56,13 @@ const $ = {
       return { kind: s.isDirectory() ? 'dir' : s.isFile() ? 'file' : 'other', size: s.size, mtimeMs: s.mtimeMs, isLink: l.isSymbolicLink(), ...(realPath ? { realPath } : {}) }
     },
   },
-  session: { cwd: async () => APP },
+  session: { cwd: async () => CWD },
   env: { get: async () => null },
   clock: { now: async () => Date.now() },
   ui: { toast: () => {}, invalidate: () => {} },
   store: { get: async () => null, set: async () => {} },
 }
-const next = async (e) => { const r = spawnSync('bash', ['-c', e.command], { cwd: APP, env, encoding: 'utf8' }); return { result: (r.stdout + r.stderr).trim(), exit: r.status } }
+const next = async (e) => { const r = spawnSync('bash', ['-c', e.command], { cwd: CWD, env, encoding: 'utf8' }); return { result: (r.stdout + r.stderr).trim(), exit: r.status } }
 
 seed(Profile, { home: HOME })
 seed(Spawn, { transport: 'none' })
@@ -474,6 +477,16 @@ try {
     fs.writeFileSync(wt + '/scripts/lib.mjs', 'export const run = () => 0\n')
     fs.writeFileSync(wt + '/server/tools.js', 'module.exports = { evil: true }\n')
     check('trust: an MCP server whose required tools.js differs is not the same config', (await sameConfig($, wt, lead)) === false)
+    // A server that names its module at run time cannot be compared: refused even when both sides are identical.
+    for (const d of [lead, wt]) {
+      fs.writeFileSync(d + '/server/index.js', "const name = 'tools'\nrequire('./' + name)\n")
+      fs.writeFileSync(d + '/server/tools.js', 'module.exports = {}\n')
+    }
+    const why = {}
+    check('trust: a dynamic require is refused, unchanged sides included', (await sameConfig($, wt, lead, why)) === false && /named at run time/.test(String(why.unresolved)), JSON.stringify(why))
+    for (const d of [lead, wt]) fs.writeFileSync(d + '/.claude/settings.json', JSON.stringify({ env: { NODE_OPTIONS: '--require ./x.js' } }))
+    for (const d of [lead, wt]) fs.writeFileSync(d + '/server/index.js', "require('./tools')\n")
+    check('trust: settings env NODE_OPTIONS is refused', (await sameConfig($, wt, lead)) === false)
     for (const d of [lead, wt]) fs.rmSync(d, { recursive: true, force: true })
   }
   {
@@ -485,6 +498,244 @@ try {
     const b = await run('sh run.sh git status --short')
     check('control: sh run.sh git status runs', !b?.deny && b.exit === 0, JSON.stringify(b))
     check('... origin/main unchanged', refOf('origin.git', 'main') === w.main)
+  }
+  {
+    // A program word built from a variable: one the line sets is expanded and split as the shell does, then judged;
+    // one it cannot read is refused below auto.
+    const w = world()
+    const a = await run("c='git push -q origin agt/x:main'; $c")
+    check("c='git push origin agt/x:main'; $c: denied", a?.deny?.includes('git push to main'), JSON.stringify(a))
+    const b = await run("a='push -q origin agt/x:main'; git $a")
+    check("a='push …'; git $a: denied", b?.deny?.includes('git push to main'), JSON.stringify(b))
+    const c = await run('$(printf git) push -q origin agt/x:main')
+    check('$(printf git) push: denied as unreadable', c?.deny?.includes('a program the guard cannot read'), JSON.stringify(c))
+    const ok = await run("c='git status --short'; $c")
+    check("control: c='git status'; $c runs", !ok?.deny && ok.exit === 0, JSON.stringify(ok))
+    check('... origin/main unchanged', refOf('origin.git', 'main') === w.main)
+  }
+  {
+    // The branch checked out at the typed /agt (feat/big, which the remote has) is pushed as itself; merging a slice
+    // into it, then pushing, is the integrate step auto owns.
+    world()
+    sh('git checkout -q -b feat/big main && echo f > f && git add f && git commit -qm f && git push -q origin feat/big && git checkout -q -b agt/slice && echo s > s && git add s && git commit -qm s && git checkout -q feat/big', APP)
+    await loadRunProfile($)
+    const big = refOf('origin.git', 'feat/big')
+    const m = await run('git merge -q --no-edit agt/slice && git push -q origin feat/big')
+    check('merge agt/slice into the checked-out feat/big, then push: denied', m?.deny?.includes('a merge into feat/big'), JSON.stringify(m))
+    check('... origin feat/big unchanged', refOf('origin.git', 'feat/big') === big)
+    sh('echo g > g && git add g && git commit -qm g', APP)
+    const own = await run('git push -q origin feat/big')
+    check('control: a commit on feat/big itself is pushed', !own?.deny && refOf('origin.git', 'feat/big') === sh('git rev-parse feat/big', APP), JSON.stringify(own))
+    fs.writeFileSync(HOME + '/.agentille/profile.json', JSON.stringify({ integration: 'local' }))
+    await loadRunProfile($)
+    const loc = await run('git merge -q --no-edit agt/slice')
+    check('control: under local the merge into the checkout runs', !loc?.deny && loc.exit === 0, JSON.stringify(loc))
+    const lp = await run('git push -q origin feat/big')
+    check('... and its push is refused', lp?.deny === DENY_LOCAL, JSON.stringify(lp))
+    fs.writeFileSync(HOME + '/.agentille/profile.json', JSON.stringify({ integration: 'pr' }))
+  }
+  {
+    // The remote's default is develop and origin/HEAD is not recorded: every branch the remote has that the run did
+    // not make is base-like, the checkout included.
+    world()
+    sh('git checkout -q -b develop main && echo d > d && git add d && git commit -qm d && git push -q origin develop && git remote set-head origin -d', APP)
+    sh('git symbolic-ref HEAD refs/heads/develop', T + '/origin.git')
+    await loadRunProfile($)
+    sh('echo e > e && git add e && git commit -qm e', APP)
+    const dev = refOf('origin.git', 'develop')
+    const p = await run('git push -q origin develop')
+    check('no origin/HEAD, push the checked-out develop: denied as the base', p?.deny?.includes('git push to develop'), JSON.stringify(p))
+    check('... origin develop unchanged', refOf('origin.git', 'develop') === dev)
+    const x = await run('git push -q origin agt/x')
+    check('control: the agt/x slice branch still goes', !x?.deny && refOf('origin.git', 'agt/x') === sh('git rev-parse agt/x', APP), JSON.stringify(x))
+  }
+  {
+    // A branch the run creates on the remote stays its own: pushed again, and merged into.
+    world()
+    await loadRunProfile($)
+    sh('git checkout -q -b feat/slug main', APP)
+    const a = await run('git push -q -u origin feat/slug')
+    check('git push -u origin feat/slug (new): allowed and landed', !a?.deny && refOf('origin.git', 'feat/slug') !== null, JSON.stringify(a))
+    const b = await run('git merge -q --no-edit agt/x && git push -q origin feat/slug')
+    check('merge agt/x into it, push again: allowed and landed', !b?.deny && refOf('origin.git', 'feat/slug') === sh('git rev-parse feat/slug', APP), JSON.stringify(b))
+    sh('git checkout -q agt/x', APP)
+    await loadRunProfile($)
+  }
+  if (spawnSync('npm', ['--version'], { env }).status === 0) {
+    // npm version runs the package's version scripts: a postversion that pushes refuses it, and the tag never lands.
+    const w = world()
+    fs.writeFileSync(APP + '/package.json', JSON.stringify({ name: 'p', version: '1.0.0', scripts: { postversion: 'git push -q origin HEAD:main && git push -q origin --tags' } }))
+    sh('git add package.json && git commit -qm pkg', APP)
+    const r = await run('npm version minor')
+    check('npm version minor with a postversion push: denied', r?.deny?.includes('postversion script'), JSON.stringify(r))
+    check('... origin/main unchanged, no tag on origin, package still 1.0.0', refOf('origin.git', 'main') === w.main && refOf('origin.git', 'refs/tags/v1.1.0') === null && JSON.parse(fs.readFileSync(APP + '/package.json', 'utf8')).version === '1.0.0')
+    fs.writeFileSync(APP + '/package.json', JSON.stringify({ name: 'p', version: '1.0.0', scripts: { prepare: 'echo prepared' } }))
+    const ok = await run('npm install --no-audit --no-fund')
+    check('control: npm install with a harmless prepare runs', !ok?.deny && ok.exit === 0, JSON.stringify(ok))
+  }
+  {
+    // push.followTags sends the annotated tag a release made along with the branch: judged as the tag push it is.
+    const w = world()
+    sh('git config push.followTags true && git tag -a v9.0.0 -m v9', APP)
+    const r = await run('git push -q origin agt/x')
+    check('push.followTags with a new annotated tag, push agt/x: denied', r?.deny?.includes('push.followTags carries v9.0.0'), JSON.stringify(r))
+    check('... no tag and no agt/x on origin, origin/main unchanged', refOf('origin.git', 'refs/tags/v9.0.0') === null && refOf('origin.git', 'agt/x') === null && refOf('origin.git', 'main') === w.main)
+    const c = await run('git config push.followTags false')
+    check('git config push.followTags: denied as a config write', c?.deny?.includes('git config key'), JSON.stringify(c))
+    const ok = await run('git push -q --no-follow-tags origin agt/x')
+    check('control: --no-follow-tags pushes the branch alone', !ok?.deny && refOf('origin.git', 'agt/x') === w.slice && refOf('origin.git', 'refs/tags/v9.0.0') === null, JSON.stringify(ok))
+  }
+  {
+    // A tag named like a branch: git reads the plain name as the tag, so the push publishes a tag.
+    const w = world()
+    sh('git tag feat/rel agt/x', APP)
+    const r = await run('git push -q origin feat/rel')
+    check('git push origin feat/rel (a tag of that name): denied', r?.deny?.includes('feat/rel names a tag'), JSON.stringify(r))
+    check('... no tag on origin, origin/main unchanged', refOf('origin.git', 'refs/tags/feat/rel') === null && refOf('origin.git', 'main') === w.main)
+  }
+  {
+    // --force-with-lease on the run's own agt/* slice branch goes; on a branch it did not make, and plain --force, not.
+    const w = world()
+    sh('git push -q origin agt/x && git branch agt/other main && git push -q origin agt/other && git commit -q --amend -m slice2', APP)
+    const x0 = refOf('origin.git', 'agt/x')
+    const f = await run('git push -q --force origin agt/x')
+    check('git push --force origin agt/x: denied', f?.deny?.includes('git push --force'), JSON.stringify(f))
+    check('... origin agt/x unchanged', refOf('origin.git', 'agt/x') === x0)
+    const o0 = refOf('origin.git', 'agt/other')
+    const o = await run('git push -q --force-with-lease origin agt/x:agt/other')
+    check('--force-with-lease onto agt/other (not the run\'s): denied', o?.deny?.includes('did not make'), JSON.stringify(o))
+    check('... origin agt/other unchanged', refOf('origin.git', 'agt/other') === o0)
+    const l = await run('git push -q --force-with-lease origin agt/x')
+    check('--force-with-lease origin agt/x (the slice checked out): allowed and landed', !l?.deny && refOf('origin.git', 'agt/x') === sh('git rev-parse agt/x', APP) && refOf('origin.git', 'agt/x') !== x0, JSON.stringify(l))
+    check('... origin/main unchanged', refOf('origin.git', 'main') === w.main)
+  }
+  {
+    // Publish, deploy and destructive repo changes are auto only. None reaches the network: the next step is a stub.
+    const w = world()
+    fs.writeFileSync(APP + '/package.json', JSON.stringify({ name: 'p', version: '1.0.0', scripts: { release: 'release-it', prepublishOnly: 'git push -q origin HEAD:main' } }))
+    const ran = []
+    const stub = async (e) => { ran.push(e.command); return { result: 'stub', exit: 0 } }
+    for (const line of ['npm publish', 'npm run release', 'docker push img:1', 'vercel --prod', 'gh repo delete o/r --yes', 'gh secret set TOKEN --body x', 'gh api -X PUT repos/o/r/collaborators/bot']) {
+      const r = await bashCall($, { command: line }, stub)
+      check(line + ': denied', r?.deny?.startsWith(DENY_PUBLISH) || r?.deny?.includes('release tool'), JSON.stringify(r))
+    }
+    check('... none of them ran, origin/main unchanged', ran.length === 0 && refOf('origin.git', 'main') === w.main, JSON.stringify(ran))
+  }
+  {
+    // What a recipe, a package script or a test run reaches is followed: a make recipe's script, a local bin and its
+    // package's own code, the files `node --test` finds, the modules a Python file imports beside it.
+    const w = world()
+    fs.mkdirSync(APP + '/bin', { recursive: true })
+    fs.writeFileSync(APP + '/bin/ship', '#!/bin/sh\ngit push -q origin HEAD:main\n', { mode: 0o755 })
+    fs.writeFileSync(APP + '/Makefile', 'SHIP = ./bin/ship\ngo:\n\t@$(SHIP)\nok:\n\t@echo fine\n')
+    fs.mkdirSync(APP + '/node_modules/release-it/lib', { recursive: true })
+    fs.mkdirSync(APP + '/node_modules/.bin', { recursive: true })
+    fs.writeFileSync(APP + '/node_modules/release-it/cli.js', "#!/usr/bin/env node\nimport './lib/run.js'\n", { mode: 0o755 })
+    fs.writeFileSync(APP + '/node_modules/release-it/lib/run.js', "import { execSync } from 'node:child_process'\nexecSync('git push -q origin HEAD:main')\n")
+    fs.symlinkSync('../release-it/cli.js', APP + '/node_modules/.bin/release-it')
+    fs.symlinkSync('../release-it/cli.js', APP + '/node_modules/.bin/shipper')
+    fs.mkdirSync(APP + '/test', { recursive: true })
+    fs.mkdirSync(APP + '/lib', { recursive: true })
+    fs.writeFileSync(APP + '/test/pusher.test.mjs', "import { ship } from '../lib/ship.mjs'\nship()\n")
+    fs.writeFileSync(APP + '/lib/ship.mjs', "import { execSync } from 'node:child_process'\nexport const ship = () => execSync('git push -q origin HEAD:main')\n")
+    fs.writeFileSync(APP + '/run.py', 'import pusher\npusher.go()\n')
+    fs.writeFileSync(APP + '/pusher.py', 'import subprocess\ndef go():\n    subprocess.run(["git", "push", "-q", "origin", "HEAD:main"])\n')
+    fs.writeFileSync(APP + '/package.json', JSON.stringify({ name: 'p', scripts: { release: 'release-it', bin: 'node_modules/.bin/shipper', test: 'node --test' } }))
+    for (const [line, text] of [['make -s go', './bin/ship runs a script that calls git push'], ['npm run -s release', 'release-it'], ['npm run -s bin', 'imports ./lib/run.js, which calls git push'], ['npm test', 'pusher.test.mjs) imports ../lib/ship.mjs, which calls git push'], ['python3 run.py', 'imports pusher, which calls git push']]) {
+      const r = await run(line)
+      check(line + ': denied', r?.deny?.includes(text), JSON.stringify(r))
+    }
+    check('... origin/main unchanged', refOf('origin.git', 'main') === w.main)
+    const ok = await run('make -s ok')
+    check('control: a recipe that only echoes runs', !ok?.deny && ok.exit === 0, JSON.stringify(ok))
+    fs.rmSync(APP + '/test', { recursive: true, force: true })
+    fs.mkdirSync(APP + '/test', { recursive: true })
+    fs.writeFileSync(APP + '/test/ok.test.mjs', "import test from 'node:test'\ntest('ok', () => {})\n")
+    const t = await run('npm test')
+    check('control: npm test, node --test with a clean test file, runs', !t?.deny && t.exit === 0, JSON.stringify(t))
+  }
+  {
+    // Config git reads with no fixed name: a file an include pulls in, the folder a global core.hooksPath names. A
+    // write to either is refused, so the alias or hook it would add never runs.
+    const w = world()
+    const glob = fs.readFileSync(T + '/gitconfig', 'utf8')
+    fs.mkdirSync(T + '/ghooks', { recursive: true })
+    fs.writeFileSync(T + '/inc.cfg', '')
+    fs.writeFileSync(T + '/gitconfig', glob.replace('hooksPath = /dev/null', 'hooksPath = ' + T + '/ghooks') + '[include]\n\tpath = inc.cfg\n')
+    try {
+      const a = await run("printf '[alias]\\n\\tpom = push -q origin agt/x:main\\n' >> " + T + '/inc.cfg')
+      check('>> the global include target: denied', a?.deny?.includes('an include pulls in'), JSON.stringify(a))
+      check('... inc.cfg still empty', fs.readFileSync(T + '/inc.cfg', 'utf8') === '')
+      const h = await run("printf '#!/bin/sh\\ngit push -q origin agt/x:main\\n' > " + T + '/ghooks/post-commit && chmod +x ' + T + '/ghooks/post-commit')
+      check('> the global core.hooksPath folder: denied', h?.deny?.includes('global hooks folder'), JSON.stringify(h))
+      const z = await run('echo "git push -q origin agt/x:main" >> ~/.zshrc')
+      check('>> ~/.zshrc: denied', z?.deny?.includes('may not write'), JSON.stringify(z))
+      const m = await run("echo '{}' > .mcp.json")
+      check('> .mcp.json: denied', m?.deny?.includes('.mcp.json'), JSON.stringify(m))
+      const c = await run('echo c > c && git add c && git commit -qm c')
+      check('control: a plain commit runs, and no hook pushes', !c?.deny && c.exit === 0 && !fs.existsSync(T + '/ghooks/post-commit'), JSON.stringify(c))
+      check('... origin/main unchanged, no .zshrc', refOf('origin.git', 'main') === w.main && !fs.existsSync(HOME + '/.zshrc'))
+    } finally {
+      fs.writeFileSync(T + '/gitconfig', glob)
+      fs.rmSync(T + '/ghooks', { recursive: true, force: true })
+    }
+  }
+  {
+    // A pane worker on a fix round: its feat/* slice is already on the remote and it has no typed /agt and none of
+    // the lead's records. The branch checked out in its own linked worktree is its slice: pushed, and the base merged
+    // into it, with or without origin/HEAD. The base itself, and the person's branch at the main checkout, are not.
+    const w = world()
+    const WT = T + '/w/app-slug'
+    sh('git worktree add -q -b feat/slug ' + WT + ' main && git -C ' + WT + ' push -q origin feat/slug', APP)
+    seed(Session, { worker: { agent: 'executor' } })
+    CWD = WT
+    try {
+      sh('echo s > s && git add s && git commit -qm s', WT)
+      const p = await run('git push -q origin feat/slug')
+      check('worker: push of its feat/slug slice (on the remote already): allowed and landed', !p?.deny && refOf('origin.git', 'feat/slug') === sh('git rev-parse HEAD', WT), JSON.stringify(p))
+      sh('echo m > m && git add m && git commit -qm m', APP)
+      const m = await run('git merge -q --no-edit agt/x')
+      check('worker: a merge into its own slice runs', !m?.deny && m.exit === 0, JSON.stringify(m))
+      sh('git remote set-head origin -d', WT)
+      const q = await run('git push -q origin feat/slug')
+      check('worker, no origin/HEAD: its slice is still its own, allowed and landed', !q?.deny && refOf('origin.git', 'feat/slug') === sh('git rev-parse HEAD', WT), JSON.stringify(q))
+      const b = await run('git push -q origin HEAD:main')
+      check('worker: a push of its slice onto main: denied', b?.deny?.includes('git push to main'), JSON.stringify(b))
+      check('... origin/main unchanged', refOf('origin.git', 'main') === w.main)
+      CWD = APP
+      sh('git remote set-head origin main && git checkout -q -b feat/big main && echo f > f && git add f && git commit -qm f && git push -q origin feat/big && echo g > g && git add g && git commit -qm g', APP)
+      const big = refOf('origin.git', 'feat/big')
+      const o = await run('git push -q origin feat/big')
+      check('worker at the main checkout: the person\'s feat/big is not its slice, denied', o?.deny?.includes('did not make'), JSON.stringify(o))
+      check('... origin feat/big unchanged', refOf('origin.git', 'feat/big') === big)
+    } finally {
+      CWD = APP
+      seed(Session, { worker: null })
+      sh('git checkout -q agt/x', APP)
+    }
+  }
+  {
+    // The tidy owns a tree only at a recorded path: a record left from a tree that is gone, naming agt/z, does not
+    // claim another session's merged, clean, hour-old tree on agt/z.
+    world()
+    const Z = T + '/w/app-z'
+    sh('git worktree add -q -b agt/z ' + Z + ' main', APP)
+    sh('echo z > z && git add z && git commit -qm z', Z)
+    sh('git merge -q --no-edit agt/z', APP)
+    const old = new Date(Date.now() - 3_600_000)
+    fs.utimesSync(Z, old, old)
+    seed(Worktrees, { worktrees: [{ path: T + '/w/gone', branch: 'agt/z', head: null, run: 'r1', at: Date.now(), src: 'add' }] })
+    try {
+      const r = { keep: [], removed: [], branches: [] }
+      await cleanGit($, (argv) => $.process.run(argv), r)
+      check('tidy: a tree whose branch only a stale record names is kept', fs.existsSync(Z) && !r.removed.includes('agt/z') && r.keep.some((k) => k.what === 'agt/z' && /not opened/.test(k.why)), JSON.stringify(r))
+      seed(Worktrees, { worktrees: [{ path: Z, branch: 'agt/z', head: null, run: 'r1', at: Date.now(), src: 'add' }] })
+      const r2 = { keep: [], removed: [], branches: [] }
+      await cleanGit($, (argv) => $.process.run(argv), r2)
+      check('control: the same tree recorded at its path is removed', !fs.existsSync(Z) && r2.removed.includes('agt/z'), JSON.stringify(r2))
+    } finally {
+      seed(Worktrees, { worktrees: [] })
+    }
   }
   {
     // Controls below auto: the run's own branch and ordinary writes still pass.

@@ -6,15 +6,17 @@ import { Profile } from './profile.js'
 import { Proofs } from './proofs.js'
 import { PROBE } from './panes.js'
 import { base, commands, commandSteps, joinPath, lineMovesHead, protectedPath, SCRIPT_RISK, MAKE_RISK } from './guard-lex.js'
-import { PLAIN_MODULE, jsCandidates, jsImports, moduleFiles, scriptChain } from './script-refs.js'
-import { ownedWorktrees } from './guard-own.js'
+import { NODE_TEST_FILE, PLAIN_MODULE, jsCandidates, jsImports, moduleFiles, pyCandidates, pyImports, scriptChain } from './script-refs.js'
+import { Worktrees, ownedBranches } from './guard-own.js'
 
 // The gh and curl/wget step readers live in a leaf the lexer shares; the policy keeps carrying their names.
 export { ghStep, httpStep } from './guard-steps.js'
 
 export const DENY_INTEGRATION = 'integration auto is not set in your profile for this repo; the run stops at the PR.'
 
-export const DENY_PUSH = 'integration auto is not set in your profile for this repo: a run pushes only its own branch (the one checked out, or an agt/*, feat/*, fix/* or storm/* branch it made or that the remote does not have yet), never the base branch, a tag, a force push, a branch deletion or every branch. Write the branch name and the directory out (no variables) and push again.'
+export const DENY_PUSH = 'integration auto is not set in your profile for this repo: a run pushes only its own branch (one it made a worktree on or created on the remote, its agt/* slice branch, or the branch checked out where /agt was typed), never the base branch (main, master, the remote default, the checkout upstream), a tag, a force push (--force-with-lease only on its own agt/* branch), a branch deletion or every branch. Write the branch name and the directory out (no variables) and push again.'
+
+export const DENY_PUBLISH = 'integration auto is not set in your profile for this repo: a deploy, a publish or a destructive repo change (a package or release published, an image pushed, a production deploy, a secret or collaborator written, a repo deleted, renamed or transferred) needs integration auto, or the person runs it.'
 
 export const DENY_LOCAL = 'integration is local for this repo: the run pushes nothing and opens no PR.'
 
@@ -49,13 +51,18 @@ const CURRENT_SUB = /^\$\(git (branch --show-current|rev-parse --abbrev-ref HEAD
 // bare `git push` goes, or null) and bases (the default branch, main and master). Returns why it is refused.
 // A push after a step that moves HEAD on the same line (p.headMoved) reads HEAD as unknown: the branch read
 // before the line ran is not the one the push sees.
-// A push to an own-prefix branch (agt/*, feat/*, fix/*, storm/*) that is not the one checked out is let through here
-// and handed to `claim`: guardLine then asks whether the run made it or the remote does not have it yet.
-export function judgePush(p, { current = null, pushDst = null, bases = new Set(['main', 'master']), refspecs = [], pushDefault = null, claim = null } = {}) {
+// A push to the branch checked out, or to an own-prefix branch (agt/*, feat/*, fix/*, storm/*), is let through here
+// and handed to `claim` (name, whether it is the one checked out): guardLine then asks whether it is the run's own.
+// `bases` is every base-like branch (guardLine baseLike): never pushed below auto, checked out or not.
+// `tags`: the sources the push names that git reads as a tag (refs/tags/<name> exists): a tag push, however named.
+export function judgePush(p, { current = null, pushDst = null, bases = new Set(['main', 'master']), refspecs = [], pushDefault = null, claim = null, tags = new Set() } = {}) {
   if (p.dry) return null
   if (p.bulk) return 'git push ' + p.bulk
   if (p.force) return 'git push --force'
   if (p.mergeOpt) return 'git push -o merge'
+  // --force-with-lease only onto an agt/* branch, and only one the run owns (claimed with `lease`, judged by the caller).
+  const LEASE = 'git push --force-with-lease of a branch that is not an agt/* branch of this run'
+  if (p.lease && (p.leaseRefs ?? []).some((r) => !/^(refs\/heads\/)?agt\//.test(r))) return LEASE
   const cur = p.headMoved ? null : current || null
   if (p.headMoved) pushDst = null
   const dst = (d) => {
@@ -64,9 +71,9 @@ export function judgePush(p, { current = null, pushDst = null, bases = new Set([
     const name = d.replace(/^refs\/heads\//, '')
     if (name.startsWith('refs/')) return 'git push ' + d
     if (bases.has(name)) return 'git push to ' + name
-    if (name === cur) return null
-    if (OWN_BRANCH.test(name)) {
-      claim?.(name)
+    if (p.lease && !name.startsWith('agt/')) return LEASE
+    if (name === cur || OWN_BRANCH.test(name)) {
+      claim?.(name, name === cur)
       return null
     }
     return 'git push ' + name + ' (not a branch of this run)'
@@ -89,6 +96,7 @@ export function judgePush(p, { current = null, pushDst = null, bases = new Set([
     if (CURRENT_SUB.test(src)) src = 'HEAD'
     if (CURRENT_SUB.test(to)) to = cur
     if (/(^|\/)refs\/tags\//.test(src) || /^refs\/tags\//.test(to ?? '')) return 'git push <tag>'
+    if (tags.has(src)) return 'git push <tag> (' + src + ' names a tag)'
     // A deletion is never a run's own push: a branch it did not make (feat/* is the person's prefix too) goes with it.
     if (p.del || (k === 0 && to)) return 'git push --delete ' + (to || src || 'a branch')
     if (k < 0 && (src === 'HEAD' || src === '@')) to = cur
@@ -129,7 +137,7 @@ export function integrationIn(line, { cwd = null, current = null, pushDst = null
   if (mode === 'auto') return null
   for (const c of commandSteps(line, cwd, 0, Profile.home ? [Profile.home] : [])) {
     if (c.kind === 'protected') return c.what
-    if (c.kind === 'step') return c.what
+    if (c.kind === 'step' || c.kind === 'publish') return c.what
     if (c.kind === 'ref') {
       const why = judgeRef(c.ref, { current, bases: new Set(['main', 'master', b].filter(Boolean)) })
       if (why) return why
@@ -236,7 +244,7 @@ async function textRisk($, text, dir, what, label, depth, seen, lang = 'sh') {
   }
   if (SCRIPT_RISK.test(text) || SCRIPT_RISK.test(expanded)) return what + ' runs a ' + label + RISK_TAIL
   if (lang !== 'sh') return null
-  const from = label === 'package script' ? 'pkg' : 'shell'
+  const from = label === 'package script' || label === 'make recipe' ? 'pkg' : 'shell'
   let steps
   try {
     steps = commandSteps(text, dir, 1, await homes($))
@@ -245,6 +253,8 @@ async function textRisk($, text, dir, what, label, depth, seen, lang = 'sh') {
   }
   for (const s of steps) {
     if (s.kind === 'protected') return what + ' runs a ' + label + ' that writes ' + s.what
+    // A merge, tag, release or publish named in the text, read as a command (gh workflow run, npm publish, release-it).
+    if (s.kind === 'step' || s.kind === 'publish') return what + ' runs a ' + label + ' that runs ' + s.what
     // A step the reader could not read at all (an unresolved program or subcommand, nesting past the caps): the
     // script may push through it, so it refuses whatever the label.
     if (s.kind === 'hidden' && s.unread) return what + ' runs a ' + label + ' where ' + s.what
@@ -281,7 +291,7 @@ const langOf = (c, text) => c.lang && c.lang !== 'other' ? c.lang : c.lang === '
 
 // A node file's relative imports, one level deep: each must be found and read (unless the file was reached from a
 // shell script, `from` 'shell'), and none may call a tool that can push, merge, tag or release.
-async function importRisk($, c, text, from) {
+async function importRisk($, c, text, from, installed = false) {
   const dir = c.path.slice(0, c.path.lastIndexOf('/')) || '/'
   for (const spec of jsImports(text)) {
     let found = null
@@ -297,7 +307,7 @@ async function importRisk($, c, text, from) {
       if (lenient(from)) continue
       return c.what + ' imports ' + spec + ', which the guard cannot read'
     }
-    if (INSTALLED.test(found.p)) continue
+    if (INSTALLED.test(found.p) && !installed) continue
     if (SCRIPT_RISK.test(found.t)) return c.what + ' imports ' + spec + RISK_TAIL.replace(' that', ', which')
   }
   return null
@@ -358,7 +368,16 @@ async function fileRisk($, c, depth = 0, seen = new Set(), from = 'line') {
     for (const f of c.paths) {
       const text = await $.fs.read(f).catch(() => null)
       if (text === null) continue
-      return MAKE_RISK.test(makeRecipe(text, c.targets)) ? c.what + ' runs a recipe that mentions push, merge, tag or release' : null
+      const recipe = makeRecipe(text, c.targets)
+      if (MAKE_RISK.test(recipe)) return c.what + ' runs a recipe that mentions push, merge, tag or release'
+      // Each recipe line is a shell line of its own: followed into the scripts, package scripts and bins it runs,
+      // as a package script's steps are, with the makefile's own variables expanded.
+      for (const line of recipeLines(recipe, makeVars(text, c.dir))) {
+        if (depth + 1 > READ_DEPTH) return skip ? null : c.what + ' runs scripts nested deeper than the guard reads'
+        const why = await textRisk($, line, c.dir, c.what, 'make recipe', depth + 1, seen)
+        if (why) return skip ? null : why
+      }
+      return null
     }
     return strict ? c.what + ' runs a makefile the guard cannot read' : null
   }
@@ -367,7 +386,7 @@ async function fileRisk($, c, depth = 0, seen = new Set(), from = 'line') {
     if (!c.path) return skip ? null : c.what + ' runs a package script the guard cannot locate (write the command out)'
     const found = await nearestPkg($, c.dir)
     if (!found) return c.optional || skip ? null : c.what + ' runs a package script the guard cannot read'
-    const key = found.path + '#' + c.script
+    const key = found.path + '#' + (c.lifecycle ? c.lifecycle.join(',') : c.script)
     if (seen.has(key)) return null
     seen.add(key)
     let scripts
@@ -376,6 +395,15 @@ async function fileRisk($, c, depth = 0, seen = new Set(), from = 'line') {
       scripts = pkg?.scripts && typeof pkg.scripts === 'object' ? pkg.scripts : {}
     } catch {
       return c.what + ' runs a package script the guard cannot read'
+    }
+    // A lifecycle run (install, ci, pack, version, …): each of its scripts the package has, read as `run` reads one.
+    if (c.lifecycle) {
+      for (const k of c.lifecycle) {
+        if (typeof scripts[k] !== 'string') continue
+        const why = await textRisk($, scripts[k], found.dir, c.what + ' (its ' + k + ' script)', 'package script', depth, seen)
+        if (why) return why
+      }
+      return null
     }
     if (typeof scripts[c.script] !== 'string') return c.optional || skip ? null : c.what + ' names a package script that is not in ' + found.path
     for (const k of scriptChain(c.script)) {
@@ -392,17 +420,122 @@ async function fileRisk($, c, depth = 0, seen = new Set(), from = 'line') {
     return SCRIPT_RISK.test(text) ? c.what + ' runs a recipe' + RISK_TAIL : null
   }
   if (c.how === 'module') return moduleRisk($, c, from)
+  if (c.how === 'tests') return testsRisk($, c, depth, seen, from)
   if (!c.path) return skip ? null : c.what + ' runs a script the guard cannot locate (write its path out)'
-  if (INSTALLED.test(c.path) || seen.has(c.path)) return null
+  // A local bin (node_modules/.bin/x, as a package script or `$(npm bin)/x` names it) is read where its link lands,
+  // with its own package's imports; one that is no readable script refuses where a package script runs it.
+  const bin = LOCAL_BIN.test(c.path)
+  if ((INSTALLED.test(c.path) && !bin) || seen.has(c.path)) return null
   seen.add(c.path)
-  const text = await $.fs.read(c.path).catch(() => null)
-  if (text === null || text.includes('\u0000')) return strict ? c.what + ' runs a file the guard cannot read' : null
+  const at = bin ? (await $.fs.stat(c.path, { resolve: true }).catch(() => null))?.realPath ?? c.path : c.path
+  const text = await $.fs.read(at).catch(() => null)
+  if (text === null || text.includes('\u0000')) return strict ? c.what + (bin ? ' runs a local bin' : ' runs a file') + ' the guard cannot read' : null
   // Read the script as the shell would: variables it sets itself are expanded, so a command assembled from
   // pieces (`G=git; $G ${P}sh`) is seen too.
   const lang = langOf(c, text)
   const why = await textRisk($, text, c.dir, c.what, 'script', depth, seen, lang)
-  if (why || lang !== 'node') return why
-  return importRisk($, c, text, from)
+  if (why) return why
+  if (lang === 'node') return importRisk($, { ...c, path: at }, text, from, bin)
+  if (lang === 'python') return pyImportRisk($, { ...c, path: at }, text)
+  return null
+}
+
+// A package's local bin folder: what a package script's bare program word, or `$(npm bin)/x`, resolves to.
+const LOCAL_BIN = /(^|\/)node_modules\/\.bin\/[^/]+$/
+
+// A Python file's imports, one level deep, from the file's own folder (where python puts a script's folder on its
+// path): each that names a file there is read, and one that calls a tool that can push, merge, tag or release
+// refuses. A name found nowhere there is the standard library or an installed package: not read.
+async function pyImportRisk($, c, text) {
+  const dir = c.path.slice(0, c.path.lastIndexOf('/')) || '/'
+  for (const imp of pyImports(text)) {
+    for (const rel of pyCandidates(imp)) {
+      const t = await $.fs.read(joinPath(dir, rel)).catch(() => null)
+      if (t !== null && SCRIPT_RISK.test(t)) return c.what + ' imports ' + (imp.mod || imp.names.join(', ')) + RISK_TAIL.replace(' that', ', which')
+    }
+  }
+  return null
+}
+
+// How many files `node --test` may name before the guard stops listing them (and refuses, from a package script).
+const TESTS_MAX = 200
+
+// The files under `dir` (node_modules, .git and other dot folders left out), as paths relative to it; null past
+// TESTS_MAX files or when a folder cannot be listed.
+async function filesUnder($, dir) {
+  const out = []
+  const walk = async (rel, depth) => {
+    if (depth > 12) return false
+    const entries = await $.fs.list(rel ? dir + '/' + rel : dir).catch(() => null)
+    if (!Array.isArray(entries)) return false
+    for (const e of entries) {
+      if (e.name === 'node_modules' || e.name.startsWith('.')) continue
+      const r = rel ? rel + '/' + e.name : e.name
+      if (e.kind === 'dir') {
+        if (!(await walk(r, depth + 1))) return false
+      } else if (out.push(r) > TESTS_MAX * 20) return false
+    }
+    return true
+  }
+  return (await walk('', 0)) ? out : null
+}
+
+// A shell glob (`*`, `**`, `?`) as a regex over a relative path.
+const globRe = (g) => new RegExp('^' + String(g).replace(/^\.\//, '').replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*\*\/?/g, '\u0000').replace(/\*/g, '[^/]*').replace(/\?/g, '[^/]').replace(/\u0000/g, '(?:.*/)?') + '$')
+
+// node --test: the files it runs, each read with its relative imports one level deep as `node <file>` is. A file or
+// a folder (searched with node's patterns) or a glob it is given; with none, node's patterns under the folder.
+async function testsRisk($, c, depth, seen, from) {
+  const skip = lenient(from)
+  if (!c.dir) return skip ? null : c.what + ' runs tests the guard cannot locate (write the folder out)'
+  const files = []
+  const add = (abs) => { if (!files.includes(abs)) files.push(abs) }
+  let all = null
+  const under = async () => (all ??= await filesUnder($, c.dir))
+  for (const t of c.targets.length ? c.targets : [null]) {
+    if (t !== null && /[$`]/.test(t)) return skip ? null : c.what + ' names tests the guard cannot read'
+    const abs = t === null ? c.dir : t.startsWith('/') ? joinPath('/', t) : joinPath(c.dir, t)
+    const st = t !== null && !/[*?]/.test(t) ? await $.fs.stat(abs).catch(() => null) : null
+    if (st && st.kind !== 'dir') add(abs)
+    else if (st?.kind === 'dir' || t === null) {
+      const list = t === null ? await under() : await filesUnder($, abs)
+      if (!list) return skip ? null : c.what + ' runs more test files than the guard reads'
+      for (const r of list) if (NODE_TEST_FILE.test(r) || (t !== null && /\.[cm]?[jt]s$/.test(r) && NODE_TEST_FILE.test('test/' + r))) add(joinPath(abs, r))
+    } else if (/[*?]/.test(t)) {
+      const list = await under()
+      if (!list) return skip ? null : c.what + ' runs more test files than the guard reads'
+      const re = globRe(t)
+      for (const r of list) if (re.test(r)) add(joinPath(c.dir, r))
+    }
+    if (files.length > TESTS_MAX) return skip ? null : c.what + ' runs more test files than the guard reads'
+  }
+  for (const f of files) {
+    const why = await fileRisk($, { kind: 'file', how: 'script', what: c.what + ' (' + f.slice(c.dir.length + 1) + ')', path: f, dir: c.dir, lang: 'node', rest: [] }, depth, seen, from)
+    if (why) return why
+  }
+  return null
+}
+
+// A makefile's own variables (`X = v`, `X := v`, `X ?= v`, `override`/`export X = v`) over make's defaults, each
+// value expanded once against the others.
+const MAKE_DEFAULTS = { MAKE: 'make', CC: 'cc', CXX: 'c++', CPP: 'cc -E', LD: 'ld', AR: 'ar', AS: 'as', RM: 'rm -f', SHELL: '/bin/sh', MAKEFLAGS: '', MFLAGS: '' }
+function makeVars(text, dir) {
+  const vars = new Map(Object.entries({ ...MAKE_DEFAULTS, CURDIR: dir ?? '' }))
+  for (const line of String(text ?? '').split('\n')) {
+    const m = /^(?:override\s+|export\s+)?([A-Za-z_][\w.-]*)\s*(?:\?=|::?=|\+=|=)\s*(.*)$/.exec(line)
+    if (m && !line.startsWith('\t')) vars.set(m[1], m[2].replace(/\s+#.*$/, '').trim())
+  }
+  for (const [k, v] of vars) vars.set(k, makeExpand(v, vars, 0))
+  return vars
+}
+function makeExpand(s, vars, depth) {
+  return String(s).replace(/\$\$/g, '\u0001').replace(/\$[({]([A-Za-z_][\w.-]*)[)}]/g, (m, n) => (vars.has(n) && depth < 4 ? makeExpand(vars.get(n), vars, depth + 1) : '$' + n)).replace(/\$([@<^*?])/g, 'x').replace(/\u0001/g, '$')
+}
+
+// A recipe as the shell lines make runs: continuations joined, the leading tab and the @, - and + prefixes dropped,
+// make's variables expanded (an unknown one left as a shell variable) and $$ read as $.
+function recipeLines(recipe, vars) {
+  return String(recipe ?? '').replace(/\\\n\t?/g, ' ').split('\n').map((l) => makeExpand(l.replace(/^\t/, '').replace(/^[@+\-\s]+/, ''), vars, 0)).filter((l) => l.trim())
 }
 
 
@@ -430,7 +563,8 @@ async function homes($) {
 // A write target → the protected label of where it lands, or null. The spelling is judged first (protectedPath),
 // then the real path, so `cfg` linked to .git/config on an earlier line, or `.GIT/CONFIG`, is refused. A link that
 // leads nowhere is refused: the guard cannot see what the write would create.
-export async function resolvedProtected($, raw, abs) {
+// `memo` holds what git said about config for one line, so a line with many writes asks once per folder.
+export async function resolvedProtected($, raw, abs, memo = new Map()) {
   const hs = await homes($)
   const spelled = protectedPath(raw, abs, hs)
   if (spelled || !abs) return spelled
@@ -438,7 +572,55 @@ export async function resolvedProtected($, raw, abs) {
   if (real === DANGLING) return 'a link that leads nowhere (' + raw + ')'
   const landed = real && real !== abs ? protectedPath('', real, hs) : null
   if (landed) return landed
-  return (await inHooksDir($, abs, typeof real === 'string' ? real : null)) ? 'the hooks folder git runs (core.hooksPath)' : null
+  const r = typeof real === 'string' ? real : null
+  if (await inHooksDir($, abs, r)) return 'the hooks folder git runs (core.hooksPath)'
+  return configFileOf($, abs, r, memo)
+}
+
+// The nearest folder of `abs` that exists (where git can be asked), or null.
+async function existingDir($, abs) {
+  let d = abs.slice(0, abs.lastIndexOf('/')) || '/'
+  for (let i = 0; i < 16; i++) {
+    if ((await $.fs.stat(d).catch(() => null))?.kind === 'dir') return d
+    if (d === '/') return null
+    d = d.slice(0, d.lastIndexOf('/')) || '/'
+  }
+  return null
+}
+
+// Config git reads that no fixed name gives: the files an include.path or includeIf.*.path pulls in (from the
+// global config, the repo's, or a file they include), and the folder a global core.hooksPath names. Asked of git
+// from the write's folder, with where each value was set, so a relative include is read against the file that set
+// it. git saying no match (exit 1) is no such file; git that cannot be run or asked refuses the write. Returns the
+// protected label, or null.
+async function configFileOf($, abs, real, memo) {
+  const d = await existingDir($, abs)
+  if (!d) return null
+  if (!memo.has(d)) {
+    const r = await $.process.run(['git', '-C', d, 'config', '--show-origin', '--show-scope', '--get-regexp', '^(include|includeif\\..*)\\.path$|^core\\.hookspath$'], PROBE).catch(() => null)
+    const out = { files: [], hooks: [], unread: !r || (r.exitCode !== 0 && r.exitCode !== 1) }
+    for (const l of r && r.exitCode === 0 ? String(r.stdout ?? '').split('\n') : []) {
+      const m = /^(\S+)\tfile:(.*?)\t(\S+) (.+)$/.exec(l.replace(/\r$/, '')) ?? /^(\S+)\tfile:(.*?)\t(\S+)\t?(.*)$/.exec(l)
+      if (!m) continue
+      const [, scope, origin, key, value] = m
+      const v = value.trim()
+      const home = Profile.home
+      const at = v.startsWith('~/') ? (home ? joinPath('/', home + v.slice(1)) : null) : v.startsWith('/') ? joinPath('/', v) : joinPath(origin.slice(0, origin.lastIndexOf('/')) || '/', v)
+      if (!at) continue
+      if (/hookspath/i.test(key)) {
+        if (scope === 'global' || scope === 'system') out.hooks.push(v.startsWith('~/') || v.startsWith('/') ? at : null)
+      } else out.files.push(at)
+    }
+    memo.set(d, out)
+  }
+  const { files, hooks, unread } = memo.get(d)
+  if (unread) return 'a file git config may include, in config the guard could not read'
+  const lc = (p) => String(p ?? '').toLowerCase().replace(/\/+$/, '')
+  const hits = (p) => !!p && files.some((f) => lc(f) === lc(p))
+  if (hits(abs) || hits(real)) return 'a git config file an include pulls in (include.path)'
+  const under = (p, h) => !!p && !!h && (lc(p) === lc(h) || lc(p).startsWith(lc(h) + '/'))
+  if (hooks.some((h) => h && (under(abs, h) || under(real, h)))) return 'the global hooks folder git runs (core.hooksPath)'
+  return null
 }
 
 // Whether a write lands in the hooks folder git runs for the repo it is in: core.hooksPath when the repo sets one
@@ -675,27 +857,87 @@ async function pushMode($, profile, c, cwd, cache) {
 }
 
 
+// The branch checked out at `cwd` and its repo's main checkout: { root, branch }, or null (none, or git not there).
+export async function checkoutOf($, cwd) {
+  if (!cwd) return null
+  const branch = (await gitOutOrThrow($, cwd, 'symbolic-ref', '--short', '-q', 'HEAD')) || null
+  const root = await repoRoot($, cwd, new Map())
+  return branch && root ? { root, branch } : null
+}
+
 export async function integrationAllowed($, cwd) {
   return modeFor($, await readProfile($), { dir: cwd, slug: null }, cwd, new Map())
 }
 
 
-// The bases of the repo at `at`: main, master and the remote's default branch.
-async function basesOf($, at, remote = 'origin') {
-  const bases = new Set(['main', 'master'])
+// The remote's default branch (its HEAD as the remote-tracking ref records it), or '' when that is not set.
+async function remoteHead($, at, remote) {
   const head = at ? await gitOutOrThrow($, at, 'symbolic-ref', '--short', 'refs/remotes/' + remote + '/HEAD') : ''
-  if (head) bases.add(head.startsWith(remote + '/') ? head.slice(remote.length + 1) : head.slice(head.indexOf('/') + 1))
-  return bases
+  return head ? (head.startsWith(remote + '/') ? head.slice(remote.length + 1) : head.slice(head.indexOf('/') + 1)) : ''
 }
 
+// The branches a remote has: its remote-tracking refs and what ls-remote lists. `unread` when the remote could not
+// be asked (then only the tracking refs are known).
+async function remoteBranches($, at, remote) {
+  const names = new Set()
+  if (!/^[\w.-]+$/.test(remote)) return { names, unread: true }
+  for (const l of (await gitOutOrThrow($, at, 'for-each-ref', '--format=%(refname)', 'refs/remotes/' + remote + '/')).split('\n')) {
+    const n = l.trim().slice(('refs/remotes/' + remote + '/').length)
+    if (l.trim() && n && n !== 'HEAD') names.add(n)
+  }
+  const ls = await $.process.run(['git', '-C', at, 'ls-remote', '--heads', remote], PROBE).catch(() => null)
+  if (!ls || ls.exitCode !== 0) return { names, unread: true }
+  for (const l of String(ls.stdout ?? '').split('\n')) {
+    const m = /\trefs\/heads\/(\S+)$/.exec(l.trim())
+    if (m) names.add(m[1])
+  }
+  return { names, unread: false }
+}
+
+// The main checkout of the repo at `at` (its common git dir's parent), or null.
+async function repoRoot($, at, cache) {
+  return at ? (await localRepo($, at, cache)).root : null
+}
+
+// Whether a branch is the run's own in the repo at `at`: one of its worktrees was made on it, or one of its pushes
+// created it on the remote.
+async function madeByRun($, at, name, cache) {
+  const root = await repoRoot($, at, cache).catch(() => null)
+  return (await ownedBranches($).catch(() => [])).some((r) => r.branch === name && (r.root === null || r.root === root))
+}
+
+// The base-like branches of the repo at `at`, which a run below auto never pushes or merges into: main, master,
+// the remote's default branch, the upstream of the branch checked out (when it names another branch), and, when
+// the remote's default is not recorded (no origin/HEAD), every branch the remote has that the run did not make. An
+// agt/* branch is a run's, never base-like. { bases, guessed } — guessed: the default was not recorded, so the
+// branch checked out at the typed /agt is not taken on trust either.
+// `keep`: a branch never added by the no-origin/HEAD fallback (a pane worker's own slice, workerTree).
+async function baseLike($, at, remote, current, cache, keep = null) {
+  const bases = new Set(['main', 'master'])
+  if (!at) return { bases, guessed: true }
+  const head = await remoteHead($, at, remote)
+  if (head) bases.add(head)
+  if (current) {
+    const up = await gitOutOrThrow($, at, 'rev-parse', '--abbrev-ref', '--symbolic-full-name', current + '@{upstream}')
+    const names = [...new Set([...(await localRepo($, at, cache)).remotes.map((x) => x.name), remote])]
+    const r = names.sort((x, y) => y.length - x.length).find((n) => up.startsWith(n + '/'))
+    const name = r ? up.slice(r.length + 1) : ''
+    if (name && name !== current) bases.add(name)
+  }
+  if (head) return { bases, guessed: false }
+  const { names } = await remoteBranches($, at, remote)
+  for (const n of names) if (!n.startsWith('agt/') && n !== keep && !(await madeByRun($, at, n, cache))) bases.add(n)
+  return { bases, guessed: true }
+}
 
 // What a push is judged against: the branch checked out in its dir, where a bare `git push` goes, the bases.
-async function pushInfo($, c, cwd, cache) {
+async function pushInfo($, c, cwd, cache, tree = null) {
   const dir = c.dir
   const at = dir ?? cwd
   const remote = c.push.remote && /^[\w.-]+$/.test(c.push.remote) ? c.push.remote : 'origin'
-  const bases = await basesOf($, at, remote)
   const current = dir ? (await gitOutOrThrow($, dir, 'symbolic-ref', '--short', '-q', 'HEAD')) || null : null
+  const keep = tree && at && tree.root === (await repoRoot($, at, cache).catch(() => null)) ? tree.branch : null
+  const { bases, guessed } = await baseLike($, at, remote, c.push.headMoved ? null : current, cache, keep)
   let pushDst = null
   let refspecs = []
   let pushDefault = null
@@ -710,25 +952,119 @@ async function pushInfo($, c, cwd, cache) {
     const r = names.find((n) => to.startsWith(n + '/'))
     if (to && r) pushDst = to.slice(r.length + 1)
   }
-  return { current, pushDst, bases, refspecs, pushDefault }
+  // A source written as a plain name is the tag of that name when one exists (git looks in refs/tags before
+  // refs/heads), so `git push origin v1` and a tag named like a branch are tag pushes.
+  const tags = new Set()
+  if (at) for (const raw of c.push.specs) {
+    const src = raw.replace(/^\+/, '').split(':')[0]
+    if (!src || src === 'HEAD' || src === '@' || src.startsWith('refs/') || /[$`]/.test(src)) continue
+    const r = await $.process.run(['git', '-C', at, 'rev-parse', '-q', '--verify', 'refs/tags/' + src], PROBE).catch(() => null)
+    if (!r || typeof r.exitCode !== 'number') throw new Error('git did not run')
+    if (r.exitCode === 0 && String(r.stdout ?? '').trim()) tags.add(src)
+  }
+  return { current, pushDst, bases, guessed, refspecs, pushDefault, tags }
 }
 
 
-// An own-prefix branch the push names but does not have checked out: the run's own when one of its worktrees was made
-// on it, or a new branch when the remote does not have it yet. One the remote already has is someone else's (feat/*
-// and fix/* are the person's prefixes too). Returns why it is refused, or null.
-async function othersBranch($, c, name, cwd) {
-  if ((await ownedWorktrees($).catch(() => [])).some((r) => r.branch === name)) return null
-  const at = c.dir ?? cwd
-  if (!at) return 'git push ' + name + ' (a branch this run did not make, in a repo the guard cannot place)'
-  const remote = c.push.remote ?? 'origin'
+// push.followTags: a push also sends every annotated tag that points into what it pushes and that the remote does
+// not have. Read from the config git reads for this push (the repo's and the global one, with the line's config
+// variables), and worked out locally: the annotated tags merged into each pushed source, less the remote's tags.
+// Returns why the push is a tag push, or null.
+async function followedTags($, c, at, current) {
+  if (!at || c.push.noFollow || c.push.dry) return null
+  const env = Object.keys(c.genv ?? {}).length ? { ...PROBE, env: c.genv } : PROBE
+  const cfg = await $.process.run(['git', '-C', at, 'config', '--type=bool', '--get', 'push.followTags'], env).catch(() => null)
+  if (!cfg || typeof cfg.exitCode !== 'number') return 'git push with push.followTags the guard could not read'
+  if (cfg.exitCode !== 0 || String(cfg.stdout ?? '').trim() !== 'true') return null
+  const srcs = c.push.specs.length ? c.push.specs.map((x) => x.replace(/^\+/, '').split(':')[0]).map((x) => (x === '@' || !x ? 'HEAD' : x)) : [current ? 'refs/heads/' + current : 'HEAD']
+  const tags = new Set()
+  for (const src of srcs) {
+    if (/[$`]/.test(src)) return 'git push of a source the guard cannot read, with push.followTags set'
+    const r = await gitOutOrThrow($, at, 'for-each-ref', '--format=%(objecttype) %(refname:short)', '--merged=' + src, 'refs/tags/')
+    for (const l of r.split('\n')) if (l.startsWith('tag ')) tags.add(l.slice(4).trim())
+  }
+  if (!tags.size) return null
+  const ls = await $.process.run(['git', '-C', at, 'ls-remote', '--tags', c.push.remote ?? 'origin'], PROBE).catch(() => null)
+  if (!ls || ls.exitCode !== 0) return 'git push with push.followTags, to a remote whose tags the guard could not read'
+  const there = new Set(String(ls.stdout ?? '').split('\n').map((l) => /\trefs\/tags\/(.+?)(\^\{\})?$/.exec(l.trim())?.[1]).filter(Boolean))
+  const carried = [...tags].filter((t) => !there.has(t))
+  return carried.length ? 'git push <tag> (push.followTags carries ' + carried.slice(0, 3).join(', ') + ')' : null
+}
+
+// Whether the remote has a branch: 'yes', 'no', or 'unread' when it could not be asked. The remote-tracking ref is
+// asked first, then ls-remote.
+async function remoteHas($, at, remote, name) {
   if (/^[\w.-]+$/.test(remote)) {
     const tracked = await $.process.run(['git', '-C', at, 'rev-parse', '-q', '--verify', 'refs/remotes/' + remote + '/' + name], PROBE).catch(() => null)
-    if (tracked?.exitCode === 0 && String(tracked.stdout ?? '').trim()) return 'git push ' + name + ' (a branch the remote already has that this run did not make)'
+    if (tracked?.exitCode === 0 && String(tracked.stdout ?? '').trim()) return 'yes'
   }
   const ls = await $.process.run(['git', '-C', at, 'ls-remote', '--heads', remote, 'refs/heads/' + name], PROBE).catch(() => null)
-  if (!ls || ls.exitCode !== 0) return 'git push ' + name + ' (a branch this run did not make, on a remote the guard could not read)'
-  return String(ls.stdout ?? '').trim() ? 'git push ' + name + ' (a branch the remote already has that this run did not make)' : null
+  if (!ls || ls.exitCode !== 0) return 'unread'
+  return String(ls.stdout ?? '').trim() ? 'yes' : 'no'
+}
+
+// A pane worker's own slice: the branch checked out in the folder its pane started in, when that folder is a linked
+// worktree (its git dir is not the common one), as the lead makes one for each slice. A worker has no typed /agt and
+// sees none of the lead's records, so this is how its feat/* or fix/* slice stays its own on a fix round. The main
+// checkout never counts: the person's branch there is not a slice. { root, branch } or null, asked once per line.
+async function workerTree($, ctx) {
+  if (!ctx.worker || !ctx.cwd) return null
+  if (ctx.tree !== undefined) return ctx.tree
+  ctx.tree = null
+  const gd = await gitOutOrThrow($, ctx.cwd, 'rev-parse', '--path-format=absolute', '--git-dir')
+  const cd = await gitOutOrThrow($, ctx.cwd, 'rev-parse', '--path-format=absolute', '--git-common-dir')
+  if (gd && cd && trimSlash(gd) !== trimSlash(cd)) ctx.tree = await checkoutOf($, ctx.cwd)
+  return ctx.tree
+}
+
+// A branch the push names that is not base-like: the run's own when it is the agt/* slice branch checked out here,
+// one of its worktrees was made on it, one of its pushes created it, it is the branch checked out where /agt was
+// typed (and the remote's default is recorded, so that branch is known not to be the base), or the remote does not
+// have it yet (then it is noted in `made`, for bashCall to record once the push ran). One the remote already has
+// is someone else's (feat/* and fix/* are the person's prefixes too). Returns why it is refused, or null.
+async function othersBranch($, c, name, cwd, { current = false, guessed = true, made = [], cache = new Map(), tree = null } = {}) {
+  const at = c.dir ?? cwd
+  if (current && name.startsWith('agt/')) return null
+  if (!at) return 'git push ' + name + ' (a branch this run did not make, in a repo the guard cannot place)'
+  if (await madeByRun($, at, name, cache)) return null
+  const root = await repoRoot($, at, cache)
+  const co = Worktrees.checkout
+  const typed = current && !guessed && !!co && co.branch === name && co.root === root
+  if (current && tree && tree.branch === name && tree.root === root) return null
+  const has = await remoteHas($, at, c.push.remote ?? 'origin', name)
+  if (has === 'no') {
+    if (root) made.push({ root, branch: name })
+    return null
+  }
+  if (typed) return null
+  if (has === 'unread') return 'git push ' + name + ' (a branch this run did not make, on a remote the guard could not read)'
+  return 'git push ' + name + ' (a branch the remote already has that this run did not make)'
+}
+
+// A --force-with-lease push onto an agt/* branch: only one the run owns, the slice branch checked out here or one its
+// worktrees or pushes made. Whether the remote has it does not make it the run's: another run's agt/* would be
+// overwritten. Returns why it is refused, or null.
+async function leaseOnto($, c, name, cwd, current, cache) {
+  const at = c.dir ?? cwd
+  if (current && name.startsWith('agt/')) return null
+  if (at && (await madeByRun($, at, name, cache))) return null
+  return 'git push --force-with-lease onto ' + name + ', an agt/* branch this run did not make'
+}
+
+// A merge into a branch below auto (and above local, where nothing leaves the machine): only into one the run made.
+// Merging into a branch the remote has and the run did not make, then pushing it, is the integrate step `auto`
+// owns. A merge of the branch's own upstream (`git merge origin/<branch>`, `@{u}`) only catches up. Returns why it
+// is refused, or null.
+async function mergeInto($, c, target, current, cache, tree = null) {
+  if (!target || /[$`]/.test(target) || !c.dir) return null
+  if (target.startsWith('agt/') && target === current) return null
+  if (tree && target === tree.branch && target === current && tree.root === (await repoRoot($, c.dir, cache).catch(() => null))) return null
+  const catchUp = (x) => x === '@{u}' || x === '@{upstream}' || x === 'origin/' + target || x === 'refs/remotes/origin/' + target
+  if (c.from?.length && c.from.every(catchUp)) return null
+  if (await madeByRun($, c.dir, target, cache)) return null
+  const has = await remoteHas($, c.dir, 'origin', target)
+  if (has === 'no') return null
+  return 'a merge into ' + target + ', a branch this run did not make (merging into it is the integrate step, which needs auto)'
 }
 
 
@@ -822,7 +1158,8 @@ async function aliasLine($, c) {
 // a blank or comment-only line, which runs nothing, gets through. A line that was read and named nothing to judge
 // (`echo hi`, `npm test`) has no candidates and runs; a part the lexer did not read (past its depth caps) is a
 // candidate of its own, so it never leaves the list empty.
-export async function guardLine($, line, cwd) {
+// `worker`: the line is a pane worker's, whose own slice is the branch checked out where its pane started (workerTree).
+export async function guardLine($, line, cwd, out = {}, { worker = false } = {}) {
   let cands
   try {
     cands = commandSteps(line, cwd, 0, await homes($))
@@ -831,7 +1168,8 @@ export async function guardLine($, line, cwd) {
   }
   if (!cands.length) return null
   const profile = await readProfile($)
-  return judgeCands($, cands, { profile, cwd, cache: new Map(), envRepo: undefined }, 0)
+  out.made = []
+  return judgeCands($, cands, { profile, cwd, cache: new Map(), envRepo: undefined, made: out.made, worker }, 0)
 }
 
 // Whether a line holds anything but blanks and comments.
@@ -847,7 +1185,7 @@ async function judgeCands($, cands, ctx, depth) {
     const c = aliasMoved && c0.kind === 'push' ? { ...c0, push: { ...c0.push, headMoved: true } } : c0
     if (c.kind === 'write') {
       // An ordinary write target: judged by where it lands, and only a protected landing costs a mode lookup.
-      const lbl = await resolvedProtected($, c.raw, c.path)
+      const lbl = await resolvedProtected($, c.raw, c.path, ctx.memo ??= new Map())
       if (!lbl) continue
       if ((await modeFor($, profile, { ...c, slug: null }, cwd, cache)) === 'auto') continue
       return denyProtected(lbl)
@@ -880,6 +1218,7 @@ async function judgeCands($, cands, ctx, depth) {
     }
     if (c.kind === 'protected') return denyProtected(c.what)
     if (c.kind === 'step') return DENY_INTEGRATION
+    if (c.kind === 'publish') return DENY_PUBLISH + ' Refused: ' + c.what + '.'
     if (c.kind === 'hidden') return denyHidden(c.what)
     if (c.kind === 'file') {
       const why = await fileRisk($, c)
@@ -888,25 +1227,34 @@ async function judgeCands($, cands, ctx, depth) {
     }
     if (c.kind === 'ref') {
       const current = c.dir ? (await gitOutOrThrow($, c.dir, 'symbolic-ref', '--short', '-q', 'HEAD')) || null : null
-      const why = judgeRef(c.ref, { current, bases: await basesOf($, c.dir) })
+      const why = judgeRef(c.ref, { current, bases: (await baseLike($, c.dir, 'origin', current, cache)).bases })
       if (why) return DENY_INTEGRATION + ' Refused: ' + why + '.'
       continue
     }
     if (c.kind === 'local') {
-      const current = c.branch ? null : c.dir ? (await gitOutOrThrow($, c.dir, 'symbolic-ref', '--short', '-q', 'HEAD')) || null : null
-      const why = judgeLocal(c.branch, { current, bases: await basesOf($, c.dir) })
+      const here = c.dir ? (await gitOutOrThrow($, c.dir, 'symbolic-ref', '--short', '-q', 'HEAD')) || null : null
+      const current = c.branch ? null : here
+      const tree = await workerTree($, ctx)
+      const keep = tree && c.dir && tree.root === (await repoRoot($, c.dir, cache).catch(() => null)) ? tree.branch : null
+      const why = judgeLocal(c.branch, { current, bases: (await baseLike($, c.dir, 'origin', here, cache, keep)).bases })
       if (why) return DENY_INTEGRATION + ' Refused: ' + why + '.'
+      const into = c.merge && mode !== 'local' ? await mergeInto($, c, c.branch ?? here, here, cache, tree) : null
+      if (into) return DENY_INTEGRATION + ' Refused: ' + into + '.'
       continue
     }
     if (mode === 'local') return DENY_LOCAL
     if (c.kind === 'push') {
       const claims = []
-      const why = judgePush(c.push, { ...(await pushInfo($, c, cwd, cache)), claim: (n) => claims.push(n) })
+      const tree = await workerTree($, ctx)
+      const info = await pushInfo($, c, cwd, cache, tree)
+      const why = judgePush(c.push, { ...info, claim: (n, current) => claims.push({ n, current }) })
       if (why) return DENY_PUSH + ' Refused: ' + why + '.'
-      for (const name of claims) {
-        const other = await othersBranch($, c, name, cwd)
+      for (const { n, current } of claims) {
+        const other = c.push.lease ? await leaseOnto($, c, n, cwd, current, cache) : await othersBranch($, c, n, cwd, { current, guessed: info.guessed, made: ctx.made, cache, tree })
         if (other) return DENY_PUSH + ' Refused: ' + other + '.'
       }
+      const tag = await followedTags($, c, c.dir ?? cwd, c.push.headMoved ? null : info.current)
+      if (tag) return DENY_PUSH + ' Refused: ' + tag + '.'
     }
   }
   return null

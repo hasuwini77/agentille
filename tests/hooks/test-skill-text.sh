@@ -77,4 +77,11 @@ done
 # a script injected from a CDN names an exact version
 check "every CDN URL in a prompt file is pinned" '! grep -rhoE "(cdn\.jsdelivr\.net/npm|unpkg\.com)/[^ \`\"]+" skills agents | grep -vE "/(@[a-z0-9-]+/)?[a-z0-9.-]+@[0-9]+\.[0-9]+\.[0-9]+" | grep -q .'
 
+# the lead re-enters a run from its files after a compaction, and the update check runs on compaction too
+reentry() { grep -F "compaction" skills/agt/SKILL.md | grep -F "Re-enter"; }
+check "SKILL.md has a re-entry rule" '[ -n "$(reentry)" ]'
+check "the re-entry rule names ledger.json and context-pack.md" 'reentry | grep -F "ledger.json" | grep -qF "context-pack.md"'
+check "SKILL.md never re-dispatches a finished slice" 'has skills/agt/SKILL.md "Never re-dispatch a finished slice"'
+check "a SessionStart hook fires on compact" 'grep -qE "\"matcher\": *\"[^\"]*compact" hooks/hooks.json'
+
 [ "$bad" = 0 ] && echo "skill-text: $n checks pass" || { echo "skill-text: $bad of $n checks fail"; exit 1; }

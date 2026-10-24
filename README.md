@@ -220,7 +220,7 @@ One tag a day at most and fixes batched into the next minor. From v3.23.0 (2026-
 Before you type anything the mod does four small things:
 
 - it draws its band above the prompt and, under `display.highlight: on` or `all`, lights replies;
-- once a day at session start it checks this repo for a newer version (see Network);
+- at session start and after a compaction its hook runs the version check, which fetches at most once a day (see Network);
 - at session start it closes finished `agt-*` panes a dead lead left behind;
 - and it registers its pane tools only on a turn where you typed for them (see Panes).
 
@@ -233,7 +233,7 @@ Everything else waits for a typed `/agt`, `/storm` or a session ask. When you do
   - The run-end tidy and `/agt-clean` remove only merged, clean `agt/*` worktrees this session's runs made, and never one made under 10 minutes ago or with no commits of its own.
   - Copied `.env*` files are deleted from every worktree the run made when it ends, whatever the branch; only untracked copies git ignores go, a tracked or un-ignored `.env.example` stays.
 - **In your home:** `~/.agentille/state/run-<id>/` (plan, checkpoints, every agent's report, `report.md`), `~/.agentille/profile.json` when you save a setting, and `~/.agentille/.update-check.json`.
-- **Network:** once a day at session start the hook fetches this repo's `plugin.json` from GitHub to compare versions (3 s timeout, nothing sent). `AGENTILLE_UPDATE_CHECK=0` turns it off.
+- **Network:** the hook runs at session start and after a compaction, and at most once a day it fetches this repo's `plugin.json` from GitHub to compare versions (3 s timeout, nothing sent). `AGENTILLE_UPDATE_CHECK=0` turns it off.
   - Research agents (`/storm`) read the web.
   - An executor whose worktree has no `node_modules` to copy runs the project's own install, and the security reviewer runs `npm audit`; both reach the package registry.
   - Nothing else goes out.

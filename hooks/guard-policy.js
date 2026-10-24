@@ -429,7 +429,27 @@ export async function resolvedProtected($, raw, abs) {
   if (spelled || !abs) return spelled
   const real = await landing($, abs)
   if (real === DANGLING) return 'a link that leads nowhere (' + raw + ')'
-  return real && real !== abs ? protectedPath('', real, hs) : null
+  const landed = real && real !== abs ? protectedPath('', real, hs) : null
+  if (landed) return landed
+  return (await inHooksDir($, abs, typeof real === 'string' ? real : null)) ? 'the hooks folder git runs (core.hooksPath)' : null
+}
+
+// Whether a write lands in the hooks folder git runs for the repo it is in: core.hooksPath when the repo sets one
+// (`.husky`, as husky does), else .git/hooks (protected by name already). Asked of git from the nearest folder that
+// exists; a folder in no repo has no hooks.
+async function inHooksDir($, abs, real) {
+  let d = abs.slice(0, abs.lastIndexOf('/')) || '/'
+  for (let i = 0; i < 16; i++) {
+    if ((await $.fs.stat(d).catch(() => null))?.kind === 'dir') break
+    if (d === '/') return false
+    d = d.slice(0, d.lastIndexOf('/')) || '/'
+  }
+  const r = await $.process.run(['git', '-C', d, 'rev-parse', '--path-format=absolute', '--git-path', 'hooks'], PROBE).catch(() => null)
+  const hooks = r && r.exitCode === 0 ? String(r.stdout ?? '').trim().replace(/\/+$/, '').toLowerCase() : ''
+  if (!hooks.startsWith('/')) return false
+  const under = (p) => !!p && (p.toLowerCase() === hooks || p.toLowerCase().startsWith(hooks + '/'))
+  const realD = (await $.fs.stat(d, { resolve: true }).catch(() => null))?.realPath
+  return under(abs) || under(real) || under(realD ? realD.replace(/\/+$/, '') + abs.slice(d.length) : null)
 }
 
 

@@ -431,7 +431,7 @@ describe('guard: worktree adds', () => {
 // A run in a session with no pane transport: the ownership list lives in memory.
 // git: per dir, the branch checked out (`current`), its remote URL and its main checkout (default /work/repo).
 type Repo = { current?: string; remote?: string; common?: string; pushurl?: string; upstream?: string }
-const setup = (on: any, o: { profile?: unknown; repoConfig?: unknown; env?: Record<string, string>; files?: Record<string, string>; repos?: Record<string, Repo>; feat?: boolean; broken?: boolean; aliases?: Record<string, string>; aliasBroken?: boolean; pyFind?: Record<string, string> } = {}) => {
+const setup = (on: any, o: { profile?: unknown; repoConfig?: unknown; env?: Record<string, string>; files?: Record<string, string>; repos?: Record<string, Repo>; feat?: boolean; broken?: boolean; aliases?: Record<string, string>; aliasBroken?: boolean; pyFind?: Record<string, string>; hooksPath?: string } = {}) => {
   const seen: string[][] = []
   const ran: string[] = []
   const git = { made: false, committed: false, feat: false }
@@ -504,6 +504,8 @@ const setup = (on: any, o: { profile?: unknown; repoConfig?: unknown; env?: Reco
     }
     if (a.includes('remote get-url --push')) return repos[dir]?.pushurl || repos[dir]?.remote ? out((repos[dir].pushurl || repos[dir].remote) + '\n') : out('', 2)
     if (a.includes('@{push}')) return out('', 128)
+    // The hooks folder git runs: core.hooksPath when the test sets one, else the repo's .git/hooks.
+    if (a.includes('--git-path hooks')) return out((o.hooksPath ?? '/work/repo/.git/hooks') + '\n')
     if (a.includes('rev-parse --path-format=absolute --git-common-dir') && repos[dir]?.common) return out(repos[dir].common + '\n')
     if (a.includes('symbolic-ref')) return out('', 1)
     if (a.includes('branch --merged')) return out('agt/other\n' + (git.made ? 'agt/x\n' : ''))
@@ -1510,5 +1512,20 @@ describe('guard: variables that make git run a program', () => {
       'GIT_CONFIG_GLOBAL=/dev/null git status',
       'GIT_EXTERNAL_DIFF=./d echo not git',
     ]) expect([line, integrationIn(line, onSlice)]).toEqual([line, null])
+  })
+})
+
+describe('guard: the hooks folder the repo sets is protected like .git/hooks', () => {
+  test('with core.hooksPath set, a Write, Edit or Bash write into that folder is refused; the folder next to it is not', async ($, on) => {
+    const { ran } = setup(on, { profile: { integration: 'pr' }, hooksPath: '/work/repo/.husky' })
+    await boot($)
+    await typed($)
+    expect((await $.tool.call({ tool: 'Write', file_path: '/work/repo/.husky/post-commit', content: 'git push origin agt/x:main' } as never)).deny).toContain('core.hooksPath')
+    expect((await $.tool.call({ tool: 'Edit', file_path: '/work/repo/.husky/pre-push', old_string: 'a', new_string: 'b' } as never)).deny).toContain('core.hooksPath')
+    expect((await bash($, "printf 'git push origin agt/x:main' > .husky/prepare-commit-msg")).deny).toContain('core.hooksPath')
+    expect((await bash($, 'cp hook /work/repo/.HUSKY/pre-commit')).deny).toContain('core.hooksPath')
+    expect((await $.tool.call({ tool: 'Write', file_path: '/work/repo/.husky-notes.md', content: 'x' } as never))?.deny).toBeUndefined()
+    expect((await bash($, 'echo x > tools/hook.md')).result).toBe('ok')
+    expect(ran.filter(Boolean)).toEqual(['echo x > tools/hook.md'])
   })
 })

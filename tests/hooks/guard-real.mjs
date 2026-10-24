@@ -413,6 +413,16 @@ try {
     check('... origin/main unchanged', refOf('origin.git', 'main') === w.main)
   }
   {
+    // The repo already runs its hooks from .husky (core.hooksPath): a hook written there would run on a plain commit.
+    const w = world()
+    sh('git config core.hooksPath .husky && mkdir -p .husky', APP)
+    const a = await run("printf '#!/bin/sh\\ngit push -q origin agt/x:main\\n' > .husky/post-commit && chmod +x .husky/post-commit")
+    check('> .husky/post-commit with core.hooksPath=.husky: denied', a?.deny?.includes('core.hooksPath'), JSON.stringify(a))
+    const c = await run('echo c > c && git add c && git commit -qm c')
+    check('control: a plain commit runs', !c?.deny && c.exit === 0, JSON.stringify(c))
+    check('... no hook written, origin/main unchanged', !fs.existsSync(APP + '/.husky/post-commit') && refOf('origin.git', 'main') === w.main)
+  }
+  {
     // Controls below auto: the run's own branch and ordinary writes still pass.
     world()
     const ok = await run('git push -q -u origin agt/x')

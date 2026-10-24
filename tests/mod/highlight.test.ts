@@ -317,7 +317,7 @@ describe('highlight: in the mod', () => {
   }
   const start = ($: any) => $.session.start({ cwd: '/w', surface: null, isInteractive: false })
   const display = (files: Record<string, string>) => JSON.parse(files['/u/.agentille/profile.json']).display
-  const say = ($: any, text: string, origin?: any) => $.prompt.submit({ text, wait: false, ...(origin ? { origin } : {}) })
+  const say = ($: any, text: string, origin: any = { kind: 'composer' }) => $.prompt.submit({ text, wait: false, origin })
   const mount = ($: any, requestId: string, text = REPLY) =>
     $.ui.mount({ plugin: 'agentille', surface: 'terminal', component: 'AssistantMessage', requestId, props: { text } as never })
 

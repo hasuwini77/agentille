@@ -9,7 +9,7 @@ import { SAFE_RUN, PROBE, SPAWN_ROLE, splitName, doneFile, paneKey, answerFile, 
 import { closeSession, forgetSession } from './sessions.js'
 import { pruneTabs } from './spawn.js'
 import { wakeDue, wakeMessage } from './wire.js'
-const { runs, live, paneRoutes, restingSince, staged, paneSeen, harvested, wireDone, woken, strandedNow, strandedToasted, firstSeen, ownedTabs } = S
+const { runs, live, paneRoutes, restingSince, staged, paneSeen, harvested, wireDone, woken, strandedNow, strandedToasted, firstSeen, openedNames } = S
 
 // A pane that left the list takes its bookkeeping with it, so a reused pane id never inherits a harvest.
 export function forgetGone(listed) {
@@ -110,18 +110,18 @@ export async function pollHerdr($) {
   S.selfName = me && typeof me.name === 'string' && me.name.startsWith('agt-') ? me.name : null
   S.selfTab = me?.tab_id ?? null
   S.selfWorkspace = me?.workspace_id ?? S.selfWorkspace
-  // Show the workspace's agt-* panes; reap only the lead's own tab, where herdr mode
-  // splits its workers. Workers (panes that are themselves agt-*) never reap.
+  // A lead sees, reaps and wakes for the panes it opened (openedNames, by name: the run id is random), never
+  // another session's workers in the same tab. Workers (panes that are themselves agt-*) see their siblings and never reap.
   const real = paneAgents(list, selfPane).filter((p) => !me || p.workspace === me.workspace_id)
-  S.panes = quietSpawn(real) // the band shows a spawn pane as `open`; the reaper below sees its real state
+  const owned = S.selfName ? real : real.filter((p) => openedNames.has(p.name))
+  S.panes = quietSpawn(owned) // the band shows a spawn pane as `open`; the reaper below sees its real state
   const now = await $.clock.now()
   for (const p of S.panes) if (!firstSeen.has(p.id)) firstSeen.set(p.id, now)
   forgetGone(S.panes)
   await notePaneExits($)
   if (me && !S.selfName) {
     await pruneTabs($, me.workspace_id)
-    const mine = real.filter((p) => p.tab === me.tab_id || ownedTabs.has(p.tab))
-    await sweep($, reapPool(mine), now, 'herdr', (p) => $.process.run(herdrCloseArgv(p.id)))
+    await sweep($, reapPool(owned), now, 'herdr', (p) => $.process.run(herdrCloseArgv(p.id)))
     // A session with no agent listed is a shell or a pane closed by hand: only a gone one is forgotten.
     for (const s of S.sessions.filter((x) => !list.some((a) => a.name === x.name))) {
       const g = await $.process.run(herdrPaneGetArgv(s.id), PROBE).catch(() => null)
@@ -149,10 +149,10 @@ export async function pollTmux($) {
   const selfPane = (await $.env.get('TMUX_PANE')) ?? null
   const me = rows.find((r) => r.id === selfPane)
   S.selfName = me && me.agt.startsWith('agt-') ? me.agt : null
-  // Window-scope first: no file is read for a pane this lead does not own. A done-file counts
+  // Window-scope first, then ownership: no file is read for a pane this lead did not open. A done-file counts
   // only if it was written after the pane was first listed.
   const now = await $.clock.now()
-  const scoped = me ? scopeRows(rows, selfPane) : []
+  const scoped = me ? scopeRows(rows, selfPane).filter((r) => S.selfName || openedNames.has(r.agt)) : []
   for (const r of scoped) if (!firstSeen.has(r.id)) firstSeen.set(r.id, now)
   forgetGone(rows)
   const done = new Map()
@@ -167,7 +167,7 @@ export async function pollTmux($) {
       // missing or unreadable counts as not done
     }
   }
-  const real = tmuxPaneAgents(rows, selfPane, done)
+  const real = tmuxPaneAgents(rows, selfPane, done).filter((p) => S.selfName || openedNames.has(p.name))
   S.panes = quietSpawn(real)
   await notePaneExits($)
   if (isLead(rows, selfPane)) {
@@ -179,6 +179,26 @@ export async function pollTmux($) {
 export async function pollNow($, t) {
   if (t === 'herdr') await pollHerdr($)
   else if (t === 'tmux') await pollTmux($)
+}
+
+// A worker's answer is on disk: its own instance file, the legacy pane-<role>.md, or its done marker. The orphan
+// cleaner closes only such panes; a finished pane whose output exists only on its screen stays and is named.
+export async function savedAnswer($, name, id) {
+  const n = splitName(name)
+  if (!n) return false
+  for (const f of [answerFile(S.home, n.run, n.role, paneKey(id)), answerFile(S.home, n.run, n.role), doneFile(S.home, n.run, n.role)]) {
+    if (f && (await $.fs.exists(f).catch(() => false))) return true
+  }
+  return false
+}
+
+async function withAnswer($, plan) {
+  const close = []
+  for (const p of plan.close) {
+    if (p.state === 'dead' || (await savedAnswer($, p.name, p.id))) close.push(p)
+    else plan.keep.push({ what: p.name, why: p.state + ', answer not saved' })
+  }
+  return close
 }
 
 // ── the cleaner ──────────────────────────────────────────────────────────────
@@ -201,10 +221,13 @@ export async function cleanWorkspace($, { all = false, auto = false, panesOnly =
     const tabs = new Map()
     for (const k of keys) tabs.set(k, String(await $.fs.read(dir + '/lead-' + k + '.tabs').catch(() => '')).split('\n').filter(Boolean))
     const plan = orphanPlan(herdrOrphans(list, (id) => tabs.get(paneKey(id))))
-    const close = [...plan.close, ...(all ? S.panes.filter((p) => strandedNow.has(p.id) && !plan.close.some((c) => c.id === p.id)) : [])]
+    const close = [...(await withAnswer($, plan)), ...(all ? S.panes.filter((p) => strandedNow.has(p.id) && !plan.close.some((c) => c.id === p.id)) : [])]
     for (const p of close) if ((await run(herdrCloseArgv(p.id)))?.exitCode === 0) r.closed.push(p.name)
     r.keep.push(...plan.keep)
     for (const k of staleTabs(keys, list, paneKey)) if ((await run(['rm', '-f', dir + '/lead-' + k + '.tabs']))?.exitCode === 0) r.tabs += 1
+    // A dead lead's pane list goes with its tabs file; its panes are judged by the orphan rule above.
+    const paneKeys = dir ? (await $.fs.list(dir).catch(() => [])).map((f) => f.name).filter((n) => /^lead-[\w-]+\.panes$/.test(n)).map((n) => n.slice(5, -6)) : []
+    for (const k of staleTabs(paneKeys, list, paneKey)) await run(['rm', '-f', dir + '/lead-' + k + '.panes'])
     // A lead that died skipped its SessionEnd sweep: close its idle sessions, then drop its list.
     const sessKeys = dir ? (await $.fs.list(dir).catch(() => [])).map((f) => f.name).filter((n) => /^lead-[\w-]+\.sessions$/.test(n)).map((n) => n.slice(5, -9)) : []
     for (const k of staleTabs(sessKeys, list, paneKey)) {
@@ -223,7 +246,7 @@ export async function cleanWorkspace($, { all = false, auto = false, panesOnly =
       if (file && (await $.fs.exists(file).catch(() => false))) done.add(row.id)
     }
     const plan = orphanPlan(tmuxOrphans(rows, (row) => done.has(row.id)))
-    const close = [...plan.close, ...(all ? S.panes.filter((p) => strandedNow.has(p.id) && !plan.close.some((c) => c.id === p.id)) : [])]
+    const close = [...(await withAnswer($, plan)), ...(all ? S.panes.filter((p) => strandedNow.has(p.id) && !plan.close.some((c) => c.id === p.id)) : [])]
     for (const p of close) if ((await run(tmuxKillArgv(p.id)))?.exitCode === 0) r.closed.push(p.name)
     r.keep.push(...plan.keep)
   }

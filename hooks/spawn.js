@@ -3,9 +3,9 @@
 // registration on the typed prompt that unlocks them.
 
 import { S } from './state.js'
-import { PROBE, HERDR_START_TIMEOUT, pickTransport, splitName, paneKey, answerFile, advisorEnv, tmuxSplitArgv, tmuxEvenArgv, tmuxTagArgvs, tmuxPaneIdOf, tmuxKillArgv, herdrSplitArgv, herdrPaneIdOf, herdrTabArgv, herdrTabOf, herdrTabListArgv, herdrTabIds, tabsFile, startupDialog, dialogKeys, herdrReadArgv, herdrKeysArgv, agentStatusOf, herdrGetArgv, screenLine, codexTask, herdrStartArgv, herdrPromptArgv, herdrCloseArgv, herdrMetaArgv, SPAWN_TOOL, CLOSE_TOOL, OPEN_SESSIONS_TOOL } from './panes.js'
+import { PROBE, HERDR_START_TIMEOUT, pickTransport, splitName, paneKey, answerFile, advisorEnv, tmuxSplitArgv, tmuxEvenArgv, tmuxTagArgvs, tmuxPaneIdOf, tmuxKillArgv, herdrSplitArgv, herdrPaneIdOf, herdrTabArgv, herdrTabOf, herdrTabListArgv, herdrTabIds, tabsFile, panesFile, startupDialog, dialogKeys, herdrReadArgv, herdrKeysArgv, agentStatusOf, herdrGetArgv, screenLine, codexTask, herdrStartArgv, herdrPromptArgv, herdrCloseArgv, herdrMetaArgv, SPAWN_TOOL, CLOSE_TOOL, OPEN_SESSIONS_TOOL } from './panes.js'
 import { wireEnv, shortName } from './wire.js'
-const { ownedTabs } = S
+const { ownedTabs, openedNames } = S
 
 export async function probeOk($, argv) {
   try {
@@ -33,6 +33,25 @@ export async function transportOf($) {
 export async function saveTabs($) {
   const file = tabsFile(S.home, await $.env.get('HERDR_PANE_ID'))
   if (file) await $.fs.write(file, [...ownedTabs].map((t) => t + '\n').join('')).catch(() => {})
+}
+
+// The lead's pane id in this transport: where its tabs, panes and sessions files are keyed.
+export async function leadPane($) {
+  return (await transportOf($)) === 'tmux' ? await $.env.get('TMUX_PANE') : await $.env.get('HERDR_PANE_ID')
+}
+
+// The worker panes this lead opened, one name per line, where the SessionEnd sweep reads them. Ownership is by
+// name (agt-<run>-<role>, the run id is random), so a restarted lead takes its own panes back and no other.
+export async function savePanes($) {
+  const file = panesFile(S.home, await leadPane($))
+  if (file) await $.fs.write(file, [...openedNames].map((n) => n + '\n').join('')).catch(() => {})
+}
+
+export async function loadOwned($) {
+  const file = panesFile(S.home, await leadPane($))
+  if (!file) return
+  const text = await $.fs.read(file).catch(() => '')
+  for (const n of String(text ?? '').split('\n')) if (splitName(n)) openedNames.add(n)
 }
 
 // A run tab herdr no longer lists is gone (its last pane closed): forget it.

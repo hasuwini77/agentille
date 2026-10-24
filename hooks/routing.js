@@ -51,6 +51,8 @@ export function parseHeader(prompt) {
     const i = pair.indexOf('=')
     if (i > 0) h[pair.slice(0, i)] = pair.slice(i + 1)
   }
+  // `slice=<slug>` is the docs' name for `piece=`: both parse, and `piece=` wins when a header carries the two.
+  if (h.slice !== undefined && h.piece === undefined) h.piece = h.slice
   return h
 }
 

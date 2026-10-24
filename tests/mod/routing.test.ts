@@ -1,5 +1,6 @@
 import { describe, expect, mock, test } from 'claude-code/testing'
 import { DEFAULTS, asksSessions, decide, demoteHeaderText, formationOf, ladderFixes, mentionsFable, parseHeader, proveHeader, roleOf, typedFable, verdictOf } from '../../hooks/routing.js'
+import { pieceOf } from '../../hooks/links.js'
 
 const fresh = () => ({ revise: 0, fixes: 0, fable: 0 })
 const S = { autoFable: true, maxFablePerRun: 1, fableWeeklyCeiling: 60 }
@@ -8,6 +9,15 @@ describe('policy', () => {
   test('parses the dispatch header', async () => {
     expect(parseHeader('[agt run=a1 size=large risk=auth mode=fix fable=auto]\nBuild it')).toEqual({ run: 'a1', size: 'large', risk: 'auth', mode: 'fix', fable: 'auto' })
     expect(parseHeader('Build it')).toBe(null)
+  })
+
+  test('slice=<slug> is an alias of piece=: both name the slice, piece= wins when a header has both', async () => {
+    expect(parseHeader('[agt run=a1 mode=build slice=api]')).toMatchObject({ piece: 'api', slice: 'api' })
+    expect(parseHeader('[agt run=a1 mode=build piece=api]')).toMatchObject({ piece: 'api' })
+    expect(parseHeader('[agt run=a1 piece=api slice=ui]')!.piece).toBe('api')
+    expect(pieceOf(parseHeader('[agt run=a1 slice=search-ui]'))).toBe('search-ui')
+    expect(pieceOf(parseHeader('[agt run=a1 piece=search-ui]'))).toBe('search-ui')
+    expect(pieceOf(parseHeader('[agt run=a1 mode=build]'))).toBe(null)
   })
 
   test('only agentille roles are routed', async () => {

@@ -27,13 +27,16 @@ delete env.TMUX
 delete env.TMUX_PANE
 // Every tmux call the mod makes goes to the private server: its argv names no socket, so the host adds one.
 const argvOf = (argv) => (argv[0] === 'tmux' ? ['tmux', '-L', sock, ...argv.slice(1)] : argv)
-const run = (argv) => {
+// The mod's calls run as the host runs them: the test's env with init.env merged on top. Nothing here adds a locale
+// for the mod, so a C-locale pass (test-tmux-real.sh runs one) only passes when the mod sets one itself.
+const run = (argv, init) => {
   const a = argvOf(argv)
-  const r = spawnSync(a[0], a.slice(1), { env, encoding: 'utf8', timeout: 10_000 })
+  const r = spawnSync(a[0], a.slice(1), { env: { ...env, ...init?.env }, encoding: 'utf8', timeout: 10_000 })
   if (r.error) throw r.error
   return { exitCode: r.status ?? 1, stdout: r.stdout, stderr: r.stderr }
 }
-const tmux = (...a) => run(['tmux', ...a])
+// The driver's own reads ask for the UTF-8 locale, so its tab-joined listing parses in any shell.
+const tmux = (...a) => run(['tmux', ...a], { env: { LC_ALL: 'C.UTF-8' } })
 const socketPath = tmux('display-message', '-p', '-t', leadPane, '#{socket_path}').stdout.trim()
 
 const vars = { HOME: home, TMUX: socketPath + ',' + process.pid + ',0', TMUX_PANE: leadPane, SHELL: '/bin/sh' }
@@ -41,7 +44,7 @@ const registered = []
 const store = new Map()
 const idle = () => ({ cancel() {} }) // no timers: the driver polls by hand, and node must exit when it is done
 const $ = {
-  process: { run: async (argv) => run(argv) },
+  process: { run: async (argv, init) => run(argv, init) },
   env: { get: async (name) => vars[name] ?? null },
   fs: {
     read: async (p) => fs.readFile(p, 'utf8'),

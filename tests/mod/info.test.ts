@@ -81,6 +81,12 @@ describe('info: route dry-run', () => {
     expect(route('code-reviewer', { size: 'large' })).toContain('past maxRunUsd $15.00') // the default ceiling
   })
 
+  test('with stopAtCeiling on, the dry-run shows every role, the executor included, denied past the ceiling', () => {
+    const on = { ...DEFAULTS, maxRunUsd: 5, stopAtCeiling: true } as never
+    expect(route('executor', {}, null, on)).toMatch(/past maxRunUsd \$5\.00\s+denied \(routing\.stopAtCeiling\)/)
+    expect(route('code-reviewer', { size: 'large' }, null, on)).toMatch(/past maxRunUsd \$5\.00\s+denied \(routing\.stopAtCeiling\)/)
+  })
+
   test('a role with no ladder says so', () => {
     expect(route('seo-reviewer')).toContain('no escalation rungs for this role')
   })

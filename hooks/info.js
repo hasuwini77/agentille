@@ -42,7 +42,7 @@ export function parseInfoArgs(args) {
   return { view: 'route', role, hdr, depth }
 }
 
-const pick = (d) => d.model + (d.effort ? ' · ' + d.effort : '') + ' · ' + d.reason
+const pick = (d) => (d.stop ? 'denied (routing.stopAtCeiling)' : d.model + (d.effort ? ' · ' + d.effort : '') + ' · ' + d.reason)
 
 // Dry-run of decide() with fresh run state under the person's routing settings, then each escalation
 // rung that changes the pick. Nothing here touches a live run.
@@ -57,7 +57,7 @@ export function routeText({ role, hdr = {}, depth = null }, settings, weeklyPct 
     ['fix attempt 3', ask({ ...hdr, mode: 'fix' }, { fixes: 3 })],
     ['diagnose, 2 failed fixes', ask({ ...hdr, mode: 'diagnose' }, { fixes: 2 })],
     ...(maxRunUsdOf(settings) == null ? [] : [['past maxRunUsd ' + usd(maxRunUsdOf(settings)), ask(hdr, { usd: maxRunUsdOf(settings) })]]),
-  ].filter(([, d]) => d.model !== base.model || d.effort !== base.effort || d.reason !== base.reason)
+  ].filter(([, d]) => d.stop || d.model !== base.model || d.effort !== base.effort || d.reason !== base.reason)
   const lines = [head + ' → ' + pick(base)]
   if (rungs.length === 0) lines.push('  no escalation rungs for this role')
   for (const [label, d] of rungs) lines.push('  ' + label.padEnd(26) + pick(d))

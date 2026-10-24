@@ -10,7 +10,8 @@ import { Runs, writeRunFile, endPaneRoute } from './dispatch.js'
 import { paneAgents, reapPlan, ledger, panesLeft } from './live.js'
 import { SAFE_RUN, PROBE, SPAWN_ROLE, splitName, doneFile, paneKey, answerFile, parseTmuxList, scopeRows, isFreshDone, quietSpawn, tmuxPaneAgents, rowIsLead, TMUX_LIST_ARGV, reapPool, tmuxKillArgv, herdrCloseArgv, herdrPaneGetArgv, herdrTerminalOf, SESSION_IDLE_MS, sessionSweep } from './panes.js'
 import { Sessions, closeSession, forgetSession } from './sessions.js'
-import { Spawn, pruneTabs } from './spawn.js'
+import { Spawn, pruneTabs, runTmux } from './spawn.js'
+import { tmuxInit } from './tmux-env.js'
 import { wakeDue, wakeMessage } from './wire.js'
 import * as P from './panerec.js'
 const { restingSince, staged, strandedNow } = P
@@ -143,7 +144,7 @@ export async function pollHerdr($) {
 export async function pollTmux($) {
   let rows = []
   try {
-    const r = await $.process.run(TMUX_LIST_ARGV, PROBE)
+    const r = await runTmux($, TMUX_LIST_ARGV)
     if (r.exitCode !== 0) return
     rows = parseTmuxList(r.stdout)
   } catch {
@@ -174,7 +175,7 @@ export async function pollTmux($) {
   my.panes = quietSpawn(real)
   await notePaneExits($)
   if (rowIsLead(rows, selfPane)) {
-    await sweep($, reapPool(real), now, 'tmux', (p) => $.process.run(tmuxKillArgv(p.id), PROBE))
+    await sweep($, reapPool(real), now, 'tmux', (p) => runTmux($, tmuxKillArgv(p.id)))
   }
   $.ui.invalidate('ui.render')
 }
@@ -213,7 +214,7 @@ async function withAnswer($, plan) {
 // Clean means done/idle/dead panes, merged branches and clean checkouts only; the rest is reported, never touched.
 export async function cleanWorkspace($, { all = false, auto = false, panesOnly = false } = {}) {
   const r = { closed: [], tabs: 0, removed: [], branches: [], runs: 0, keep: [] }
-  const run = (argv) => $.process.run(argv, PROBE).catch(() => null)
+  const run = (argv) => $.process.run(argv, tmuxInit(argv, PROBE)).catch(() => null)
   if (Spawn.transport === 'herdr') {
     const res = await run(['herdr', 'agent', 'list'])
     let list = []

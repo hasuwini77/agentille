@@ -3,6 +3,8 @@
 # socket (-L agt-test-<pid>, socket dir under a mktemp dir), HOME pointed at that dir, and a placeholder `claude`
 # (exec sleep 30) first on the server's PATH, so the pane never starts the CLI. Asserts the pane appears in
 # `tmux list-panes` as agt-<run>-<role> and is gone after close_pane, then kills the private server.
+# The checks run twice: once in the caller's shell, then once more under `env -i` with only PATH and HOME, so no
+# LANG or LC_* is set. tmux then prints `_` for a tab in its own output unless the mod asks for a UTF-8 locale.
 # Exit 0 = all checks pass; exit 3 with a `SKIP: <reason>` line = tmux or node 22.7+ missing
 # (scripts/validate.sh: a WARN on a developer machine, a FAIL under CI=true).
 set -u
@@ -17,6 +19,7 @@ if [ "$(node -p 'const [a,b]=process.versions.node.split(".").map(Number); a>22|
   echo "SKIP: tmux-real needs node 22.7 or newer (node $(node -v 2>/dev/null))"; exit 3
 fi
 # mktemp -d, not a long scratch path: a unix socket path is capped at about 104 bytes on macOS.
+ORIG_PATH=$PATH ORIG_HOME=$HOME
 T=$(mktemp -d); T=$(cd "$T" && pwd -P)
 SOCK="agt-test-$$"
 export TMUX_TMPDIR="$T" HOME="$T/home"
@@ -40,4 +43,9 @@ done <<< "$dout"
 n=$((n+1)); if [ "$drc" = 0 ] || [ "$bad" -gt 0 ]; then :; else bad=$((bad+1)); echo "FAIL the driver exited $drc:"; printf '%s\n' "$dout" | tail -5; fi
 # Nothing of the run may land outside the test HOME, and the private server holds only the lead again.
 n=$((n+1)); [ "$(t list-panes -a -F '#{pane_id}')" = "$LEAD" ] || { bad=$((bad+1)); echo "FAIL the private server still holds a worker pane"; }
-[ "$bad" = 0 ] && echo "tmux-real: $n checks pass" || { echo "tmux-real: $bad of $n checks fail"; exit 1; }
+if [ -n "${AGT_TMUX_REAL_C_LOCALE:-}" ]; then where=" (C locale)"; else where=""; fi
+[ "$bad" = 0 ] && echo "tmux-real$where: $n checks pass" || { echo "tmux-real$where: $bad of $n checks fail"; exit 1; }
+# The second pass: a fresh shell with no locale at all. Its own server, HOME and trap; its exit code is this one's.
+[ -n "${AGT_TMUX_REAL_C_LOCALE:-}" ] && exit 0
+t kill-server >/dev/null 2>&1; rm -rf "$T"; trap - EXIT
+exec env -i PATH="$ORIG_PATH" HOME="$ORIG_HOME" AGT_TMUX_REAL_C_LOCALE=1 bash "$ROOT/tests/hooks/test-tmux-real.sh"

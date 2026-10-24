@@ -9,10 +9,11 @@ import { PROBE, newRunId, doneFile, paneKey, answerFile, tmuxKillArgv, placePlan
 import { installedSkew } from './profile.js'
 import { pollNow } from './reaper.js'
 import { spawnAllowed, sessionsAllowed, fableProof, moment, startRun, agtTurnFromDispatch, flight } from './proofs.js'
-import { mentionsCodex, mentionsFable, proveHeader, demoteHeaderText, ladderFixes, decide } from './routing.js'
+import { mentionsCodex, mentionsFable, proveHeader, demoteHeaderText, ladderFixes, decide, formationOf, runStop } from './routing.js'
 import { saveSessions, closeSession, openSession, addSession } from './sessions.js'
 import { skewMessage } from './skew.js'
 import { transportOf, openPane, savePanes, ownName } from './spawn.js'
+import { tmuxInit } from './tmux-env.js'
 import { ensurePolling, ensureTicker } from './ticker.js'
 import { shortName } from './wire.js'
 import { noteWire } from './worker.js'
@@ -70,6 +71,9 @@ export async function spawnPane($, e) {
   // The ceiling counts this run's subagents and its pane workers (estimated from their minutes open).
   const spent = runSpend(a.run)
   const d = codex ? { model: 'codex', effort: '', reason: 'table', fable: false } : decide({ role: a.agent, hdr: a.hdr, run: { ...run, fixes, usd: spent }, depth: Profile.depth, settings: Profile.settings, weeklyPct: Session.weeklyPct })
+  // routing.stopAtCeiling: a run at its ceiling opens no more panes, a Codex one included.
+  const stop = d.stop ?? runStop({ usd: spent }, Profile.settings)
+  if (stop) return { deny: stop }
   const r = paneRole(a.agent)
   if (!r.pane) return { deny: r.why }
   await pollNow($, t)
@@ -179,7 +183,8 @@ export async function closePane($, e) {
   const c = closeTarget(e, Panes.panes, t === 'herdr' && Session.selfTab ? [Session.selfTab, ...Spawn.ownedTabs] : null, Spawn.openedNames)
   if (c.gone) return { result: c.gone + ' is already closed (the reaper closed it after its answer was saved).' }
   if (c.error) return { deny: c.error }
-  const r = await $.process.run(t === 'herdr' ? herdrCloseArgv(c.pane.id) : tmuxKillArgv(c.pane.id), PROBE).catch(() => null)
+  const kill = t === 'herdr' ? herdrCloseArgv(c.pane.id) : tmuxKillArgv(c.pane.id)
+  const r = await $.process.run(kill, tmuxInit(kill, PROBE)).catch(() => null)
   if (!r || r.exitCode !== 0) return { deny: 'Could not close ' + c.pane.name + '.' }
   P.harvest(c.pane.id)
   await pollNow($, t)

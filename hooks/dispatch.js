@@ -9,7 +9,7 @@ import { reportRun, reportTail } from './drawing.js'
 import { sliceOf, party, taskLine } from './links.js'
 import { newAgent, short, ledger, ledgerText, addUsage, finish, endRoute } from './live.js'
 import { SAFE_RUN, splitName } from './panes.js'
-import { formationOf, roleOf, parseHeader, proveHeader, demoteHeaderText, ladderFixes, decide, executorsWorking, executorCapFlag, estimateRunUsd, maxRunUsdOf, usd } from './routing.js'
+import { formationOf, roleOf, parseHeader, proveHeader, demoteHeaderText, ladderFixes, decide, executorsWorking, executorCapFlag, estimateRunUsd, leadUsd, maxRunUsdOf, usd } from './routing.js'
 import { addFlag } from './display.js'
 import { noteWire } from './worker.js'
 import { Proofs, agtTurnFromDispatch } from './proofs.js'
@@ -24,6 +24,8 @@ const { s: my, view, raw } = makeStore('dispatch.js', {
   decisions: [],  // this session, for /agt-info routing
   paneRoutes: [],  // PaneRoute[], append-only: how each worker this lead opened was routed
   sessionRun: null,  // the run session-<session id>.run names (markRun)
+  lead: new Map(),  // run id → { input, output, cacheRead, model }: the lead's own main-loop tokens on that run
+  leadPending: null,  // { at, input, output, cacheRead, model }: the typed /agt's tokens before its run had an id
 })
 export const Runs = view
 ctxSource({ runs: view })
@@ -144,9 +146,41 @@ export function ceilingOnce($, runId, spent, role, d) {
   addFlag($, 'ceiling|' + runId, 'run ' + runId + ': ~' + usd(spent) + ' spent, past maxRunUsd ' + usd(maxRunUsdOf(Profile.settings)) + '; ' + role + ' ' + (d.from ?? 'opus') + ' → sonnet, and every later Opus or Fable planner, reviewer, ui-prototyper and adversary runs Sonnet (the executor keeps its route)')
 }
 
-// The run's spend so far for the ceiling, subagents and pane workers alike, or null when no ceiling is set.
+// One main-loop step of the lead (turn.step with no agentId): its tokens count toward the run it works on. Only a
+// turn that is part of an /agt run counts. Until the typed /agt names its run (its first pane or routed dispatch),
+// its steps wait in leadPending, keyed by the typed /agt's clock; the first step after the run has an id files them
+// under it. A newer typed /agt drops what an older one left pending. `p` is the proof state (Proofs by default).
+export function addLeadUsage(u, model, p = Proofs) {
+  if (!u || !p.agtTurn) return
+  const add = (t) => {
+    t.input += (u.input_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0)
+    t.output += u.output_tokens ?? 0
+    t.cacheRead += u.cache_read_input_tokens ?? 0
+    if (model) t.model = model
+  }
+  const fresh = () => ({ input: 0, output: 0, cacheRead: 0, model: model ?? null })
+  const run = SAFE_RUN.test(String(p.agtRun ?? '')) && p.agtRun !== 'adhoc' ? p.agtRun : null
+  if (!run) {
+    if (my.leadPending?.at !== p.agtTypedAt) my.leadPending = { at: p.agtTypedAt, ...fresh() }
+    add(my.leadPending)
+    return
+  }
+  if (!my.lead.has(run)) my.lead.set(run, fresh())
+  const t = my.lead.get(run)
+  if (my.leadPending && my.leadPending.at === p.agtTypedAt) {
+    t.input += my.leadPending.input
+    t.output += my.leadPending.output
+    t.cacheRead += my.leadPending.cacheRead
+    t.model ??= my.leadPending.model
+  }
+  my.leadPending = null
+  add(t)
+}
+
+// The run's spend so far for the ceiling, subagents, pane workers and the lead's own tokens alike, or null when no
+// ceiling is set.
 export function runSpend(runId) {
-  return maxRunUsdOf(Profile.settings) == null ? null : estimateRunUsd(my.live, runId, my.paneRoutes)
+  return maxRunUsdOf(Profile.settings) == null ? null : estimateRunUsd(my.live, runId, my.paneRoutes, Date.now(), my.lead)
 }
 
 // A run's counters, made on first use. runRec is this module's writable record; runState is the read view of it.
@@ -213,7 +247,7 @@ export function routingView() {
 export function ledgerView() {
   const text = ledgerText(ledger(my.live, my.lastRun, my.paneRoutes))
   const max = maxRunUsdOf(Profile.settings)
-  return max == null ? text : text + '\nestimate ~' + usd(estimateRunUsd(my.live, my.lastRun, my.paneRoutes)) + ' of maxRunUsd ' + usd(max) + ' (list prices; pane workers estimated from their minutes open)'
+  return max == null ? text : text + '\nestimate ~' + usd(estimateRunUsd(my.live, my.lastRun, my.paneRoutes, Date.now(), my.lead)) + ' of maxRunUsd ' + usd(max) + ', lead ~' + usd(leadUsd(my.lead, my.lastRun)) + ' of it (list prices; pane workers estimated from their minutes open)'
 }
 
 export async function writeRunFile($, runId, name, text) {
@@ -335,6 +369,8 @@ export async function dispatchAgent($, e, next) {
   // The run's spend so far, estimated from its agents' tokens and its panes' minutes, only when a ceiling is set.
   const spent = runSpend(runId)
   const d = decide({ role, hdr, run: { ...run, fixes: ladderFixes(run, sliceOf(hdr)), usd: spent }, depth: Profile.depth, settings: Profile.settings, weeklyPct: Session.weeklyPct })
+  // routing.stopAtCeiling: the run is at its ceiling, so nothing more is dispatched, whatever the role.
+  if (d.stop) return { deny: d.stop }
   const res = await next({ ...e, model: d.model })
   if (res.deny) return res
 

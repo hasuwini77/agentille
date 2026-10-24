@@ -5,8 +5,9 @@ import { Session } from './session.js'
 import { Profile } from './profile.js'
 import { makeStore } from './store.js'
 import { PROBE, tmuxEvenArgv, tmuxPaneIdOf, tmuxKillArgv, herdrPaneIdOf, herdrTabOf, herdrPromptArgv, herdrCloseArgv, herdrMetaArgv, herdrSessionSplitArgv, herdrSessionTabArgv, herdrSessionStartArgv, herdrRunArgv, herdrPaneGetArgv, herdrTerminalOf, tmuxSessionSplitArgv, tmuxTitleArgvs, tmuxTypeArgvs, sessionsFile } from './panes.js'
-import { runOk, startAgent } from './spawn.js'
-import { forgetResting } from './panerec.js'
+import { runOk, startAgent, runTmux } from './spawn.js'
+import { forgetResting, restingSince } from './panerec.js'
+import { tmuxInit } from './tmux-env.js'
 
 // The person's sessions this lead opened: { id, name, kind, tab, terminal }, oldest first. Read through the Sessions
 // view; written only here.
@@ -38,7 +39,8 @@ export async function closeSession($, t, s) {
       return 'gone'
     }
   }
-  const r = await $.process.run(t === 'herdr' ? herdrCloseArgv(s.id) : tmuxKillArgv(s.id), PROBE).catch(() => null)
+  const kill = t === 'herdr' ? herdrCloseArgv(s.id) : tmuxKillArgv(s.id)
+  const r = await $.process.run(kill, tmuxInit(kill, PROBE)).catch(() => null)
   if (t === 'herdr' && r?.exitCode !== 0) return 'failed'
   await forgetSession($, s)
   return r?.exitCode === 0 ? 'closed' : 'gone'
@@ -64,8 +66,8 @@ export async function openSession($, t, o) {
     const shell = (await $.env.get('SHELL')) ?? ''
     const argv = (p) => tmuxSessionSplitArgv({ ...o, ...p, shell })
     let where = at
-    let r = await $.process.run(argv(where), PROBE)
-    if (r.exitCode !== 0 && where.target !== lead) r = await $.process.run(argv((where = { target: lead, direction: 'right' })), PROBE)
+    let r = await runTmux($, argv(where))
+    if (r.exitCode !== 0 && where.target !== lead) r = await runTmux($, argv((where = { target: lead, direction: 'right' })))
     if (r.exitCode !== 0) throw failed(r, argv(where))
     const id = tmuxPaneIdOf(r.stdout)
     if (!id) throw new Error('tmux gave no pane id')
@@ -73,13 +75,13 @@ export async function openSession($, t, o) {
       try {
         for (const a of tmuxTypeArgvs(id, o.task)) await runOk($, a, PROBE)
       } catch (err) {
-        await $.process.run(tmuxKillArgv(id), PROBE).catch(() => {})
+        await runTmux($, tmuxKillArgv(id)).catch(() => {})
         throw err
       }
     }
     // The title and an even stack are cosmetic: a failure never loses the session.
-    for (const a of tmuxTitleArgvs(id, o.name)) await $.process.run(a, PROBE).catch(() => {})
-    if (where.target !== lead) await $.process.run(tmuxEvenArgv(id), PROBE).catch(() => {})
+    for (const a of tmuxTitleArgvs(id, o.name)) await runTmux($, a).catch(() => {})
+    if (where.target !== lead) await runTmux($, tmuxEvenArgv(id)).catch(() => {})
     return { id, name: o.name, kind: o.kind, tab: null, terminal: null }
   }
   let id

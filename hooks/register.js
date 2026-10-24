@@ -5,7 +5,7 @@ import { ctx, isLead, Profile, Display, Runs, Spawn, Panes, Proofs, Session, set
 import { registerAutocomplete } from './autocomplete.js'
 import { toolLabel, runPhases } from './board.js'
 import { cleanText } from './clean.js'
-import { routingView, ledgerView, dispatchAgent, setRouteVerdict, noteAgentTool, enterAgentCall, leaveAgentCall, noteAgentStep } from './dispatch.js'
+import { routingView, ledgerView, dispatchAgent, setRouteVerdict, noteAgentTool, enterAgentCall, leaveAgentCall, noteAgentStep, addLeadUsage } from './dispatch.js'
 import { DECK, applyDisplay, answerPanel, deckCommand, focusCommand, highlightCommand, setStoredRaw, setLastAnswer, mascotHello, mascotWorking } from './display.js'
 import { canDraw, drawingBlock } from './drawing.js'
 import { highlightFor, litFor } from './highlight.js'
@@ -236,6 +236,7 @@ export function register(on) {
     const a = e.agentId ? Runs.live.get(e.agentId) : undefined
     if (!e.agentId) setLeadModel(e.model)
     const result = yield* next(a && a.routed ? { ...e, effort: a.effort } : e)
+    if (!e.agentId && result?.usage) addLeadUsage(result.usage, e.model)
     if (!e.agentId && Session.wireName && result?.usage) {
       pubStep(result.usage, e.model)
       await publish($)

@@ -31,7 +31,8 @@ disable-model-invocation: true
 | `neverDo` | list of hard prohibitions, passed to every agent | `[]` |
 | `thinkingDepth` | `always` / `complex-only` / `quick`; edit by hand | `complex-only` |
 | `routing` | `{autoFable, maxFablePerRun, fableWeeklyCeiling, maxRunUsd, advisorOnOpus}`; edit by hand | built-in |
-| `display` | `{deck: auto\|off, focus: true\|false, highlight: on\|all\|off}`; edit by hand | `{off, true, on}` |
+| `display` | `{deck: auto\|off, focus: true\|false, highlight: on\|all\|off, band: on\|off, statusLine: on\|off, mascot: on\|off, rows: on\|off, spinner: on\|off}`; edit by hand | `{deck: off, focus: true, highlight: off, band: on, statusLine: on, mascot: on, rows: on, spinner: on}` |
+| `sessions` | `on` / `off`: `off` stops a plain prompt from opening sessions (a typed `/storm` still can); edit by hand | `on` |
 | `viewports` | design-reviewer default, any of `desktop` / `tablet` / `mobile`; edit by hand | desktop + mobile |
 | `projects[]` | repos registered by `/agentille-project` | `[]` |
 

@@ -21,6 +21,7 @@
 
 import { isLead, Session } from './session.js'
 import { Display } from './display.js'
+import { Profile } from './profile.js'
 import { Runs } from './dispatch.js'
 import { Panes } from './reaper.js'
 import { makeStore } from './store.js'
@@ -86,8 +87,10 @@ export function typedPrompt(text, origin, at = NO_MOMENT) {
     my.workerProved = true
     my.fableTyped = parseHeader(text)?.fable === 'forced' || typedFable(text)
   }
-  // Only a typed ask opens sessions, on that turn.
-  my.sessionsAsked = !agt && isLead() && asksSessions(text)
+  // Only a typed ask opens sessions, on that turn. Under `sessions: "off"` a plain prompt never does: only a typed
+  // /storm, whose hand-off opens one, still asks (its command word alone passes asksSessions; no sentence can).
+  const word = String(text ?? '').trimStart().split(/\s/, 1)[0]
+  my.sessionsAsked = !agt && isLead() && asksSessions(text) && (Profile.sessions !== 'off' || asksSessions(word))
   // Under display.highlight: all, a typed question in the lead session asks for the panel's shape. Never in a worker
   // pane (the lead parses its report) and never for a slash command or an /agt run. Asked for text to paste as is: no
   // panel and no answer style. Under display.highlight: off nothing is added, so the raw style needs on or all.

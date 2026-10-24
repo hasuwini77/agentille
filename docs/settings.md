@@ -68,9 +68,12 @@ Each surface the mod draws has its own key in the `display` block. An invalid va
 | `band` | `on`, `off` | `on` | Draws nothing above the prompt: the run's tree, the wire line, the `⚑` flags and a worker pane's own band all live there and go with it. |
 | `statusLine` | `on`, `off` | `on` | Pins no status line under the prompt, and clears one an earlier reload left pinned. |
 | `mascot` | `on`, `off` | `on` | Drops the figure from a worker pane's band and from the deck's cast. A worker keeps its one-line caption (role, model, effort, elapsed); the deck keeps each agent's role and model. |
+| `rows` | `on`, `off` | `on` | Leaves every `Agent` call in the transcript as Claude Code's own row, and a `Workflow` call without the agents listed under it. This covers a plain subagent you never ran through `/agt` and an `/agt` run's own agents alike. |
+| `spinner` | `on`, `off` | `on` | Adds nothing to the main spinner: no `◇2 working` count while plain subagents work, and no phase names during an `/agt` run. |
 | `deck` | `auto`, `off` | `off` | `auto` opens the deck on every typed `/agt`; `off` opens it only when you type `/agt-deck`. |
 | `focus` | `true`, `false` | `true` | `false` hides the `⚑` agent flags in the band (a REVISE, a FAIL, a blocked pane). |
 | `highlight` | `on`, `all`, `off` | `off` | See below. |
+| `sessions` (top level, not in `display`) | `on`, `off` | `on` | A plain prompt never unlocks `open_sessions`: "open three sessions" opens nothing. A typed `/storm` still opens its one hand-off session. `/agt-info` prints it under the `display` keys. Set it as `{ "sessions": "off" }`. |
 
 ```json
 { "display": { "band": "off", "statusLine": "on", "mascot": "off" } }

@@ -105,6 +105,17 @@ check "routing.md says a solo run dispatches no role in the roster" 'grep -F "so
 check "SKILL.md's solo step has no reviewer agent and a self-review before the push" 'grep -F "Solo steps aside" skills/agt/SKILL.md | grep -qF "no reviewer" && has skills/agt/SKILL.md "Before the push (under \`local\`, before you report), review your own full diff"'
 check "factory.md gives a solo run no fix attempts" '! has skills/agt/factory.md "solo run counts its own review-fix rounds" && grep -F "solo run dispatches no executor" skills/agt/factory.md | grep -qF "reviews its own diff"'
 
+# the init skill's `display` row says what hooks/settings.js defaults to: every key, and each key's default, in order
+# (the Default cell is DISPLAY_DEFAULTS with the quotes dropped), so the table cannot drift from the code again
+display_defaults() { sed -n 's/^export const DISPLAY_DEFAULTS = \({.*}\)$/\1/p' hooks/settings.js | tr -d "'" | sed 's/^{ /{/; s/ }$/}/'; }
+init_display_row() { grep -E '^\| `display` \|' skills/agentille-init/SKILL.md; }
+init_display_values() { init_display_row | sed 's/^| `display` | `\([^`]*\)`.*/\1/'; }
+check "hooks/settings.js declares DISPLAY_DEFAULTS on one line" '[ -n "$(display_defaults)" ]'
+check "the init skill's display default is hooks/settings.js's DISPLAY_DEFAULTS" '[ "$(init_display_row | awk -F"|" "{ print \$(NF-1) }" | sed "s/^ *\`//; s/\` *$//")" = "$(display_defaults)" ]'
+for k in $(display_defaults | tr -d '{}' | tr ',' '\n' | sed 's/:.*//; s/ //g'); do
+  check "the init skill's display row lists the values $k takes" 'init_display_values | grep -qE "[{ ]$k: [^,}]+[,}]"'
+done
+
 # setup skills that say "typed only" disable model invocation
 for f in skills/agentille-init/SKILL.md skills/agentille-project/SKILL.md skills/agentille-claude-md/SKILL.md; do
   check "$f disables model invocation" 'grep -qE "^disable-model-invocation: true$" "$f"'

@@ -5,7 +5,7 @@ import { Session } from './session.js'
 import { makeStore } from './store.js'
 import { TIP } from './drawing.js'
 import { DEFAULTS } from './routing.js'
-import { cleanDisplay, hasVoice } from './settings.js'
+import { cleanDisplay, cleanSessions, hasVoice } from './settings.js'
 import { setProfileDisplay } from './display.js'
 import { compareVersions, newerInstalled, cacheDirOf } from './skew.js'
 import { depsOf, activeSquads, explain, squadsText, allPaths, injection } from './squads.js'
@@ -16,6 +16,7 @@ const { s: my, view } = makeStore('profile.js', {
   home: null,
   settings: { ...DEFAULTS },
   depth: null,
+  sessions: null,  // profile.json → sessions: 'on' | 'off', null when unset (on); off, a plain prompt opens no sessions
   profileMissing: false,  // no profile with a voice (missing, unreadable, or only a display block): the tip is due once
   squads: [],  // active squads for this repo
   squadBlock: '',
@@ -45,6 +46,7 @@ export async function installedSkew($) {
 export async function loadProfile($) {
   my.home = (await $.env.get('HOME')) ?? null
   setProfileDisplay({})
+  my.sessions = null
   my.profileMissing = false
   if (!my.home) return
   try {
@@ -54,6 +56,7 @@ export async function loadProfile($) {
     my.depth = p.thinkingDepth ?? null
     my.settings = { ...DEFAULTS, ...(p.routing ?? {}) }
     setProfileDisplay(cleanDisplay(p.display))
+    my.sessions = cleanSessions(p.sessions)
   } catch {
     // no profile yet: the tip says /agentille-init (the mod's toast when it draws, else /agt's line)
     my.profileMissing = true

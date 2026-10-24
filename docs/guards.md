@@ -78,7 +78,7 @@ A plain session has no pane tools.
 ### Unlocked by what you type
 
 - The mod registers `spawn_pane` and `close_pane` on a turn where you typed `/agt`.
-- It registers `open_sessions` (with `close_pane`) on a turn whose typed prompt asked for sessions, panes or terminals.
+- It registers `open_sessions` (with `close_pane`) on a turn whose typed prompt asked for sessions, panes or terminals, unless the profile sets `"sessions": "off"`: then only a typed `/storm` does.
 - Each tool still checks that proof when called, so a task notification, plugin or peer message never opens a pane.
 
 ### Lapses after the run

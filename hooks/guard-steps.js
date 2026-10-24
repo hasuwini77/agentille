@@ -28,7 +28,8 @@ const apiSlug = (path) => {
 
 // Writes that change what guards the base branch or start a workflow: branch protection, rulesets, a workflow's
 // dispatch, enable or disable.
-const API_GUARD_PATH = /^repos\/[^/]+\/[^/]+\/(branches\/.+\/protection|rulesets|actions\/workflows\/[^/]+\/(dispatches|enable|disable))(\/|$)/
+// A repository_dispatch (repos/o/r/dispatches) starts workflows as a workflow dispatch does.
+const API_GUARD_PATH = /^repos\/[^/]+\/[^/]+\/(branches\/.+\/protection|rulesets|dispatches|actions\/workflows\/[^/]+\/(dispatches|enable|disable))(\/|$)/
 
 const sensitive = (path) => path.split('/').some((s) => API_WRITES.has(s)) || API_WRITE_PATH.test(path) || API_GUARD_PATH.test(path)
 
@@ -36,6 +37,23 @@ const sensitive = (path) => path.split('/').some((s) => API_WRITES.has(s)) || AP
 const repoRoot = (path) => /^repos\/[^/]+\/[^/]+\/?$/.test(path)
 const setsDefault = (bodies, unread) => unread || bodies.some((b) => /default_branch/.test(b) || /^[@$]/.test(b))
 
+
+// gh's own commands: any other first word is an alias from gh's config, an extension or a typo.
+const GH_COMMANDS = new Set(('accessibility agent-task alias api attestation auth browse cache co codespace completion config copilot ' +
+  'extension gist gpg-key help issue label org pr preview project release repo ruleset run search secret ssh-key status variable ' +
+  'version workflow').split(' '))
+
+const AUTO_MERGE_LABEL = /auto-?merge/i
+
+// The labels `--add-label` adds (repeated, or comma-separated).
+function labels(pos) {
+  const out = []
+  for (let i = 0; i < pos.length; i++) {
+    if (pos[i] === '--add-label') out.push(...String(pos[++i] ?? '').split(','))
+    else if (pos[i].startsWith('--add-label=')) out.push(...pos[i].slice(12).split(','))
+  }
+  return out
+}
 
 // `env`: what the line set in front of gh; GH_REPO (or GITHUB_REPOSITORY) names its repo as -R does.
 export function ghStep(w, dir, env = new Map()) {
@@ -50,7 +68,14 @@ export function ghStep(w, dir, env = new Map()) {
     else pos.push(a)
   }
   const [a0, a1] = pos.filter((x) => !x.startsWith('-'))
+  // A word that is none of gh's own commands may be an alias from gh's config: guardLine reads and judges it.
+  if (a0 !== undefined && !GH_COMMANDS.has(a0) && !/[$`]/.test(a0)) return { kind: 'ghalias', what: 'gh ' + a0, sub: a0, args: pos.slice(pos.indexOf(a0) + 1), dir, slug }
   if (a0 === 'pr' && a1 === 'merge') return { kind: 'step', what: 'gh pr merge', dir, slug }
+  // An approval can satisfy the review the base requires; an auto-merge label can merge on a bot's behalf.
+  if (a0 === 'pr' && a1 === 'review' && pos.some((x) => x === '--approve' || x === '-a' || /^-[a-zA-Z]*a$/.test(x))) return { kind: 'step', what: 'gh pr review --approve', dir, slug }
+  if (a0 === 'pr' && a1 === 'edit' && labels(pos).some((l) => AUTO_MERGE_LABEL.test(l))) return { kind: 'step', what: 'gh pr edit --add-label (an auto-merge label)', dir, slug }
+  // gh repo sync writes a branch (the default branch unless -b names another) from its upstream.
+  if (a0 === 'repo' && a1 === 'sync') return { kind: 'step', what: 'gh repo sync', dir, slug }
   if (a0 === 'release' && a1 && !['list', 'ls', 'view', 'download', 'verify', 'verify-asset'].includes(a1)) return { kind: 'step', what: 'gh release ' + a1, dir, slug }
   if (a0 === 'pr' && a1 === 'create') return { kind: 'pr', what: 'gh pr create', dir, slug }
   // An alias can name any of the above under a new word: making one is a step of its own.
@@ -89,9 +114,13 @@ export function ghStep(w, dir, env = new Map()) {
 const CURL_SHORT_VALUE = 'AbcCdDeEFHKmoPQrtTuUwxXyYz'
 
 
-// curl / wget straight at the GitHub API (api.github.com, uploads.github.com, a GHE …/api/v3/).
+// curl / wget / httpie (http, https, xh, xhs) straight at the GitHub API (api.github.com, uploads.github.com, a GHE
+// …/api/v3/).
+export const HTTPIE = new Set(['http', 'https', 'xh', 'xhs'])
+
 export function httpStep(w, dir) {
   const p = base(w[0])
+  if (HTTPIE.has(p)) return httpieStep(w, dir)
   let method = null
   let body = false
   let get = false
@@ -125,7 +154,33 @@ export function httpStep(w, dir) {
     else if (!a.startsWith('-')) urls.push(a)
   }
   const m = get ? 'GET' : String(method ?? (body ? 'POST' : 'GET')).toUpperCase()
-  if (m === 'GET') return null
+  return githubWrite(p, m, urls, data, dir)
+}
+
+// httpie and xh: `http [flags] [METHOD] URL [items]`. An item `k=v`, `k:=json` or `k@file` is a body (POST by
+// default); `k==v` is a query and `Header:v` a header.
+const HTTPIE_VALUE = new Set(['-a', '--auth', '-A', '--auth-type', '-o', '--output', '--session', '--session-read-only', '--cert', '--cert-key', '--verify', '--timeout', '--proxy', '--max-redirects', '-p', '--print', '--pretty', '-s', '--style', '--format-options', '--response-charset', '--response-mime'])
+function httpieStep(w, dir) {
+  const p = base(w[0])
+  const pos = []
+  let form = false
+  for (let i = 1; i < w.length; i++) {
+    const a = w[i]
+    if (HTTPIE_VALUE.has(a)) i++
+    else if (a === '-f' || a === '--form' || a === '--multipart') form = true
+    else if (!a.startsWith('-') || a === '-') pos.push(a)
+  }
+  let method = null
+  if (pos.length && /^[A-Za-z]+$/.test(pos[0]) && /^(GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)$/i.test(pos[0]) && pos.length > 1) method = pos.shift()
+  const url = pos.shift() ?? ''
+  const data = pos.filter((x) => /^[^=:@]+(:=@?|=@?|@)/.test(x) && !/^[^=]+==/.test(x))
+  const m = String(method ?? (data.length || form ? 'POST' : 'GET')).toUpperCase()
+  return githubWrite(p, m, [url], data, dir)
+}
+
+// A write (any method but GET) to one of the URLs, judged by its GitHub API path.
+function githubWrite(p, m, urls, data, dir) {
+  if (m === 'GET' || m === 'HEAD' || m === 'OPTIONS') return null
   for (const u of urls) {
     const s = u.replace(/^[a-z]+:\/\//i, '').split(/[?#]/)[0]
     const host = s.split('/')[0].toLowerCase()

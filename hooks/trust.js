@@ -4,7 +4,7 @@
 // (package-manager scripts, npx, python -m, CLAUDE.md @imports). Reads only through $.fs (read, stat, list).
 // The names a command runs without naming them (script chains, python -m files) come from script-refs.js, which
 // the guard reads them with too.
-import { ELSEWHERE, NPM_SCRIPT_ALIASES, PLAIN_MODULE, VALUE_FLAGS, moduleFiles, pythonModule, scriptChain } from './script-refs.js'
+import { ELSEWHERE, NPM_SCRIPT_ALIASES, PLAIN_MODULE, VALUE_FLAGS, jsCandidates, jsImports, moduleFiles, pyImports, pythonModule, scriptChain } from './script-refs.js'
 
 // Absent in the worktree is fine for these (settings.local.json and CLAUDE.local.md are gitignored, so a fresh
 // worktree has none); present, they must be the lead checkout's byte for byte.
@@ -353,6 +353,7 @@ async function followScript($, ctx, script, base, depth) {
     for (const p of commandPaths(x, ctx.top)) {
       const at = joinRel(base, p)
       if (at == null || !(await entryAt($, ctx, at))) return at == null ? unresolved(ctx, 'run ' + script, p + ' is outside the checkout') : false
+      if (!(await followCode($, ctx, at, 1, new Set([at])))) return false
     }
     const cmds = simpleCommands(x)
     if (!(await followCommands($, ctx, cmds, base, depth + 1))) return false
@@ -514,6 +515,86 @@ async function followUv($, ctx, args, base, depth) {
   return true
 }
 
+// ── what an entry file imports ────────────────────────────────────────────────────────────────────────────────
+
+// A file's state on one side: its text, ABSENT, a folder ('dir'), or UNREADABLE.
+async function sideOf($, path) {
+  const text = await configFile($, path)
+  if (text !== UNREADABLE) return text
+  return (await $.fs.stat(path).catch(() => null))?.kind === 'dir' ? 'dir' : UNREADABLE
+}
+
+// The first of `cands` (repo-relative) that is a file on either side: { rel, same } with `same` whether both sides
+// hold the same bytes; null when none is. A candidate that is a folder on both sides is passed over (node then tries
+// its index file).
+async function firstFile($, ctx, cands) {
+  for (const rel of cands) {
+    const [a, b] = await Promise.all([sideOf($, ctx.top + '/' + rel), sideOf($, ctx.leadTop + '/' + rel)])
+    if (a === ABSENT && b === ABSENT) continue
+    if (a === 'dir' && b === 'dir') continue
+    return { rel, same: typeof a === 'string' && a !== 'dir' && a === b, text: typeof a === 'string' ? a : null }
+  }
+  return null
+}
+
+const JS_FILE = /\.(?:[cm]?[jt]sx?)$/i
+const PY_FILE = /\.py$/i
+
+// An entry file a command runs (a hook script, an MCP server), and what it imports: each relative JavaScript import
+// and each Python import that resolves inside the checkout must be the lead checkout's byte for byte, followed
+// DEPTH_MAX hops. A relative import that names no file on either side, or climbs out of the checkout, refuses. A
+// Python import found nowhere next to the file is the standard library or an installed package: not compared.
+async function followCode($, ctx, rel, depth, seen) {
+  if (depth > DEPTH_MAX) return unresolved(ctx, rel, 'its imports nest deeper than ' + DEPTH_MAX)
+  const text = await configFile($, ctx.top + '/' + rel)
+  if (typeof text !== 'string') return true // absent on both sides (compared already), or a folder
+  const dir = rel.includes('/') ? rel.slice(0, rel.lastIndexOf('/')) : ''
+  const next = async (hit) => {
+    if (!hit.same) return false
+    if (seen.has(hit.rel)) return true
+    seen.add(hit.rel)
+    return followCode($, ctx, hit.rel, depth + 1, seen)
+  }
+  if (JS_FILE.test(rel)) {
+    for (const spec of jsImports(text)) {
+      const cands = jsCandidates(spec).map((c) => joinRel(dir, c))
+      if (cands.some((c) => c == null)) return unresolved(ctx, 'import ' + spec + ' in ' + rel, 'it is outside the checkout')
+      const hit = await firstFile($, ctx, cands)
+      if (!hit) return unresolved(ctx, 'import ' + spec + ' in ' + rel, 'no such file on either side')
+      if (!(await next(hit))) return false
+    }
+  }
+  if (PY_FILE.test(rel)) {
+    for (const imp of pyImports(text)) {
+      let from = dir
+      for (let k = 1; k < imp.level && from != null; k++) from = joinRel(from, '..')
+      if (from == null) return unresolved(ctx, 'a relative import in ' + rel, 'it is outside the checkout')
+      // A relative import runs its package's __init__.py, which may also hold the names it imports.
+      if (imp.level) {
+        const init = await firstFile($, ctx, [joinRel(from, '__init__.py')])
+        if (init && !(await next(init))) return false
+      }
+      const mods = imp.mod ? [imp.mod, ...imp.names.map((n) => imp.mod + '.' + n)] : imp.names
+      for (const m of mods) {
+        const { parents, own } = moduleFiles(m)
+        const hit = await firstFile($, ctx, own.map((f) => joinRel(from, f)))
+        // An absolute import found nowhere here is installed or standard; `from pkg import name` names an attribute
+        // as often as a submodule.
+        if (!hit) {
+          if (imp.level && m === imp.mod) return unresolved(ctx, 'from ' + '.'.repeat(imp.level) + imp.mod + ' in ' + rel, 'no such module on either side')
+          continue
+        }
+        for (const p of parents) {
+          const ph = await firstFile($, ctx, [joinRel(from, p)])
+          if (ph && !(await next(ph))) return false
+        }
+        if (!(await next(hit))) return false
+      }
+    }
+  }
+  return true
+}
+
 // The @imports of a CLAUDE.md-style file: each `@path` that starts the text or follows a space, outside code blocks
 // and code spans, with trailing punctuation dropped.
 export function memoryImports(text) {
@@ -592,6 +673,7 @@ export async function sameConfig($, top, leadTop, why = {}) {
   if (refs.length > REFS_MAX) return false
   for (const r of refs) if (!(await sameEntry($, top + '/' + r, leadTop + '/' + r))) return false
   const ctx = { top, leadTop, why }
+  for (const r of refs) if (!(await followCode($, ctx, r, 1, new Set([r])))) return false
   for (const c of commands) if (!(await followLine($, ctx, c, '', 0))) return false
   for (const s of servers) if (!(await followCommands($, ctx, [s.argv], s.cwd == null ? '' : dirOf(s.cwd, '', top), 0))) return false
   for (const f of [...MEMORY_FILES, 'CLAUDE.local.md']) if (!(await followImports($, ctx, f, 1, new Set([f])))) return false

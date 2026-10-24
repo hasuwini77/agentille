@@ -88,8 +88,11 @@ export async function bashCall($, e, next) {
 
 // ── the profile snapshot ─────────────────────────────────────────────────────
 // The profile the run started with: read at the typed /agt so a later read cannot raise the mode mid-run (capMode).
+// With no profile (or one that does not parse) the run's ceiling is the default, `pr`, never a live read: a profile
+// the run writes itself cannot lift it.
+export const DEFAULT_PROFILE = Object.freeze({ integration: 'pr' })
 export async function loadRunProfile($) {
-  setRunProfile(await readProfile($))
+  setRunProfile((await readProfile($)) ?? DEFAULT_PROFILE)
 }
 
 // ── the non-Bash write hooks ─────────────────────────────────────────────────

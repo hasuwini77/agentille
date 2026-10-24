@@ -489,6 +489,60 @@ PY
   printf '%s\n' "$cyc_out" | grep -qE '^(PASS|FAIL)' || fail "stores: the state.js cycle check produced no result"
 fi
 
+# The guard's imports run one way: guard.js > guard-policy.js > guard-lex.js > guard-steps.js. No guard module
+# reaches guard.js again, none reaches a module above it in that chain, directly or through another hooks module,
+# and the lexer's leaves stay leaves: guard-lex.js imports only guard-steps.js and script-refs.js, which import none.
+if command -v python3 >/dev/null 2>&1; then
+  guard_out=$(python3 - <<'PY'
+import os, re
+d = 'hooks'
+spec = re.compile(r"^\s*(?:import|export)\b[^;'\"]*?\bfrom\s*['\"]\./([^'\"]+)['\"]|^\s*import\s*['\"]\./([^'\"]+)['\"]|\bimport\s*\(\s*['\"]\./([^'\"]+)['\"]", re.M)
+def deps(f):
+    try: t = open(os.path.join(d, f)).read()
+    except OSError: return []
+    t = re.sub(r'^\s*//.*$', '', t, flags=re.M)
+    return [next(x for x in m if x) for m in spec.findall(t)]
+g = {f: deps(f) for f in os.listdir(d) if f.endswith('.js')}
+def path_to(a, b):
+    prev = {a: None}
+    todo = [a]
+    while todo:
+        m = todo.pop(0)
+        for n in g.get(m, []):
+            if n in prev: continue
+            prev[n] = m
+            if n == b:
+                out = [n]
+                while prev[out[-1]] is not None: out.append(prev[out[-1]])
+                return ' > '.join(reversed(out))
+            todo.append(n)
+    return None
+chain = ['guard.js', 'guard-policy.js', 'guard-lex.js', 'guard-steps.js']
+bad = []
+missing = [m for m in chain + ['guard-own.js', 'script-refs.js'] if m not in g]
+for m in missing: bad.append('hooks/%s is missing' % m)
+if not missing:
+    for m in chain[1:] + ['guard-own.js', 'script-refs.js']:
+        p = path_to(m, 'guard.js')
+        if p: bad.append('reaches guard.js again: ' + p)
+    for i, m in enumerate(chain):
+        for up in chain[1:i]:
+            p = path_to(m, up)
+            if p: bad.append('imports backwards: ' + p)
+    leaves = {'guard-lex.js': {'guard-steps.js', 'script-refs.js'}, 'guard-steps.js': set(), 'script-refs.js': set()}
+    for m, ok in leaves.items():
+        extra = sorted(set(g[m]) - ok)
+        if extra: bad.append('hooks/%s must import only %s (it also imports: %s)' % (m, ', '.join(sorted(ok)) or 'no hooks module', ', '.join(extra)))
+for b in bad: print('FAIL ' + b)
+if not bad: print('PASS guard imports run one way: guard.js > guard-policy.js > guard-lex.js > guard-steps.js, none back')
+PY
+)
+  while IFS= read -r line; do
+    case "$line" in PASS*) pass "guard layers: ${line#PASS }";; FAIL*) fail "guard layers: ${line#FAIL }";; esac
+  done <<< "$guard_out"
+  printf '%s\n' "$guard_out" | grep -qE '^(PASS|FAIL)' || fail "guard layers: the import-direction check produced no result"
+fi
+
 # ── 6c. The mod: Claude Code's own validator + its tests ────────────────────
 # WARN where the claude CLI is absent on a developer machine; in CI (CI=true) its absence is a
 # FAIL, so the 600 mod tests can never be skipped silently on the runner.

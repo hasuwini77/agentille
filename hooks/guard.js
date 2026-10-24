@@ -19,11 +19,11 @@
 // or curl is refused, and a script file, a sourced file or a make target is read first and refused when it pushes,
 // merges, tags or releases. Probing that fails denies the command: the guard never lets a line through unread.
 
-import { S, Profile } from './state.js'
+import { S, Profile, Runs } from './state.js'
 import { parseWorktrees } from './clean.js'
 import { PROBE, SAFE_RUN, SPAWN_ROLE, splitName, paneKey } from './panes.js'
 import { ROLES } from './routing.js'
-import { moment, inFlight, runHeld } from './proofs.js'
+import { moment, inFlight, runHeld, flight } from './proofs.js'
 import { leadPane } from './spawn.js'
 
 export const DENY_INTEGRATION = 'integration auto is not set in your profile for this repo; the run stops at the PR.'
@@ -1053,13 +1053,13 @@ export async function guardLine($, line, cwd) {
 // proofs.js moment($) read): a question typed mid-run does not switch the guard off. A plain session has none.
 export function fromRun(e, at) {
   if (e.agentId) {
-    const a = S.live.get(e.agentId)
+    const a = Runs.live.get(e.agentId)
     if (a && ROLES.includes(a.role)) return true
   }
   if (S.worker) return S.worker.agent !== SPAWN_ROLE
   const self = splitName(S.wireName ?? S.selfName)
   if (self) return self.role !== SPAWN_ROLE
-  return !!S.agtTurn || runHeld() || inFlight(S, at)
+  return !!S.agtTurn || runHeld() || inFlight(flight, at)
 }
 
 // ── worktree ownership ───────────────────────────────────────────────────────
@@ -1274,8 +1274,8 @@ async function listTrees($, cwd) {
 }
 
 const runOf = (e) => {
-  const a = e.agentId ? S.live.get(e.agentId) : null
-  return a?.run ?? splitName(S.wireName ?? S.selfName)?.run ?? S.lastRun
+  const a = e.agentId ? Runs.live.get(e.agentId) : null
+  return a?.run ?? splitName(S.wireName ?? S.selfName)?.run ?? Runs.lastRun
 }
 
 // ── the hook ─────────────────────────────────────────────────────────────────

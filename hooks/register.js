@@ -1,7 +1,7 @@
 // agentille mod entry: wires the hooks. The state is in state.js; routing, panes, sessions, the reaper, the
 // timers, the worker's wire, display settings, drawing and run files each have a module beside this one.
 
-import { S, ctx, isLead, Profile, Display } from './state.js'
+import { S, ctx, isLead, Profile, Display, Runs } from './state.js'
 import { registerAutocomplete } from './autocomplete.js'
 import { toolLabel, runPhases } from './board.js'
 import { cleanText } from './clean.js'
@@ -124,8 +124,8 @@ export function register(on) {
     if (a.view === 'squads') return { text: await squadsView($) }
     if (a.view === 'route') return { text: routeText({ ...a, depth: a.depth ?? Profile.depth }, Profile.settings, S.weeklyPct) }
     await loadSquads($)
-    const log = S.runs.get(S.lastRun)?.log ?? []
-    return { text: overviewText({ display: Display.display, squads: squadsSummary(Profile.squadRows), routing: routingSummary(log), ledger: ledgerSummary(ledger(S.live, S.lastRun, S.paneRoutes)) }) }
+    const log = Runs.runs.get(Runs.lastRun)?.log ?? []
+    return { text: overviewText({ display: Display.display, squads: squadsSummary(Profile.squadRows), routing: routingSummary(log), ledger: ledgerSummary(ledger(Runs.live, Runs.lastRun, Runs.paneRoutes)) }) }
   })
 
   // Typed only: a plugin, a scheduled task or a notification never opens a pane.
@@ -180,7 +180,7 @@ export function register(on) {
       // Only the pane whose key the message names: a stale list or a respawned role must not harvest the older pane.
       const hit = w.kind === 'done' && w.key ? S.panes.find((p) => paneKey(p.id) === w.key && p.name === w.from) : null
       if (hit) { const r = P.rec(hit.id); r.harvested = true; r.wireDone = true }
-      const route = w.kind === 'done' ? S.paneRoutes.findLast((r) => r.name === w.from) : null
+      const route = w.kind === 'done' ? Runs.paneRoutes.findLast((r) => r.name === w.from) : null
       if (route) route.verdict = verdictChip(route.agent, w.summary)
       noteWire({ from, to: S.wireName ? shortName(S.wireName) : 'lead', kind: w.kind, summary: w.summary, at: Date.now() })
       $.ui.toast('⇄ ' + from + ' ' + w.kind)
@@ -199,7 +199,7 @@ export function register(on) {
 
   on('tool.call', async ($, e, next) => {
     if (e.agentId) {
-      const a = S.live.get(e.agentId)
+      const a = Runs.live.get(e.agentId)
       if (a) {
         a.tool = toolLabel(e.tool, e)
         a.heard = Date.now()
@@ -237,7 +237,7 @@ export function register(on) {
   })
 
   on('turn.step', async function* ($, e, next) {
-    const a = e.agentId ? S.live.get(e.agentId) : undefined
+    const a = e.agentId ? Runs.live.get(e.agentId) : undefined
     if (!e.agentId) S.leadModel = e.model
     const result = yield* next(a && a.routed ? { ...e, effort: a.effort } : e)
     if (!e.agentId && S.wireName && result?.usage) {
@@ -301,12 +301,12 @@ export function register(on) {
 
   // Main-session spinner: how many subagents (◇) and pane sessions (▣) work behind it.
   on('ui.render', { component: 'Spinner' }, async ($, e, next) => {
-    if (S.live.has(e.requestId)) return next(e)
-    const subs = [...S.live.values()].filter((a) => a.state === 'working').length
+    if (Runs.live.has(e.requestId)) return next(e)
+    const subs = [...Runs.live.values()].filter((a) => a.state === 'working').length
     const busy = S.panes.filter((p) => p.state === 'working').length
     if (subs + busy === 0) return next(e)
     // In an /agt run the status line holds the counts; the spinner names the phases at work.
-    const phases = S.lastRun === 'adhoc' ? '' : runPhases(S.live, S.paneRoutes, S.lastRun)
+    const phases = Runs.lastRun === 'adhoc' ? '' : runPhases(Runs.live, Runs.paneRoutes, Runs.lastRun)
     const parts = phases || [subs ? '◇' + subs : '', busy ? '▣' + busy : ''].filter(Boolean).join(' ') + ' working'
     return next({ ...e, props: { ...e.props, suffix: (e.props.suffix ?? '') + ' · ' + parts } })
   })

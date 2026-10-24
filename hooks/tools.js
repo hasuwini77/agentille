@@ -3,12 +3,12 @@
 // register.js only wires them to tool.call.
 
 import { S, isLead, Profile } from './state.js'
-import { demoteToast, runState, writeRunFile } from './dispatch.js'
+import { demoteToast, runState, writeRunFile, setLastRun, addRoute, addDecision } from './dispatch.js'
 import { pieceOf, party, taskLine } from './links.js'
 import { PROBE, newRunId, doneFile, paneKey, answerFile, tmuxKillArgv, placePlan, codexNote, herdrCloseArgv, paneRole, spawnToolInput, closeTarget, sessionName, sessionsToolInput, sessionsNote, droppedNote } from './panes.js'
 import { installedSkew } from './profile.js'
 import { pollNow } from './reaper.js'
-import { spawnAllowed, sessionsAllowed, fableProof, moment, startRun, agtTurnFromDispatch } from './proofs.js'
+import { spawnAllowed, sessionsAllowed, fableProof, moment, startRun, agtTurnFromDispatch, flight } from './proofs.js'
 import { formationOf, mentionsCodex, mentionsFable, proveHeader, demoteHeaderText, ladderFixes, decide } from './routing.js'
 import { saveSessions, closeSession, openSession } from './sessions.js'
 import { skewMessage } from './skew.js'
@@ -33,11 +33,11 @@ export async function spawnPane($, e) {
   if (!S.agtTyped) return { deny: spawnAllowed() }
   await pollNow($, t) // the panes as they are now: one that closed since the last poll no longer keeps the run going
   const at = await moment($)
-  const why = spawnAllowed(null, S, at)
+  const why = spawnAllowed(null, flight, at)
   if (why) return { deny: why }
   const a = spawnToolInput(e, S.panes)
   if (a.error) return { deny: a.error }
-  const other = spawnAllowed(a.run, S, at)
+  const other = spawnAllowed(a.run, flight, at)
   if (other) return { deny: other }
   // Codex is the person's pick, never the lead's: their /agt prompt or their newest typed prompt names it.
   const codex = a.vendor === 'codex'
@@ -56,7 +56,7 @@ export async function spawnPane($, e) {
     if (s?.kind !== 'dir') return { deny: cwd + ' is not a directory.' }
   }
   agtTurnFromDispatch()
-  S.lastRun = a.run
+  setLastRun(a.run)
   const run = runState(a.run)
   run.formation = formationOf(a.hdr) ?? run.formation
   // Counted only once the pane opens: a failed split is not a fix attempt. The ladder sees this piece's rounds only.
@@ -104,10 +104,10 @@ export async function spawnPane($, e) {
   S.openedNames.add(a.name)
   await savePanes($)
   const piece = pieceOf(a.hdr)
-  S.paneRoutes.push({ name: a.name, run: a.run, role: a.role, agent: a.agent, model: d.model, effort: d.effort, reason: d.reason, start: Date.now(), end: null, piece, verdict: null })
+  addRoute({ name: a.name, run: a.run, role: a.role, agent: a.agent, model: d.model, effort: d.effort, reason: d.reason, start: Date.now(), end: null, piece, verdict: null })
   noteWire({ from: 'lead', to: party(shortName(a.name), piece), kind: 'task', summary: taskLine(a.task) || a.agent, at: Date.now() })
   const rec = { at: new Date().toISOString(), role: a.agent, model: d.model, effort: d.effort, reason: d.reason, asked: a.asked, agentId: null, kind: 'pane', pane: a.name }
-  S.decisions.push(rec)
+  addDecision(rec)
   run.log.push(JSON.stringify(rec))
   await writeRunFile($, a.run, 'routing.jsonl', run.log.join('\n') + '\n')
   await pollNow($, t)

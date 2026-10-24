@@ -2,7 +2,7 @@
 // prompt.submit and turn.complete here; the per-turn proofs, the answer memo, the run-end tidy, the worker's
 // publish and a subagent's report and ledger all start from these two. The proofs themselves are proofs.js's.
 
-import { S, isLead, Wire, Display } from './state.js'
+import { S, isLead, Wire, Display, Runs } from './state.js'
 import { runState, writeRunFile, writeReport, fileRunOf } from './dispatch.js'
 import { DECK, addFlag, clearFlags, setLastAnswer, mascotRest } from './display.js'
 import { flagOf, flagKey } from './focus.js'
@@ -33,7 +33,7 @@ export async function onPromptSubmit($, e) {
 
 // A turn ended: a main-loop answer (raw copy, run-end tidy, the worker's band and report) or a subagent's.
 export async function onTurnComplete($, e) {
-  const a = e.agentId ? S.live.get(e.agentId) : undefined
+  const a = e.agentId ? Runs.live.get(e.agentId) : undefined
   if (!e.agentId) S.leadTurn = false
   if (!e.agentId && e.reason === 'answer' && typeof e.answer === 'string') {
     setLastAnswer({ text: e.answer, ms: e.durationMs, id: null, shaped: S.shapedTurn, raw: S.rawTurn })
@@ -79,7 +79,7 @@ export async function onTurnComplete($, e) {
     if (a.input + a.output === 0) addUsage(a, e.usage)
     finish(a, Date.now(), e.durationMs)
     await writeReport($, a, e.answer)
-    await writeRunFile($, fileRunOf(a), 'ledger.json', JSON.stringify(ledger(S.live, fileRunOf(a), S.paneRoutes), null, 2) + '\n')
+    await writeRunFile($, fileRunOf(a), 'ledger.json', JSON.stringify(ledger(Runs.live, fileRunOf(a), Runs.paneRoutes), null, 2) + '\n')
     ensureTicker($)
     void refreshAgents($)
     $.ui.invalidate('ui.render')

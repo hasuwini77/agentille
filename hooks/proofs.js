@@ -16,7 +16,7 @@
 //
 // and the gates read them through spawnAllowed, sessionsAllowed, fableProof and runHeld.
 
-import { S, isLead, Display } from './state.js'
+import { S, isLead, Display, Runs } from './state.js'
 import { SAFE_RUN } from './panes.js'
 import * as P from './panerec.js'
 import { isRawPrompt } from './highlight.js'
@@ -39,7 +39,7 @@ export function typedPrompt(text, origin, at = NO_MOMENT) {
   S.shapedTurn = false
   S.agtBirth = false
   if (typed && !agt) S.agtTypedSince += 1
-  if (isLead() && S.agtTyped && !agt && !inFlight(S, at)) dropProof()
+  if (isLead() && S.agtTyped && !agt && !inFlight(flight, at)) dropProof()
   if (!typed) return { typed, agt }
   S.lastTyped = String(text ?? '')
   // A typed /agt unlocks spawn_pane for its run, and --fable on it is what makes fable=forced hold.
@@ -124,6 +124,19 @@ export async function moment($) {
   }
   return { clock, rest }
 }
+// What runInFlight and spawnAllowed read, gathered from the stores that hold it: the typed proofs, the panes and the
+// run the band follows with its agents.
+export const flight = Object.freeze({
+  get agtTyped() { return S.agtTyped },
+  get agtTypedAt() { return S.agtTypedAt },
+  get agtTypedSince() { return S.agtTypedSince },
+  get agtBirth() { return S.agtBirth },
+  get agtRun() { return S.agtRun },
+  get panes() { return S.panes },
+  get lastRun() { return Runs.lastRun },
+  get live() { return Runs.live },
+})
+
 // The run's in-flight test on the right clocks: agents by Date.now(), the typed /agt and the panes' rest by the
 // plugin clock `at` was read on. guard.js asks this too, so the guard and spawn_pane never disagree.
 export const inFlight = (st, at = NO_MOMENT) => runInFlight(st, Date.now(), at.rest, at.clock)
@@ -131,7 +144,7 @@ export const inFlight = (st, at = NO_MOMENT) => runInFlight(st, Date.now(), at.r
 // spawn_pane's typed gate: null when it may open a pane, else the one sentence it is denied with. With no `runId`,
 // only the typed /agt and its run in flight are checked. The typed /agt's own turn may open any run id (that is
 // where the id is born) and is never past the in-flight cap; a later turn opens panes only for the run's own id.
-export function spawnAllowed(runId = null, st = S, at = NO_MOMENT) {
+export function spawnAllowed(runId = null, st = flight, at = NO_MOMENT) {
   if (!st.agtTyped) return 'spawn_pane opens worker panes only in a session where /agt was typed.'
   if (!st.agtBirth && !inFlight(st, at)) return 'spawn_pane opens worker panes only while the typed /agt run is in flight; the next run needs the next typed /agt.'
   if (runId !== null && !st.agtBirth && st.agtRun && runId !== st.agtRun) return 'spawn_pane opens panes only for run ' + st.agtRun + ', the run the typed /agt started; run ' + runId + ' needs its own typed /agt.'

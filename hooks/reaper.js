@@ -1,7 +1,7 @@
 // agentille reaper: what the lead sees of its panes (herdr or tmux poll), which finished worker is harvested,
 // which closes, which is flagged, the wake it sends itself, and the cleaner behind /agt-clean.
 
-import { S, Profile } from './state.js'
+import { S, Profile, Runs } from './state.js'
 import { herdrOrphans, tmuxOrphans, orphanPlan, staleTabs, parseWorktrees, worktreePlan, cleanText, FRESH_MS } from './clean.js'
 import { ownedWorktrees, forgetOwned } from './guard.js'
 import { writeRunFile } from './dispatch.js'
@@ -17,10 +17,10 @@ const { restingSince, staged, strandedNow } = P
 export async function notePaneExits($) {
   const touched = new Set()
   for (const name of panesLeft(staged, S.panes)) {
-    const r = endRoute(S.paneRoutes, name, Date.now())
+    const r = endRoute(Runs.paneRoutes, name, Date.now())
     if (r) touched.add(r.run)
   }
-  for (const run of touched) await writeRunFile($, run, 'ledger.json', JSON.stringify(ledger(S.live, run, S.paneRoutes), null, 2) + '\n')
+  for (const run of touched) await writeRunFile($, run, 'ledger.json', JSON.stringify(ledger(Runs.live, run, Runs.paneRoutes), null, 2) + '\n')
 }
 
 // A file counts only if it was written once this session knew the pane: a role can be respawned, and
@@ -263,7 +263,7 @@ export const RUN_TTL_MS = 14 * 24 * 60 * 60_000
 export async function pruneRuns($, run, r) {
   if (!Profile.home) return
   const dir = Profile.home + '/.agentille/state'
-  const keep = new Set([S.lastRun, ...S.runs.keys(), ...S.panes.map((p) => splitName(p.name)?.run), ...[...S.live.values()].map((a) => a.run)])
+  const keep = new Set([Runs.lastRun, ...Runs.runs.keys(), ...S.panes.map((p) => splitName(p.name)?.run), ...[...Runs.live.values()].map((a) => a.run)])
   for (const e of await $.fs.list(dir).catch(() => [])) {
     if (e.kind !== 'dir' || !e.name.startsWith('run-')) continue
     const id = e.name.slice(4)

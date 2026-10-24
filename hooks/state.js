@@ -7,19 +7,14 @@ import { Timers } from './ticker.js'
 import { Wire } from './worker.js'
 import { Profile } from './profile.js'
 import { Display } from './display.js'
+import { Runs } from './dispatch.js'
 
 // The read views of the stores the owner modules keep (store.js): read through these, written only by their owners.
-export { Timers, Wire, Profile, Display }
+export { Timers, Wire, Profile, Display, Runs }
 
 export const S = {
   weeklyPct: null,
-  lastRun: 'adhoc',
-  wfToasted: new Set(),  // run:role pairs whose drift the person was told once
-  runs: new Map(),  // run id → { revise, fixes, fable, formation, log: [], reports: { role → count } }
-  live: new Map(),  // agentId → live agent (live.js)
-  decisions: [],  // this session, for /agt-info routing
   panes: [],  // agt-* panes (herdr or tmux) other than this one
-  paneRoutes: [],  // PaneRoute[], append-only: how each worker this lead opened was routed
   opened: [],  // { id, name } of panes this lead opened via spawn_pane, in spawn order
   openedNames: new Set(),  // every pane name this lead opened, kept after the pane closes
   sessions: [],  // { id, name, kind, tab, terminal } of the sessions this lead opened via open_sessions, oldest first
@@ -45,7 +40,6 @@ export const S = {
   lastTyped: '',  // the newest typed prompt: a shell session runs only a command it asks for
   agtPrompt: '',  // the newest typed /agt prompt: a worker pane runs on Codex only when it or lastTyped names Codex
   workerProved: false,  // worker: its first typed prompt decided whether fable=forced holds here
-  demotedToasted: new Set(),  // run ids told once that fable=forced was dropped for want of a typed --fable
   leadTurn: false,  // a main-loop turn is running: its idle panes are waiting for review
   shapedTurn: false,  // this turn's prompt carried the answer style (display.highlight: all)
   rawTurn: false,  // this turn's prompt asked for text to paste as is: no panel, answer copied
@@ -65,11 +59,11 @@ export const isLead = () => !S.worker && !S.selfName
 // What the modules wired last in register(on) read: live state through getters, since most of
 // it is reassigned.
 export const ctx = {
-  live: S.live,
-  get run() { return S.lastRun },
+  get live() { return Runs.live },
+  get run() { return Runs.lastRun },
   get tick() { return Timers.tick },
   get panes() { return S.panes },
-  get routes() { return S.paneRoutes },
+  get routes() { return Runs.paneRoutes },
   get isLead() { return isLead() },
   onTick: [], // (io, ctx, now) callbacks the redraw ticker calls each period; a module adds its own while registering
 }

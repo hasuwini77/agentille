@@ -30,6 +30,10 @@ A framed dispatch tree above your prompt, rooted at your session.
   - a role the lead respawns is a new pane and starts unharvested, even while the earlier pane is still open.
 - **Until then** the pane stays open and is flagged once (`⚑ <name> done, not harvested`, or `idle, not harvested`).
 
+## After a compaction
+
+When a session with an `/agt` run in flight compacts, a hook prints a short `[agt re-entry]` block into the new context: the run id, how its workers run (subagent, panes or workflow), one line per slice with each role's state (working or done), and which files to re-read before the next dispatch. The mod names the session's run in `~/.agentille/state/session-<session id>.run` at the run's first dispatch, and refreshes the run's `ledger.json` on each dispatch so every slice shows from the start. A run whose `report.md` is written, or that has not changed in a day, counts as over: the hook prints nothing.
+
 ## Best with Herdr
 
 - Workers are labeled in Herdr's sidebar, and a row's `↗` jumps to its pane.

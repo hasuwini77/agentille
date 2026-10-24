@@ -11,7 +11,7 @@ import { readWire } from './worker.js'
 
 // The redraw count is read by the drawing (Timers.tick, ctx.tick); the timers and the agent-list throttle are this
 // module's alone.
-const { s, view } = makeStore('ticker.js', { tick: 0 })
+const { s: my, view } = makeStore('ticker.js', { tick: 0 })
 export const Timers = view
 let pollTimer = null  // pane polling: runs only while panes may exist
 let quietPolls = 0
@@ -89,10 +89,10 @@ export function ensureTicker($) {
     if (!working() && !animating(now)) {
       tickTimer?.cancel()
       tickTimer = null
-    } else s.tick += 1
+    } else my.tick += 1
     await tickModules($, now) // also on the tick that stops the ticker, so the last change is seen
-    if (S.panes.length && s.tick % 3 === 0) await readWire($)
-    if (s.tick % 4 === 0) void refreshAgents($, now)
+    if (S.panes.length && my.tick % 3 === 0) await readWire($)
+    if (my.tick % 4 === 0) void refreshAgents($, now)
     $.ui.invalidate('ui.render')
   })
 }

@@ -12,7 +12,7 @@ import { depsOf, activeSquads, explain, squadsText, allPaths, injection } from '
 
 // The profile's store: what the session read from ~/.agentille/profile.json and squads.json. Read through the Profile
 // view; written only by loadProfile and loadSquads.
-const { s, view } = makeStore('profile.js', {
+const { s: my, view } = makeStore('profile.js', {
   home: null,
   settings: { ...DEFAULTS },
   depth: null,
@@ -43,20 +43,20 @@ export async function installedSkew($) {
 }
 
 export async function loadProfile($) {
-  s.home = (await $.env.get('HOME')) ?? null
+  my.home = (await $.env.get('HOME')) ?? null
   setProfileDisplay({})
-  s.profileMissing = false
-  if (!s.home) return
+  my.profileMissing = false
+  if (!my.home) return
   try {
-    const p = JSON.parse(await $.fs.read(s.home + '/.agentille/profile.json'))
+    const p = JSON.parse(await $.fs.read(my.home + '/.agentille/profile.json'))
     // a toggle can create a profile that holds only display: that is still a profile with no voice
-    s.profileMissing = !hasVoice(p)
-    s.depth = p.thinkingDepth ?? null
-    s.settings = { ...DEFAULTS, ...(p.routing ?? {}) }
+    my.profileMissing = !hasVoice(p)
+    my.depth = p.thinkingDepth ?? null
+    my.settings = { ...DEFAULTS, ...(p.routing ?? {}) }
     setProfileDisplay(cleanDisplay(p.display))
   } catch {
     // no profile yet: the tip says /agentille-init (the mod's toast when it draws, else /agt's line)
-    s.profileMissing = true
+    my.profileMissing = true
   }
 }
 
@@ -69,25 +69,25 @@ export async function loadSquads($) {
     const existing = new Set()
     for (const p of allPaths(config)) if (await $.fs.exists(cwd + '/' + p)) existing.add(p)
     const deps = depsOf(pkg)
-    s.squads = activeSquads(config, deps, existing)
-    s.squadRows = explain(config, deps, existing)
-    s.squadBlock = injection(s.squads)
+    my.squads = activeSquads(config, deps, existing)
+    my.squadRows = explain(config, deps, existing)
+    my.squadBlock = injection(my.squads)
   } catch {
-    s.squads = []
-    s.squadRows = null
-    s.squadBlock = ''
+    my.squads = []
+    my.squadRows = null
+    my.squadBlock = ''
   }
 }
 
 export async function squadsView($) {
   await loadSquads($)
-  return squadsText(s.squadRows)
+  return squadsText(my.squadRows)
 }
 
 // The profile tip, once per machine: the same marker /agt writes when it prints the tip itself.
 export async function tipOnce($) {
-  if (!s.profileMissing || !s.home) return
-  const marker = s.home + '/.agentille/state/.tip-shown'
+  if (!my.profileMissing || !my.home) return
+  const marker = my.home + '/.agentille/state/.tip-shown'
   if (await $.fs.exists(marker).catch(() => true)) return
   $.ui.toast(TIP, { timeoutMs: 8000 })
   await $.fs.write(marker, '').catch(() => {})

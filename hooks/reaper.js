@@ -218,7 +218,7 @@ export async function cleanWorkspace($, { all = false, auto = false, panesOnly =
     const tabs = new Map()
     for (const k of keys) tabs.set(k, String(await $.fs.read(dir + '/lead-' + k + '.tabs').catch(() => '')).split('\n').filter(Boolean))
     const plan = orphanPlan(herdrOrphans(list, (id) => tabs.get(paneKey(id))))
-    const close = [...(await withAnswer($, plan)), ...(all ? S.panes.filter((p) => strandedNow.has(p.id) && !plan.close.some((c) => c.id === p.id)) : [])]
+    const close = [...(await withAnswer($, plan)), ...(all ? S.panes.filter((p) => strandedNow.has(p.name) && !plan.close.some((c) => c.id === p.id)) : [])]
     for (const p of close) if ((await run(herdrCloseArgv(p.id)))?.exitCode === 0) r.closed.push(p.name)
     r.keep.push(...plan.keep)
     for (const k of staleTabs(keys, list, paneKey)) if ((await run(['rm', '-f', dir + '/lead-' + k + '.tabs']))?.exitCode === 0) r.tabs += 1
@@ -243,11 +243,11 @@ export async function cleanWorkspace($, { all = false, auto = false, panesOnly =
       if (file && (await $.fs.exists(file).catch(() => false))) done.add(row.id)
     }
     const plan = orphanPlan(tmuxOrphans(rows, (row) => done.has(row.id)))
-    const close = [...(await withAnswer($, plan)), ...(all ? S.panes.filter((p) => strandedNow.has(p.id) && !plan.close.some((c) => c.id === p.id)) : [])]
+    const close = [...(await withAnswer($, plan)), ...(all ? S.panes.filter((p) => strandedNow.has(p.name) && !plan.close.some((c) => c.id === p.id)) : [])]
     for (const p of close) if ((await run(tmuxKillArgv(p.id)))?.exitCode === 0) r.closed.push(p.name)
     r.keep.push(...plan.keep)
   }
-  if (!all) for (const p of S.panes) if (strandedNow.has(p.id)) r.keep.push({ what: p.name, why: 'answer not read · /agt-clean closes it' })
+  if (!all) for (const p of S.panes) if (strandedNow.has(p.name)) r.keep.push({ what: p.name, why: 'answer not read · /agt-clean closes it' })
   if (!panesOnly) await cleanGit($, run, r, { sweepEnv: auto })
   if (all && !panesOnly) await pruneRuns($, run, r)
   if (r.closed.length) $.ui.invalidate('ui.render')

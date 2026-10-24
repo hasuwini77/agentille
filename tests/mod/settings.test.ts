@@ -5,8 +5,8 @@ describe('settings: display parsing', () => {
   test('nothing set: every key is its default', () => {
     const r = resolveDisplay(undefined, {})
     expect(r.values).toEqual(DISPLAY_DEFAULTS)
-    expect(r.from).toEqual({ deck: 'default', focus: 'default', highlight: 'default', band: 'default', statusLine: 'default', mascot: 'default' })
-    expect(DISPLAY_DEFAULTS).toEqual({ deck: 'off', focus: true, highlight: 'off', band: 'on', statusLine: 'on', mascot: 'on' })
+    expect(r.from).toEqual({ deck: 'default', focus: 'default', highlight: 'default', band: 'default', statusLine: 'default', mascot: 'default', rows: 'default', spinner: 'default' })
+    expect(DISPLAY_DEFAULTS).toEqual({ deck: 'off', focus: true, highlight: 'off', band: 'on', statusLine: 'on', mascot: 'on', rows: 'on', spinner: 'on' })
   })
 
   test('profile beats store, store beats default, per key', () => {
@@ -23,8 +23,8 @@ describe('settings: display parsing', () => {
     expect(r.from).toMatchObject({ deck: 'default', focus: 'profile', highlight: 'store' })
   })
 
-  test('band, statusLine and mascot take on or off and nothing else', () => {
-    for (const k of ['band', 'statusLine', 'mascot']) {
+  test('band, statusLine, mascot, rows and spinner take on or off and nothing else', () => {
+    for (const k of ['band', 'statusLine', 'mascot', 'rows', 'spinner']) {
       expect(cleanDisplay({ [k]: 'off' })).toEqual({ [k]: 'off' })
       expect(cleanDisplay({ [k]: 'on' })).toEqual({ [k]: 'on' })
       for (const junk of [false, true, 'OFF', 'auto', 0, null, ['off']]) expect(cleanDisplay({ [k]: junk })).toEqual({})
@@ -93,6 +93,8 @@ describe('settings: writing the profile', () => {
     expect(displayText(resolveDisplay({ statusLine: 'off' }, {}))).toMatch(/statusLine\s+off\s+profile/)
     expect(t).toMatch(/band\s+on\s+default/)
     expect(t).toMatch(/mascot\s+on\s+default/)
+    expect(t).toMatch(/rows\s+on\s+default/)
+    expect(t).toMatch(/spinner\s+on\s+default/)
   })
 })
 

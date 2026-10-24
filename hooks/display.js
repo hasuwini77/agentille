@@ -1,4 +1,4 @@
-// agentille display: the display settings (deck, focus, highlight, band, statusLine, mascot) read from
+// agentille display: the display settings (deck, focus, highlight, band, statusLine, mascot, rows, spinner) read from
 // profile.json or the mod store and written back, the agent flags above the prompt, and the memo of which message closed an answer.
 
 import { Profile } from './profile.js'
@@ -25,6 +25,8 @@ const { s: my, view } = makeStore('display.js', {
   bandOn: true,  // display.band: the switchboard above the prompt draws
   statusOn: true,  // display.statusLine: the agt status line under the prompt is pinned
   mascotOn: true,  // display.mascot: the mascot figure draws in a worker's band and the deck's cast
+  rowsOn: true,  // display.rows: an Agent call, and a Workflow call's agents, draw as live rows in the transcript
+  spinnerOn: true,  // display.spinner: the main spinner gets the working-agents suffix
   flags: [],  // [{ text, key, at }] from agent results this run
   lastAnswer: null,  // { text, ms, id, shaped, raw } of the newest main-turn answer; its closing block draws as the panel
   panelMemo: new Map(),  // message id → { text, panel() result }: the blocks that closed a main turn's answer
@@ -86,6 +88,8 @@ export function applyDisplay() {
   my.bandOn = my.display.values.band !== 'off'
   my.statusOn = my.display.values.statusLine !== 'off'
   my.mascotOn = my.display.values.mascot !== 'off'
+  my.rowsOn = my.display.values.rows !== 'off'
+  my.spinnerOn = my.display.values.spinner !== 'off'
 }
 
 export const PROFILE_FILE = '/.agentille/profile.json'

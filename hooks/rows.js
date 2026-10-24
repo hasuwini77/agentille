@@ -1,9 +1,11 @@
 // Live agent rows in the transcript: an Agent tool call draws as the agent it started, with its
 // model, effort, current tool, time and tokens, instead of the engine's static row.
-// The live map (ctx.live) is the truth; this file only paints from it.
+// The live map (ctx.live) is the truth; this file only paints from it. display.rows off leaves every
+// Agent and Workflow row to the engine, an /agt run's own agents included.
 
 import { boardRows, prettyModel } from './board.js'
 import { short, waving } from './live.js'
+import { Display } from './state.js'
 
 const MAX_CALLS = 200
 const MAX_FLOW_ROWS = 8
@@ -87,6 +89,7 @@ export function registerRows(on, ctx) {
 
   on('ui.render', { component: 'ToolUse', props: { tool: 'Agent' } }, async ($, e, next) => {
     const p = e.props
+    if (!Display.rowsOn) return next(e)
     if (p.isErrored || p.isInterrupted) return next(e)
     const id = p.output?.agentId ?? calls.get(p.tool_use_id ?? e.requestId)
     const a = id ? ctx.live.get(id) : undefined
@@ -98,6 +101,7 @@ export function registerRows(on, ctx) {
   // A Workflow call keeps the engine's own row and lists the agents its script started beneath it.
   on('ui.render', { component: 'ToolUse', props: { tool: 'Workflow' } }, async ($, e, next) => {
     const p = e.props
+    if (!Display.rowsOn) return next(e)
     if (p.isErrored || p.isInterrupted) return next(e)
     if (p.onScreen === null) return next(e) // drawn outside the viewport: the engine's row alone
     const started = flows.get(p.tool_use_id ?? e.requestId)

@@ -290,9 +290,9 @@ export function register(on) {
     return els.Box({ flexDirection: 'column', children: h.card.length ? [cardBox(els, h.card), body] : [body] })
   })
 
-  // Main-session spinner: how many subagents (◇) and pane sessions (▣) work behind it.
+  // Main-session spinner: how many subagents (◇) and pane sessions (▣) work behind it. display.spinner off adds nothing.
   on('ui.render', { component: 'Spinner' }, async ($, e, next) => {
-    if (Runs.live.has(e.requestId)) return next(e)
+    if (!Display.spinnerOn || Runs.live.has(e.requestId)) return next(e)
     const subs = [...Runs.live.values()].filter((a) => a.state === 'working').length
     const busy = Panes.panes.filter((p) => p.state === 'working').length
     if (subs + busy === 0) return next(e)

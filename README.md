@@ -127,6 +127,8 @@ Everything lives in `~/.agentille/profile.json`. Every key is optional, and a mi
 - `display.band` (default `on`): `off` draws nothing above the prompt, the run's tree, its `⚑` flags and a worker's own band included.
 - `display.statusLine` (default `on`): `off` pins no status line under the prompt.
 - `display.mascot` (default `on`): `off` drops the figure from worker panes and the deck; a worker keeps its one-line caption.
+- `display.rows` (default `on`): `off` leaves every `Agent` call in the transcript as Claude Code's own row, a plain subagent's and an `/agt` run's alike.
+- `display.spinner` (default `on`): `off` adds no working-agents count or phase names to the main spinner.
 - `display.deck`: `auto` opens the deck on every `/agt`, `off` only when you type `/agt-deck`.
 - `display.focus`: agent flags (a REVISE, a FAIL, a blocked pane) in the band.
 - `display.highlight` (default `off`): `on` lights `/agt` replies, `all` every reply, `off` none. The mod adds text to a prompt only under `all` and for text to paste; the answer frame, the answer-shape note, plain-text answers and the older commands that write this block: [docs/settings.md](./docs/settings.md).

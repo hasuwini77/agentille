@@ -1614,7 +1614,7 @@ describe('sessions: helpers', () => {
     expect([...shellCommands('open a shell and run npm run dev in it')]).toEqual(['npm run dev'])
   })
 
-  test('session names are s-<run>-<n>, never agt-, so no reaper, band or sweep picks them up', () => {
+  test('session names are s-<run>-<n>, never agt-, so the band and the worker reaper never pick them up', () => {
     expect(sessionName('k7f2ab', 1)).toBe('s-k7f2ab-1')
     expect(sessionName('k7f2ab', 8)).toBe('s-k7f2ab-8')
     expect(sessionName('k7f2ab', 0)).toBe(null)
@@ -1625,6 +1625,10 @@ describe('sessions: helpers', () => {
 
   test('the tool loads eagerly and says when to use it', () => {
     expect(OPEN_SESSIONS_TOOL.isDeferred).toBe(false)
+    // What the reaper and the SessionEnd sweep really do, not "no reaper".
+    expect(OPEN_SESSIONS_TOOL.description).not.toContain('no reaper')
+    expect(OPEN_SESSIONS_TOOL.description).toContain('closed after 10 minutes idle and unfocused, and at session end when idle')
+    expect(sessionsNote('herdr', 'claude')).toContain('closed after 10 minutes idle and unfocused')
     expect(OPEN_SESSIONS_TOOL.description).toContain('open or start sessions')
     expect(OPEN_SESSIONS_TOOL.description).toContain('never answer it with subagents')
     expect(OPEN_SESSIONS_TOOL.inputSchema.properties.model.enum).not.toContain('fable')
@@ -1908,7 +1912,7 @@ describe('sessions: the idle sweep', () => {
   })
 
   test('the note tells a herdr lead the sessions close themselves; tmux ones only on request', () => {
-    expect(sessionsNote('herdr', 'claude')).toContain('closes itself after 10 minutes idle')
+    expect(sessionsNote('herdr', 'claude')).toContain('is closed after 10 minutes idle')
     expect(sessionsNote('tmux', 'claude')).toContain('close only on request')
   })
 

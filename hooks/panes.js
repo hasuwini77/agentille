@@ -447,9 +447,14 @@ export function closeTarget(input, live = [], tab = null, mine = new Set()) {
 // ── sessions: interactive panes the person asked for, not workers ──────────────
 
 // What open_sessions can start. A session is the person's own, like a pane they opened by hand: no agt- name,
-// no worker env and no wire, so the band, the reaper, the SessionEnd sweep and /agt-clean never touch it.
+// no worker env and no wire, so the band and the worker reaper never touch it. Only a Herdr Claude or Codex session
+// is ever closed for the person: by the lead after SESSION_IDLE_MS idle and unfocused (sessionSweep), at session end
+// when idle (the SessionEnd sweep, from the lead's own lead-<pane>.sessions list), and by /agt-clean when idle after
+// its lead died. A shell, and any tmux session, closes only on request.
 export const SESSION_KINDS = ['claude', 'codex', 'shell']
 export const MAX_SESSIONS = 8
+// A resting session closes after this long: time to read an answer and type the next prompt.
+export const SESSION_IDLE_MS = 10 * 60_000
 
 // s-<run>-<n>: unique per herdr server through the run id, and never agt-.
 export function sessionName(run, i) {
@@ -460,7 +465,7 @@ export function sessionName(run, i) {
 export const OPEN_SESSIONS_TOOL = {
   name: 'open_sessions',
   isDeferred: false,
-  description: 'Open interactive sessions beside this one as Herdr or tmux panes, never focused: Claude by default, or Codex or a plain shell. Use it whenever the person asks to open or start sessions, panes, terminals, Claudes or Codexes ("open three sessions"): that is a direct action, not orchestration, so never answer it with subagents. Each session belongs to the person, like one opened by hand: no worker, no reaper, no reports. Not for delegating work.',
+  description: 'Open interactive sessions beside this one as Herdr or tmux panes, never focused: Claude by default, or Codex or a plain shell. Use it whenever the person asks to open or start sessions, panes, terminals, Claudes or Codexes ("open three sessions"): that is a direct action, not orchestration, so never answer it with subagents. Each session belongs to the person, like one opened by hand: no worker and no reports. On Herdr a Claude or Codex session is closed after ' + SESSION_IDLE_MS / 60_000 + ' minutes idle and unfocused, and at session end when idle; a shell, or any session on tmux, closes only on request. Not for delegating work.',
   inputSchema: {
     type: 'object',
     properties: {
@@ -595,9 +600,6 @@ export const tmuxTitleArgvs = (id, name) => [
 ]
 export const tmuxTypeArgvs = (id, command) => [['tmux', 'send-keys', '-t', id, '-l', '--', command], ['tmux', 'send-keys', '-t', id, 'Enter']]
 
-// A resting session closes after this long: time to read an answer and type the next prompt.
-export const SESSION_IDLE_MS = 10 * 60_000
-
 // The Herdr sessions a lead closes now: an agent idle (its answer seen) and unfocused for SESSION_IDLE_MS. A `done`
 // agent holds an answer nobody has looked at yet, so it stays. A shell is never closed for the person, and neither is a
 // session whose agent left (claude exited to a bare shell the person may be using). `since` maps name → when it was
@@ -625,6 +627,6 @@ export function sessionsFile(home, leadPane) {
 
 // What the lead may do next with the sessions it opened, without any tool of ours.
 export function sessionsNote(transport, kind) {
-  if (transport === 'herdr' && kind !== 'shell') return ' Each closes itself after ' + SESSION_IDLE_MS / 60_000 + ' minutes idle and when this session ends. To send one a prompt: herdr agent prompt <name> "…". To read it: herdr agent read <name> --source recent-unwrapped --lines 120. close_pane <name> closes one now when the person asks.'
+  if (transport === 'herdr' && kind !== 'shell') return ' Each is closed after ' + SESSION_IDLE_MS / 60_000 + ' minutes idle and unfocused, and when this session ends if it is idle then. To send one a prompt: herdr agent prompt <name> "…". To read it: herdr agent read <name> --source recent-unwrapped --lines 120. close_pane <name> closes one now when the person asks.'
   return ' They close only on request: close_pane <name> when the person asks.'
 }

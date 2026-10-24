@@ -70,7 +70,7 @@ Every command and its arguments (`--fable`, `/agt-spawn`, `/agt-clean`, `/agt-te
 
 ## Settings
 
-Everything lives in `~/.agentille/profile.json`. Every key is optional and no profile file is needed. The key most people set first is `integration`, what a finished slice becomes: `pr` (the default) pushes a branch and opens a PR per slice, `auto` also merges each PR on green and pushes a version tag, `push` pushes the branch only, `local` pushes nothing. A repo can only lower it, and a risky diff (auth, payments, deploy, migrations, dependencies) stops at the PR under every setting. `/agt-info` shows what is in effect.
+Everything lives in `~/.agentille/profile.json`. Every key is optional and no profile file is needed. The key most people set first is `integration`, what a finished slice becomes: `pr` (the default) pushes a branch and opens a PR per slice, `auto` also merges each PR on green and pushes a version tag, `push` pushes the branch only, `local` pushes nothing. A repo can only lower it, and a risky diff (auth, payments, deploy, migrations, dependencies) stops at the PR under every setting. `/agt-info` shows the `display` values in effect and where each came from.
 
 Every key, its default and what is checked (`integration`, `thinkingDepth`, `projects[]`, `routing.*`, `display.*`, the voice keys, `viewports`): [docs/settings.md](./docs/settings.md).
 

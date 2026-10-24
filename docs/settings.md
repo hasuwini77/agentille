@@ -4,7 +4,7 @@ Everything lives in `~/.agentille/profile.json`. Every key is optional, a missin
 
 ## What is checked
 
-- **What is checked:** an invalid `display.*` value is ignored and falls back to the value a settings command (`/agt-deck`, `/agt-focus`, `/agt-highlight`) left in the mod's store, then to the default ([Display switches](#display-switches)). An invalid `integration` value is ignored too, and the next rule in [`integration`](#integration) decides.
+- **What is checked:** an invalid `display.*` value is ignored and falls back to the value a settings command (`/agt-deck`, `/agt-focus`, `/agt-highlight`) left in the mod's store, then to the default; `band`, `statusLine` and `mascot` have no command, so they go straight to the default ([Display switches](#display-switches)). An invalid `integration` value is ignored too, and the next rule in [`integration`](#integration) decides.
 - **What is not:** `thinkingDepth` and `routing.*` are read as written. A mistyped value is not replaced by its default, so a `thinkingDepth` other than `quick` routes as the default table, and the escalation ladder reaches Fable only when `routing.autoFable` is exactly `true` (`--fable` works either way).
 - **See it:** `/agt-info` shows the `display` values in effect and where each came from; `/agt-info route <role>` shows what your `thinkingDepth` and `routing.*` do to that role's route.
 

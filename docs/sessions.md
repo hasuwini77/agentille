@@ -10,3 +10,4 @@ Each one is yours, like a pane opened by hand: no worker role or worker environm
 - **Never auto-closed**: shells, a session whose agent has exited, and every tmux session. They close when you ask or when you close the pane.
 - **Got one closed too early?** `claude --resume` in that directory brings the conversation back.
 - **What unlocks the tool:** `open_sessions` exists only on a turn whose typed prompt asked for sessions, panes or terminals, and a shell's first command must be one you quoted in that sentence: [guards.md](./guards.md#pane-tools).
+- **Turn it off:** `"sessions": "off"` at the top level of `~/.agentille/profile.json` (default `on`, beside the `display` keys in [settings.md](./settings.md#display-switches)). A plain prompt then never unlocks `open_sessions`; only a typed `/storm` still opens its one hand-off session. `/agt-info` prints the value in effect.

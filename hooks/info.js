@@ -92,6 +92,11 @@ export function squadsSummary(rows) {
   return 'squads: ' + (active.length ? active.join(', ') : 'none active') + ' (/agt-info squads)'
 }
 
-export function overviewText({ display, squads, routing, ledger }) {
-  return ['display (profile.json → display):', displayText(display), squads, routing, ledger, 'more: /agt-info routing | ledger | squads | route <role>'].join('\n')
+// profile.json → sessions as one line: null is unset, which reads as on.
+export function sessionsLine(v) {
+  return 'sessions: ' + (v ?? 'on') + (v ? ' (profile)' : ' (default)') + (v === 'off' ? ' · a plain prompt opens no sessions' : '')
+}
+
+export function overviewText({ display, sessions, squads, routing, ledger }) {
+  return ['display (profile.json → display):', displayText(display), sessionsLine(sessions), squads, routing, ledger, 'more: /agt-info routing | ledger | squads | route <role>'].join('\n')
 }

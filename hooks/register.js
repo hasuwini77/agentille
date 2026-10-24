@@ -125,7 +125,7 @@ export function register(on) {
     if (a.view === 'route') return { text: routeText({ ...a, depth: a.depth ?? Profile.depth }, Profile.settings, Session.weeklyPct) }
     await loadSquads($)
     const log = Runs.runs.get(Runs.lastRun)?.log ?? []
-    return { text: overviewText({ display: Display.display, squads: squadsSummary(Profile.squadRows), routing: routingSummary(log), ledger: ledgerSummary(ledger(Runs.live, Runs.lastRun, Runs.paneRoutes)) }) }
+    return { text: overviewText({ display: Display.display, sessions: Profile.sessions, squads: squadsSummary(Profile.squadRows), routing: routingSummary(log), ledger: ledgerSummary(ledger(Runs.live, Runs.lastRun, Runs.paneRoutes)) }) }
   })
 
   // Typed only: a plugin, a scheduled task or a notification never opens a pane.

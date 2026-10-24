@@ -32,6 +32,7 @@ disable-model-invocation: true
 | `thinkingDepth` | `always` / `complex-only` / `quick`; edit by hand | `complex-only` |
 | `routing` | `{autoFable, maxFablePerRun, fableWeeklyCeiling, maxRunUsd, advisorOnOpus}`; edit by hand | built-in |
 | `display` | `{deck: auto\|off, focus: true\|false, highlight: on\|all\|off}`; edit by hand | `{off, true, on}` |
+| `sessions` | `on` / `off`: `off` stops a plain prompt from opening sessions (a typed `/storm` still can); edit by hand | `on` |
 | `viewports` | design-reviewer default, any of `desktop` / `tablet` / `mobile`; edit by hand | desktop + mobile |
 | `projects[]` | repos registered by `/agentille-project` | `[]` |
 

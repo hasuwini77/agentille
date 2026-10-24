@@ -122,6 +122,8 @@ describe('info: overview lines', () => {
     expect(t).toMatch(/deck\s+auto\s+profile/)
     expect(t).toMatch(/focus\s+true\s+default/)
     expect(t.split('\n').slice(-4, -1)).toEqual(['S', 'R', 'L'])
+    expect(t).toContain('sessions: on (default)')
+    expect(overviewText({ display: resolveDisplay({}, {}), sessions: 'off', squads: 'S', routing: 'R', ledger: 'L' })).toContain('sessions: off (profile) · a plain prompt opens no sessions')
   })
 })
 

@@ -73,6 +73,12 @@ export function displayText({ values, from }) {
   return DISPLAY_KEYS.map((k) => '  ' + k.padEnd(12) + String(values[k]).padEnd(6) + word(k)).join('\n')
 }
 
+// The top-level `sessions` key: 'on' | 'off' when the profile sets it, null when it does not (or holds junk). Off,
+// a plain prompt never unlocks open_sessions (proofs.js typedPrompt); null reads as on.
+export function cleanSessions(v) {
+  return v === 'on' || v === 'off' ? v : null
+}
+
 // Keys that make a profile a voice (what /agentille-init writes). A file holding only `display` or
 // `routing` has none, so the init tip still shows.
 export const VOICE_KEYS = ['name', 'role', 'deliveryStyle', 'tone', 'preTaskQuestioning', 'neverDo']

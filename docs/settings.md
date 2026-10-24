@@ -16,6 +16,7 @@ Each surface the mod draws has its own key in the `display` block. An invalid va
 | `deck` | `auto`, `off` | `off` | `auto` opens the deck on every typed `/agt`; `off` opens it only when you type `/agt-deck`. |
 | `focus` | `true`, `false` | `true` | `false` hides the `⚑` flags in the band. |
 | `highlight` | `on`, `all`, `off` | `off` | See below. |
+| `sessions` (top level, not in `display`) | `on`, `off` | `on` | A plain prompt never unlocks `open_sessions`: "open three sessions" opens nothing. A typed `/storm` still opens its one hand-off session. `/agt-info` prints it under the `display` keys. Set it as `{ "sessions": "off" }`. |
 
 ```json
 { "display": { "band": "off", "statusLine": "on", "mascot": "off" } }

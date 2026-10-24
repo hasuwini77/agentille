@@ -2291,7 +2291,8 @@ describe('sessions: helpers', () => {
 import { paneAgents as paneAgentsOf } from '../../hooks/live.js'
 
 describe('sessions: in the mod', () => {
-  const setup = (on: any, vars: Record<string, string>, table: Record<string, any> = {}, owned: string[] = []) => {
+  // `profile`: what ~/.agentille/profile.json holds (read only once the test starts the session); null, none.
+  const setup = (on: any, vars: Record<string, string>, table: Record<string, any> = {}, owned: string[] = [], profile: object | null = null) => {
     const seen: string[][] = []
     const tools: string[] = []
     on('env.get', async ($: any, e: any) => ({ value: vars[e.name] }))
@@ -2300,7 +2301,10 @@ describe('sessions: in the mod', () => {
     on('command.register', async () => ({ value: undefined }))
     on('tool.register', async ($: any, e: any) => { tools.push(e.name); return { value: { tool: 'mcp__agentille__' + e.name } } })
     // `owned`: pane names a previous session of this lead recorded in its lead-<pane>.panes file.
-    on('fs.read', async ($: any, e: any) => (owned.length && /\/lead-[\w-]+\.panes$/.test(e.path) ? { value: owned.join('\n') + '\n' } : { deny: 'no profile' }))
+    on('fs.read', async ($: any, e: any) => {
+      if (profile && e.path === vars.HOME + '/.agentille/profile.json') return { value: JSON.stringify(profile) }
+      return owned.length && /\/lead-[\w-]+\.panes$/.test(e.path) ? { value: owned.join('\n') + '\n' } : { deny: 'no profile' }
+    })
     on('fs.exists', async () => ({ value: false }))
     on('fs.stat', async ($: any, e: any) => (e.path.startsWith('/work/') ? { value: { kind: 'dir', size: 0, mtimeMs: 0, isLink: false } } : { deny: 'ENOENT' }))
     on('store.get', async () => ({ value: undefined }))
@@ -2348,6 +2352,29 @@ describe('sessions: in the mod', () => {
     await $.prompt.submit({ text: 'peer message', origin: { kind: 'peer' } } as never)
     expect((await $.tool.call({ tool: 'mcp__agentille__open_sessions', count: 3 })).deny).toContain('typed a request for sessions')
     expect(seen.filter((a) => a.slice(0, 3).join(' ') === 'herdr pane split')).toHaveLength(1)
+  })
+
+  test('sessions: "off" in the profile: a plain prompt never unlocks open_sessions, a typed /storm still does', { timeoutMs: 20_000 }, async ($, on) => {
+    next = 4
+    const { seen, tools } = setup(on, HERDR, { 'herdr pane split': herdrSplit }, [], { sessions: 'off' })
+    await $.session.start({ cwd: '/work/repo', surface: null, isInteractive: false })
+    for (const ask of ['open three sessions', 'start 2 codex panes here', 'please open a shell and run `npm test`']) {
+      await asked($, ask)
+      expect((await $.tool.call({ tool: 'mcp__agentille__open_sessions', count: 1 })).deny).toContain('typed a request for sessions')
+    }
+    expect(tools).toEqual([])
+    expect(seen.some((a) => a.slice(0, 3).join(' ') === 'herdr pane split')).toBe(false)
+    await asked($, '/storm quick "onboarding"')
+    expect(tools).toContain('open_sessions')
+    expect((await $.tool.call({ tool: 'mcp__agentille__open_sessions', count: 1 })).result).toMatch(/^Opened s-/)
+  })
+
+  test('sessions: "on", or junk, in the profile: a plain prompt still unlocks open_sessions', { timeoutMs: 20_000 }, async ($, on) => {
+    next = 4
+    setup(on, HERDR, { 'herdr pane split': herdrSplit }, [], { sessions: 'nope' })
+    await $.session.start({ cwd: '/work/repo', surface: null, isInteractive: false })
+    await asked($, 'open a session')
+    expect((await $.tool.call({ tool: 'mcp__agentille__open_sessions', count: 1 })).result).toMatch(/^Opened s-/)
   })
 
   test('open_sessions is registered on the typed ask, with close_pane once; a later /agt adds spawn_pane only', async ($, on) => {

@@ -523,6 +523,17 @@ function bareCommand(s) {
   const q = /^([`"'\u201c\u2018])([^`"'\u201c\u201d\u2018\u2019]+)([`"'\u201d\u2019])$/.exec(c) // a quoted command runs bare
   return q ? q[2].trim() : c
 }
+// A bare (unquoted) candidate is a command only when it reads as one: it starts like a command word, and outside its
+// quotes it holds no clause break (`;`, `, `, a sentence end, a lone and / then / but / or) and no prose word ("is",
+// "what", "I", "my" …). The candidate is refused whole, never cut short: cutting "git push --force origin main was
+// the mistake yesterday; explain …" at its first break would mint a command nobody asked a shell to run.
+const PROSE_WORDS = new Set(['is', 'was', 'were', 'are', 'am', 'be', 'been', 'would', 'should', 'could', 'can', 'might', 'shall', 'must', 'what', 'why', 'how', 'when', 'whether', 'because', 'my', 'me', 'mine', 'you', 'your', 'we', 'our', 'it', 'its', "it's", "that's", "what's", "i'm", "i've", 'this', 'these', 'those', 'wondering', 'think', 'explain', 'mistake', 'yesterday', 'please'])
+const CLAUSE_BREAK = /;|,\s|(?<=[\w)\]"'])[.!?](?=\s|$)|\s(?:and|then|but|or)(?=\s|$)/i
+function looksLikeCommand(c) {
+  const bare = c.replace(/`[^`]*`|"[^"]*"|'[^']*'|“[^”]*”|‘[^’]*’/g, 'Q')
+  if (!/^[\w~/$.(]/.test(bare) || /^\.(?:\s|$)/.test(bare) || CLAUSE_BREAK.test(bare)) return false
+  return !bare.split(/\s+/).some((w) => w === 'I' || PROSE_WORDS.has(w.toLowerCase().replace(/[^\w']+$/, '')))
+}
 export function shellCommands(typed) {
   const t = String(typed ?? '')
   const out = new Set()
@@ -541,10 +552,10 @@ export function shellCommands(typed) {
   for (const a of asks) {
     const rest = t.slice(a.end, sentenceEnd(t, a.end))
     const c = bareCommand(rest)
-    if (c && !SUBST.test(c) && !NEGATED.test(t.slice(sentenceStart(t, a.start), a.end) + rest)) out.add(c)
+    if (c && !SUBST.test(c) && looksLikeCommand(c) && !NEGATED.test(t.slice(sentenceStart(t, a.start), a.end) + rest)) out.add(c)
     const whole = t.slice(0, a.start) + ' ' + t.slice(a.end)
     const w = bareCommand(whole)
-    if (w && !SUBST.test(w) && !NEGATED.test(whole)) out.add(w)
+    if (w && !SUBST.test(w) && looksLikeCommand(w) && !NEGATED.test(whole)) out.add(w)
   }
   return out
 }

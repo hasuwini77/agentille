@@ -1921,6 +1921,23 @@ describe('sessions: helpers', () => {
     expect(droppedNote([], ['s-k7f2ab-1'])).toBe('')
   })
 
+  // Reproduced: "open a shell. git push --force origin main was the mistake yesterday; explain …" made the prose after
+  // the ask a shell "command". A bare candidate is refused whole when it reads as prose, never cut to a prefix.
+  test('a shell candidate that reads as prose is refused, never cut short', () => {
+    const cmds = (typed: string) => [...shellCommands(typed)]
+    expect(cmds('open a shell. git push --force origin main was the mistake yesterday; explain what went wrong')).toEqual([])
+    expect(cmds('open a shell, I keep wondering if git reset --hard origin/main would lose my work')).toEqual([])
+    expect(cmds('open a shell, rm -rf build is what fixed it last time, should I do it again?')).toEqual([])
+    expect(cmds('open a shell and run npm install and npm test')).toEqual([])
+    expect(cmds('open a shell and run git push --force origin main; then explain')).toEqual([])
+    expect(shellDrop('git push --force origin main', 'open a shell. git push --force origin main was the mistake yesterday; explain what went wrong')).toContain('runs only as the person typed it')
+    // Commands still read as commands.
+    expect(cmds('open a shell: cd .. && ls')).toEqual(['cd .. && ls'])
+    expect(cmds('open a shell and run node index.js.')).toEqual(['node index.js'])
+    expect(cmds('open a shell and run git commit -m "fix it, and ship"')).toEqual(['git commit -m "fix it, and ship"'])
+    expect(cmds('open a shell and run ./scripts/dev.sh')).toEqual(['./scripts/dev.sh'])
+  })
+
   test('session names are s-<run>-<n>, never agt-, so the band and the worker reaper never pick them up', () => {
     expect(sessionName('k7f2ab', 1)).toBe('s-k7f2ab-1')
     expect(sessionName('k7f2ab', 8)).toBe('s-k7f2ab-8')

@@ -28,6 +28,15 @@ export function protectedPath(raw, abs, homes = []) {
     const t = String(h ?? '').toLowerCase().replace(/\/+$/, '')
     if (t && (al === t + '/.agentille' || al.startsWith(t + '/.agentille/'))) return '~/.agentille'
   }
+  // Config in the home folder that runs code or holds a backstop: git's global config and attributes, gh's config
+  // (its aliases) and hosts. Read from the spelling (`~/`, `$HOME/`, `$XDG_CONFIG_HOME/`) and the resolved path.
+  const homeRel = [r.replace(/^(~|\$HOME|\$\{HOME\})\//i, '').replace(/^(\$XDG_CONFIG_HOME|\$\{XDG_CONFIG_HOME\})\//i, '.config/')]
+  if (homeRel[0] === r) homeRel.length = 0
+  for (const h of homes) {
+    const t = String(h ?? '').toLowerCase().replace(/\/+$/, '')
+    if (t && al.startsWith(t + '/')) homeRel.push(a.slice(t.length + 1))
+  }
+  for (const rel of homeRel) if (HOME_CONFIG.test(rel)) return '~/' + rel
   const git = (s) =>
     /(^|\/)\.git\/config$/i.test(s) ? '.git/config'
     : /(^|\/)\.git\/hooks(\/|$)/i.test(s) ? '.git/hooks'
@@ -35,11 +44,17 @@ export function protectedPath(raw, abs, homes = []) {
     : /(^|\/)\.git\/refs(\/|$)/i.test(s) ? '.git/refs'
     : /(^|\/)\.git\/packed-refs$/i.test(s) ? '.git/packed-refs'
     : MODULE_GIT.test(s) ? 'a submodule\'s .git/modules config, hooks or refs'
+    : /(^|\/)\.git\/(config\.worktree|HEAD)$/i.test(s) ? '.git/' + /[^/]+$/.exec(s)[0]
+    : /(^|\/)\.git\/worktrees\/[^/]+\/(config\.worktree|HEAD|commondir|gitdir)$/i.test(s) ? 'a linked worktree\'s git state (.git/worktrees)'
+    : /(^|\/)\.claude\/settings(\.local)?\.json$/i.test(s) ? 'Claude Code settings (' + /\.claude\/[^/]+$/i.exec(s)[0] + ')'
     : /(^|\/)\.git$/i.test(s) ? 'the worktree .git file'
     : /(^|\/)\.gitattributes$/i.test(s) ? '.gitattributes (it names the filters and diff drivers git runs)'
     : null
   return git(a) ?? git(r)
 }
+
+// Files under the home folder (relative to it) that a run may not write below auto.
+const HOME_CONFIG = /^(\.gitconfig|\.config\/git\/(config|attributes)|\.config\/gh\/(config|hosts)\.yml)$/i
 
 // A submodule's git dir under the repo's: its config, hooks and refs (`.git/modules/a/modules/b/config` too).
 const MODULE_GIT = /(^|\/)\.git\/modules\/(?:[^/]+\/)+?(config$|hooks(\/|$)|refs(\/|$)|packed-refs$)/i
@@ -729,7 +744,7 @@ function riskyCode(code) {
 }
 
 // Interpreter code that names the trust root or the repo's own git state: it may write them directly.
-const PROTECT_IN_CODE = /\.agentille(?![\w-])|\.gitattributes|\.git\/config|\.git\/hooks|\.git\/refs|\.git\/info|packed-refs|\.git\/modules\/\S*(config|hooks|refs)/i
+const PROTECT_IN_CODE = /\.agentille(?![\w-])|\.gitattributes|\.claude\/settings|\.gitconfig|\.config\/(git|gh)\/|\.git\/HEAD|config\.worktree|\.git\/worktrees\/|\.git\/config|\.git\/hooks|\.git\/refs|\.git\/info|packed-refs|\.git\/modules\/\S*(config|hooks|refs)/i
 
 // A script that pushes, merges, tags or releases: per line, git with push/merge/tag/send-pack/update-ref, gh or
 // hub with a merge, release, api or alias, curl or wget at GitHub.

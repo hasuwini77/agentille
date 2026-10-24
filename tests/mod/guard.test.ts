@@ -1438,3 +1438,38 @@ describe('guard: a cp link, or interpreter code that links, is judged by its sou
     expect(ran).toEqual([])
   })
 })
+
+describe('guard: settings, git and gh config, HEAD and linked-worktree state are protected', () => {
+  test('a redirect, append, tee, cp, install, dd or interpreter write to them is refused', async () => {
+    seed(Profile, { home: '/h' })
+    for (const line of [
+      'echo x > ~/.claude/settings.json',
+      'printf x > "$HOME/.claude/settings.local.json"',
+      'echo x > .claude/settings.json',
+      'cp s.json /work/repo/.claude/settings.local.json',
+      'echo "[alias] p = push" >> ~/.gitconfig',
+      'tee -a /h/.gitconfig < a',
+      'echo x > $XDG_CONFIG_HOME/git/config',
+      'echo x > ~/.config/git/attributes',
+      'install -m 644 a ~/.config/gh/config.yml',
+      'dd if=a of=/h/.config/gh/hosts.yml',
+      'echo ref > .git/HEAD',
+      'echo x >> .git/config.worktree',
+      'echo x > .git/worktrees/wt/HEAD',
+      'sed -i s/a/b/ .git/worktrees/wt/config.worktree',
+      "python3 -c \"open('/h/.claude/settings.json','w').write('{}')\"",
+      "node -e \"require('fs').appendFileSync(require('os').homedir() + '/.gitconfig', 'x')\"",
+    ]) expect([line, integrationIn(line, onSlice)]).toEqual([line, expect.any(String)])
+    for (const line of ['echo x > docs/settings.json', 'cat .git/HEAD', 'echo x > notes/gitconfig.md', 'cp a .claude/notes.md']) expect([line, integrationIn(line, onSlice)]).toEqual([line, null])
+  })
+
+  test('the Write and Edit tools are refused the same files', async ($, on) => {
+    setup(on, { profile: { integration: 'pr' } })
+    await boot($)
+    await typed($)
+    for (const p of ['/h/.claude/settings.json', '/h/.claude/settings.local.json', '/work/repo/.claude/settings.json', '/h/.gitconfig', '/h/.config/gh/config.yml', '/work/repo/.git/HEAD', '/work/repo/.git/worktrees/x/config.worktree']) {
+      expect([p, (await $.tool.call({ tool: 'Write', file_path: p, content: 'x' } as never))?.deny]).toEqual([p, expect.stringContaining('may not write')])
+    }
+    expect((await $.tool.call({ tool: 'Write', file_path: '/work/repo/src/settings.json', content: 'x' } as never))?.deny).toBeUndefined()
+  })
+})

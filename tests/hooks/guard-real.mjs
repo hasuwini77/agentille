@@ -390,6 +390,16 @@ try {
     check('... and the base push is denied', !!p?.deny && refOf('origin.git', 'main') === w.main, JSON.stringify(p))
   }
   {
+    // Your global git config holds aliases and code-running keys too: appending one is refused, so the alias never
+    // exists and origin/main does not move.
+    const w = world()
+    const a = await run(`printf '[alias]\\n\\tpom = push -q origin agt/x:main\\n' >> ~/.gitconfig`)
+    check('>> ~/.gitconfig: denied', a?.deny?.includes('may not write'), JSON.stringify(a))
+    const s = await run('mkdir -p .claude && echo {} > .claude/settings.local.json')
+    check('> .claude/settings.local.json: denied', s?.deny?.includes('Claude Code settings'), JSON.stringify(s))
+    check('... no ~/.gitconfig, origin/main unchanged', !fs.existsSync(HOME + '/.gitconfig') && refOf('origin.git', 'main') === w.main)
+  }
+  {
     // Controls below auto: the run's own branch and ordinary writes still pass.
     world()
     const ok = await run('git push -q -u origin agt/x')

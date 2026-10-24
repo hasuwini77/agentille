@@ -21,7 +21,7 @@ export const denyHidden = (what) => 'integration auto is not set in your profile
 
 export const DENY_UNREAD = 'The guard could not read the repo this command targets; retry, or run the command yourself.'
 
-export const denyProtected = (what) => 'integration auto is not set in your profile for this repo: below auto a run may not write ' + what + ' (the trust root ~/.agentille, the repo config, hooks, info, refs or a push-related git config), which a run could use to lift its own ceiling. Make that change yourself, or raise integration in your profile.'
+export const denyProtected = (what) => 'integration auto is not set in your profile for this repo: below auto a run may not write ' + what + ' (the trust root ~/.agentille, Claude Code settings, your git or gh config, the repo git state and hooks, or a git config key that runs code or moves a push), which a run could use to lift its own ceiling. Make that change yourself, or raise integration in your profile.'
 
 const MODES = ['local', 'push', 'pr', 'auto'] // least to most autonomy
 

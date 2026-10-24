@@ -595,43 +595,116 @@ function envCfg(env) {
   return keys
 }
 
-// Interpreters and the flags whose value is code they run.
-const INTERP = { python: ['-c'], python3: ['-c'], python2: ['-c'], node: ['-e', '--eval', '-p', '--print'], nodejs: ['-e', '--eval', '-p', '--print'], bun: ['-e', '--eval', '-p', '--print'], deno: ['eval'], perl: ['-e', '-E'], ruby: ['-e'], php: ['-r'], lua: ['-e'], osascript: ['-e'] }
+// Interpreters and the flags whose value is code they run. python3.N, pypyN, rubyN and perlN map to their base.
+const INTERP = {
+  python: ['-c'], python3: ['-c'], python2: ['-c'], pypy: ['-c'], pypy3: ['-c'],
+  node: ['-e', '--eval', '-p', '--print'], nodejs: ['-e', '--eval', '-p', '--print'], bun: ['-e', '--eval', '-p', '--print'], deno: ['eval'],
+  perl: ['-e', '-E'], ruby: ['-e'], php: ['-r'], lua: ['-e'], Rscript: ['-e'], osascript: ['-e'], expect: ['-c'],
+  awk: [], gawk: [], mawk: [], tclsh: [], swift: [],
+}
+const AWK = new Set(['awk', 'gawk', 'mawk'])
+// The interpreter a program name resolves to (python3.12 → python3, pypy3 → python3, ruby3.2 → ruby), or null.
+function interpKey(p) {
+  if (Object.hasOwn(INTERP, p)) return p
+  if (/^python\d+(\.\d+)?$/.test(p) || /^pypy\d*$/.test(p)) return 'python3'
+  if (/^ruby\d/.test(p)) return 'ruby'
+  if (/^perl\d/.test(p)) return 'perl'
+  return null
+}
 // Code that mentions a tool which can push, merge, tag or release.
 export const MENTIONS_TOOL = /(^|[^\w.-])(git|gh|hub|curl|wget)([^\w.-]|$)|api\.github\.com|\/api\/v3\//
-// A script that does so: per line, git with push/merge/tag/send-pack/update-ref, gh or hub with a merge, release,
-// api or alias, curl or wget at GitHub.
+// A call that spawns a process: interpreter code can reach git, gh or curl through one however it is spelled.
+const SPAWN_CALL = /\bsystem\s*\(|\bsubprocess\b|\bos\.system\b|\bos\.exec|\bos\.popen\b|\bexecSync\b|\bexecFileSync\b|\bspawnSync\b|\bchild_process\b|\bpopen\s*\(|\bProcess\s*\(|Runtime\.getRuntime|\bposix_spawn\b|do shell script/i
+// The tool name squeezed out of quotes and concatenation, so `'g'+'it'`, `"g" "it"` and `g\it` still read as git.
+const squish = (code) => String(code ?? '').replace(/['"\\+]|\s+/g, '')
+// Interpreter code the reader must refuse below auto: it names a tool (even split up) or spawns a process at all,
+// since the run can reach git, gh or curl through that call.
+function riskyCode(code) {
+  const s = String(code ?? '')
+  return MENTIONS_TOOL.test(s) || MENTIONS_TOOL.test(squish(s)) || SPAWN_CALL.test(s)
+}
+// A script that pushes, merges, tags or releases: per line, git with push/merge/tag/send-pack/update-ref, gh or
+// hub with a merge, release, api or alias, curl or wget at GitHub.
 export const SCRIPT_RISK = /\bgit\b[^\n]*\b(push|merge|tag|send-pack|update-ref)\b|\b(gh|hub)\b[^\n]*\b(merge|release|api|alias)\b|\b(curl|wget)\b[^\n]*github|api\.github\.com/
 // A make target's recipe that does: push, merge, tag or release named in it.
 export const MAKE_RISK = /\b(push|merge|tag|release)\b/
 // System binaries are programs, not scripts of the run's: never read.
 const SYSTEM_BIN = /^\/(usr|bin|sbin|opt|System|Library|nix)\//
 const SHELL_VALUE_OPTS = new Set(['-o', '-O', '--rcfile', '--init-file', '-C', '--init-command'])
+// Package managers whose `run <script>` the reader reads from package.json; task runners read from their recipe
+// file; openers it cannot introspect are refused below auto.
+const PKG_FILE = { npm: 'package.json', pnpm: 'package.json', yarn: 'package.json', bun: 'package.json' }
+const RUNNER_FILE = { just: 'justfile', task: 'Taskfile.yml', rake: 'Rakefile' }
+const OPAQUE_RUNNER = /^(npx|bunx|mise|docker|docker-compose|podman|podman-compose)$/
 
-// A run of code the reader cannot follow: an interpreter's code string → { kind: 'hidden' } when it mentions a
-// tool; a script file, a sourced file or a make target → { kind: 'file' } for guardLine to read.
-function codeStep(w, here) {
+// A package-manager invocation → { script, what } to read, { deny, what } to refuse, or null when it is not a
+// script-running form (install, a builtin, a bare shorthand): those are left alone.
+function pkgScript(p, args) {
+  const pos = args.filter((x) => !x.startsWith('-'))
+  const sub = pos[0]
+  if (sub === 'exec' || sub === 'dlx' || sub === 'x') return { deny: true, what: p + ' ' + sub + ' runs a package the guard cannot read' }
+  if ((sub === 'run' || sub === 'run-script') && pos[1]) return { script: pos[1], what: p + ' run ' + pos[1] }
+  return null
+}
+
+// A run of code the reader cannot follow: an interpreter's code string → { kind: 'hidden' } when it reaches a
+// tool or spawns a process; a script file, a sourced file, a package script or a make target → { kind: 'file' }
+// for guardLine to read; an opener it cannot introspect → { kind: 'hidden' }.
+function codeStep(w, here, stdin = null, piped = false) {
   const p = base(w[0])
   const at = (f) => (/[$`]/.test(f) ? null : f.startsWith('~/') ? null : f.startsWith('/') ? joinPath('/', f) : here ? joinPath(here, f) : null)
   const file = (f, what) => ({ kind: 'file', how: 'script', what, path: at(f), dir: here, slug: null })
-  if (Object.hasOwn(INTERP, p)) {
-    const flags = INTERP[p]
+  const hidden = (what) => ({ kind: 'hidden', what, dir: here, slug: null })
+  const ik = interpKey(p)
+  if (ik) {
+    const flags = INTERP[ik]
     const k = w.findIndex((x, n) => n > 0 && (flags.includes(x) || flags.some((f) => f.startsWith('-') && f.length === 2 && x.startsWith(f) && x.length > 2 && !x.startsWith('--'))))
     if (k > 0) {
       const code = flags.includes(w[k]) ? w[k + 1] ?? '' : w[k].slice(2)
-      return MENTIONS_TOOL.test(code) ? { kind: 'hidden', what: p + ' ' + (flags.includes(w[k]) ? w[k] : w[k].slice(0, 2)) + ' runs code that calls git, gh or curl', dir: here, slug: null } : null
+      return riskyCode(code) ? hidden(p + ' ' + (flags.includes(w[k]) ? w[k] : w[k].slice(0, 2)) + ' runs code that reaches git, gh or curl') : null
     }
-    const f = w.slice(1).find((x) => !x.startsWith('-'))
-    return f && !/(^|\/)node_modules\//.test(f) ? file(f, p + ' ' + f) : null
+    // awk's program is its first positional (a `-f` file is read instead).
+    if (AWK.has(ik)) {
+      const fi = w.findIndex((x, n) => n > 0 && (x === '-f' || x.startsWith('--file')))
+      if (fi > 0) {
+        const f = w[fi].includes('=') ? w[fi].split('=')[1] : w[fi + 1]
+        return f ? file(f, p + ' -f ' + f) : null
+      }
+      const prog = w.slice(1).find((x) => !x.startsWith('-'))
+      return prog && riskyCode(prog) ? hidden(p + ' runs a program that reaches git, gh or curl') : null
+    }
+    // No code flag: the first positional is a script file (a pipe into it is data), else it reads code from stdin.
+    const pos = w.slice(1).filter((x) => !x.startsWith('-') || x === '-')
+    const f = pos.find((x) => x !== '-')
+    if (f && !pos.includes('-')) return /(^|\/)node_modules\//.test(f) ? null : file(f, p + ' ' + f)
+    if (stdin != null && !piped) return riskyCode(stdin) ? hidden(p + ' runs code from stdin that reaches git, gh or curl') : null
+    return hidden(p + ' runs code from stdin that the guard cannot read')
   }
   if (SHELLS.includes(p)) {
+    const hasS = w.some((x, n) => n > 0 && !x.startsWith('--') && /^-[a-z]*s/.test(x))
     for (let i = 1; i < w.length; i++) {
       if (SHELL_VALUE_OPTS.has(w[i])) i++
       else if (!w[i].startsWith('-') && !w[i].startsWith('+')) return file(w[i], p + ' ' + w[i])
     }
-    return null
+    return piped || hasS ? hidden(p + ' runs code from stdin that the guard cannot read') : null
   }
   if ((p === 'source' || w[0] === '.') && w[1]) return file(w[1], w[0] + ' ' + w[1])
+  if (Object.hasOwn(PKG_FILE, p)) {
+    const r = pkgScript(p, w.slice(1))
+    if (!r) return null // not a script-running form (install, a builtin): left alone
+    if (r.deny) return hidden(r.what)
+    return { kind: 'file', how: 'pkg', what: r.what, script: r.script, path: here ? joinPath(here, PKG_FILE[p]) : null, dir: here, slug: null }
+  }
+  if (Object.hasOwn(RUNNER_FILE, p)) {
+    const t = w.slice(1).filter((x) => !x.startsWith('-'))
+    return { kind: 'file', how: 'runner', what: p + (t.length ? ' ' + t.join(' ') : ''), path: here ? joinPath(here, RUNNER_FILE[p]) : null, dir: here, slug: null }
+  }
+  if (p === 'cargo' && w[1] === 'make') return hidden('cargo make runs a task the guard cannot read')
+  if (OPAQUE_RUNNER.test(p)) {
+    const sub = w.find((x, n) => n > 0 && !x.startsWith('-'))
+    if (/^(docker|podman)/.test(p) && !['run', 'exec', 'compose', 'start'].includes(sub ?? '')) return null
+    return hidden(p + (sub ? ' ' + sub : '') + ' runs a container or package the guard cannot read')
+  }
   if (p === 'make' || p === 'gmake') {
     let dir = here
     let mf = null
@@ -673,7 +746,15 @@ export function commandSteps(line, cwd = null) {
       continue
     }
     const at = c.dir ? (/[$`~]/.test(c.dir) ? null : c.dir.startsWith('/') ? joinPath('/', c.dir) : here && joinPath(here, c.dir)) : here
+    // A tool whose subcommand and arguments xargs appends from stdin cannot be read: fail closed below auto.
+    if (c.viaXargs && ['git', 'gh', 'hub', 'curl', 'wget'].includes(p)) {
+      out.push({ kind: 'hidden', what: p + ' takes its subcommand or arguments from xargs, which the guard cannot read', dir: at, slug: null })
+      continue
+    }
     if (p === 'gh' || p === 'hub') {
+      // A subcommand word built by a substitution or an unresolved expansion cannot be read.
+      const sub = w.slice(1).filter((x) => !x.startsWith('-')).slice(0, 2)
+      if (sub.some((x) => /[$`]/.test(x))) { out.push({ kind: 'hidden', what: p + ' runs a subcommand the guard cannot read', dir: at, slug: null }); continue }
       // hub is gh's elder: the same release and api steps, `pull-request` for a PR, and git's own commands.
       const k = p === 'hub' && w[1] === 'pull-request' ? { kind: 'pr', what: 'hub pull-request', dir: at, slug: null } : ghStep(w, at, c.env)
       if (k) out.push({ ...k, gh: true, slugUnknown: ghEdited })
@@ -684,11 +765,13 @@ export function commandSteps(line, cwd = null) {
       const k = httpStep(w, at)
       if (k) out.push(k)
     } else if (p !== 'gh' && p !== 'git' && p !== 'hub') {
-      const k = codeStep(w, at)
+      const k = codeStep(w, at, c.stdin, c.piped)
       if (k) out.push(k)
     } else if (p !== 'gh') {
       const g = gitCall(w)
       if (!g) continue
+      // A subcommand word built by a substitution or an unresolved expansion cannot be read.
+      if (/[$`]/.test(String(g.sub ?? ''))) { out.push({ kind: 'hidden', what: 'git runs a subcommand the guard cannot read', dir: at, slug: null }); continue }
       // GIT_DIR / GIT_WORK_TREE set on the line name the repo as --git-dir does.
       const envDir = c.env?.get('GIT_WORK_TREE') || (c.env?.get('GIT_DIR') ?? '').replace(/\/\.git\/?$/, '') || c.env?.get('GIT_DIR') || null
       const named = g.dir ?? envDir
@@ -793,6 +876,24 @@ async function fileRisk($, c) {
       return MAKE_RISK.test(makeRecipe(text, c.targets)) ? c.what + ' runs a recipe that mentions push, merge, tag or release' : null
     }
     return null
+  }
+  if (c.how === 'pkg') {
+    // Read the named script from package.json and judge its text; a missing file or script is refused.
+    if (!c.path) return c.what + ' runs a package script the guard cannot locate (write the command out)'
+    let script = null
+    try {
+      script = JSON.parse(await $.fs.read(c.path))?.scripts?.[c.script] ?? null
+    } catch {
+      return c.what + ' runs a package script the guard cannot read'
+    }
+    if (typeof script !== 'string') return c.what + ' names a package script that is not in ' + c.path
+    return SCRIPT_RISK.test(script) ? c.what + ' runs a package script that calls git push, merge or tag, gh or curl to GitHub' : null
+  }
+  if (c.how === 'runner') {
+    if (!c.path) return c.what + ' runs a recipe the guard cannot locate (write the command out)'
+    const text = await $.fs.read(c.path).catch(() => null)
+    if (text === null) return c.what + ' runs a recipe the guard cannot read'
+    return SCRIPT_RISK.test(text) ? c.what + ' runs a recipe that calls git push, merge or tag, gh or curl to GitHub' : null
   }
   if (!c.path) return c.what + ' runs a script the guard cannot locate (write its path out)'
   const text = await $.fs.read(c.path).catch(() => null)

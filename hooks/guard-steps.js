@@ -26,7 +26,15 @@ const apiSlug = (path) => {
   return m && !m[1].startsWith('{') && !m[2].startsWith('{') ? m[1] + '/' + m[2] : null
 }
 
-const sensitive = (path) => path.split('/').some((s) => API_WRITES.has(s)) || API_WRITE_PATH.test(path)
+// Writes that change what guards the base branch or start a workflow: branch protection, rulesets, a workflow's
+// dispatch, enable or disable.
+const API_GUARD_PATH = /^repos\/[^/]+\/[^/]+\/(branches\/.+\/protection|rulesets|actions\/workflows\/[^/]+\/(dispatches|enable|disable))(\/|$)/
+
+const sensitive = (path) => path.split('/').some((s) => API_WRITES.has(s)) || API_WRITE_PATH.test(path) || API_GUARD_PATH.test(path)
+
+// A write to the repo itself (`repos/o/r`) that sets its default branch, or whose body the guard cannot read.
+const repoRoot = (path) => /^repos\/[^/]+\/[^/]+\/?$/.test(path)
+const setsDefault = (bodies, unread) => unread || bodies.some((b) => /default_branch/.test(b) || /^[@$]/.test(b))
 
 
 // `env`: what the line set in front of gh; GH_REPO (or GITHUB_REPOSITORY) names its repo as -R does.
@@ -47,6 +55,9 @@ export function ghStep(w, dir, env = new Map()) {
   if (a0 === 'pr' && a1 === 'create') return { kind: 'pr', what: 'gh pr create', dir, slug }
   // An alias can name any of the above under a new word: making one is a step of its own.
   if (a0 === 'alias' && !['list', 'ls'].includes(a1)) return { kind: 'step', what: 'gh alias ' + (a1 ?? ''), dir, slug }
+  // A workflow run can publish or merge on the run's behalf; enabling or disabling one changes what guards the base.
+  if (a0 === 'workflow' && ['run', 'enable', 'disable'].includes(a1)) return { kind: 'step', what: 'gh workflow ' + a1, dir, slug }
+  if (a0 === 'repo' && a1 === 'edit' && pos.some((x) => x === '--default-branch' || x.startsWith('--default-branch='))) return { kind: 'step', what: 'gh repo edit --default-branch', dir, slug }
   if (a0 !== 'api') return null
   let method = null
   let body = false
@@ -69,6 +80,7 @@ export function ghStep(w, dir, env = new Map()) {
   const path = String(endpoint ?? '').replace(/^\//, '').split('?')[0]
   if (m === 'GET') return null
   if (path === 'graphql') return fields.some((f) => gqlWrites(f) || gqlUnread(f)) || input ? { kind: 'step', what: 'gh api graphql mutation', dir, slug } : null
+  if (repoRoot(path) && setsDefault(fields, input)) return { kind: 'step', what: 'gh api ' + m + ' ' + path + ' default_branch', dir, slug: apiSlug(path) ?? slug }
   return sensitive(path) ? { kind: 'step', what: 'gh api ' + m + ' ' + path, dir, slug: apiSlug(path) ?? slug } : null
 }
 
@@ -122,7 +134,7 @@ export function httpStep(w, dir) {
     if (path === null) continue
     if (path.replace(/\/$/, '') === 'graphql') {
       if (data.some((d) => gqlWrites(d) || d.startsWith('@') || /^\$/.test(d))) return { kind: 'step', what: p + ' graphql mutation', dir, slug: null }
-    } else if (sensitive(path) || host === 'uploads.github.com') return { kind: 'step', what: p + ' ' + m + ' ' + path, dir, slug: apiSlug(path) }
+    } else if (sensitive(path) || host === 'uploads.github.com' || (repoRoot(path) && setsDefault(data, false))) return { kind: 'step', what: p + ' ' + m + ' ' + path, dir, slug: apiSlug(path) }
   }
   return null
 }

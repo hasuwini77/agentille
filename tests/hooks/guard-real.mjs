@@ -214,6 +214,18 @@ try {
     check('... origin/main unchanged', refOf('origin.git', 'main') === w.main)
   }
   {
+    // What guards the base on GitHub is the person's: branch protection, the default branch, workflow runs. The
+    // lines are judged against the real repo; none is run (the next step is a stub, so nothing reaches the network).
+    world()
+    const ran = []
+    const stub = async (e) => { ran.push(e.command); return { result: 'stub', exit: 0 } }
+    for (const line of ['gh api -X DELETE repos/o/r/branches/main/protection', 'gh api -X PATCH repos/o/r -f default_branch=agt/x', 'gh workflow run release.yml', 'gh repo edit --default-branch agt/x']) {
+      const r = await bashCall($, { command: line }, stub)
+      check(line + ': denied', r?.deny === DENY_INTEGRATION, JSON.stringify(r))
+    }
+    check('... and none of them ran', ran.length === 0, JSON.stringify(ran))
+  }
+  {
     // Controls below auto: the run's own branch and ordinary writes still pass.
     world()
     const ok = await run('git push -q -u origin agt/x')

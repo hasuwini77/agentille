@@ -50,6 +50,39 @@ describe('guard: which commands integrate', () => {
     ]) expect([line, integrationIn(line, onSlice)]).toEqual([line, expect.any(String)])
   })
 
+  test('branch protection, rulesets, the default branch and workflow runs are steps; reads are not', async () => {
+    for (const line of [
+      'gh api -X DELETE repos/o/r/branches/main/protection',
+      'gh api -X PUT repos/o/r/branches/main/protection --input p.json',
+      'gh api repos/o/r/branches/main/protection/required_status_checks -X PATCH -f strict=false',
+      'gh api -X DELETE repos/o/r/branches/release/1.x/protection',
+      'gh api -X POST repos/o/r/rulesets --input r.json',
+      'gh api -X DELETE repos/o/r/rulesets/7',
+      'gh api -X PATCH repos/o/r -f default_branch=agt/x',
+      'gh api --method PATCH repos/o/r --input repo.json',
+      'gh api repos/o/r/actions/workflows/release.yml/dispatches -f ref=main',
+      'gh api -X PUT repos/o/r/actions/workflows/ci.yml/disable',
+      'gh workflow run release.yml',
+      'gh workflow enable ci.yml',
+      'gh workflow disable ci.yml -R o/r',
+      'gh repo edit --default-branch agt/x',
+      'gh repo edit o/r --default-branch=agt/x',
+      'curl -X DELETE -H "Authorization: token t" https://api.github.com/repos/o/r/branches/main/protection',
+      'curl -X PATCH -d \'{"default_branch":"agt/x"}\' https://api.github.com/repos/o/r',
+      'curl -X PATCH --data-binary @repo.json https://api.github.com/repos/o/r',
+    ]) expect([line, integrationIn(line, onSlice)]).toEqual([line, expect.any(String)])
+    for (const line of [
+      'gh api repos/o/r/branches/main/protection',
+      'gh api repos/o/r',
+      'gh api -X PATCH repos/o/r -f description=docs',
+      'gh workflow list',
+      'gh workflow view ci.yml',
+      'gh run list',
+      'gh repo edit --description docs',
+      'curl https://api.github.com/repos/o/r/branches/main/protection',
+    ]) expect([line, integrationIn(line, onSlice)]).toEqual([line, null])
+  })
+
   test('pushes of the base branch, tags, every branch, a force or a variable are caught', async () => {
     for (const line of [
       'git push origin HEAD:main',

@@ -1,11 +1,13 @@
 // agentille guard: what a run's Bash and file-write calls may do on their own, and which worktrees a run made.
-// The guard is split across three modules; this file wires the hooks and re-exports their public surface, so
-// every existing import of ./guard.js keeps working.
+// The guard is split across four modules; this file wires the hooks and re-exports their public surface, so
+// every existing import of ./guard.js keeps working. Imports run one way: guard.js → guard-policy.js →
+// guard-lex.js → guard-steps.js, never back.
 //
+//   guard-policy.js — the policy: the integration mode for the repo a command targets, and the judgements on
+//                     pushes, merges, tags, releases, ref writes, scripts and recipes.
 //   guard-lex.js    — the shell lexer: reads a line the way the shell would (words, quotes, $( ), heredocs,
 //                     wrappers, interpreters, the variables set on the line) and turns it into candidates.
-//   guard-policy.js — the policy: the integration mode for the repo a command targets, and the judgements on
-//                     pushes, merges, tags, releases, ref writes, the GitHub API, scripts and recipes.
+//   guard-steps.js  — a leaf with the gh and curl/wget readers (merges, releases, API writes).
 //   guard-own.js    — worktree ownership: which worktrees a run made, so the cleaner touches only those.
 //
 //   integration — `auto` (merge, tag and push with no human step) holds only where the person's own
@@ -36,6 +38,7 @@ import { WT_SCRIPT, listTrees, newTrees, claimedTrees, scriptTrees, scriptSlugs,
 
 // Re-exports: every name ./guard.js used to carry still resolves here.
 export { protectedPath, SHELLS, commands, splitCommands, gitCall, commandSteps, joinPath, MENTIONS_TOOL, SCRIPT_RISK, MAKE_RISK } from './guard-lex.js'
+export { ghStep, httpStep } from './guard-steps.js'
 export { DENY_INTEGRATION, DENY_PUSH, DENY_LOCAL, DENY_UNREAD, denyHidden, denyProtected, judgePush, judgeRef, judgeLocal, integrationIn, integrationOf, integrationAllowed, guardLine, makeRecipe, normUrl, normSlug, sameRemote, capsOf } from './guard-policy.js'
 export { OWNED_TTL_MS, worktreeAdds, newTrees, WT_SCRIPT, scriptTrees, scriptSlugs, claimedTrees, recordTrees, parseOwned, Worktrees, worktreesFile, saveOwned, ownedWorktrees, forgetOwned } from './guard-own.js'
 

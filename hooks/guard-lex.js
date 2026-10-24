@@ -3,7 +3,9 @@
 // variables set on the line; then turns a line into the simple commands it runs and each command into an
 // integration candidate (commandSteps/codeStep). Policy (guard-policy.js) judges those candidates.
 import { Profile } from './state.js'
-import { ghStep, httpStep } from './guard-policy.js'
+import { base, ghStep, httpStep } from './guard-steps.js'
+
+export { base }
 
 
 // The trust root and the repo's own git state: a write to any of these below auto is refused, because a run could
@@ -233,8 +235,6 @@ function lex(s, at = 0, closer = null, depth = 0) {
   return { cmds, end: i }
 }
 
-
-export const base = (w) => String(w ?? '').split('/').pop()
 
 export const ASSIGN = /^([A-Za-z_][A-Za-z0-9_]*)=(.*)$/s
 

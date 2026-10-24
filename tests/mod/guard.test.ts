@@ -1,6 +1,10 @@
 import { describe, expect, mock, test } from 'claude-code/testing'
 import { DENY_INTEGRATION, DENY_LOCAL, DENY_PUSH, DENY_UNREAD, capsOf, claimedTrees, integrationIn, integrationOf, joinPath, judgePush, newTrees, normSlug, normUrl, parseOwned, recordTrees, sameRemote, scriptSlugs, scriptTrees, splitCommands, worktreeAdds } from '../../hooks/guard.js'
 import { parseWorktrees } from '../../hooks/clean.js'
+import { DEFAULT_PROFILE, guardLine as judge, loadRunProfile } from '../../hooks/guard.js'
+import { setRunProfile } from '../../hooks/proofs.js'
+import { Profile } from '../../hooks/profile.js'
+import { seed } from '../../hooks/store.js'
 
 // What the repo looks like to a line read alone: the slice branch is checked out, the base is main.
 const onSlice = { current: 'agt/x', cwd: '/w/app' }
@@ -1377,5 +1381,35 @@ describe('guard: a script step it cannot read refuses', () => {
     expect((await bash($, 'sh run.sh npm test')).result).toBe('ok')
     expect((await bash($, '"$EDITOR" notes.md')).result).toBe('ok')
     expect(ran).toEqual(['npm run build', 'sh run.sh npm test', '"$EDITOR" notes.md'])
+  })
+})
+
+describe('guard: with no profile the run is held to the default', () => {
+  test('a profile written mid-run cannot lift a run that started with none', async () => {
+    seed(Profile, { home: '/h' })
+    let profile: string | null = null
+    const host: any = {
+      fs: { read: async (p: string) => { if (p === '/h/.agentille/profile.json' && profile) return profile; throw new Error('ENOENT') }, stat: async () => { throw new Error('ENOENT') }, list: async () => [] },
+      process: { run: async () => ({ exitCode: 1, stdout: '', stderr: '' }) },
+      env: { get: async () => null },
+    }
+    try {
+      await loadRunProfile(host)
+      profile = JSON.stringify({ integration: 'auto' })
+      expect(await judge(host, 'gh pr merge 3', '/w/app')).toBe(DENY_INTEGRATION)
+      expect(DEFAULT_PROFILE.integration).toBe('pr')
+      // A run that started with auto keeps it.
+      await loadRunProfile(host)
+      expect(await judge(host, 'gh pr merge 3', '/w/app')).toBe(null)
+    } finally {
+      setRunProfile(null)
+    }
+  })
+
+  test('the profile and run state are refused however the folder above them is spelled', async () => {
+    for (const line of ['echo x > $H/.agentille/profile.json', 'cp p.json /tmp/x/.agentille/state/lead-1.panes', 'tee ../../.agentille/profile.json < p']) {
+      expect([line, integrationIn(line, onSlice)]).toEqual([line, expect.any(String)])
+    }
+    expect(integrationIn('echo x > notes/agentille.md', onSlice)).toBe(null)
   })
 })

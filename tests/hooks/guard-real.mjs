@@ -9,7 +9,7 @@ import os from 'node:os'
 const root = process.argv[2]
 const { Profile, Spawn, Session } = await import(root + '/hooks/state.js')
 const { seed } = await import(root + '/hooks/store.js')
-const { bashCall, DENY_INTEGRATION } = await import(root + '/hooks/guard.js')
+const { bashCall, loadRunProfile, DENY_INTEGRATION } = await import(root + '/hooks/guard.js')
 const { agtTurnStart } = await import(root + '/hooks/proofs.js')
 
 const T = fs.realpathSync(fs.mkdtempSync(os.tmpdir() + '/agt-guard-real-'))
@@ -360,6 +360,22 @@ try {
     const b = await run('sh s.sh')
     check('sh s.sh ($(printf gi)t push): denied as unreadable', b?.deny?.includes('cannot read'), JSON.stringify(b))
     check('... origin/main unchanged', refOf('origin.git', 'main') === w.main)
+  }
+  {
+    // No profile at the typed /agt: the run is held to the default, so a profile it writes (here through a path the
+    // reader cannot see) does not let the base push through.
+    const w = world()
+    fs.rmSync(HOME + '/.agentille/profile.json', { force: true })
+    await loadRunProfile($)
+    if (spawnSync('python3', ['-c', 'pass'], { env }).status === 0) {
+      const a = await run(`python3 -c "import os; open(os.environ['HOME']+'/.agen'+'tille/profile.json','w').write('{\\"integration\\":\\"auto\\"}')"`)
+      check('control: a profile write the reader cannot see runs', !a?.deny && JSON.parse(fs.readFileSync(HOME + '/.agentille/profile.json', 'utf8')).integration === 'auto', JSON.stringify(a))
+    } else fs.writeFileSync(HOME + '/.agentille/profile.json', JSON.stringify({ integration: 'auto' }))
+    const p = await run('git push -q origin agt/x:main')
+    check('... the base push is still denied (the ceiling is the default, not the live profile)', p?.deny?.includes('git push to main'), JSON.stringify(p))
+    check('... origin/main unchanged', refOf('origin.git', 'main') === w.main)
+    fs.writeFileSync(HOME + '/.agentille/profile.json', JSON.stringify({ integration: 'pr' }))
+    await loadRunProfile($)
   }
   {
     // Controls below auto: the run's own branch and ordinary writes still pass.

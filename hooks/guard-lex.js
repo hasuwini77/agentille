@@ -21,6 +21,8 @@ export function protectedPath(raw, abs, homes = []) {
   if (/\$\{?GIT_DIR\}?/.test(r)) return '$GIT_DIR'
   if (/^~\/\.agentille(\/|$)/i.test(r)) return '~/.agentille'
   if (/^(\$HOME|\$\{HOME\})\/\.agentille(\/|$)/i.test(r)) return '~/.agentille'
+  // The profile and the run state, however the folder above them is spelled (`$H/.agentille/profile.json`).
+  if (/(^|\/)\.agentille\/(profile\.json$|state(\/|$))/i.test(r) || /(^|\/)\.agentille\/(profile\.json$|state(\/|$))/i.test(a)) return '~/.agentille'
   const al = a.toLowerCase()
   for (const h of homes) {
     const t = String(h ?? '').toLowerCase().replace(/\/+$/, '')

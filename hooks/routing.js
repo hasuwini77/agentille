@@ -72,11 +72,19 @@ export function paneUsd(route, now = Date.now()) {
   return priced(route.model, rate) * (ms / 60_000)
 }
 
+// The lead session's own spend on a run: the tokens its main-loop steps used while the run was in progress
+// (dispatch.js addLeadUsage), priced at the lead's model. `lead` maps run id → { input, output, cacheRead, model }.
+export function leadUsd(lead, run) {
+  const t = lead?.get(run)
+  return t ? priced(t.model, t) : 0
+}
+
 // The run's estimated spend so far: the live agents' token counts (live.js: `input` holds uncached input plus cache
-// writes, `cacheRead` the cache reads), filed the way the ledger files them, plus each of the run's pane workers by
-// paneUsd. `routes` is the lead's pane routes; `now` is Date.now(), the clock a route's start is read on.
-export function estimateRunUsd(agents, run, routes = [], now = Date.now()) {
-  let usd = 0
+// writes, `cacheRead` the cache reads), filed the way the ledger files them, each of the run's pane workers by
+// paneUsd, and the lead's own tokens on the run by leadUsd. `routes` is the lead's pane routes; `now` is Date.now(),
+// the clock a route's start is read on.
+export function estimateRunUsd(agents, run, routes = [], now = Date.now(), lead = null) {
+  let usd = leadUsd(lead, run)
   for (const a of agents?.values() ?? []) if ((a.fileRun ?? a.run) === run) usd += priced(a.model, a)
   for (const r of routes ?? []) if (r.run === run) usd += paneUsd(r, now)
   return usd

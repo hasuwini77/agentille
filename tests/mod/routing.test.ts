@@ -1,6 +1,8 @@
 import { describe, expect, mock, test } from 'claude-code/testing'
-import { AGENT_SILENT_MS, AGT_GRACE_TYPED, AGT_INFLIGHT_MAX_MS, PANE_REST_MS, PANE_EST_MAX_MS, PANE_TOKENS_PER_MIN, CEILING_ROLES, ROLES, paneUsd, DEFAULTS, MAX_EXECUTORS_AT_ONCE, PRICES, asksSessions, decide, estimateRunUsd, executorCapFlag, executorsWorking, ordinal, demoteHeaderText, formationOf, ladderFixes, mentionsCodex, mentionsFable, parseHeader, proveHeader, roleOf, runInFlight, typedFable, verdictOf } from '../../hooks/routing.js'
+import { AGENT_SILENT_MS, AGT_GRACE_TYPED, AGT_INFLIGHT_MAX_MS, PANE_REST_MS, PANE_EST_MAX_MS, PANE_TOKENS_PER_MIN, CEILING_ROLES, ROLES, paneUsd, DEFAULTS, MAX_EXECUTORS_AT_ONCE, PRICES, asksSessions, decide, estimateRunUsd, leadUsd, executorCapFlag, executorsWorking, ordinal, demoteHeaderText, formationOf, ladderFixes, mentionsCodex, mentionsFable, parseHeader, proveHeader, roleOf, runInFlight, typedFable, verdictOf } from '../../hooks/routing.js'
 import { pieceOf } from '../../hooks/links.js'
+import { addLeadUsage } from '../../hooks/dispatch.js'
+import { Runs } from '../../hooks/state.js'
 
 const fresh = () => ({ revise: 0, fixes: 0, fable: 0 })
 const S = { autoFable: true, maxFablePerRun: 1, fableWeeklyCeiling: 60 }
@@ -485,6 +487,39 @@ describe('maxRunUsd: a per-run cost ceiling', () => {
     expect(seen).toEqual(['opus', 'opus'])
     expect(ceilingToasts(toasts)).toEqual([])
     expect((await $.command.run({ command: 'agt-info', args: 'ledger' })).text).not.toContain('estimate')
+  })
+
+  test('the lead\'s own tokens on the run are priced at the lead\'s model and counted', async () => {
+    const lead = new Map(Object.entries({
+      r1: { model: 'claude-opus-5-5', input: 1_000_000, output: 100_000, cacheRead: 1_000_000 }, // 4 + 2 + 0.2
+      r2: { model: 'claude-sonnet-5-5', input: 1_000_000, output: 0, cacheRead: 0 }, // another run
+    }))
+    expect(Math.round(leadUsd(lead, 'r1') * 1e6) / 1e6).toBe(6.2)
+    expect(leadUsd(lead, 'r9')).toBe(0)
+    expect(leadUsd(null, 'r1')).toBe(0)
+    const agents = new Map(Object.entries({ x: { run: 'r1', model: 'sonnet', input: 500_000, output: 0, cacheRead: 0 } })) // 1
+    expect(Math.round(estimateRunUsd(agents, 'r1', [], Date.now(), lead) * 1e6) / 1e6).toBe(7.2)
+    expect(Math.round(estimateRunUsd(agents, 'r1') * 1e6) / 1e6).toBe(1) // no lead map: subagents only
+  })
+
+  test('lead usage files under the run its /agt named; steps before the name wait, steps outside a run never count', async () => {
+    const step = (input: number, output: number) => ({ input_tokens: input, output_tokens: output, cache_read_input_tokens: 10, cache_creation_input_tokens: 5 })
+    addLeadUsage(step(100, 10), 'claude-opus-5-5', { agtTurn: false, agtRun: null, agtTypedAt: 1 })
+    expect(Runs.leadPending).toBe(null)
+    // The typed /agt reads its procedure before it names a run: pending.
+    addLeadUsage(step(1000, 100), 'claude-opus-5-5', { agtTurn: true, agtRun: null, agtTypedAt: 7 })
+    expect(Runs.leadPending).toMatchObject({ at: 7, input: 1005, output: 100, cacheRead: 10 })
+    // The run has an id: the pending steps and this one file under it.
+    addLeadUsage(step(500, 50), 'claude-opus-5-5', { agtTurn: true, agtRun: 'lead1', agtTypedAt: 7 })
+    expect(Runs.lead.get('lead1')).toEqual({ input: 1510, output: 150, cacheRead: 20, model: 'claude-opus-5-5' })
+    expect(Runs.leadPending).toBe(null)
+    // A newer typed /agt drops what an older one left pending.
+    addLeadUsage(step(1, 1), 'claude-opus-5-5', { agtTurn: true, agtRun: null, agtTypedAt: 8 })
+    addLeadUsage(step(2, 2), 'claude-opus-5-5', { agtTurn: true, agtRun: null, agtTypedAt: 9 })
+    expect(Runs.leadPending).toMatchObject({ at: 9, input: 7, output: 2 })
+    addLeadUsage(step(0, 0), 'claude-opus-5-5', { agtTurn: true, agtRun: 'lead2', agtTypedAt: 9 })
+    expect(Runs.lead.get('lead2')).toMatchObject({ input: 12, output: 2 })
+    expect(Runs.lead.get('lead1')).toMatchObject({ input: 1510 }) // untouched
   })
 })
 

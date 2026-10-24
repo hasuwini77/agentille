@@ -19,11 +19,14 @@ The prices are the first-party API list prices of the current model generation (
 
 A model the mod cannot name is priced as Opus.
 
+The lead session's own tokens count too. Each main-loop step of the lead reports its usage, and the steps taken while an `/agt` run is in progress are added to that run and priced at the lead's model. That covers the procedure the lead reads at the start of a run and every report it reads after. Steps taken before the run has an id (its first pane or routed dispatch names it) wait and join the run once it does. Lead turns outside a run never count.
+
 ## What it leaves out
 
 - **It is an estimate, not a bill.** A plan subscription is not billed per token.
 - **Cache writes count as plain input,** though they cost about 1.25× that.
 - **Pane workers report no tokens to the lead,** so they are estimated, not measured (below).
+- **The lead's model is the one it ran last on the run.** A run whose lead switched models midway is priced at the newer one.
 
 ## Pane workers
 
@@ -38,5 +41,5 @@ Minutes run from the pane's start to its end (or now), at most 60 per pane. That
 
 ## Where to see it
 
-- `/agt-info ledger` shows the run's estimate beside the ceiling.
+- `/agt-info ledger` shows the run's estimate beside the ceiling, and how much of it is the lead's own.
 - `/agt-info route <role>` shows the pick a role gets past the ceiling.

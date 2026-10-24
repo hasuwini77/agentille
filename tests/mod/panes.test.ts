@@ -2643,7 +2643,7 @@ describe('text.js: the model-facing text', () => {
     expect(PANE_RULE).toBe('Pane rule: panes open only on the heavy level (auto-picked or typed `/agt heavy`): each slice\'s executor (and the adversary) via spawn_pane (agent + header); everyone else is a subagent. close_pane right after harvest.')
     expect(transportBlock('herdr', true)).toBe('\n## Pane transport (agentille mod)\n\ntransport: herdr\nPane rule: panes open only on the heavy level (auto-picked or typed `/agt heavy`): each slice\'s executor (and the adversary) via spawn_pane (agent + header); everyone else is a subagent. close_pane right after harvest.\n')
     expect(transportBlock('none')).toBe('\n## Pane transport (agentille mod)\n\ntransport: none\nNo pane transport here: parallel slices run as a workflow, else subagent waves.\n')
-    expect(sessionsNote('herdr', 'claude')).toBe(' Each is closed after 10 minutes idle and unfocused, and at session end when idle. To send one a prompt: herdr agent prompt <name> "…". To read it: herdr agent read <name> --source recent-unwrapped --lines 120. close_pane <name> closes one now when the person asks.')
+    expect(sessionsNote('herdr', 'claude')).toBe(' Each is closed after 10 minutes idle and unfocused, and at session end when idle. When the person asks you to send one a prompt: herdr agent prompt <name> "…". To read it: herdr agent read <name> --source recent-unwrapped --lines 120. close_pane <name> closes one now when the person asks.')
     expect(sessionsNote('tmux', 'claude')).toBe(' They close only on request: close_pane <name> when the person asks.')
     for (const t of [SPAWN_TOOL.description, CLOSE_TOOL.description, OPEN_SESSIONS_TOOL.description, PANE_RULE]) expect(t).not.toMatch(/\n|  /)
   })

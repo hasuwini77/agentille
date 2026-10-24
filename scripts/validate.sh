@@ -276,7 +276,7 @@ fi
 # (every "<N> failed fixes"), skills/agt/routing.md ("diagnose planner after <N> failed attempts")
 # and the /agt-info rung label in hooks/info.js ("diagnose, <N> failed fixes") must name the same N.
 # Number words one..five and digits compare equal. A phrase that vanished from README.md,
-# routing.md or routing.js is a FAIL (reword the check with it); info.js disagreeing is a WARN.
+# routing.md, routing.js or info.js is a FAIL (reword the check with it).
 hdr "Fable failed-fix count"
 ff_num() { tr 'A-Z' 'a-z' | sed -E 's/(^|[^a-z])one([^a-z]|$)/\11\2/; s/(^|[^a-z])two([^a-z]|$)/\12\2/; s/(^|[^a-z])three([^a-z]|$)/\13\2/; s/(^|[^a-z])four([^a-z]|$)/\14\2/; s/(^|[^a-z])five([^a-z]|$)/\15\2/' | grep -oE '[0-9]+' | head -1; }
 ff_n='([0-9]+|[Oo]ne|[Tt]wo|[Tt]hree|[Ff]our|[Ff]ive)'
@@ -297,8 +297,8 @@ if [ "$ff_bad" = 0 ]; then
   if [ "$ff_rd" != "$ff_js" ]; then fail "fable-fixes: $ff_readme says $ff_rd failed fixes, hooks/routing.js moves the diagnose planner to Fable at $ff_js"; ff_bad=1; fi
   [ "$ff_bad" = 0 ] && pass "fable-fixes: README.md, routing.md and routing.js agree: Fable after $ff_js failed fixes"
 fi
-if [ -z "$ff_info" ]; then warn "fable-fixes: hooks/info.js has no \"diagnose, N failed fixes\" rung label"
-elif [ -n "$ff_js" ] && [ "$ff_info" != "$ff_js" ]; then warn "fable-fixes: hooks/info.js labels the rung \"$ff_info failed fixes\", hooks/routing.js says $ff_js"
+if [ -z "$ff_info" ]; then fail "fable-fixes: hooks/info.js has no \"diagnose, N failed fixes\" rung label"
+elif [ -n "$ff_js" ] && [ "$ff_info" != "$ff_js" ]; then fail "fable-fixes: hooks/info.js labels the rung \"$ff_info failed fixes\", hooks/routing.js says $ff_js"
 elif [ -n "$ff_js" ]; then pass "fable-fixes: hooks/info.js rung label agrees ($ff_info failed fixes)"; fi
 
 # ── 6b'. Role parity (agents/ ↔ routing.js TABLE ↔ routing.md ↔ hooks.json) ───

@@ -9,6 +9,52 @@ next minor, `docs/releasing.md`).
 
 ### Added
 
+- **`/agt --local "task"`** runs one /agt under integration `local` whatever
+  the profile says: the guard's snapshot holds `local` alone, so the run
+  commits on its slice branch and pushes nothing. The README's first-run
+  smoke test uses it. `--local` autocompletes next to `--fable` and has a
+  row in `docs/commands.md`. Heavy-run pane workers are not held by it:
+  the lead writes it into each task.
+- **The dispatch header's work type is `work=`** (`work=build|review|fix|
+  diagnose`). `mode=` still parses as its alias, and like `piece=` wins
+  when both are present; both aliases are removed in 4.0.0.
+- **The guard reads what a package or recipe runs before judging it.**
+  `npm install|pack|version|publish` lifecycle scripts (`preinstall`,
+  `postversion`, …), `make <target>` recipes, `./bin/*` and
+  `node_modules/.bin` programs, `node --test` files and the modules a
+  `python` entry imports are followed like `npm run` targets; a push
+  hidden in any of them is refused. A variable program word (`c='git
+  push'; $c`) is expanded and split before judging; one the guard cannot
+  read is refused.
+- **More repo surfaces are protected during a run:** `include.path` and
+  `includeIf` targets, the global `core.hooksPath` folder, `.mcp.json`,
+  shell rc files and `~/.ssh`. `npm publish`, `pnpm publish`, deploy
+  tools (`vercel --prod`, `railway up`, `fly deploy`, …), `release-it`,
+  `semantic-release` and `gh repo delete|archive|edit --visibility` are
+  refused below `auto`.
+- **The base set is what the run did not make.** A push of a branch the
+  remote already has and the run did not create is judged as a base push,
+  with or without `origin/HEAD`; `push.followTags` and a push of a name
+  that is also a tag are judged as the tag pushes they are;
+  `--force-with-lease` is allowed on the run's own `agt/*` branch. The
+  branches a run's pushes created are kept in
+  `~/.agentille/state/lead-<pane>.branches`.
+- **`scripts/validate.sh` checks three more things:** no import cycle at
+  all among `hooks/*.js` (`scripts/import-graph.mjs`, Tarjan's
+  components; `hooks/bus.js` must stay a leaf), the defaults in
+  `docs/settings.md` against `routing.js`, `settings.js`, the sessions
+  line and the integration default, and the README's display-switch
+  sentence against the `settings.md` table (`test-skill-text.sh`).
+- **`tests/mod/routing-replay.test.ts`** replays the eval cases' routing
+  expectations against the mod in about 20 ms, so a routing change is
+  caught without a credential. `tests/mod/guard-allow.test.ts` pins the
+  `merge`/`rebase` `--abort|--continue|--quit|--skip` exemptions, and
+  `test-guard-real.sh` runs them against real git (130 → 217 checks).
+- **`skills/agt/no-mod.md`** holds the branches that only apply with the
+  mod off (squad scoring, the drawing list and TodoWrite spine, the manual
+  transport check, the Herdr and tmux spawn commands); `squads.md`,
+  `display.md`, `panes-mode.md` and `SKILL.md` each keep a one-line
+  pointer.
 - **The guard fails closed at its own depth caps.** A `$( )` nested past
   depth 4, an `eval`/`bash -c` line past depth 3, a `submodule foreach`
   past its cap, or a line the lexer could not parse at all now adds an
@@ -102,6 +148,41 @@ next minor, `docs/releasing.md`).
 
 ### Changed
 
+- **Fix rounds are one table** in `factory.md` → "Fix rounds": event →
+  counts as a fix attempt? → what happens next → what the card shows, 14
+  rows from P0/P1 through `STUCK:`, `CONTEXT`, `BLOCKED:`, `CONTRACT:`,
+  the early stops and `INTEGRATE:`. "Early stop" keeps only its definition
+  and the `RESUME:` steps. Each hard rule in `SKILL.md` now names the
+  failure it prevents, and every coined term is defined in → "Words".
+- **A 4th executor subagent at once is refused**, before it reaches the
+  engine and before a fix round is counted, with a deny line that says to
+  dispatch it again once one is done. Dispatches still on their way to
+  the engine hold a place. A 4th executor pane is still flagged, not
+  refused. The `cap` field on `routing.jsonl` lines is gone.
+- **A workflow agent naming another model than routed is refused**, not
+  toasted, since the mod cannot rewrite a workflow agent's model;
+  `inherit` reads as the lead's model. A workflow agent naming no model
+  passes and the log says which engine default ran.
+- **The two session-start toasts follow `display.band`**, like the band
+  they announce. The `spawn_pane` skew refusal stays with the band off.
+- **Every deprecation names the one removal date, 4.0.0:** `/agt-focus`,
+  `/agt-highlight`, `--mode`, the moved-to-profile note, the `mode=` and
+  `piece=` header aliases, in `commands.md`, `settings.md`, the glossary
+  and `SKILL.md`. The glossary calls the dispatch tree above the prompt
+  "the band (alias: switchboard)" and `docs/display.md` is headed that way.
+- **The owners no longer import one another.** `proofs.js`, `dispatch.js`,
+  `display.js` and `worker.js` read a peer's view through `ctx` and reach a
+  peer's transition (`noteWire`, `setProfileDisplay`) through `hooks/bus.js`
+  (`emit`/`on`, a leaf), so `hooks/` has no import cycle at all.
+- **A worktree is owned only at a recorded path** (`reaper.js`); a branch
+  name alone still counts for a branch whose tree is gone, so branch
+  cleanup keeps working.
+- **The evals workflow fails a tag push with no `ANTHROPIC_API_KEY`**
+  (`::error::`); the weekly schedule and a run by hand still skip with the
+  old notice.
+- **The README's Network line** names `DISABLE_TELEMETRY` and
+  `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC`; `docs/settings.md` has a
+  "For one run" bullet under integration.
 - **The README is a short path.** Install, the `/agt-info` check, a solo
   smoke test under `integration: "local"` (one line says the default is
   `pr`), then a bigger run and its card. The full command list moved to
@@ -170,6 +251,23 @@ next minor, `docs/releasing.md`).
 
 ### Fixed
 
+- **A solo run's guard hold ends with its turn.** A `low · solo` run
+  prints no card, so the hold used to last until the next /agt; now
+  `turns.js` `soloTurn` ends it when the turn that printed the solo recon
+  line ends (a solo run that stops to ask a question ends its hold there,
+  `docs/guards.md`).
+- **A pane worker keeps its own slice on a fix round:** its checked-out
+  `feat/<slug>` counts as its own in a linked worktree, never at the main
+  checkout, so it can push the slice and merge the base into it again.
+- **A worktree whose config loads code the guard cannot follow is
+  refused** by `trust.js`: a dynamic `require`/`import()`, a sourced file
+  built from a variable, a `node -e`/`python -c` body. Identical copies of
+  a package or helper that can be followed stay trusted.
+- **The adversary's output template has the `NOTES` field** its scope rule
+  writes to; `test-skill-text.sh` now checks that every field an agent's
+  prose sends something "under" exists in its own template.
+- **A git config write the guard cannot resolve** (git cannot say what the
+  config includes) is refused instead of allowed.
 - `docs/settings.md` claimed to cover every profile key while the voice
   keys lived only in the init skill, and gave the display fallback order
   wrong (profile value, then the value an older command stored, then the

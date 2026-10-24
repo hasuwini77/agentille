@@ -1070,6 +1070,21 @@ describe('guard: git aliases from config', () => {
     expect(seen.some((a) => a.join(' ') === 'git -C /work/repo config --get alias.pom')).toBe(true)
   })
 
+  test('an alias a package script or a shell script runs is looked up too', async ($, on) => {
+    const files = {
+      '/work/repo/package.json': JSON.stringify({ scripts: { ship: 'git pom', status: 'git st', sh: 'sh ./ship.sh' } }),
+      '/work/repo/ship.sh': '#!/bin/sh\nset -e\ngit pom\n',
+    }
+    const { ran } = setup(on, { files, repos: { '/work/repo': { current: 'agt/x' } }, aliases: { pom: 'push origin HEAD:main', st: 'status' } })
+    await boot($)
+    await typed($)
+    expect((await bash($, 'npm run ship')).deny).toContain('npm run ship, then git pom runs a package script that calls git push')
+    expect((await bash($, 'sh ship.sh')).deny).toContain('sh ship.sh, then git pom runs a script that calls git push')
+    expect((await bash($, 'npm run sh')).deny).toContain('then git pom')
+    expect((await bash($, 'npm run status')).result).toBe('ok')
+    expect(ran).toEqual(['npm run status'])
+  })
+
   test('an alias the guard cannot look up is refused in a run; outside a run nothing is looked up', async ($, on) => {
     const { ran, seen } = setup(on, { aliasBroken: true })
     await boot($)

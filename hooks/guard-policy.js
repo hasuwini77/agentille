@@ -237,6 +237,22 @@ async function textRisk($, text, dir, what, label, depth, seen, lang = 'sh') {
   }
   for (const s of steps) {
     if (s.kind === 'protected') return what + ' runs a ' + label + ' that writes ' + s.what
+    if (s.kind === 'alias') {
+      // A git alias the script runs (`git pom`): its expansion is read as the script's own text, one hop on.
+      if (depth + 1 > READ_DEPTH) {
+        if (lenient(from)) continue
+        return what + ' runs scripts nested deeper than the guard reads (' + s.what + ')'
+      }
+      const a = await aliasLine($, s)
+      if (a.why) {
+        if (lenient(from)) continue
+        return what + ', then ' + a.why
+      }
+      if (a.none) continue
+      const why = await textRisk($, a.line, s.at ?? dir, what + ', then git ' + s.sub, label, depth + 1, seen)
+      if (why) return why
+      continue
+    }
     if (s.kind !== 'file') continue
     if (depth + 1 > READ_DEPTH) {
       if (lenient(from)) continue

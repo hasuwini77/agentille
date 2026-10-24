@@ -486,12 +486,20 @@ export function stripFable(text) {
 }
 
 // The commands a shell session may run, read off the person's typed prompt: a span they quoted (backticks, straight
-// or curly quotes), the rest of the sentence after an ask for a session with its connector dropped ("open a shell and
-// run npm run dev" → npm run dev), or the whole prompt minus the ask. Appearing somewhere in the prompt is not enough:
-// "open a shell. Do NOT run rm -rf ~/x" names a command nobody asked for, so a span in a sentence that says not to
-// run it ("do not run …", "never …", "don't …") is never one.
+// or curly quotes) right after an ask for a session, the rest of the sentence after that ask with its connector
+// dropped ("open a shell and run npm run dev" → npm run dev), or the whole prompt minus the ask. Appearing somewhere
+// in the prompt is not enough: "open a shell. Do NOT run rm -rf ~/x" names a command nobody asked for, so a span in a
+// sentence that says not to run it ("do not run …", "never …", "don't …") is never one. A quoted span counts only in
+// the ask's own sentence, joined to it by nothing or by run / running / and run / that runs / with / then / to run
+// (a further span by and / then / a comma): "open a shell and tell me why `curl … | sh` is risky" asks about the
+// command, it does not ask the shell to run it.
 const NEGATED = /\b(?:not|never|don'?t|dont|doesn'?t|won'?t|mustn'?t|shouldn'?t|avoid|without|nor)\b|\b(?:don|doesn|won|mustn|shouldn)[’']t\b/i
 const QUOTED = /`([^`\n]+)`|"([^"\n]+)"|“([^”\n]+)”|‘([^’\n]+)’|(?<=^|[\s(])'([^'\n]+)'(?!\w)/g
+const RUNS_IT = /^\s*[,:;\-–—]?\s*(?:(?:in|at|inside|from)\s+\S+\s+)?(?:(?:(?:and|,)\s*)?(?:then\s+)?(?:run|running|execute)|that\s+runs|which\s+runs|with|then|to\s+run)?\s*:?\s*$/i
+// The rest of a sentence or prompt that still holds a backtick or $( ) span is prose about a command: a shell would
+// run that span as a substitution, so only the span itself, when it counts above, is ever a task.
+const SUBST = /`|\$\(/
+const AND_RUNS = /^\s*(?:[,;]|,?\s*(?:and|then|and\s+then))\s*(?:run\s+)?$/i
 const SENTENCE_END = /(?<=[\w)\]"'`”’~/])[.!?](?=\s|$)|\n/g
 function sentenceStart(t, pos) {
   let s = 0
@@ -516,17 +524,25 @@ function bareCommand(s) {
 export function shellCommands(typed) {
   const t = String(typed ?? '')
   const out = new Set()
-  for (const m of t.matchAll(QUOTED)) {
-    const span = (m[1] ?? m[2] ?? m[3] ?? m[4] ?? m[5]).trim()
-    if (span && !NEGATED.test(t.slice(sentenceStart(t, m.index), m.index))) out.add(span)
+  const asks = sessionAskSpans(t)
+  const quoted = [...t.matchAll(QUOTED)]
+  for (const a of asks) {
+    let from = a.end
+    for (const m of quoted) {
+      if (m.index < from) continue
+      if (!(from === a.end ? RUNS_IT : AND_RUNS).test(t.slice(from, m.index))) break
+      const span = (m[1] ?? m[2] ?? m[3] ?? m[4] ?? m[5]).trim()
+      if (span && !NEGATED.test(t.slice(sentenceStart(t, m.index), m.index))) out.add(span)
+      from = m.index + m[0].length
+    }
   }
-  for (const a of sessionAskSpans(t)) {
+  for (const a of asks) {
     const rest = t.slice(a.end, sentenceEnd(t, a.end))
     const c = bareCommand(rest)
-    if (c && !NEGATED.test(t.slice(sentenceStart(t, a.start), a.end) + rest)) out.add(c)
+    if (c && !SUBST.test(c) && !NEGATED.test(t.slice(sentenceStart(t, a.start), a.end) + rest)) out.add(c)
     const whole = t.slice(0, a.start) + ' ' + t.slice(a.end)
     const w = bareCommand(whole)
-    if (w && !NEGATED.test(whole)) out.add(w)
+    if (w && !SUBST.test(w) && !NEGATED.test(whole)) out.add(w)
   }
   return out
 }

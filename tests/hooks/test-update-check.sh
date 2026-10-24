@@ -6,6 +6,8 @@ cd "$(dirname "$0")/../.." || exit 2
 HOOK="$PWD/hooks/agentille-update-check.sh"
 T=$(mktemp -d); trap 'rm -rf "$T"' EXIT
 export HOME="$T/home"; mkdir -p "$HOME"
+# The opt-out switches are tested below; a shell that sets them must not skip every other check.
+unset CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC DISABLE_TELEMETRY AGENTILLE_UPDATE_CHECK
 ROOT="$T/plugin"; mkdir -p "$ROOT/.claude-plugin"
 printf '{ "name": "agentille", "version": "1.0.0" }\n' > "$ROOT/.claude-plugin/plugin.json"
 CACHE="$HOME/.agentille/.update-check.json"
@@ -36,6 +38,19 @@ out=$(AGENTILLE_UPDATE_CHECK=0 run "$T/newer.json"); rc=$?
 check "opt-out: exit 0" '[ "$rc" = 0 ]'
 check "opt-out: silent" '[ -z "$out" ]'
 check "opt-out: no cache" '[ ! -e "$CACHE" ]'
+
+# 4b. Claude Code's non-essential-traffic and telemetry switches skip it too (1 or true, any case)
+for kv in CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1 CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=true DISABLE_TELEMETRY=1 DISABLE_TELEMETRY=TRUE; do
+  rm -f "$CACHE"
+  out=$(env "$kv" CLAUDE_PLUGIN_ROOT="$ROOT" AGENTILLE_RAW_URL="file://$T/newer.json" bash "$HOOK" </dev/null); rc=$?
+  check "$kv: exit 0, silent" '[ "$rc" = 0 ] && [ -z "$out" ]'
+  check "$kv: no fetch, no cache" '[ ! -e "$CACHE" ]'
+done
+# 4c. set to 0 or empty, they do not opt out
+rm -f "$CACHE"
+out=$(CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=0 DISABLE_TELEMETRY= run "$T/newer.json")
+check "switches off: still checks" '[[ "$out" == *"1.2.0 available"* ]]'
+rm -f "$CACHE"
 
 # 5. garbage or an unreachable remote never prints, never errors, never poisons the cache
 printf 'version: "9.9.9"; <html>' > "$T/garbage.json"

@@ -5,8 +5,12 @@
 # Discard stdin (Claude Code passes JSON on stdin)
 cat >/dev/null 2>&1 || true
 
-# Opt out: AGENTILLE_UPDATE_CHECK=0 skips the daily fetch entirely (no cache, no network).
+# Opt out: AGENTILLE_UPDATE_CHECK=0 skips the daily fetch entirely (no cache, no network), and so do Claude
+# Code's own switches for non-essential traffic and telemetry, set to 1 or true.
 [[ "${AGENTILLE_UPDATE_CHECK:-1}" == "0" ]] && exit 0
+for v in "${CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC:-}" "${DISABLE_TELEMETRY:-}"; do
+  case "$(printf '%s' "$v" | tr '[:upper:]' '[:lower:]')" in 1|true) exit 0 ;; esac
+done
 
 ROOT="${CLAUDE_PLUGIN_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 RAW_URL="${AGENTILLE_RAW_URL:-https://raw.githubusercontent.com/hasuwini77/agentille/main/.claude-plugin/plugin.json}"

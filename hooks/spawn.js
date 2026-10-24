@@ -79,11 +79,21 @@ export async function sameRepo($, a, b) {
 // Whether the mod may accept the folder-trust prompt for `cwd` on the person's behalf. Sharing the lead's git
 // common dir is not enough: a worktree of a contributor's branch can carry its own .claude/settings.json hooks.
 // Trusted: the lead's own checkout (or a folder in it), or a worktree of the same repo on an agt/*, feat/* or fix/*
-// branch that this lead made. The lead's lead-<pane>.worktrees list (one worktree path or branch per line) says
-// which it made; with no list, the worktree must carry no .claude/settings.json or settings.local.json that
+// branch that this lead made. The lead's lead-<pane>.worktrees list (guard.js: JSON records with path and branch;
+// a plain one-per-line list is read too) says which it made; with no list, the worktree must carry no .claude/settings.json or settings.local.json that
 // differs from the lead checkout's.
 const OWN_BRANCH = /^(?:agt|feat|fix)\/[A-Za-z0-9._/-]+$/
 const SETTINGS = ['.claude/settings.json', '.claude/settings.local.json']
+// Does a lead-<pane>.worktrees file name this worktree: a JSON array of { path, branch } records (guard.js), or
+// one path or branch per line.
+export function ownedWorktree(listed, top, branch) {
+  try {
+    const recs = JSON.parse(listed)
+    if (Array.isArray(recs)) return recs.some((r) => r && (r.path === top || (branch && r.branch === branch)))
+  } catch {}
+  return String(listed).split('\n').some((l) => l.trim().split(/\s+/).some((f) => f === top || (branch && f === branch)))
+}
+
 export async function trustable($, cwd, leadCwd) {
   if (cwd === leadCwd) return true
   if (!(await sameRepo($, cwd, leadCwd))) return false
@@ -98,7 +108,7 @@ export async function trustable($, cwd, leadCwd) {
   if (!OWN_BRANCH.test(branch)) return false
   const file = String(panesFile(S.home, await leadPane($)) ?? '').replace(/\.panes$/, '.worktrees')
   const listed = file ? await $.fs.read(file).catch(() => null) : null
-  if (typeof listed === 'string') return listed.split('\n').some((l) => l.trim().split(/\s+/).some((f) => f === top || f === branch))
+  if (typeof listed === 'string') return ownedWorktree(listed, top, branch)
   for (const f of SETTINGS) {
     const mine = await $.fs.read(top + '/' + f).catch(() => null)
     if (typeof mine !== 'string') continue

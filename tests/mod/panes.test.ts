@@ -1089,6 +1089,20 @@ describe('pane tools: folder trust', () => {
     expect(accepted(seen)).toBe(true)
   })
 
+  test('the guard\'s JSON records (path, branch) are read: a listed agt/* worktree is trusted, an unlisted one is not', async ($, on) => {
+    const recs = JSON.stringify([{ path: '/work/wt', branch: 'agt/k7f2ab-exec-1', head: 'abc', run: 'k7f2ab', at: 1 }])
+    const yes = setup(on, { files: { [LIST]: recs + '\n' } })
+    expect((await spawn($, yes.clock)).result).toContain('Opened agt-k7f2ab-exec-1')
+    expect(accepted(yes.seen)).toBe(true)
+  })
+
+  test('the guard\'s JSON records naming another worktree refuse this one', async ($, on) => {
+    const recs = JSON.stringify([{ path: '/work/elsewhere', branch: 'agt/other', head: 'abc', run: 'k7f2ab', at: 1 }])
+    const { seen, clock } = setup(on, { branch: 'feat/other', files: { [LIST]: recs + '\n' } })
+    expect(JSON.stringify(await spawn($, clock))).toContain('needs a one-time trust')
+    expect(accepted(seen)).toBe(false)
+  })
+
   test('a feat/* worktree the list does not name is refused', async ($, on) => {
     const { seen, clock } = setup(on, { branch: 'feat/other', files: { [LIST]: '/work/elsewhere\nagt/k7f2ab-exec-2\n' } })
     expect(JSON.stringify(await spawn($, clock))).toContain('needs a one-time trust')

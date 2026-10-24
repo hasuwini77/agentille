@@ -39,7 +39,7 @@ describe('autocomplete: levels', () => {
 
 describe('autocomplete: --fable', () => {
   test('is the only flag', () => {
-    expect(texts(agtSuggestions(ev('/agt -')))).toEqual(['--fable'])
+    expect(texts(agtSuggestions(ev('/agt -')))).toEqual(['--fable', '--local'])
     expect(texts(agtSuggestions(ev('/agt heavy --f')))).toEqual(['--fable'])
     expect(agtSuggestions(ev('/agt --fable'))).toEqual([])
     expect(agtSuggestions(ev('/agt --mo'))).toEqual([])

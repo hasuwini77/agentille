@@ -54,7 +54,7 @@ export const SPAWN_TOOL = {
       role: { type: 'string', description: 'Slice role, lowercase letters, digits and dashes (exec-1, review). Not "spawn".' },
       task: { type: 'string', description: 'The full self-contained worker prompt.' },
       agent: { type: 'string', enum: ROLES, description: 'Routing role (executor, code-reviewer, …): the mod routes model and effort from it.' },
-      header: { type: 'string', description: 'This run\'s full [agt run=… size=… risk=… mode=… fable=…] line.' },
+      header: { type: 'string', description: 'This run\'s full [agt run=… size=… risk=… work=… fable=…] line.' },
       model: { type: 'string', enum: TOOL_MODELS, description: 'Ignored: the mod routes model and effort from agent + header. Kept so older prompts validate.' },
       cwd: { type: 'string', description: 'Absolute directory to start in (the slice worktree). Default: this session\'s directory.' },
       layout: { type: 'string', enum: LAYOUTS, description: '"tab": on Herdr, this run\'s workers share a new tab of their own. Default "stack" (lead\'s tab); tmux ignores it.' },

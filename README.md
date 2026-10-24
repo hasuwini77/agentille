@@ -103,7 +103,7 @@ Kinds, follow-ups, which ones close on their own and how to get one back: [docs/
 - **Review is a gate**: P0/P1 findings get fixed before the card says ✓.
 - **Squads**: in a saas, ecommerce, content or immersive repo, payments, SEO and performance specialists join the review when the diff touches their area.
 - **Type less**: the first word after `/agt` completes to a level (`low`, `medium`, `heavy`, `next`), and a dash completes to `--fable`.
-- **What you see:** the switchboard (a live dispatch tree above your prompt), a live row per `Agent` call in the transcript, a pinned status line under the prompt, and a small mascot in each worker pane, all drawn by the mod for zero model tokens: [docs/display.md](./docs/display.md). Each has its own switch in the profile's `display` block ([docs/settings.md](./docs/settings.md#display-switches)).
+- **What you see:** the band (a live dispatch tree above your prompt, also called the switchboard), a live row per `Agent` call in the transcript, a pinned status line under the prompt, and a small mascot in each worker pane, all drawn by the mod for zero model tokens: [docs/display.md](./docs/display.md). Each has its own switch in the profile's `display` block ([docs/settings.md](./docs/settings.md#display-switches)).
 - **Pane workers report back over the wire**, and a pane is closed only once its answer is saved or read.
 - **Best with Herdr:** workers are labeled in its sidebar and a run with 3+ pane workers gets its own tab; ask for Codex in the task ("codex builds the API slice") and that slice runs as a Codex pane. tmux works with the same band; without a multiplexer you get the subagent tree.
 

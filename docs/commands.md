@@ -10,6 +10,7 @@ Every command agentille adds, with its arguments. The README's Commands section 
 | `/agt low\|medium\|heavy "task"` | Force the level for one run |
 | `/agt next ["task"]` | Build the next item in `.agentille/backlog.md` and integrate it (PR by default) or escalate; after a merged item it takes the next one, and stops on the first escalation · with a task: queue it |
 | `/agt --fable "task"` | The top model tier on judgment roles for one run |
+| `/agt --local "task"` | Integration `local` for one run: commits on the slice branch, no push, no PR, whatever the profile says |
 | `/agt-info [routing\|ledger\|squads\|route <role>]` | Display settings in effect, last run's routing and ledger, active squads · or one view: routing decisions, tokens per role, the squad rescan · or a dry-run of what a role would route to, escalation rungs included |
 | `/agt-spawn "task" [--model …]` | One extra routed Claude pane (Herdr or tmux); it closes itself once its answer is saved |
 | `/agt-clean` | Tidy up now: close finished agt panes, remove merged and clean `agt/*` worktrees and branches, drop run folders untouched for 14 days. Anything still working, unmerged or with changes stays. When a run ends the pane and worktree part runs on its own; at session start only finished panes a dead lead left behind are closed |

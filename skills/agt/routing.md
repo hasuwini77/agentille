@@ -57,7 +57,7 @@ Malformed JSON → `low` plus a one-line note; never crash. If the level hinges 
 - Debug: attempts, the limit and the `mode=diagnose` planner after 2 failed attempts are `factory.md` → "Fix rounds".
 - Squads add payments / SEO / perf reviewers to the review step when the diff touches their domain (`squads.md`). Formations reshape the workers (`formations.md`).
 - Every reviewer column ticked for a slice runs **at once**: one message, parallel background calls (`SKILL.md` → "The contract" step 8).
-- Never more than 3 executors at once; batch the rest in waves. The mod flags a 4th executor at once (`⚑ run <id>: 4th executor at once; the roster says 3` on the band, and a `cap` field on that line of `routing.jsonl`). It never refuses the dispatch.
+- Never more than 3 executors at once; batch the rest in waves. The mod refuses a 4th executor subagent at once (`agt ✗ run <id>: a 4th executor at once is refused; the roster runs at most 3`) and flags it on the band; dispatch it again once one of the three is done. A 4th executor pane is flagged, not refused.
 
 ## Default routing
 

@@ -120,7 +120,7 @@ export function judgeLocal(branch, { current = null, bases = new Set(['main', 'm
 // current branch, base, mode. Merges and tags need `auto`; pushes are judged; `local` refuses pushes and PRs.
 export function integrationIn(line, { cwd = null, current = null, pushDst = null, base: b = null, mode = 'pr' } = {}) {
   if (mode === 'auto') return null
-  for (const c of commandSteps(line, cwd)) {
+  for (const c of commandSteps(line, cwd, 0, Profile.home ? [Profile.home] : [])) {
     if (c.kind === 'protected') return c.what
     if (c.kind === 'step') return c.what
     if (c.kind === 'ref') {
@@ -232,7 +232,7 @@ async function textRisk($, text, dir, what, label, depth, seen, lang = 'sh') {
   const from = label === 'package script' ? 'pkg' : 'shell'
   let steps
   try {
-    steps = commandSteps(text, dir, 1)
+    steps = commandSteps(text, dir, 1, await homes($))
   } catch {
     return what + ' runs a ' + label + ' the guard cannot read'
   }
@@ -712,7 +712,7 @@ async function aliasLine($, c) {
 export async function guardLine($, line, cwd) {
   let cands
   try {
-    cands = commandSteps(line, cwd)
+    cands = commandSteps(line, cwd, 0, await homes($))
   } catch {
     cands = runsSomething(line) ? [{ kind: 'hidden', what: 'the guard could not parse this line', dir: cwd, slug: null }] : []
   }
@@ -748,7 +748,7 @@ async function judgeCands($, cands, ctx, depth) {
       const a = await aliasLine($, c)
       if (a.why) return denyHidden(a.why)
       if (a.none) continue
-      const inner = commandSteps(a.line, c.at).map((x) => (x.kind === 'push' ? { ...x, push: { ...x.push, headMoved: x.push.headMoved || c.headMoved || aliasMoved, remoteEdited: x.push.remoteEdited || c.remoteEdited } } : x))
+      const inner = commandSteps(a.line, c.at, 0, await homes($)).map((x) => (x.kind === 'push' ? { ...x, push: { ...x.push, headMoved: x.push.headMoved || c.headMoved || aliasMoved, remoteEdited: x.push.remoteEdited || c.remoteEdited } } : x))
       const why = await judgeCands($, inner, ctx, depth + 1)
       if (why) return why
       if (lineMovesHead(a.line)) aliasMoved = true

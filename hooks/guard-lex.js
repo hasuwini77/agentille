@@ -2,7 +2,6 @@
 // backticks, heredocs/here-strings, wrappers (env, timeout, xargs, sudo, …), `bash -c`/`eval`, and the
 // variables set on the line; then turns a line into the simple commands it runs and each command into an
 // integration candidate (commandSteps/codeStep). Policy (guard-policy.js) judges those candidates.
-import { Profile } from './profile.js'
 import { base, ghStep, httpStep } from './guard-steps.js'
 import { ELSEWHERE, NPM_SCRIPT_ALIASES, VALUE_FLAGS, pythonModule } from './script-refs.js'
 
@@ -13,10 +12,10 @@ export { base }
 // use it to lift its own ceiling (rewrite ~/.agentille/profile.json), run code (a git hook) or publish (a ref).
 // `raw` is the path as the line wrote it (so `~`, `$HOME`, a relative `.git/config` are seen); `abs` its resolved
 // form (the guard also passes where a link lands, guard-policy.js resolvedProtected); `homes` the home folder's
-// spellings. Matching ignores case: APFS and NTFS open `.GIT/CONFIG` as `.git/config`. A submodule's own git dir
+// spellings, which the policy passes in (this module reads no session state). Matching ignores case: APFS and NTFS open `.GIT/CONFIG` as `.git/config`. A submodule's own git dir
 // (`.git/modules/<name>/…`, nested at any depth) counts as the repo's. Returns a short label for the deny
 // message, or null.
-export function protectedPath(raw, abs, homes = [Profile.home]) {
+export function protectedPath(raw, abs, homes = []) {
   const r = String(raw ?? '')
   const a = String(abs ?? '')
   if (/\$\{?GIT_DIR\}?/.test(r)) return '$GIT_DIR'
@@ -864,7 +863,7 @@ function codeStep(w, here, stdin = null, piped = false, env = null) {
 
 
 // A line → its integration candidates, each with the dir it runs in (cd, pushd, git -C, env -C followed).
-export function commandSteps(line, cwd = null, depth = 0) {
+export function commandSteps(line, cwd = null, depth = 0, homes = []) {
   const out = []
   let here = cwd
   let moved = false // a step before this one switched branches, in any dir
@@ -898,7 +897,7 @@ export function commandSteps(line, cwd = null, depth = 0) {
     // earlier line, `cfg` → .git/config) and judges that path too.
     for (const t of [...(c.redirects ?? []), ...writeTargets(w)]) {
       const abs = t.startsWith('/') ? joinPath('/', t) : !/[$`~]/.test(t) && at ? joinPath(at, t) : null
-      const lbl = protectedPath(t, abs)
+      const lbl = protectedPath(t, abs, homes)
       if (lbl) out.push({ kind: 'protected', what: lbl, dir: at, slug: null })
       else if (abs && !/^\/dev(\/|$)/.test(abs) && !/^\d+$/.test(t)) out.push({ kind: 'write', raw: t, path: abs, dir: at, slug: null })
     }
@@ -906,7 +905,7 @@ export function commandSteps(line, cwd = null, depth = 0) {
     // through, the move rewrites it.
     for (const t of linkSources(w)) {
       const abs = t.startsWith('/') ? joinPath('/', t) : !/[$`~]/.test(t) && at ? joinPath(at, t) : null
-      const lbl = protectedPath(t, abs)
+      const lbl = protectedPath(t, abs, homes)
       if (lbl) out.push({ kind: 'protected', what: lbl + ' (through ' + p + ')', dir: at, slug: null })
     }
     // A tool whose subcommand and arguments xargs appends from stdin cannot be read: fail closed below auto.
@@ -959,7 +958,7 @@ export function commandSteps(line, cwd = null, depth = 0) {
         if (k >= 0 && g.args.slice(0, k).every((x) => x.startsWith('-'))) {
           const rest = g.args.slice(k + 1)
           while (rest.length && /^(--recursive|-q|--quiet)$/.test(rest[0])) rest.shift()
-          if (rest.length && depth < 3) for (const x of commandSteps(rest.join(' '), null, depth + 1)) out.push({ ...x, what: x.what + ' (in git submodule foreach)' })
+          if (rest.length && depth < LINE_DEPTH) for (const x of commandSteps(rest.join(' '), null, depth + 1, homes)) out.push({ ...x, what: x.what + ' (in git submodule foreach)' })
           else if (rest.length) out.push({ kind: 'hidden', what: 'git submodule foreach nests deeper than the guard reads', dir, slug: null })
         }
       }

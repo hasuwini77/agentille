@@ -38,7 +38,9 @@ export function formationOf(hdr) {
 // maxRunUsd is the run's cost ceiling in US dollars (see runCeiling below): 15 by default, about two heavy runs' worth
 // of Opus review at list prices; the person's `null` (or anything but a positive number) turns it off. stopAtCeiling
 // true turns the ceiling from a demotion into a stop: every later dispatch of the run is denied (runStop below).
-export const DEFAULTS = { autoFable: false, maxFablePerRun: 1, fableWeeklyCeiling: 60, advisorOnOpus: true, maxRunUsd: 15, stopAtCeiling: false }
+// maxRunUsd prices tokens at API list prices, which is not what a plan subscription is billed: stopAtWeeklyPct is the
+// gate on the subscription itself, the seven-day usage percent Claude Code reports (0, the default, turns it off).
+export const DEFAULTS = { autoFable: false, maxFablePerRun: 1, fableWeeklyCeiling: 60, advisorOnOpus: true, maxRunUsd: 15, stopAtCeiling: false, stopAtWeeklyPct: 0 }
 
 // US dollars per million tokens, by model family, at the current generation's first-party API list price (Fable 5.1,
 // Opus 5.5, Sonnet 5.5, Haiku 5.5 up to 100K-token prompts). An estimate, not a bill: a plan subscription is not billed
@@ -94,6 +96,12 @@ export function estimateRunUsd(agents, run, routes = [], now = Date.now(), lead 
 export const maxRunUsdOf = (settings) => {
   const v = settings?.maxRunUsd
   return typeof v === 'number' && Number.isFinite(v) && v > 0 ? v : null
+}
+
+// The weekly gate's threshold: a number from 1 to 100, or null (off) for 0, null or anything else.
+export const stopAtWeeklyPctOf = (settings) => {
+  const v = settings?.stopAtWeeklyPct
+  return typeof v === 'number' && Number.isFinite(v) && v >= 1 && v <= 100 ? v : null
 }
 
 // Past the ceiling, every role the table or the ladder puts on Opus (or a ladder Fable) drops to Sonnet at the same
@@ -288,21 +296,34 @@ export function ladderFixes(run, slice) {
 
 // run: { revise, fixes, fable, usd? } observed so far (usd: estimateRunUsd, for the maxRunUsd ceiling) · settings:
 // profile.routing merged over DEFAULTS · weeklyPct: seven_day percent used, or null when unknown. A typed --fable is
-// the person's choice and passes the ceiling; every other pick goes through runCeiling last.
-// With `stopAtCeiling: true`, a run at or past maxRunUsd dispatches nothing more: every role (the executor and a
-// typed --fable included) gets `stop`, the line the dispatch is denied with. Off (the default), runCeiling demotes.
-export function runStop(run, settings) {
+// the person's choice and passes the ceiling (marked `pastCeiling`, so the caller can say so); every other pick goes
+// through runCeiling last.
+// `stop` is the line a dispatch is denied with; every role (the executor and a typed --fable included) gets it:
+// - With `stopAtCeiling: true`, a run at or past maxRunUsd dispatches nothing more. Off (the default), runCeiling demotes.
+// - With `stopAtWeeklyPct` 1–100, nothing more is dispatched once the subscription's seven-day usage percent is at or
+//   above it. An unknown percent (null: Claude Code has not reported one) never stops. A caller that leaves weeklyPct
+//   out is not gated on it: a Codex pane runs on the person's Codex account and spends none of the subscription.
+const pct = (n) => String(Math.round(n * 10) / 10) + '%'
+export function runStop(run, settings, weeklyPct = null) {
   const max = maxRunUsdOf(settings)
-  if (max == null || settings?.stopAtCeiling !== true) return null
-  if (!(typeof run?.usd === 'number' && run.usd >= max)) return null
-  return 'agt ✗ run ~' + usd(run.usd) + ' reached its cost ceiling, maxRunUsd ' + usd(max) + ', and routing.stopAtCeiling is on: no more dispatches this run. Raise routing.maxRunUsd in ~/.agentille/profile.json (or set stopAtCeiling to false) to go on.'
+  if (max != null && settings?.stopAtCeiling === true && typeof run?.usd === 'number' && run.usd >= max) {
+    return 'agt ✗ run ~' + usd(run.usd) + ' reached its cost ceiling, maxRunUsd ' + usd(max) + ', and routing.stopAtCeiling is on: no more dispatches this run. Raise routing.maxRunUsd in ~/.agentille/profile.json (or set stopAtCeiling to false) to go on.'
+  }
+  const week = stopAtWeeklyPctOf(settings)
+  if (week != null && typeof weeklyPct === 'number' && Number.isFinite(weeklyPct) && weeklyPct >= week) {
+    return 'agt ✗ the subscription has used ' + pct(weeklyPct) + ' of its seven-day limit, at or above routing.stopAtWeeklyPct ' + pct(week) + ': no more dispatches this run. Raise routing.stopAtWeeklyPct in ~/.agentille/profile.json (or set it to 0) to go on.'
+  }
+  return null
 }
 
 export function decide(o) {
   const { forced, ...d } = pick(o)
-  const stop = runStop(o.run ?? {}, o.settings ?? DEFAULTS)
+  const settings = o.settings ?? DEFAULTS
+  const stop = runStop(o.run ?? {}, settings, o.weeklyPct ?? null)
   if (stop) return { ...d, fable: false, stop }
-  return forced ? d : runCeiling(d, o.role, o.run ?? {}, o.settings ?? DEFAULTS)
+  if (!forced) return runCeiling(d, o.role, o.run ?? {}, settings)
+  const max = maxRunUsdOf(settings)
+  return max != null && typeof o.run?.usd === 'number' && o.run.usd >= max ? { ...d, pastCeiling: true } : d
 }
 
 function pick({ role, hdr = {}, run = { revise: 0, fixes: 0, fable: 0 }, depth, settings = DEFAULTS, weeklyPct = null }) {

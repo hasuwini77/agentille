@@ -4,34 +4,20 @@ One typed command runs the work. Type `/agt "task"` in Claude Code and that one 
 
 ## Quick start
 
-1. Install (no profile or config needed):
+1. **Install** (no profile or config needed), then start a new Claude Code session so the plugin and its mod load. Nothing prints on load.
    ```
    /plugin marketplace add hasuwini77/agentille
    /plugin install agentille@hasuwini77-agentille
    ```
-2. Start a new Claude Code session. Nothing prints on load. Type `/agt-info`: its first line reads `display (profile.json → display):`. If Claude Code does not know `/agt-info`, the mod did not load.
-3. Smoke test: `/agt "fix the typo in the footer"` prints `recon: low · solo · <reason>`, then Claude makes the fix itself, with no agents and no card. The fix lands on a new `fix/<slug>` branch, and under the default `integration: "pr"` that branch is pushed and a PR is opened. To keep it local, put `{"integration": "local"}` in `~/.agentille/profile.json` before you run it.
-4. Settings live in `~/.agentille/profile.json`. Every key is optional ([Settings](#settings)).
-
-Small tasks stay cheap: a one-sentence task with no risk words (the typo, the rename) runs solo, with no agents and no card. A plain prompt never starts `/agt`: the skill runs only when you type it. Powered by [Systown AI Lab](https://systown.ai).
-
-Also in the box, each covered below: `/storm` researches what to build next and hands the picks to `/agt heavy`; "open two sessions" opens real Claude, Codex or shell panes beside yours; `/agentille-project` writes a repo's CLAUDE.md and `/agentille-claude-md` trims one (your global `~/.claude/CLAUDE.md` unless you give it a path). The band, the deck and the wire belong to the mod. The words this README uses (level, slice, band, transport, mode): [docs/glossary.md](./docs/glossary.md).
-
-## Contents
-
-- [Quick start](#quick-start) · [First 15 minutes](#first-15-minutes) · [When to use it](#when-to-use-it) · [Commands](#commands) · [Settings](#settings)
-- [Storm](#storm) · [Sessions](#sessions) · [How it decides](#how-it-decides)
-- [When something goes wrong](#when-something-goes-wrong) · [Requirements](#requirements) · [Releases](#releases) · [What it touches](#what-it-touches) · [Routing](#routing)
-- Reference pages: [glossary](./docs/glossary.md) · [guards](./docs/guards.md) · [sessions](./docs/sessions.md) · [what you see](./docs/display.md) · [commands](./docs/commands.md) · [settings](./docs/settings.md) · [routing cost](./docs/routing-cost.md) · [releasing](./docs/releasing.md)
-
-## First 15 minutes
-
-1. **Install** with the two lines above, then start a new Claude Code session so the plugin and its mod load.
-2. **Check that the mod loaded:** type `/agt-info`. It prints the display settings in effect and the last run's routing. Every `/agt-*` command comes from the module `hooks/hooks.json` loads, so if Claude Code does not know `/agt-info`, the mod did not load.
+2. **Check that the mod loaded:** type `/agt-info`. Its first line reads `display (profile.json → display):`, followed by the display settings in effect and the last run's routing. Every `/agt-*` command comes from the module `hooks/hooks.json` loads, so if Claude Code does not know `/agt-info`, the mod did not load.
    - `/agt` still works without the mod; its recon line then ends in `[agentille v<version>]`, and you get the plain subagent tree instead of the band.
-3. **Run a small task:** `/agt "fix the typo in the footer"` prints `recon: low · solo · <reason>`, then Claude does it on a new `fix/<slug>` branch: no agents, no card. Under the default `integration: "pr"` it opens a PR; under `local` it pushes nothing.
-4. **Run a bigger one:** `/agt "add a CSV export endpoint and a download button on the reports page"`. It reads your repo and picks a level: low (it just does it, or one builder), medium (2–3 builders in parallel) or heavy (one Herdr or tmux pane per part). The recon line names the level it picked (`medium · subagent`, say), and the band above your prompt fills with the planner, executors and reviewers. Risky changes (auth, payments, data) get a red-team pass, you get one reviewed PR per part to merge (merging on green is opt-in, see "What it touches"), and every pane it opened is closed.
-5. **Read the card** it ends on. Everything else (plan, findings, each agent's full report) is in that `report.md`. A one-part feature's card looks like this:
+3. **Smoke test, kept local:** put `"integration": "local"` in `~/.agentille/profile.json` (create the file with the line below, or add the key to the one you have), so the first run pushes nothing and opens no PR.
+   ```json
+   { "integration": "local" }
+   ```
+   Then type `/agt "fix the typo in the footer"`. It prints `recon: low · solo · <reason>`, then Claude makes the fix itself on a new `fix/<slug>` branch, with no agents and no card. The default is `integration: "pr"`, which pushes that branch and opens a PR; remove the key when you want that.
+4. **Run a bigger one:** `/agt "add a CSV export endpoint and a download button on the reports page"`. It reads your repo and picks a level: low (it just does it, or one builder), medium (2–3 builders in parallel) or heavy (one Herdr or tmux pane per part). The recon line names the level it picked (`medium · subagent`, say), and the band above your prompt fills with the planner, executors and reviewers. Risky changes (auth, payments, data) get a red-team pass, under `pr` you get one reviewed PR per part to merge (merging on green is opt-in, see "What it touches"), and every pane it opened is closed.
+5. **Read the card** it ends on (solo runs have none). Everything else (plan, findings, each agent's full report) is in that `report.md`. A one-part feature's card under `pr` looks like this:
    ```
    ✓ dark mode toggle on /settings  ·  low  ·  4 files  ·  feat/dark-mode-toggle  ·  6m
    verify: npm test → 48 passed
@@ -40,15 +26,18 @@ Also in the box, each covered below: `/storm` researches what to build next and 
    Open: ~/.agentille/state/run-a1b2/report.md
    Next: gh pr merge 12 --merge
    ```
-6. **Find your settings** in `~/.agentille/profile.json`. Every key is optional ([Settings](#settings)). `/agentille-init` adds your voice; `/agentille-project` adds a repo's entry.
-7. **Turn a surface off** in the profile's `display` block, or the version check in your environment:
-   - the band above the prompt (the run's tree, its flags, a worker's own band): `display.band: "off"`;
-   - the status line pinned under the prompt: `display.statusLine: "off"`;
-   - the mascot figure in worker panes and the deck: `display.mascot: "off"`;
-   - the deck side pane on every `/agt`: `display.deck: "off"` (the default);
-   - the `⚑` flags in the band: `display.focus: false`;
-   - reply highlighting: `display.highlight: "off"` (the default);
-   - the daily version check: `AGENTILLE_UPDATE_CHECK=0`.
+6. **Then:** every other key in `~/.agentille/profile.json` is optional ([Settings](#settings)). `/agentille-init` adds your voice; `/agentille-project` adds a repo's entry. Each surface the mod draws (the band, the status line, the mascot, the deck, the `⚑` flags, reply highlighting) has an off switch in the profile's `display` block, and `AGENTILLE_UPDATE_CHECK=0` turns the daily version check off: [docs/settings.md](./docs/settings.md#display-switches).
+
+Small tasks stay cheap: a one-sentence task with no risk words (the typo, the rename) runs solo, with no agents and no card. A plain prompt never starts `/agt`: the skill runs only when you type it. Powered by [Systown AI Lab](https://systown.ai).
+
+Also in the box, each covered below: `/storm` researches what to build next and hands the picks to `/agt heavy`; "open two sessions" opens real Claude, Codex or shell panes beside yours; `/agentille-project` writes a repo's CLAUDE.md and `/agentille-claude-md` trims one (your global `~/.claude/CLAUDE.md` unless you give it a path). The band, the deck and the wire belong to the mod. The words this README uses (level, slice, band, transport, mode): [docs/glossary.md](./docs/glossary.md).
+
+## Contents
+
+- [Quick start](#quick-start) · [When to use it](#when-to-use-it) · [Commands](#commands) · [Settings](#settings)
+- [Storm](#storm) · [Sessions](#sessions) · [How it decides](#how-it-decides)
+- [When something goes wrong](#when-something-goes-wrong) · [Requirements](#requirements) · [Releases](#releases) · [What it touches](#what-it-touches) · [Routing](#routing)
+- Reference pages: [glossary](./docs/glossary.md) · [guards](./docs/guards.md) · [sessions](./docs/sessions.md) · [what you see](./docs/display.md) · [commands](./docs/commands.md) · [settings](./docs/settings.md) · [routing cost](./docs/routing-cost.md) · [releasing](./docs/releasing.md)
 
 ## When to use it
 

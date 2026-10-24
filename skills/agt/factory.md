@@ -13,7 +13,7 @@ What turns one `/agt` run into a small software factory: queued work, cheap fix 
 
 ## Worktree lifecycle
 
-One slice, one sibling worktree `../<project>-<slug>` on its slice branch, from first build to the gate's decision. This is the one definition; the executor, `routing.md` and `panes-mode.md` point here.
+One slice, one sibling worktree `../<project>-<slug>` on its slice branch, from first build to the gate's decision. This is the one definition: `routing.md` and `panes-mode.md` point here, and the executor carries the facts it needs in its own file.
 
 - **Who creates it.** Subagent mode: the executor (`isolated: true`), with the script below. Panes mode: the lead, before `spawn_pane` (its `cwd` must already exist), with the same script run from the main checkout; the pane executor then gets `isolated: false` and works in the tree it was started in.
 - **It stays** through every build, resume, fix round and design review of the slice, until the gate decides: merged, PR left ready (`pr`), branch pushed (`push`), or escalated.

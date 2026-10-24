@@ -232,6 +232,8 @@ describe('guard: which commands integrate', () => {
       'ssh host git push origin main',
       "ssh -p 22 host 'cd app && git push origin main'",
       'xcrun git push origin main',
+      'env -iC /w git push origin main',
+      'sudo -nu bob gh pr merge 4',
     ]) expect([line, integrationIn(line, onSlice)]).toEqual([line, expect.any(String)])
     for (const line of [
       'python3 -c "print(1)"',

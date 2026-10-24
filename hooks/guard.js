@@ -219,8 +219,13 @@ function unwrap(words) {
       }
       const [k, v] = o.startsWith('--') && o.includes('=') ? [o.slice(0, o.indexOf('=')), o.slice(o.indexOf('=') + 1)] : [o, undefined]
       const takes = opts.includes(k)
-      const val = takes ? (v ?? words[i + 1]) : o.length > 2 && opts.includes(o.slice(0, 2)) ? o.slice(2) : undefined
-      const flag = takes ? k : o.slice(0, 2)
+      // A cluster of one-letter flags (env -iC /w, sudo -nu bob): the first letter that takes a value ends it,
+      // its value the rest of the word or the next one.
+      const at = !takes && /^-[a-zA-Z]/.test(o) && !o.startsWith('--') ? [...o.slice(1)].findIndex((ch) => opts.includes('-' + ch)) + 1 : 0
+      const rest = at > 0 ? o.slice(at + 1) : ''
+      const val = takes ? (v ?? words[i + 1]) : at > 0 ? rest || words[i + 1] : undefined
+      const flag = takes ? k : at > 0 ? '-' + o[at] : o.slice(0, 2)
+      if (at > 0 && !rest) i++
       if ((flag === '-C' || flag === '--chdir') && (p === 'env' || p === 'sudo')) dir = val ?? null
       if (flag === '-D' && p === 'sudo') dir = val ?? null
       if ((flag === '-S' || flag === '--split-string') && p === 'env') inner = val ?? null

@@ -62,6 +62,14 @@ describe('info: route dry-run', () => {
     expect(t).not.toContain('REVISE')
   })
 
+  // routing.md and the TABLE logic move the diagnose planner to Fable from the second failed fix, not the third.
+  test('the diagnose rung is reached after two failed fixes, as decide() climbs', () => {
+    const on = route('planner', {}, null, { ...DEFAULTS, autoFable: true })
+    expect(on).toMatch(/diagnose, 2 failed fixes\s+fable · high · 2 failed fixes/)
+    expect(on).not.toContain('3 failed fixes')
+    expect(route('planner')).toMatch(/diagnose, 2 failed fixes {2,}opus · max · 2 failed fixes · Fable blocked: autoFable off/)
+  })
+
   test('a role with no ladder says so', () => {
     expect(route('seo-reviewer')).toContain('no escalation rungs for this role')
   })

@@ -2,10 +2,12 @@
 
 All notable changes to agentille are documented here.
 
-## [Unreleased]
+## [3.24.0] — 2026-10-25
 
-Fixes and clean-up on top of 3.23.0, no version bump (fixes batch into the
-next minor, `docs/releasing.md`).
+Fixes and clean-up batched since 3.23.0 (`docs/releasing.md`): guard hardening
+and ownership split, `work=` wording in every prompt, `/agt --local`, one
+glossary, the evals workflow's secret gate, and the `transport-workflow.md`
+rename.
 
 ### Added
 

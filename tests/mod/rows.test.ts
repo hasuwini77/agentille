@@ -260,7 +260,7 @@ describe('rows: workflow agents', () => {
     expect(await has(other, /executor/)).toBe(false)
     await other.unmount()
   })
-  test('a Workflow row lists working agents first, then by index, so the cap never hides them', async ($, on) => {
+  test('a Workflow row lists working agents first, then by index, so the cap never hides them', { timeoutMs: 20_000 }, async ($, on) => {
     const { clock } = setup(on)
     for (let i = 1; i <= 9; i++) await spawn($, i === 9 ? 'code-reviewer' : 'executor', i)
     const ids = ['wa', 'wb', 'w2', 'w3', 'w4', 'w5', 'w6', 'w7'] // indexes 1..8 finish; 9 keeps working

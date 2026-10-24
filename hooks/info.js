@@ -1,7 +1,7 @@
 // agentille info — the pure half of /agt-info: argument parsing, the overview lines, and the route
 // dry-run. No mods API; register.js feeds it what the mod holds.
 
-import { ROLES, decide } from './routing.js'
+import { ROLES, decide, maxRunUsdOf, usd } from './routing.js'
 import { elapsed, short, tokens } from './live.js'
 import { displayText } from './settings.js'
 
@@ -56,6 +56,7 @@ export function routeText({ role, hdr = {}, depth = null }, settings, weeklyPct 
     ['fix attempt 2', ask({ ...hdr, mode: 'fix' }, { fixes: 2 })],
     ['fix attempt 3', ask({ ...hdr, mode: 'fix' }, { fixes: 3 })],
     ['diagnose, 2 failed fixes', ask({ ...hdr, mode: 'diagnose' }, { fixes: 2 })],
+    ...(maxRunUsdOf(settings) == null ? [] : [['past maxRunUsd ' + usd(maxRunUsdOf(settings)), ask(hdr, { usd: maxRunUsdOf(settings) })]]),
   ].filter(([, d]) => d.model !== base.model || d.effort !== base.effort || d.reason !== base.reason)
   const lines = [head + ' → ' + pick(base)]
   if (rungs.length === 0) lines.push('  no escalation rungs for this role')

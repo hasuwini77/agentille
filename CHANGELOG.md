@@ -7,19 +7,35 @@ All notable changes to agentille are documented here.
 Fixes and clean-up on top of 3.23.0, no version bump (fixes batch into the
 next minor, `docs/releasing.md`).
 
+### Fixed
+
+- **The pre-push hook's git environment stays out of the test suites.**
+  `scripts/validate.sh` and `tests/hooks/test-agt-worktree.sh` unset
+  `GIT_DIR`, `GIT_WORK_TREE` and friends first; under a hook those pointed
+  the throwaway-repo tests at the real repository. A failing
+  `claude plugin test` run now prints its failing lines instead of only
+  the exit code.
+
 ### Changed (behaviour)
 
-- **A run tidies only the worktrees and branches it made.** The mod
-  records a worktree as the run's only when the command that made it
-  names the branch, the path or its basename whole (a slug that merely
-  occurs inside your own `feat/ui` no longer claims it), in
-  `~/.agentille/state/lead-<pane>.worktrees`; the run-end tidy and
-  `/agt-clean` remove only merged, clean `agt/*` worktrees on that list,
-  never one under 10 minutes old or with no commits of its own, and a
-  session with no list removes nothing. Untracked `.env*` copies are
-  swept only in those `agt/*` trees (a `feat/*` or `fix/*` tree you keep
-  working in is left alone), when the run ends and on a typed
-  `/agt-clean`, so an aborted run's copies go too.
+- **A run tidies only the worktrees and branches it made, and makes them
+  with one script.** `scripts/agt-worktree.sh <slug> [--base] [--branch]`
+  creates or re-attaches a slice worktree, copies the `.env*` files git
+  ignores and `node_modules` (copy-on-write, never a link), and prints
+  `path=` and `branch=`; the orchestrator and the executor call it in
+  place of an inline bash recipe, so a tree made the documented way is
+  recorded as the run's own in `~/.agentille/state/lead-<pane>.worktrees`
+  (a hand-written `git worktree add` is recorded only when the line
+  names the branch or path whole, so a slug inside your own `feat/ui`
+  never claims it). The run-end tidy and `/agt-clean` remove only
+  merged, clean `agt/*` worktrees on that list, never one under 10
+  minutes old or with no commits of its own, and a session with no list
+  removes nothing. Copied `.env*` files are deleted from every worktree
+  the run made, `feat/*` and `fix/*` included, when the run ends and on
+  a typed `/agt-clean`; only untracked copies git ignores go, so a
+  tracked or un-ignored `.env.example` stays. Re-attaching on a fix round
+  keeps the tree's fork point, and a restarted session keeps the records
+  saved before it.
 - **`auto` integration comes from your profile alone, and the guard
   judges by effect.** A run cannot merge, create or push a tag, or create
   a release unless `~/.agentille/profile.json` sets `integration: "auto"`
@@ -44,6 +60,28 @@ next minor, `docs/releasing.md`).
   flight (a question typed mid-run does not switch it off) and lapses
   with the run's card. Sessions where `/agt` was never typed keep full
   Bash.
+- **The guard sees the write, not the spelling.** A `checkout`, `switch`,
+  `branch -m/-M/-f`, `reset`, `symbolic-ref HEAD` or `gh pr checkout`
+  earlier on the same line makes HEAD unreadable, so
+  `git checkout main && git merge --ff-only agt/x && git push origin HEAD`
+  is refused. Below `auto` a run can no longer define a git or gh alias
+  on the line, use `send-pack`, `http-push` or `subtree push`, write a
+  tag or the base branch with `update-ref`/`symbolic-ref`, send GraphQL
+  from a file or naming a merge, ref or release mutation, or delete a
+  remote branch; `curl`'s combined short flags are parsed and `hub` is
+  read like `gh`. More wrappers are seen through (`script`, `watch`,
+  `flock`, `caffeinate`, `stdbuf`, `arch`, `coproc`, `ssh`, `parallel`,
+  `find -exec`, `fish -c`); interpreter code (`python -c`, `node -e`,
+  `perl -e`, …) that calls git, gh or curl is refused, and a script, a
+  sourced file or a make target is read before it runs and refused when
+  it pushes, merges, tags or releases. The mode comes from the repo the
+  write lands in: `GH_REPO`, `GITHUB_REPOSITORY` or `gh repo set-default`
+  for gh, and for a push the URL git would push to (pushurl, insteadOf,
+  a URL, a path); a profile entry with only a name never grants `auto`
+  to a repo that has a remote. When the guard cannot read the repo it
+  refuses instead of letting the command run. The lead stays guarded from
+  the moment its run names an id until the run's ✓/✗ card, with no
+  60-minute or typed-reply cutoff.
 - **Typed proofs last one run, and belong to it.** `spawn_pane` and
   `--fable` stay unlocked while the typed `/agt` run is in flight (a
   worker pane or subagent still working, or fewer than three later typed
@@ -59,22 +97,34 @@ next minor, `docs/releasing.md`).
   task notification or peer message after it opens nothing.
 - **A worker runs on Codex only when you named Codex** in the typed
   `/agt` prompt or your newest typed prompt.
-- **A shell session runs only a command you quoted right after the ask,
-  in the ask's own sentence** ("open a shell and run `npm test`", joined
-  by run, running, and run, that runs, with, then or to run); a command
-  quoted after "why", "what" or "explain", in another sentence, or one
-  your prompt says not to run is refused, and a candidate that still
-  holds a backtick or `$(` is dropped since a shell would run it. "Start a terminal emulator project", "give me a
+- **A session's first prompt is your own words, whatever its kind.**
+  `open_sessions` gives a Claude, Codex or shell session a first prompt
+  only when it appears in your newest typed prompt; a task the model
+  wrote itself is dropped, the session opens empty and the tool result
+  says why (`/storm`'s hand-off line still goes through). A shell runs
+  only a command you quoted right after the ask, in the ask's own
+  sentence ("open a shell and run `npm test`", joined by run, running,
+  and run, that runs, with, then or to run); a command quoted after
+  "why", "what" or "explain", in another sentence, one your prompt says
+  not to run, or prose that merely contains a command is refused whole,
+  and a candidate that still holds a backtick or `$(` is dropped since a
+  shell would run it. "Start a terminal emulator project", "give me a
   session summary" and "spawn a shell injection test suite" are no longer
   asks for sessions.
-- **The folder-trust prompt is answered for you only in your own checkout
-  or in an `agt/*` worktree on this session's own worktrees list** whose
-  `.mcp.json`, `.claude` settings files, agents and commands are absent
-  or identical to your checkout's (nested command folders compared file
-  by file). With no list no worktree is accepted, and `feat/*` and
-  `fix/*` trees no longer qualify, so a contributor's tree cannot bring
-  MCP servers, hooks or commands in through a worker pane. Any other
-  worktree needs a one-time trust by hand.
+- **The folder-trust prompt is answered for you only at the root of your
+  own checkout or of an `agt/*` worktree on this session's own worktrees
+  list**, matched by exact path (a branch name alone is not ownership),
+  and only when its `.mcp.json` and the server scripts it names, its
+  `.claude` settings files and the hook, status-line and helper scripts
+  they run, agents, commands, skills, hooks, `CLAUDE.md`, `AGENTS.md`
+  and `.claude/CLAUDE.md` are absent on both sides or identical to your
+  checkout's (nested folders compared file by file; a settings or
+  `.mcp.json` file that does not parse refuses). With no list no
+  worktree is accepted, `feat/*` and `fix/*` trees do not qualify, and a
+  folder below either root (a package inside `node_modules` with its own
+  `.claude/`) is never accepted, so a contributor's tree cannot bring MCP
+  servers, hooks or commands in through a worker pane. Any other folder
+  needs a one-time trust by hand.
 - **The daily update check honours Claude Code's own switches.**
   `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC` or `DISABLE_TELEMETRY` set
   to `1` or `true` skips it with no fetch and no cache file, like
@@ -106,7 +156,28 @@ next minor, `docs/releasing.md`).
   failing on `git worktree add -b`. Every executor dispatch states
   `isolated:`; in panes mode the lead makes the worktree.
 - **The pane pool is capped at three executors**, the same as medium;
-  heavy differs by giving each slice a real pane, not by width.
+  heavy differs by giving each slice a real pane, not by width. A fourth
+  executor working at once in a run raises a band flag and a toast and is
+  noted in `routing.jsonl`; the dispatch still goes ahead.
+- **`thinkingDepth: quick` moves the design-reviewer to Sonnet** (high
+  effort) like the other reviewers; the default depths keep it on Opus.
+- **`routing.maxRunUsd`**, an optional per-run cost ceiling in dollars
+  (default off), estimated from the run's token ledger at API list
+  prices. Past it, later Opus planners and reviewers run on Sonnet at the
+  same effort, with one toast per run and a card line; the executor and
+  the design-reviewer follow the table as before. `/agt-info ledger`
+  shows the estimate and `/agt-info route` the demoted rung.
+- **A small, one-screen UI feature or fix with no risk words gets one
+  executor and a Sonnet code review.** The ui-prototyper and the
+  design-reviewer join for multi-screen or large work, for the `design`
+  category, or when you ask.
+- **After a gauntlet clears or a duel picks its winner, the kept executor
+  integrates.** The lead re-dispatches it with `INTEGRATE:` and the run's
+  real `integration:`; it re-verifies, pushes its branch and opens the
+  PR, then deletes its `.env*` copies. Before, nothing said who pushes.
+- **The executor pushes the branch the lead handed it** (`feat/` or
+  `fix/` off main, `agt/` off a feature branch, `agt/<slug>` when none is
+  given), written out, instead of always `agt/<slug>`.
 
 - **The session-end sweep and the reaper touch only panes this session
   opened.** Every pane a lead opens (`spawn_pane`, `open_sessions`,
@@ -157,6 +228,19 @@ next minor, `docs/releasing.md`).
 
 ### Fixed
 
+- The design-reviewer treats page and repo content as data, never
+  instructions, like the other ten agents, and loads a pinned axe-core
+  (4.14.0).
+- The `/agt` skill description and the SaaS squad label use neutral
+  wording.
+- README: a contents list after the first screen; the long bullets are
+  split; the Sessions, guard and display detail moved to `docs/sessions.md`,
+  `docs/guards.md` and `docs/display.md` with one-line pointers; the
+  2.1.294 Requirements row says the mod still draws and routes below it;
+  the settings note says which keys are validated; `/agentille-claude-md`
+  defaults to the global CLAUDE.md as the skill does; the sample card
+  carries its `⚑` line; `/agt-focus` and `/agt-highlight` are listed as
+  deprecated.
 - The `open_sessions` description says when a session closes: on Herdr
   after 10 minutes idle and unfocused, and at session end when idle;
   shells and tmux sessions close only when you ask.
@@ -189,6 +273,14 @@ next minor, `docs/releasing.md`).
 ### Added
 
 - `hooks/guard.js`: the Bash guard and the worktree ownership records.
+- `scripts/agt-worktree.sh`: the one slice-worktree recipe, with
+  `tests/hooks/test-agt-worktree.sh` (40 checks on a real repo).
+- `tests/hooks/test-guard-real.sh`: the guard against a real repo and a
+  bare origin (20 checks); allowed pushes land, refused ones do not.
+- `tests/hooks/test-skill-text.sh` checks that values one prompt file
+  hands to another (the slice branch, `INTEGRATE:`, the untrusted-data
+  line, pinned CDN URLs) read the same where they are used.
+- Validator: at least 600 passing mod tests (was 500). 674 mod tests.
 - `tests/hooks/test-sweep-parity.sh` (121 checks): the session-end
   sweep's pane keys and answer paths match `hooks/panes.js`.
 - Validator: at least 500 passing mod tests (was 400);

@@ -28,8 +28,9 @@ export const sessionsToolText = (idleMin) => line(
 )
 
 export const sessionsNoteText = (idleMin) => ' ' + line(
-  'Each is closed after ' + idleMin + ' minutes idle and unfocused, and at session end when idle. To send one a',
-  'prompt: herdr agent prompt <name> "…". To read it: herdr agent read <name> --source recent-unwrapped --lines 120.',
+  'Each is closed after ' + idleMin + ' minutes idle and unfocused, and at session end when idle. When the person',
+  'asks you to send one a prompt: herdr agent prompt <name> "…". To read it: herdr agent read <name> --source',
+  'recent-unwrapped --lines 120.',
   'close_pane <name> closes one now when the person asks.',
 )
 

@@ -2,6 +2,8 @@
 // register.js feeds it what the mod observed; it returns { model, effort, reason }.
 // The table and ladder mirror skills/agt/routing.md → "Default routing" (that doc is the spec).
 
+import { modelKey } from './mascot.js'
+
 const ROLE_PREFIX = 'agentille:agentille-'
 
 // [model, effort] per role: default · size=large · risk auth/money · thinkingDepth=quick
@@ -11,7 +13,7 @@ const TABLE = {
   'ui-prototyper':     { base: ['opus', 'high'],     large: ['opus', 'high'],  risk: null,              quick: ['sonnet', 'medium'] },
   executor:            { base: ['sonnet', 'medium'], large: ['sonnet', 'high'], risk: ['sonnet', 'high'], quick: ['sonnet', 'medium'] },
   'code-reviewer':     { base: ['sonnet', 'medium'], large: ['opus', 'high'],  risk: ['opus', 'high'],   quick: ['sonnet', 'medium'] },
-  'design-reviewer':   { base: ['opus', 'high'],     large: ['opus', 'high'],  risk: ['opus', 'high'],   quick: ['opus', 'high'] },
+  'design-reviewer':   { base: ['opus', 'high'],     large: ['opus', 'high'],  risk: ['opus', 'high'],   quick: ['sonnet', 'high'] },
   'security-reviewer': { base: ['opus', 'high'],     large: ['opus', 'high'],  risk: ['opus', 'max'],    quick: ['sonnet', 'high'] },
   'payments-reviewer': { base: ['opus', 'high'],     large: ['opus', 'high'],  risk: ['opus', 'max'],    quick: ['sonnet', 'high'] },
   'seo-reviewer':      { base: ['sonnet', 'medium'], large: ['sonnet', 'high'], risk: null,              quick: ['sonnet', 'low'] },
@@ -33,7 +35,48 @@ export function formationOf(hdr) {
 }
 
 // autoFable is opt-in: Fable costs about twice Opus, so the ladder may only reach it when profile.routing.autoFable is true.
-export const DEFAULTS = { autoFable: false, maxFablePerRun: 1, fableWeeklyCeiling: 60, advisorOnOpus: true }
+// maxRunUsd is off (null) by default: a positive number is the run's cost ceiling in US dollars (see runCeiling below).
+export const DEFAULTS = { autoFable: false, maxFablePerRun: 1, fableWeeklyCeiling: 60, advisorOnOpus: true, maxRunUsd: null }
+
+// US dollars per million tokens, by model family, at the current generation's first-party API list price (Fable 5.1,
+// Opus 5.5, Sonnet 5.5, Haiku 5.5 up to 100K-token prompts). An estimate, not a bill: a plan subscription is not billed
+// per token, cache writes are priced as plain input (they cost about 1.25×), and pane workers report no tokens to the
+// lead, so a run with panes reads low. A model the mod cannot name is priced as Opus.
+export const PRICES = {
+  fable:  { input: 10, output: 50, cacheRead: 0.25 },
+  opus:   { input: 4, output: 20, cacheRead: 0.20 },
+  sonnet: { input: 2, output: 10, cacheRead: 0.20 },
+  haiku:  { input: 0.10, output: 0.50, cacheRead: 0.01 },
+}
+
+// The run's estimated spend so far from the live agents' token counts (live.js: `input` holds uncached input plus cache
+// writes, `cacheRead` the cache reads), filed the way the ledger files them.
+export function estimateRunUsd(agents, run) {
+  let usd = 0
+  for (const a of agents?.values() ?? []) {
+    if ((a.fileRun ?? a.run) !== run) continue
+    const p = PRICES[modelKey(a.model)] ?? PRICES.opus
+    usd += ((a.input ?? 0) * p.input + (a.output ?? 0) * p.output + (a.cacheRead ?? 0) * p.cacheRead) / 1_000_000
+  }
+  return usd
+}
+
+export const maxRunUsdOf = (settings) => {
+  const v = settings?.maxRunUsd
+  return typeof v === 'number' && Number.isFinite(v) && v > 0 ? v : null
+}
+
+// Past the ceiling, the roles that judge rather than build drop from Opus (or a ladder Fable) to Sonnet at the same
+// effort. The executor never changes model, and the design-reviewer, ui-prototyper and adversary keep the table.
+const CEILING_ROLES = new Set(['planner', 'plan-reviewer', 'code-reviewer', 'security-reviewer', 'payments-reviewer', 'seo-reviewer', 'perf-reviewer'])
+export const usd = (n) => '$' + (Math.round(n * 100) / 100).toFixed(2)
+function runCeiling(d, role, run, settings) {
+  const max = maxRunUsdOf(settings)
+  if (max == null || !CEILING_ROLES.has(role) || (d.model !== 'opus' && d.model !== 'fable')) return d
+  if (!(typeof run.usd === 'number' && run.usd >= max)) return d
+  const why = 'run ~' + usd(run.usd) + ' ≥ maxRunUsd ' + usd(max)
+  return { model: 'sonnet', effort: d.effort, reason: d.reason === 'table' ? why : d.reason + ' · ' + why, fable: false, capped: true }
+}
 
 export function roleOf(subagentType) {
   if (typeof subagentType !== 'string' || !subagentType.startsWith(ROLE_PREFIX)) return null
@@ -107,6 +150,28 @@ export function runInFlight(st, now = Date.now(), restMs = () => null, clockNow 
   const run = st.lastRun
   if (run && run !== 'adhoc' && [...(st.live?.values() ?? [])].some((a) => a.run === run && a.state === 'working' && now - (a.heard ?? a.start ?? 0) < AGENT_SILENT_MS)) return true
   return (st.agtTypedSince ?? 0) < AGT_GRACE_TYPED
+}
+
+// The roster runs at most this many executors at once (SKILL.md → "Hard rules"). The mod never refuses a dispatch:
+// the one past the cap is flagged. `agents` is the live map (subagents: working and heard from within AGENT_SILENT_MS,
+// since a cancelled one raises no turn.complete), `routes` the pane routes (an executor pane counts until it leaves the
+// stage). `run` is the run id; `now` is Date.now().
+export const MAX_EXECUTORS_AT_ONCE = 3
+export function executorsWorking(agents, routes, run, now = Date.now()) {
+  const subs = [...(agents?.values() ?? [])].filter((a) => a.run === run && a.role === 'executor' && a.state === 'working' && now - (a.heard ?? a.start ?? 0) < AGENT_SILENT_MS).length
+  const panes = (routes ?? []).filter((r) => r.run === run && r.agent === 'executor' && r.end == null).length
+  return subs + panes
+}
+
+export function ordinal(n) {
+  const t = n % 100
+  if (t >= 11 && t <= 13) return n + 'th'
+  return n + ({ 1: 'st', 2: 'nd', 3: 'rd' }[n % 10] ?? 'th')
+}
+
+// The flag for an executor dispatch that makes `count` executors at once in `run`, or null within the cap.
+export function executorCapFlag(run, count) {
+  return count > MAX_EXECUTORS_AT_ONCE ? 'run ' + run + ': ' + ordinal(count) + ' executor at once; the roster says ' + MAX_EXECUTORS_AT_ONCE : null
 }
 
 // The person named Codex in a typed prompt ("codex builds the API slice", "use Codex"): the only proof a worker pane
@@ -190,14 +255,20 @@ export function ladderFixes(run, piece) {
   return all.length ? Math.max(...all) : 0
 }
 
-// run: { revise, fixes, fable } observed so far · settings: profile.routing merged over DEFAULTS
-// weeklyPct: seven_day percent used, or null when unknown
-export function decide({ role, hdr = {}, run = { revise: 0, fixes: 0, fable: 0 }, depth, settings = DEFAULTS, weeklyPct = null }) {
+// run: { revise, fixes, fable, usd? } observed so far (usd: estimateRunUsd, for the maxRunUsd ceiling) · settings:
+// profile.routing merged over DEFAULTS · weeklyPct: seven_day percent used, or null when unknown. A typed --fable is
+// the person's choice and passes the ceiling; every other pick goes through runCeiling last.
+export function decide(o) {
+  const { forced, ...d } = pick(o)
+  return forced ? d : runCeiling(d, o.role, o.run ?? {}, o.settings ?? DEFAULTS)
+}
+
+function pick({ role, hdr = {}, run = { revise: 0, fixes: 0, fable: 0 }, depth, settings = DEFAULTS, weeklyPct = null }) {
   let [model, effort] = base(role, hdr, depth)
   const reasons = []
 
   if (hdr.fable === 'forced' && FABLE_ROLES.has(role) && (!FORCED_FABLE_NEEDS_LARGE.has(role) || model === 'opus')) {
-    return { model: 'fable', effort: 'high', reason: '--fable typed', fable: true }
+    return { model: 'fable', effort: 'high', reason: '--fable typed', fable: true, forced: true }
   }
 
   // Ladder rung 1–2: effort first, on observed failure.

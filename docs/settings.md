@@ -14,4 +14,4 @@ Default `off`. `on` lights `/agt` replies, `all` every reply, `off` none. The mo
 
 ## Older commands
 
-`/agt-routing`, `/agt-ledger` and `/agt-squads` were removed in v3.14.0: use `/agt-info routing|ledger|squads`. `/agt-focus` and `/agt-highlight` still work and write the `display` block.
+`/agt-routing`, `/agt-ledger` and `/agt-squads` were removed in v3.14.0: use `/agt-info routing|ledger|squads`. `/agt-focus` and `/agt-highlight` still work and write the `display` block, but both are deprecated and go away in v4: set `display.focus` and `display.highlight` in your profile instead.

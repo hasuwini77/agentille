@@ -14,6 +14,9 @@
 #         WARNs never fail the build; they are advisory.
 
 set -uo pipefail
+# This script is also the pre-push hook. A hook exports GIT_DIR and friends; left in the environment they
+# point every git call the real-git test suites make (throwaway repos under mktemp) at the real repository.
+unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_COMMON_DIR GIT_PREFIX
 cd "$(dirname "$0")/.." || exit 2
 
 FAILS=0
@@ -366,7 +369,7 @@ fi
 
 # ── 6c. The mod: Claude Code's own validator + its tests ────────────────────
 # WARN where the claude CLI is absent on a developer machine; in CI (CI=true) its absence is a
-# FAIL, so the 500 mod tests can never be skipped silently on the runner.
+# FAIL, so the 600 mod tests can never be skipped silently on the runner.
 hdr "Mod (hooks/register.js)"
 if ! command -v claude >/dev/null 2>&1; then
   if [ "${CI:-}" = "true" ]; then
@@ -383,15 +386,15 @@ else
   fi
   tout=$(claude plugin test . 2>&1); trc=$?
   # Exit 0 is not enough: an empty or truncated run must not read as green. Need a pass count
-  # at or above the floor (there are ~534 tests) and no failures.
+  # at or above the floor (there are ~674 tests) and no failures.
   tpass=$(printf '%s\n' "$tout" | grep -oE '[0-9]+ pass' | tail -1 | grep -oE '[0-9]+')
   tfail=$(printf '%s\n' "$tout" | grep -oE '[0-9]+ fail' | tail -1 | grep -oE '[0-9]+')
   if [ "$trc" != 0 ]; then
-    fail "claude plugin test failed (exit $trc)"
+    fail "claude plugin test failed (exit $trc):"; printf '%s\n' "$tout" | grep -E '✗|✘|FAIL|fail|rror' | head -15 | sed 's/^/    /'
   elif [ -z "$tpass" ]; then
     fail "claude plugin test printed no 'N pass' count — cannot tell it ran"
-  elif [ "$tpass" -lt 500 ]; then
-    fail "claude plugin test: only $tpass pass (expected at least 500)"
+  elif [ "$tpass" -lt 600 ]; then
+    fail "claude plugin test: only $tpass pass (expected at least 600)"
   elif [ -n "$tfail" ] && [ "$tfail" != 0 ]; then
     fail "claude plugin test: $tfail fail"
   else

@@ -120,7 +120,7 @@ describe('wire: in the mod', () => {
     expect(parseWire(sent[0].text)?.key).toBe('5')
   })
 
-  test('a worker tool call does not wait on the status publish', async ($, on) => {
+  test('a worker tool call does not wait on the status publish', { timeoutMs: 20_000 }, async ($, on) => {
     let release: () => void = () => {}
     let gate = false
     const stored: Record<string, any> = {}

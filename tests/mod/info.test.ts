@@ -52,6 +52,8 @@ describe('info: route dry-run', () => {
     expect(route('planner', { size: 'large' }).split('\n')[0]).toBe('planner size=large → opus · xhigh · table')
     expect(route('security-reviewer', { risk: 'money' }).split('\n')[0]).toBe('security-reviewer risk=money → opus · max · table')
     expect(route('security-reviewer', {}, 'quick').split('\n')[0]).toBe('security-reviewer depth=quick → sonnet · high · table')
+    expect(route('design-reviewer', {}, 'quick').split('\n')[0]).toBe('design-reviewer depth=quick → sonnet · high · table')
+    expect(route('design-reviewer', {}, 'always').split('\n')[0]).toBe('design-reviewer depth=always → opus · high · table')
   })
 
   test('the executor climbs on fix attempts and has no REVISE rung', () => {
@@ -68,6 +70,14 @@ describe('info: route dry-run', () => {
     expect(on).toMatch(/diagnose, 2 failed fixes\s+fable · high · 2 failed fixes/)
     expect(on).not.toContain('3 failed fixes')
     expect(route('planner')).toMatch(/diagnose, 2 failed fixes {2,}opus · max · 2 failed fixes · Fable blocked: autoFable off/)
+  })
+
+  test('with maxRunUsd set, the dry-run shows the pick past the ceiling', () => {
+    const t = route('code-reviewer', { size: 'large' }, null, { ...DEFAULTS, maxRunUsd: 5 } as never)
+    expect(t.split('\n')[0]).toBe('code-reviewer size=large → opus · high · table')
+    expect(t).toMatch(/past maxRunUsd \$5\.00\s+sonnet · high · run ~\$5\.00 ≥ maxRunUsd \$5\.00/)
+    expect(route('executor', {}, null, { ...DEFAULTS, maxRunUsd: 5 } as never)).not.toContain('maxRunUsd')
+    expect(route('code-reviewer', { size: 'large' })).not.toContain('maxRunUsd')
   })
 
   test('a role with no ladder says so', () => {

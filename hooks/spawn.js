@@ -78,23 +78,33 @@ export async function sameRepo($, a, b) {
 
 // Whether the mod may accept the folder-trust prompt for `cwd` on the person's behalf. Sharing the lead's git
 // common dir is not enough: a worktree of a contributor's branch can carry its own hooks, MCP servers, agents and
-// commands. Trusted: the lead's own checkout (or a folder in it), or a worktree of the same repo on an agt/* branch
-// that this lead's runs made, named on its lead-<pane>.worktrees list (guard.js: JSON records with path and branch;
-// a plain one-per-line list is read too), whose project config matches the lead checkout's: .mcp.json and the two
-// .claude settings files absent or byte for byte the same, .claude/agents and .claude/commands absent or the same
-// files with the same contents. With no list nothing but the lead's own checkout is accepted.
+// commands, and a folder inside a checkout (a gitignored node_modules/<pkg>) can carry a .claude/ or .mcp.json of
+// its own. Trusted: the lead's own cwd, the root of the lead's checkout, or the root of a worktree of the same repo
+// on an agt/* branch that this lead's runs made, named by its exact path on the lead-<pane>.worktrees list (guard.js:
+// JSON records with path and branch; a plain one-per-line list is read too; a branch name alone is not ownership),
+// whose project config matches the lead checkout's (sameConfig). A folder below either root is never accepted. With
+// no list nothing but the lead's own cwd and checkout root is accepted.
 const OWN_BRANCH = /^agt\/[A-Za-z0-9._/-]+$/
-const CONFIG_FILES = ['.mcp.json', '.claude/settings.json', '.claude/settings.local.json']
-const CONFIG_DIRS = ['.claude/agents', '.claude/commands']
+// Absent in the worktree is fine for these (settings.local.json and CLAUDE.local.md are gitignored, so a fresh
+// worktree has none); present, they must be the lead checkout's byte for byte.
+const CONFIG_FILES = ['.mcp.json', '.claude/settings.json', '.claude/settings.local.json', 'CLAUDE.local.md']
+// These must match both ways: absent on both sides, or the same bytes.
+const MEMORY_FILES = ['CLAUDE.md', 'AGENTS.md', '.claude/CLAUDE.md']
+const CONFIG_DIRS = ['.claude/agents', '.claude/commands', '.claude/skills', '.claude/hooks']
 const TREE_MAX = 500
-// Does a lead-<pane>.worktrees file name this worktree: a JSON array of { path, branch } records (guard.js), or
-// one path or branch per line.
-export function ownedWorktree(listed, top, branch) {
+const REFS_MAX = 64
+// The worktree paths a lead-<pane>.worktrees file names: the `path` of each JSON record (guard.js), or the absolute
+// paths on a plain one-per-line list. Branch names are skipped: a branch can be checked out anywhere.
+export function listedPaths(listed) {
   try {
     const recs = JSON.parse(listed)
-    if (Array.isArray(recs)) return recs.some((r) => r && (r.path === top || (branch && r.branch === branch)))
+    if (Array.isArray(recs)) return recs.filter((r) => r && typeof r.path === 'string' && r.path.startsWith('/')).map((r) => r.path)
   } catch {}
-  return String(listed).split('\n').some((l) => l.trim().split(/\s+/).some((f) => f === top || (branch && f === branch)))
+  return String(listed).split('\n').flatMap((l) => l.trim().split(/\s+/).filter((f) => f.startsWith('/')))
+}
+// Does the list name this worktree root `top` (as git prints it) by its exact path.
+export function ownedWorktree(listed, top) {
+  return listedPaths(listed).some((p) => p.replace(/\/+$/, '') === top)
 }
 
 // A file's text, ABSENT when there is none, UNREADABLE when it is there but cannot be read. Existence is asked of
@@ -133,36 +143,126 @@ async function configTree($, dir) {
   return (await missing($, dir)) && out.size === 0 ? out : null
 }
 
-// The worktree brings no project config of its own: what it has is the lead checkout's, byte for byte.
-export async function sameConfig($, top, leadTop) {
-  for (const f of CONFIG_FILES) {
-    const mine = await configFile($, top + '/' + f)
-    if (mine === ABSENT) continue
-    if (mine === UNREADABLE || mine !== (await configFile($, leadTop + '/' + f))) return false
+// The repo-relative files a command line may run: each word that is a path (holds a `/`) or names a script, with
+// $CLAUDE_PROJECT_DIR (bare or braced) read as the checkout's root and an absolute path under `top` made relative.
+// Other variables, `~` and absolute paths outside the checkout are the same file for both sides, so they are skipped.
+// Over-reading is safe: a word that is no file is absent on both sides, and absent on both sides is equal.
+const SCRIPT = /\.(?:sh|bash|zsh|fish|js|mjs|cjs|ts|mts|py|rb|pl|php|lua)$/i
+export function commandPaths(command, top) {
+  const out = []
+  for (let w of String(command ?? '').split(/[\s;|&()<>=,]+/)) {
+    w = w.replace(/^["'`]+|["'`]+$/g, '')
+    const rooted = /^\$\{?CLAUDE_PROJECT_DIR\}?["']?(?=\/|$)/
+    if (rooted.test(w)) w = w.replace(rooted, '').replace(/^\/+/, '')
+    else if (w.startsWith(top + '/')) w = w.slice(top.length + 1)
+    else if (w.startsWith('/')) continue
+    if (!w || w.startsWith('-') || w.startsWith('~') || w.includes('$')) continue
+    w = w.replace(/^(?:\.\/)+/, '')
+    if (w && (w.includes('/') || SCRIPT.test(w))) out.push(w)
   }
-  for (const d of CONFIG_DIRS) {
-    const [mine, lead] = await Promise.all([configTree($, top + '/' + d), configTree($, leadTop + '/' + d)])
-    if (!mine || !lead || mine.size !== lead.size) return false
-    for (const [k, v] of mine) if (lead.get(k) !== v) return false
+  return out
+}
+
+// Every command string a settings file runs: hook commands and statusLine.command (any `command` key), and the
+// helpers that run a command (apiKeyHelper, awsAuthRefresh, awsCredentialExport, otelHeadersHelper).
+const HELPER_KEYS = new Set(['command', 'apiKeyHelper', 'awsAuthRefresh', 'awsCredentialExport', 'otelHeadersHelper'])
+function settingsCommands(value, out = []) {
+  if (Array.isArray(value)) for (const v of value) settingsCommands(v, out)
+  else if (value && typeof value === 'object') {
+    for (const [k, v] of Object.entries(value)) {
+      if (HELPER_KEYS.has(k) && typeof v === 'string') out.push(v)
+      else settingsCommands(v, out)
+    }
   }
+  return out
+}
+
+// The command and args of every .mcp.json server.
+function mcpCommands(json) {
+  const servers = json && typeof json === 'object' ? json.mcpServers : null
+  if (!servers || typeof servers !== 'object') return []
+  return Object.values(servers).flatMap((v) => (v && typeof v === 'object' ? [v.command, ...(Array.isArray(v.args) ? v.args : [])] : [])).filter((x) => typeof x === 'string')
+}
+
+async function sameText($, a, b) {
+  const [x, y] = await Promise.all([configFile($, a), configFile($, b)])
+  return x !== UNREADABLE && y !== UNREADABLE && x === y
+}
+// A file a command names, or a folder (`--directory tools/mcp`, `cd apps/web`): a folder is compared file by file,
+// and one too big to compare refuses.
+async function sameEntry($, a, b) {
+  const [x, y] = await Promise.all([configFile($, a), configFile($, b)])
+  if (x !== UNREADABLE && y !== UNREADABLE) return x === y
+  const [sa, sb] = await Promise.all([$.fs.stat(a).catch(() => null), $.fs.stat(b).catch(() => null)])
+  if (sa?.kind !== 'dir' || sb?.kind !== 'dir') return false
+  const [ta, tb] = await Promise.all([configTree($, a), configTree($, b)])
+  if (!ta || !tb || ta.size !== tb.size) return false
+  for (const [k, v] of ta) if (tb.get(k) !== v) return false
   return true
+}
+
+// The worktree brings no project config of its own: what it has is the lead checkout's, byte for byte. That is the
+// .mcp.json, settings and local files (CONFIG_FILES, absent in the worktree is fine), CLAUDE.md, AGENTS.md and
+// .claude/CLAUDE.md (MEMORY_FILES, absent on both sides or the same), .claude/agents, commands, skills and hooks
+// (CONFIG_DIRS, every file, nested ones too), and every repo file a settings command or an .mcp.json server names
+// (commandPaths): settings.json can stay byte for byte the same while the hook script it runs changes. A settings
+// or .mcp.json file that does not parse refuses.
+export async function sameConfig($, top, leadTop) {
+  const mine = new Map()
+  for (const f of CONFIG_FILES) {
+    const text = await configFile($, top + '/' + f)
+    if (text === ABSENT) continue
+    if (text === UNREADABLE || text !== (await configFile($, leadTop + '/' + f))) return false
+    mine.set(f, text)
+  }
+  for (const f of MEMORY_FILES) if (!(await sameText($, top + '/' + f, leadTop + '/' + f))) return false
+  for (const d of CONFIG_DIRS) {
+    const [here, lead] = await Promise.all([configTree($, top + '/' + d), configTree($, leadTop + '/' + d)])
+    if (!here || !lead || here.size !== lead.size) return false
+    for (const [k, v] of here) if (lead.get(k) !== v) return false
+  }
+  const commands = []
+  try {
+    for (const f of ['.claude/settings.json', '.claude/settings.local.json']) if (mine.has(f)) commands.push(...settingsCommands(JSON.parse(mine.get(f))))
+    if (mine.has('.mcp.json')) commands.push(...mcpCommands(JSON.parse(mine.get('.mcp.json'))))
+  } catch {
+    return false
+  }
+  const refs = [...new Set(commands.flatMap((c) => commandPaths(c, top)))]
+  if (refs.length > REFS_MAX) return false
+  for (const r of refs) if (!(await sameEntry($, top + '/' + r, leadTop + '/' + r))) return false
+  return true
+}
+
+// git's answer, trimmed, or null when git failed: '' is a real answer (--show-prefix at a checkout's root).
+async function gitOut($, d, ...a) {
+  const r = await $.process.run(['git', '-C', d, ...a], PROBE).catch(() => null)
+  return r?.exitCode === 0 ? String(r.stdout ?? '').trim() : null
+}
+// A listed path that is not `top` letter for letter may still be it through a symlink (/tmp and /private/tmp): git
+// resolves it. Only paths with top's own last segment are asked, so a long list costs nothing.
+async function listsRoot($, listed, top) {
+  if (ownedWorktree(listed, top)) return true
+  const leaf = top.split('/').pop()
+  for (const p of listedPaths(listed).filter((x) => x.replace(/\/+$/, '').split('/').pop() === leaf).slice(0, 8)) {
+    const [real, prefix] = await Promise.all([gitOut($, p, 'rev-parse', '--show-toplevel'), gitOut($, p, 'rev-parse', '--show-prefix')])
+    if (real === top && prefix === '') return true
+  }
+  return false
 }
 
 export async function trustable($, cwd, leadCwd) {
   if (cwd === leadCwd) return true
   if (!(await sameRepo($, cwd, leadCwd))) return false
-  const git = async (d, ...a) => {
-    const r = await $.process.run(['git', '-C', d, ...a], PROBE).catch(() => null)
-    return r?.exitCode === 0 ? String(r.stdout).trim() : ''
-  }
-  const [top, leadTop] = await Promise.all([git(cwd, 'rev-parse', '--show-toplevel'), git(leadCwd, 'rev-parse', '--show-toplevel')])
-  if (!top || !leadTop) return false
+  const [top, leadTop, prefix] = await Promise.all([gitOut($, cwd, 'rev-parse', '--show-toplevel'), gitOut($, leadCwd, 'rev-parse', '--show-toplevel'), gitOut($, cwd, 'rev-parse', '--show-prefix')])
+  // A folder below a checkout's root brings whatever .claude/ or .mcp.json sits in it: never on the person's behalf.
+  if (!top || !leadTop || prefix !== '') return false
   if (top === leadTop) return true
-  const branch = await git(cwd, 'symbolic-ref', '--short', 'HEAD')
-  if (!OWN_BRANCH.test(branch)) return false
+  const branch = await gitOut($, cwd, 'symbolic-ref', '--short', 'HEAD')
+  if (!branch || !OWN_BRANCH.test(branch)) return false
   const file = String(panesFile(S.home, await leadPane($)) ?? '').replace(/\.panes$/, '.worktrees')
   const listed = file ? await $.fs.read(file).catch(() => null) : null
-  if (typeof listed !== 'string' || !ownedWorktree(listed, top, branch)) return false
+  if (typeof listed !== 'string' || !(await listsRoot($, listed, top))) return false
   return sameConfig($, top, leadTop)
 }
 

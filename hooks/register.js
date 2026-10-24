@@ -27,7 +27,7 @@ import { refreshAgents, working, ensurePolling, ensureTicker } from './ticker.js
 import { statusKey, freshStatus, validLead, parseWire, shortName, logWire, parseTellArgs } from './wire.js'
 import { publish } from './worker.js'
 import { onPromptSubmit, onTurnComplete } from './turns.js'
-import { dispatchedRun } from './proofs.js'
+import { dispatchedRun, agtTurnFromDispatch } from './proofs.js'
 import { parseHeader, roleOf } from './routing.js'
 import * as P from './panerec.js'
 const { runs, live, paneRoutes, openedNames, mascot, litMemo, hlMemo, rawIds, wireLog, pub } = S
@@ -160,7 +160,7 @@ export function register(on) {
 
   on('skill.prompt', async ($, e, next) => {
     if (!/(^|:)agt$/.test(e.skill)) return next(e)
-    S.agtTurn = true
+    agtTurnFromDispatch()
     const t = await transportOf($)
     if (t !== 'none') ensurePolling($)
     const draws = canDraw(await $.session.surfaces().catch(() => []))

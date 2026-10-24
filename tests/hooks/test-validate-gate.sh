@@ -16,7 +16,7 @@ check() { n=$((n+1)); if eval "$2"; then :; else echo "FAIL $1"; bad=$((bad+1));
 cat > "$T/bin/claude" <<'C'
 #!/usr/bin/env bash
 if [ "$1" = plugin ] && [ "$2" = validate ]; then echo "fake validate"; exit "${FAKE_VALIDATE_RC:-0}"; fi
-if [ "$1" = plugin ] && [ "$2" = test ]; then printf "%b\n" "${FAKE_TEST_OUT:- 527 pass\n 0 fail}"; exit "${FAKE_TEST_RC:-0}"; fi
+if [ "$1" = plugin ] && [ "$2" = test ]; then printf "%b\n" "${FAKE_TEST_OUT:- 674 pass\n 0 fail}"; exit "${FAKE_TEST_RC:-0}"; fi
 exit 0
 C
 chmod +x "$T/bin/claude"
@@ -41,18 +41,18 @@ check "test output without a count: says so" 'printf "%s" "$out" | grep -q "prin
 out=$(run FAKE_TEST_OUT=" 12 pass"); rc=$?
 check "12 pass: run fails" '[ "$rc" != 0 ]'
 check "12 pass: names the floor" 'printf "%s" "$out" | grep -q "only 12 pass"'
-out=$(run "FAKE_TEST_OUT= 499 pass\n 0 fail"); rc=$?
-check "499 pass: run fails" '[ "$rc" != 0 ]'
-check "499 pass: says the floor is 500" 'printf "%s" "$out" | grep -q "only 499 pass (expected at least 500)"'
-out=$(run "FAKE_TEST_OUT= 500 pass\n 0 fail"); rc=$?
-check "500 pass: exit 0" '[ "$rc" = 0 ]'
-check "500 pass: reports the count" 'printf "%s" "$out" | grep -q "claude plugin test: 500 pass"'
-out=$(run "FAKE_TEST_OUT= 527 pass\n 0 fail"); rc=$?
-check "527 pass 0 fail: exit 0" '[ "$rc" = 0 ]'
-check "527 pass 0 fail: reports the count" 'printf "%s" "$out" | grep -q "claude plugin test: 527 pass"'
-out=$(run "FAKE_TEST_OUT= 527 pass\n 1 fail"); rc=$?
-check "527 pass 1 fail: run fails" '[ "$rc" != 0 ]'
-check "527 pass 1 fail: says 1 fail" 'printf "%s" "$out" | grep -q "claude plugin test: 1 fail"'
+out=$(run "FAKE_TEST_OUT= 599 pass\n 0 fail"); rc=$?
+check "599 pass: run fails" '[ "$rc" != 0 ]'
+check "599 pass: says the floor is 600" 'printf "%s" "$out" | grep -q "only 599 pass (expected at least 600)"'
+out=$(run "FAKE_TEST_OUT= 600 pass\n 0 fail"); rc=$?
+check "600 pass: exit 0" '[ "$rc" = 0 ]'
+check "600 pass: reports the count" 'printf "%s" "$out" | grep -q "claude plugin test: 600 pass"'
+out=$(run "FAKE_TEST_OUT= 674 pass\n 0 fail"); rc=$?
+check "674 pass 0 fail: exit 0" '[ "$rc" = 0 ]'
+check "674 pass 0 fail: reports the count" 'printf "%s" "$out" | grep -q "claude plugin test: 674 pass"'
+out=$(run "FAKE_TEST_OUT= 674 pass\n 1 fail"); rc=$?
+check "674 pass 1 fail: run fails" '[ "$rc" != 0 ]'
+check "674 pass 1 fail: says 1 fail" 'printf "%s" "$out" | grep -q "claude plugin test: 1 fail"'
 
 # skipping the hook tests: a WARN on a developer machine, a FAIL under CI=true
 out=$(run); rc=$?

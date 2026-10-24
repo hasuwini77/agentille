@@ -1,6 +1,6 @@
 ---
 name: agt
-description: Personal AI coding orchestrator and software factory. One command, `/agt <task>`, detects the level (low, medium, heavy) and runs the cheapest crew that does the job well (planner, executors, reviewers, each on the right model), opens one reviewed PR per slice (merges on green only with `integration: auto`) or escalates, closes every pane it opened, and ends on one short card. `/agt next` builds the next backlog item. Activates ONLY when the user types `/agt`; model invocation is disabled.
+description: Multi-agent coding orchestrator and software factory. One command, `/agt <task>`, detects the level (low, medium, heavy) and runs the cheapest crew that does the job well (planner, executors, reviewers, each on the right model), opens one reviewed PR per slice (merges on green only with `integration: auto`) or escalates, closes every pane it opened, and ends on one short card. `/agt next` builds the next backlog item. Activates ONLY when the user types `/agt`; model invocation is disabled.
 argument-hint: [low|medium|heavy|next] "<task>"
 disable-model-invocation: true
 ---
@@ -74,7 +74,7 @@ Ask: <preTaskQuestioning>. Depth: <thinkingDepth>.
 - **Review gate: P0/P1 block; P2/P3 advisory.** Fix every P0/P1 and confirm the fix. If it cannot or should not be fixed, put it on the card's `⚑` line; never call it shipped.
 - **Never commit to `main` directly.** Work lands through a branch and a PR or a local merge (`factory.md` → "Integrate").
 - **Never let an agent push through context pressure.** An executor that reports `CONTEXT …` is replaced by a fresh one seeded from its checkpoint and slice.
-- **At most 3 executors at once.** Batch the rest in waves.
+- **At most 3 executors at once.** Batch the rest in waves; the mod flags a fourth on the band and in `routing.jsonl` but does not block it.
 - **Executor is never Haiku**; Haiku only classifies and scouts (read-only). Fable comes only from the ladder or `--fable`.
 - **Foreground when it gates.** A dispatch whose result feeds the next step runs in the foreground; independent dispatches go out as one message of background calls, then one wait.
 - **Mods off still works.** The mod only adds the band, routing, the wire between panes and the automatic pane cleanup.

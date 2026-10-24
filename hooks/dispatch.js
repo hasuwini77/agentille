@@ -6,8 +6,10 @@ import { reportRun, reportTail } from './drawing.js'
 import { pieceOf, party, taskLine } from './links.js'
 import { newAgent, short, ledger, ledgerText } from './live.js'
 import { SAFE_RUN, splitName } from './panes.js'
-import { formationOf, roleOf, parseHeader, proveHeader, demoteHeaderText, ladderFixes, decide } from './routing.js'
+import { formationOf, roleOf, parseHeader, proveHeader, demoteHeaderText, ladderFixes, decide, executorsWorking, executorCapFlag, estimateRunUsd, maxRunUsdOf, usd } from './routing.js'
+import { addFlag } from './display.js'
 import { logWire } from './wire.js'
+import { agtTurnFromDispatch } from './proofs.js'
 const { wfToasted, runs, live, decisions, paneRoutes, demotedToasted, wireLog } = S
 
 // A workflow agent is in no agent list, and a cancelled one raises no turn.complete: it is marked,
@@ -25,6 +27,14 @@ export function demoteToast($, run) {
   $.ui.toast('agt ⚑ fable=forced dropped: --fable was not typed, the ladder applies')
 }
 
+// Once per run: the maxRunUsd ceiling was reached and the first dispatch was demoted. One toast and a band ⚑ line;
+// every later demotion shows only in the routing log (`capped: true`).
+export function ceilingOnce($, runId, run, spent) {
+  if (run.ceilingToasted) return
+  run.ceilingToasted = true
+  addFlag($, 'ceiling|' + runId, 'run ' + runId + ': ~' + usd(spent) + ' spent, past maxRunUsd ' + usd(maxRunUsdOf(S.settings)) + '; Opus reviewers and planners now run Sonnet')
+}
+
 export function runState(id) {
   if (!runs.has(id)) runs.set(id, { revise: 0, fixes: 0, fixesByPiece: {}, fable: 0, formation: null, log: [], reports: {} })
   return runs.get(id)
@@ -40,7 +50,9 @@ export function routingView() {
 }
 
 export function ledgerView() {
-  return ledgerText(ledger(live, S.lastRun, paneRoutes))
+  const text = ledgerText(ledger(live, S.lastRun, paneRoutes))
+  const max = maxRunUsdOf(S.settings)
+  return max == null ? text : text + '\nestimate ~' + usd(estimateRunUsd(live, S.lastRun)) + ' of maxRunUsd ' + usd(max) + ' (list prices; pane workers not counted)'
 }
 
 export async function writeRunFile($, runId, name, text) {
@@ -113,7 +125,7 @@ export async function dispatchAgent($, e, next) {
     const run = runState(fileRun)
     const busy = [...live.values()].some((a) => a.run === S.lastRun && a.state === 'working') || S.panes.some((p) => splitName(p.name)?.run === S.lastRun && p.state === 'working')
     if (named && (S.lastRun === 'adhoc' || !busy)) S.lastRun = named
-    S.agtTurn = true
+    agtTurnFromDispatch()
     // The table pick follows the run in progress (its REVISEs); `run` is only where the log goes.
     const d = decide({ role, hdr, run: { ...runState(runId), fixes: ladderFixes(runState(runId), pieceOf(hdr)) }, depth: S.depth, settings: S.settings, weeklyPct: S.weeklyPct })
     const res = await next(e)
@@ -139,7 +151,7 @@ export async function dispatchAgent($, e, next) {
   }
 
   const runId = SAFE_RUN.test(hdr.run ?? '') ? hdr.run : 'adhoc'
-  S.agtTurn = true
+  agtTurnFromDispatch()
   S.lastRun = runId
   const run = runState(runId)
   run.formation = formationOf(hdr) ?? run.formation
@@ -151,7 +163,9 @@ export async function dispatchAgent($, e, next) {
   const shared = Number((await $.store.get('fable:' + runId)) ?? 0)
   run.fable = Math.max(run.fable, shared)
 
-  const d = decide({ role, hdr, run: { ...run, fixes: ladderFixes(run, pieceOf(hdr)) }, depth: S.depth, settings: S.settings, weeklyPct: S.weeklyPct })
+  // The run's spend so far, estimated from its agents' tokens, only when a maxRunUsd ceiling is set.
+  const spent = maxRunUsdOf(S.settings) == null ? null : estimateRunUsd(live, runId)
+  const d = decide({ role, hdr, run: { ...run, fixes: ladderFixes(run, pieceOf(hdr)), usd: spent }, depth: S.depth, settings: S.settings, weeklyPct: S.weeklyPct })
   const res = await next({ ...e, model: d.model })
   if (res.deny) return res
 
@@ -160,13 +174,17 @@ export async function dispatchAgent($, e, next) {
     await $.store.set('fable:' + runId, run.fable)
   }
   const piece = pieceOf(hdr)
+  // At most 3 executors at once: counted before this one joins, subagents and the run's executor panes alike.
+  const cap = role === 'executor' && runId !== 'adhoc' && res.agentId ? executorCapFlag(runId, executorsWorking(live, paneRoutes, runId) + 1) : null
   if (res.agentId) live.set(res.agentId, { ...newAgent({ id: res.agentId, role, routed: true, model: res.model, effort: d.effort, reason: d.reason, run: runId, now: Date.now(), parentId: e.parentAgentId ?? null }), piece })
   if (runId !== 'adhoc') logWire(wireLog, { from: 'lead', to: party(role, piece), kind: 'task', summary: taskLine(e.prompt) || role, at: Date.now(), via: 'sub' })
-  const rec = { at: new Date().toISOString(), role, model: res.model, effort: d.effort, reason: d.reason, asked: e.model ?? null, agentId: res.agentId ?? null }
+  const rec = { at: new Date().toISOString(), role, model: res.model, effort: d.effort, reason: d.reason, asked: e.model ?? null, agentId: res.agentId ?? null, ...(cap && { cap }), ...(d.capped && { capped: true }) }
   decisions.push(rec)
   run.log.push(JSON.stringify(rec))
   await writeRunFile($, runId, 'routing.jsonl', run.log.join('\n') + '\n')
-  if (d.reason !== 'table') $.ui.toast('agt ↑ ' + role + ' → ' + short(res.model) + ' · ' + d.effort + ' — ' + d.reason)
+  if (cap) addFlag($, 'cap|' + runId, cap) // the band's ⚑ line and one toast; the dispatch itself goes ahead
+  if (d.capped) ceilingOnce($, runId, run, spent)
+  else if (d.reason !== 'table') $.ui.toast('agt ↑ ' + role + ' → ' + short(res.model) + ' · ' + d.effort + ' — ' + d.reason)
   $.ui.invalidate('ui.render')
   return res
 }

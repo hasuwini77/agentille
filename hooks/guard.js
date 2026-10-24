@@ -11,20 +11,26 @@
 // A session where /agt was never typed is untouched: its Bash runs as the engine runs it.
 //
 // The command is read, not run: quotes, `$( )`, backticks, heredocs, wrappers (env, command, nice, nohup,
-// timeout, xargs, sudo, time, absolute paths) and `bash -c` / `eval` are seen through, and variables set in
-// the same line are expanded. A ref that is still a variable after that is not guessed at: the push is denied
-// and the message asks for the name written out.
+// timeout, xargs, sudo, time, script, watch, flock, caffeinate, stdbuf, arch, ssh, parallel, coproc, find -exec,
+// absolute paths) and `bash -c` / `fish -c` / `eval` are seen through, and variables set in the same line are
+// expanded. A ref that is still a variable after that is not guessed at: the push is denied and the message asks
+// for the name written out; so is a HEAD push after a branch switch earlier on the line. What the reader cannot
+// follow is judged by what it holds, below `auto`: interpreter code (python -c, node -e …) that mentions git, gh
+// or curl is refused, and a script file, a sourced file or a make target is read first and refused when it pushes,
+// merges, tags or releases. Probing that fails denies the command: the guard never lets a line through unread.
 
 import { S } from './state.js'
 import { parseWorktrees } from './clean.js'
 import { PROBE, SAFE_RUN, SPAWN_ROLE, splitName, paneKey } from './panes.js'
 import { ROLES } from './routing.js'
-import { moment, inFlight } from './proofs.js'
+import { moment, inFlight, runHeld } from './proofs.js'
 import { leadPane } from './spawn.js'
 
 export const DENY_INTEGRATION = 'integration auto is not set in your profile for this repo; the run stops at the PR.'
-export const DENY_PUSH = 'integration auto is not set in your profile for this repo: a run pushes only its own branch (agt/*, feat/*, fix/* or the one checked out), never the base branch, a tag, a force push or every branch. Write the branch name and the directory out (no variables) and push again.'
+export const DENY_PUSH = 'integration auto is not set in your profile for this repo: a run pushes only its own branch (agt/*, feat/*, fix/* or the one checked out), never the base branch, a tag, a force push, a branch deletion or every branch. Write the branch name and the directory out (no variables) and push again.'
 export const DENY_LOCAL = 'integration is local for this repo: the run pushes nothing and opens no PR.'
+export const denyHidden = (what) => 'integration auto is not set in your profile for this repo, and ' + what + ', where the guard cannot judge a push, merge, tag or release. Run those steps as plain commands, with the branch and directory written out.'
+export const DENY_UNREAD = 'The guard could not read the repo this command targets; retry, or run the command yourself.'
 export const OWNED_TTL_MS = 14 * 24 * 60 * 60_000
 const MODES = ['local', 'push', 'pr', 'auto'] // least to most autonomy
 const OWN_BRANCH = /^(agt|feat|fix|storm)\//
@@ -162,6 +168,9 @@ const ASSIGN = /^([A-Za-z_][A-Za-z0-9_]*)=(.*)$/s
 const expand = (w, vars) => w.replace(/\$\{([A-Za-z_][A-Za-z0-9_]*)\}|\$([A-Za-z_][A-Za-z0-9_]*)/g, (m, a, b) => vars.get(a ?? b) ?? m)
 
 // Wrappers in front of the real program, and their options that take a value. `timeout` also takes a duration.
+// An object entry says more: `c`, its options whose value is a shell line it runs (flock -c, script -c); `skip`,
+// the positionals before the program (flock's lock file, script's log file, ssh's host); `line`, that it runs the
+// rest as one shell line (watch, ssh). `par`: GNU parallel, whose `:::` arguments complete the command.
 const WRAP = {
   command: [], builtin: [], exec: ['-a'], nohup: [], time: ['-f', '--format', '-o', '--output'],
   sudo: ['-u', '-g', '-h', '-p', '-C', '-D', '-r', '-t', '-U', '-T', '-R', '--user', '--group', '--host', '--prompt', '--chdir', '--role', '--type', '--other-user', '--command-timeout', '--close-from'],
@@ -169,26 +178,39 @@ const WRAP = {
   nice: ['-n', '--adjustment'],
   timeout: ['-s', '--signal', '-k', '--kill-after'],
   xargs: ['-I', '-L', '-l', '-n', '-P', '-s', '-d', '-E', '-e', '-a', '--arg-file', '--delimiter', '--max-args', '--max-procs', '--max-lines', '--max-chars', '--eof', '--replace', '--process-slot-var'],
+  caffeinate: ['-t', '-w'], stdbuf: ['-i', '-o', '-e', '--input', '--output', '--error'], arch: ['-arch', '-d', '-e'],
+  coproc: [], doas: ['-u', '-C'], setsid: [], unbuffer: [], chronic: [], nocorrect: [], noglob: [], xcrun: ['--sdk', '--toolchain'],
+  ionice: ['-c', '-n', '-p', '--class', '--classdata'],
+  script: { opts: ['-t', '-T', '-O', '-I', '-B', '-E', '-o', '--timing', '--log-out', '--log-in', '--log-io', '--log-timing', '--echo', '--output-limit'], c: ['-c', '--command'], skip: 1 },
+  flock: { opts: ['-w', '--wait', '--timeout', '-E', '--conflict-exit-code'], c: ['-c', '--command'], skip: 1 },
+  watch: { opts: ['-n', '--interval', '-q', '--equexit'], line: true },
+  ssh: { opts: ['-b', '-c', '-D', '-E', '-e', '-F', '-I', '-i', '-J', '-L', '-l', '-m', '-O', '-o', '-p', '-Q', '-R', '-S', '-W', '-w', '-B'], skip: 1, line: true },
+  parallel: { opts: ['-j', '--jobs', '-S', '--sshlogin', '--sshloginfile', '-a', '--arg-file', '-d', '--delimiter', '-I', '--replace', '-n', '--max-args', '-N', '--colsep', '-C', '--tmpdir', '--results', '--timeout', '--delay', '--retries', '--joblog', '-E', '--eof'], par: true },
 }
 const KEYWORDS = new Set(['then', 'do', 'else', 'elif', 'if', 'while', 'until', '!', '{', '}'])
 
-// words → { words, dir, inner }: the program's own words, a directory a wrapper moved to (env -C, sudo -D),
-// and a line a wrapper runs as a shell line (env -S).
+// words → { words, dir, inner, env }: the program's own words, a directory a wrapper moved to (env -C, sudo -D),
+// a line a wrapper runs as a shell line (env -S), and the variables set in front of it (GH_REPO=… gh, env K=V).
 function unwrap(words) {
   let i = 0
   let dir = null
   let inner = null
+  const env = new Map()
   while (i < words.length) {
     const w = words[i]
     const p = base(w)
     if (ASSIGN.test(w) || KEYWORDS.has(w)) {
+      const m = ASSIGN.exec(w)
+      if (m) env.set(m[1], m[2])
       i++
       continue
     }
-    const opts = Object.hasOwn(WRAP, p) ? WRAP[p] : null
-    if (!opts) break
+    const spec = Object.hasOwn(WRAP, p) ? WRAP[p] : null
+    if (!spec) break
+    const opts = Array.isArray(spec) ? spec : spec.opts
     i++
-    if (p === 'command' && /^-[a-zA-Z]*[vV]/.test(words[i] ?? '')) return { words: [], dir, inner } // a lookup, not a run
+    if (p === 'command' && /^-[a-zA-Z]*[vV]/.test(words[i] ?? '')) return { words: [], dir, inner, env } // a lookup, not a run
+    if (p === 'coproc' && /^[A-Za-z_]\w*$/.test(words[i] ?? '') && words[i + 1] === '{') i++ // coproc NAME { … }
     while (i < words.length && words[i].startsWith('-') && words[i] !== '-') {
       const o = words[i]
       if (o === '--') {
@@ -197,24 +219,49 @@ function unwrap(words) {
       }
       const [k, v] = o.startsWith('--') && o.includes('=') ? [o.slice(0, o.indexOf('=')), o.slice(o.indexOf('=') + 1)] : [o, undefined]
       const takes = opts.includes(k)
-      const val = takes ? (v ?? words[i + 1]) : o.length > 2 && opts.includes(o.slice(0, 2)) ? o.slice(2) : undefined
-      const flag = takes ? k : o.slice(0, 2)
+      // A cluster of one-letter flags (env -iC /w, sudo -nu bob): the first letter that takes a value ends it,
+      // its value the rest of the word or the next one.
+      const at = !takes && /^-[a-zA-Z]/.test(o) && !o.startsWith('--') ? [...o.slice(1)].findIndex((ch) => opts.includes('-' + ch)) + 1 : 0
+      const rest = at > 0 ? o.slice(at + 1) : ''
+      const val = takes ? (v ?? words[i + 1]) : at > 0 ? rest || words[i + 1] : undefined
+      const flag = takes ? k : at > 0 ? '-' + o[at] : o.slice(0, 2)
+      if (at > 0 && !rest) i++
       if ((flag === '-C' || flag === '--chdir') && (p === 'env' || p === 'sudo')) dir = val ?? null
       if (flag === '-D' && p === 'sudo') dir = val ?? null
       if ((flag === '-S' || flag === '--split-string') && p === 'env') inner = val ?? null
+      if (spec.c?.includes(k)) return { words: [], dir, inner: v ?? words[i + 1] ?? '', env }
+      if (/^-[a-zA-Z]{2,}$/.test(o) && spec.c?.some((f) => f.length === 2 && o.endsWith(f[1]))) return { words: [], dir, inner: words[i + 1] ?? '', env } // -qc '…'
       i += takes && v === undefined ? 2 : 1
     }
     if (p === 'timeout' && i < words.length) i++ // the duration
+    if (spec.skip) i += spec.skip
+    if (spec.c?.includes(words[i])) return { words: [], dir, inner: words[i + 1] ?? '', env } // flock <file> -c '…'
+    if (spec.line) return { words: [], dir, inner: words.slice(i).join(' '), env }
+    if (spec.par) return { ...parallelRun(words.slice(i)), dir, env }
   }
-  return { words: words.slice(i), dir, inner }
+  return { words: words.slice(i), dir, inner, env }
+}
+
+// GNU parallel's command and its `:::` arguments → the shell lines it runs (one per argument; with no command,
+// each argument is a line of its own). With no `:::` the command reads its arguments from stdin, as xargs does.
+function parallelRun(words) {
+  const k = words.findIndex((w) => /^:::+\+?$/.test(w))
+  if (k < 0) return { words, inner: null }
+  const cmd = words.slice(0, k).join(' ')
+  const args = words.slice(k + 1).filter((w) => !/^:::+\+?$/.test(w))
+  const lines = args.map((a) => (!cmd ? a : cmd.includes('{}') ? cmd.split('{}').join(a) : cmd + ' ' + a))
+  return { words: [], inner: lines.join('\n') }
 }
 
 // A shell that runs a line it is handed: `bash -c '…'`, `eval …`, or a heredoc/here-string fed to a shell.
+export const SHELLS = ['bash', 'sh', 'zsh', 'dash', 'ksh', 'fish']
 function innerLine(words, stdin) {
   const p = base(words[0])
-  if (['bash', 'sh', 'zsh', 'dash', 'ksh'].includes(p)) {
-    const k = words.findIndex((w, n) => n > 0 && /^-[a-z]*c[a-z]*$/.test(w))
+  if (SHELLS.includes(p)) {
+    const k = words.findIndex((w, n) => n > 0 && (/^-[a-z]*c[a-z]*$/.test(w) || w === '--command'))
     if (k > 0) return words[k + 1] ?? null
+    const long = words.find((w) => w.startsWith('--command='))
+    if (long) return long.slice(10)
     if (stdin !== null && !words.slice(1).some((w) => !w.startsWith('-'))) return stdin
     return null
   }
@@ -222,7 +269,8 @@ function innerLine(words, stdin) {
   return null
 }
 
-// The simple commands of a line, wrappers stripped and variables set earlier in it expanded: [{ words, dir }].
+// The simple commands of a line, wrappers stripped and variables set earlier in it expanded: [{ words, dir, env }],
+// env being what the command sees set on this line (earlier assignments and exports, and its own prefix).
 export function commands(line, depth = 0, vars = new Map()) {
   const out = []
   for (const c of lex(String(line ?? '')).cmds) {
@@ -235,10 +283,24 @@ export function commands(line, depth = 0, vars = new Map()) {
       }
       continue
     }
+    take(words, c.stdin)
+  }
+  // One simple command's words: wrappers stripped, a line it runs read as commands, `find -exec … ;` segments too.
+  function take(words, stdin) {
     const u = unwrap(words)
-    const inner = depth < 3 ? (u.inner ?? innerLine(u.words, c.stdin)) : null
-    if (inner !== null && inner !== undefined) out.push(...commands(inner, depth + 1, vars))
-    else if (u.words.length) out.push({ words: u.words, dir: u.dir })
+    const env = new Map([...vars, ...u.env])
+    const inner = depth < 3 ? (u.inner ?? innerLine(u.words, stdin)) : null
+    if (inner !== null && inner !== undefined) out.push(...commands(inner, depth + 1, base(u.words[0]) === 'eval' ? vars : env))
+    else if (u.words.length) out.push({ words: u.words, dir: u.dir, env })
+    if (base(u.words[0]) === 'find' && depth < 3) {
+      for (let k = 1; k < u.words.length; k++) {
+        if (!['-exec', '-execdir', '-ok', '-okdir'].includes(u.words[k])) continue
+        const end = u.words.findIndex((x, n) => n > k && (x === ';' || x === '+'))
+        const seg = u.words.slice(k + 1, end < 0 ? u.words.length : end)
+        if (seg.length) take(seg, null)
+        k = end < 0 ? u.words.length : end
+      }
+    }
   }
   return out
 }
@@ -248,12 +310,13 @@ export function splitCommands(line) {
 }
 
 // git's own options before the subcommand: -C <dir> is where it runs. `unknown`: a dir it names through a
-// variable, which cannot be read here.
+// variable, which cannot be read here. `cfg`: the config keys -c / --config-env set for this one call.
 const GIT_VALUE_OPTS = new Set(['-C', '-c', '--git-dir', '--work-tree', '--namespace', '--exec-path', '--config-env', '--super-prefix'])
 export function gitCall(words) {
   if (!['git', 'hub'].includes(base(words[0]))) return null
   let dir = null
   let unknown = false
+  const cfg = []
   let i = 1
   while (i < words.length && words[i].startsWith('-')) {
     const w = words[i]
@@ -264,10 +327,11 @@ export function gitCall(words) {
       if (k === '-C') dir = dir ? joinPath(dir, v) : v
       if (k === '--work-tree' || k === '--git-dir') dir = k === '--git-dir' ? v.replace(/\/\.git\/?$/, '') || v : v
       if ((k === '-C' || k === '--work-tree' || k === '--git-dir') && /[$`~]/.test(v)) unknown = true
+      if (k === '-c' || k === '--config-env') cfg.push(v.split('=')[0].toLowerCase())
       i += k === w ? 2 : 1
     } else i++
   }
-  return i < words.length ? { sub: words[i], args: words.slice(i + 1), dir, unknown } : null
+  return i < words.length ? { sub: words[i], args: words.slice(i + 1), dir, unknown, cfg } : null
 }
 
 const TAG_LIST = new Set(['-l', '--list', '-n', '--contains', '--no-contains', '--merged', '--no-merged', '--points-at', '--column', '--no-column', '--format', '--sort', '-i', '--ignore-case', '--omit-empty', '--color'])
@@ -322,14 +386,17 @@ const CURRENT_SUB = /^\$\(git (branch --show-current|rev-parse --abbrev-ref HEAD
 
 // One push, judged against the repo it runs in: current (the branch checked out, or null), pushDst (where a
 // bare `git push` goes, or null) and bases (the default branch, main and master). Returns why it is refused.
+// A push after a step that moves HEAD on the same line (p.headMoved) reads HEAD as unknown: the branch read
+// before the line ran is not the one the push sees.
 export function judgePush(p, { current = null, pushDst = null, bases = new Set(['main', 'master']) } = {}) {
   if (p.dry) return null
   if (p.bulk) return 'git push ' + p.bulk
   if (p.force) return 'git push --force'
   if (p.mergeOpt) return 'git push -o merge'
-  const cur = current || null
+  const cur = p.headMoved ? null : current || null
+  if (p.headMoved) pushDst = null
   const dst = (d) => {
-    if (!d) return 'git push of a branch that cannot be read here'
+    if (!d) return p.headMoved ? 'git push of HEAD after the same line switches branches' : 'git push of a branch that cannot be read here'
     if (/[$`]/.test(d)) return 'git push ' + d + ' (a variable)'
     const name = d.replace(/^refs\/heads\//, '')
     if (name.startsWith('refs/')) return 'git push ' + d
@@ -347,11 +414,8 @@ export function judgePush(p, { current = null, pushDst = null, bases = new Set([
     if (CURRENT_SUB.test(src)) src = 'HEAD'
     if (CURRENT_SUB.test(to)) to = cur
     if (/(^|\/)refs\/tags\//.test(src) || /^refs\/tags\//.test(to ?? '')) return 'git push <tag>'
-    if (p.del || (k === 0 && to)) {
-      const why = dst(to)
-      if (why) return why.replace('git push', 'git push --delete')
-      continue
-    }
+    // A deletion is never a run's own push: a branch it did not make (feat/* is the person's prefix too) goes with it.
+    if (p.del || (k === 0 && to)) return 'git push --delete ' + (to || src || 'a branch')
     if (k < 0 && (src === 'HEAD' || src === '@')) to = cur
     else if (k < 0 && /[$`]/.test(src)) to = src
     const why = dst(to)
@@ -365,16 +429,21 @@ export function judgePush(p, { current = null, pushDst = null, bases = new Set([
 // local), what, dir (where it runs; null when a variable names it), slug (a repo it names: owner/repo or a URL) }.
 const API_WRITES = new Set(['merge', 'merges', 'merge-upstream', 'releases'])
 const API_WRITE_PATH = /^repos\/[^/]+\/[^/]+\/(git\/refs|git\/tags|contents)(\/|$)/
-const MUTATION = /\b(mergePullRequest|enablePullRequestAutoMerge|createRelease|updateRelease|createRef|updateRef|updateRefs|mergeBranch|createCommitOnBranch)\b/
+const MUTATION = /\b(mergePullRequest|enablePullRequestAutoMerge|enqueuePullRequest|createRelease|updateRelease|deleteRelease|createRef|updateRef|updateRefs|deleteRef|mergeBranch|createCommitOnBranch)\b/
+// A GraphQL body that writes a merge, a ref or a release; or one the guard cannot read (a file, a variable).
+const GQL_WRITE = /\bmutation\b[\s\S]*(merge|ref|release|tag|commitonbranch)/i
+const gqlWrites = (body) => MUTATION.test(body) || GQL_WRITE.test(body)
+const gqlUnread = (field) => /^query=(@|\$)/.test(field)
 const apiSlug = (path) => {
   const m = /^repos\/([^/]+)\/([^/]+)/.exec(path)
   return m && !m[1].startsWith('{') && !m[2].startsWith('{') ? m[1] + '/' + m[2] : null
 }
 const sensitive = (path) => path.split('/').some((s) => API_WRITES.has(s)) || API_WRITE_PATH.test(path)
 
-function ghStep(w, dir) {
+// `env`: what the line set in front of gh; GH_REPO (or GITHUB_REPOSITORY) names its repo as -R does.
+function ghStep(w, dir, env = new Map()) {
   const args = w.slice(1)
-  let slug = null
+  let slug = env.get('GH_REPO') || env.get('GITHUB_REPOSITORY') || null
   const pos = []
   for (let i = 0; i < args.length; i++) {
     const a = args[i]
@@ -387,6 +456,8 @@ function ghStep(w, dir) {
   if (a0 === 'pr' && a1 === 'merge') return { kind: 'step', what: 'gh pr merge', dir, slug }
   if (a0 === 'release' && a1 && !['list', 'ls', 'view', 'download', 'verify', 'verify-asset'].includes(a1)) return { kind: 'step', what: 'gh release ' + a1, dir, slug }
   if (a0 === 'pr' && a1 === 'create') return { kind: 'pr', what: 'gh pr create', dir, slug }
+  // An alias can name any of the above under a new word: making one is a step of its own.
+  if (a0 === 'alias' && !['list', 'ls'].includes(a1)) return { kind: 'step', what: 'gh alias ' + (a1 ?? ''), dir, slug }
   if (a0 !== 'api') return null
   let method = null
   let body = false
@@ -408,9 +479,12 @@ function ghStep(w, dir) {
   const m = String(method ?? (body ? 'POST' : 'GET')).toUpperCase()
   const path = String(endpoint ?? '').replace(/^\//, '').split('?')[0]
   if (m === 'GET') return null
-  if (path === 'graphql') return fields.some((f) => MUTATION.test(f)) || input ? { kind: 'step', what: 'gh api graphql mutation', dir, slug } : null
+  if (path === 'graphql') return fields.some((f) => gqlWrites(f) || gqlUnread(f)) || input ? { kind: 'step', what: 'gh api graphql mutation', dir, slug } : null
   return sensitive(path) ? { kind: 'step', what: 'gh api ' + m + ' ' + path, dir, slug: apiSlug(path) ?? slug } : null
 }
+
+// curl's one-letter options that take a value.
+const CURL_SHORT_VALUE = 'AbcCdDeEFHKmoPQrtTuUwxXyYz'
 
 // curl / wget straight at the GitHub API (api.github.com, uploads.github.com, a GHE …/api/v3/).
 function httpStep(w, dir) {
@@ -428,11 +502,20 @@ function httpStep(w, dir) {
     const eq = a.startsWith('--') ? a.indexOf('=') : -1
     const k = eq > 0 ? a.slice(0, eq) : a
     const v = () => (eq > 0 ? a.slice(eq + 1) : w[++i] ?? '')
-    if (p === 'curl' && (k === '-X' || k === '--request')) method = v()
-    else if (p === 'curl' && /^-X./.test(a)) method = a.slice(2)
-    else if (p === 'curl' && (k === '-G' || k === '--get')) get = true
-    else if (p === 'curl' && (/^--data/.test(k) || ['-d', '--json', '-F', '--form', '--form-string', '-T', '--upload-file'].includes(k))) { body = true; data.push(v()) }
-    else if (p === 'curl' && /^-d./.test(a)) { body = true; data.push(a.slice(2)) }
+    if (p === 'curl' && /^-[^-]/.test(a)) {
+      // A cluster of short flags (-sSfX PUT, -sXPUT, -sd@body): a letter that takes a value ends it.
+      for (let j = 1; j < a.length; j++) {
+        const ch = a[j]
+        if (ch === 'G' || ch === 'I') get = true
+        if (!CURL_SHORT_VALUE.includes(ch)) continue
+        const val = j + 1 < a.length ? a.slice(j + 1) : w[++i] ?? ''
+        if (ch === 'X') method = val
+        else if ('dFT'.includes(ch)) { body = true; data.push(val) }
+        break
+      }
+    } else if (p === 'curl' && k === '--request') method = v()
+    else if (p === 'curl' && k === '--get') get = true
+    else if (p === 'curl' && (/^--data/.test(k) || ['--json', '--form', '--form-string', '--upload-file'].includes(k))) { body = true; data.push(v()) }
     else if (p !== 'curl' && k === '--method') method = v()
     else if (p !== 'curl' && ['--post-data', '--post-file', '--body-data', '--body-file'].includes(k)) { body = true; data.push(v()) }
     else if (VAL.includes(k)) { if (eq < 0) i++ }
@@ -447,7 +530,7 @@ function httpStep(w, dir) {
     const path = host === 'api.github.com' || host === 'uploads.github.com' ? rest : rest.includes('api/v3/') ? rest.slice(rest.indexOf('api/v3/') + 7) : rest.startsWith('api/graphql') ? 'graphql' : null
     if (path === null) continue
     if (path.replace(/\/$/, '') === 'graphql') {
-      if (data.some((d) => MUTATION.test(d) || d.startsWith('@'))) return { kind: 'step', what: p + ' graphql mutation', dir, slug: null }
+      if (data.some((d) => gqlWrites(d) || d.startsWith('@') || /^\$/.test(d))) return { kind: 'step', what: p + ' graphql mutation', dir, slug: null }
     } else if (sensitive(path) || host === 'uploads.github.com') return { kind: 'step', what: p + ' ' + m + ' ' + path, dir, slug: apiSlug(path) }
   }
   return null
@@ -460,10 +543,115 @@ function cdTo(here, args) {
   return here ? joinPath(here, a) : null
 }
 
+// A git step that moves HEAD (or the branch it names): a later push on the same line cannot read HEAD from
+// the repo as it was before the line ran. `git checkout <ref> -- <paths>` restores files and moves nothing.
+const MOVES_BRANCH = /^-[a-zA-Z]*[fmM]|^--(force|move)$/
+function movesHead(g) {
+  const a = g.args
+  const pos = a.filter((x) => !x.startsWith('-'))
+  if (g.sub === 'checkout') return !a.includes('--')
+  if (g.sub === 'switch' || g.sub === 'reset' || g.sub === 'bisect') return true
+  if (g.sub === 'branch') return a.some((x) => MOVES_BRANCH.test(x))
+  if (g.sub === 'symbolic-ref' || g.sub === 'update-ref') return pos[0] === 'HEAD' && (pos.length > 1 || a.includes('--stdin'))
+  if (g.sub === 'rebase') return pos.length > 1
+  return false
+}
+
+// `git update-ref <ref> <value>` / `git symbolic-ref <ref> <target>`: the ref it writes (or deletes), when that is a
+// tag, a branch, HEAD or unreadable (--stdin); null for a read or another ref. guardLine judges a branch against
+// the repo's bases.
+function refWrite(g) {
+  if (g.sub !== 'update-ref' && g.sub !== 'symbolic-ref') return null
+  if (g.sub === 'update-ref' && g.args.includes('--stdin')) return '--stdin'
+  const pos = []
+  for (let i = 0; i < g.args.length; i++) {
+    if (g.args[i] === '-m') i++
+    else if (!g.args[i].startsWith('-')) pos.push(g.args[i])
+  }
+  const del = g.args.some((x) => x === '-d' || x === '--delete')
+  if (!pos.length || (pos.length < 2 && !del)) return null
+  const refs = g.sub === 'symbolic-ref' ? pos.slice(0, 2) : [pos[0]]
+  return refs.find((r) => /^refs\/(tags|heads)\//.test(r) || r === 'HEAD' || /[$`]/.test(r)) ?? null
+}
+
+// Config keys that change where a push goes: a remote's URL, its rewriting, a branch's push remote, an include.
+const REMOTE_CFG = /^(remote|url|branch|include|includeif)\./i
+// GIT_CONFIG_KEY_<n> and GIT_CONFIG_PARAMETERS set config for one call, as -c does.
+function envCfg(env) {
+  const keys = []
+  for (const [k, v] of env ?? []) {
+    if (/^GIT_CONFIG_KEY_\d+$/.test(k)) keys.push(String(v).toLowerCase())
+    if (k === 'GIT_CONFIG_PARAMETERS') for (const m of String(v).matchAll(/'([^'=]+)'?=/g)) keys.push(m[1].toLowerCase())
+  }
+  return keys
+}
+
+// Interpreters and the flags whose value is code they run.
+const INTERP = { python: ['-c'], python3: ['-c'], python2: ['-c'], node: ['-e', '--eval', '-p', '--print'], nodejs: ['-e', '--eval', '-p', '--print'], bun: ['-e', '--eval', '-p', '--print'], deno: ['eval'], perl: ['-e', '-E'], ruby: ['-e'], php: ['-r'], lua: ['-e'], osascript: ['-e'] }
+// Code that mentions a tool which can push, merge, tag or release.
+export const MENTIONS_TOOL = /(^|[^\w.-])(git|gh|hub|curl|wget)([^\w.-]|$)|api\.github\.com|\/api\/v3\//
+// A script that does so: per line, git with push/merge/tag/send-pack/update-ref, gh or hub with a merge, release,
+// api or alias, curl or wget at GitHub.
+export const SCRIPT_RISK = /\bgit\b[^\n]*\b(push|merge|tag|send-pack|update-ref)\b|\b(gh|hub)\b[^\n]*\b(merge|release|api|alias)\b|\b(curl|wget)\b[^\n]*github|api\.github\.com/
+// A make target's recipe that does: push, merge, tag or release named in it.
+export const MAKE_RISK = /\b(push|merge|tag|release)\b/
+// System binaries are programs, not scripts of the run's: never read.
+const SYSTEM_BIN = /^\/(usr|bin|sbin|opt|System|Library|nix)\//
+const SHELL_VALUE_OPTS = new Set(['-o', '-O', '--rcfile', '--init-file', '-C', '--init-command'])
+
+// A run of code the reader cannot follow: an interpreter's code string → { kind: 'hidden' } when it mentions a
+// tool; a script file, a sourced file or a make target → { kind: 'file' } for guardLine to read.
+function codeStep(w, here) {
+  const p = base(w[0])
+  const at = (f) => (/[$`]/.test(f) ? null : f.startsWith('~/') ? null : f.startsWith('/') ? joinPath('/', f) : here ? joinPath(here, f) : null)
+  const file = (f, what) => ({ kind: 'file', how: 'script', what, path: at(f), dir: here, slug: null })
+  if (Object.hasOwn(INTERP, p)) {
+    const flags = INTERP[p]
+    const k = w.findIndex((x, n) => n > 0 && (flags.includes(x) || flags.some((f) => f.startsWith('-') && f.length === 2 && x.startsWith(f) && x.length > 2 && !x.startsWith('--'))))
+    if (k > 0) {
+      const code = flags.includes(w[k]) ? w[k + 1] ?? '' : w[k].slice(2)
+      return MENTIONS_TOOL.test(code) ? { kind: 'hidden', what: p + ' ' + (flags.includes(w[k]) ? w[k] : w[k].slice(0, 2)) + ' runs code that calls git, gh or curl', dir: here, slug: null } : null
+    }
+    const f = w.slice(1).find((x) => !x.startsWith('-'))
+    return f && !/(^|\/)node_modules\//.test(f) ? file(f, p + ' ' + f) : null
+  }
+  if (SHELLS.includes(p)) {
+    for (let i = 1; i < w.length; i++) {
+      if (SHELL_VALUE_OPTS.has(w[i])) i++
+      else if (!w[i].startsWith('-') && !w[i].startsWith('+')) return file(w[i], p + ' ' + w[i])
+    }
+    return null
+  }
+  if ((p === 'source' || w[0] === '.') && w[1]) return file(w[1], w[0] + ' ' + w[1])
+  if (p === 'make' || p === 'gmake') {
+    let dir = here
+    let mf = null
+    const targets = []
+    for (let i = 1; i < w.length; i++) {
+      const a = w[i]
+      const val = () => (a.length > 2 && !a.startsWith('--') ? a.slice(2) : a.includes('=') ? a.slice(a.indexOf('=') + 1) : w[++i] ?? '')
+      if (a === '-C' || a.startsWith('--directory') || /^-C./.test(a)) {
+        const d = val()
+        dir = /[$`~]/.test(d) ? null : d.startsWith('/') ? joinPath('/', d) : dir && joinPath(dir, d)
+      } else if (a === '-f' || a.startsWith('--file') || a.startsWith('--makefile') || /^-f./.test(a)) mf = val()
+      else if (['-I', '-o', '-W', '--include-dir', '--old-file', '--what-if'].includes(a)) i++
+      else if (!a.startsWith('-') && !ASSIGN.test(a)) targets.push(a)
+    }
+    const files = mf ? [mf] : ['GNUmakefile', 'makefile', 'Makefile']
+    const paths = dir ? files.map((f) => (/[$`]/.test(f) ? null : f.startsWith('/') ? joinPath('/', f) : joinPath(dir, f))) : [null]
+    return { kind: 'file', how: 'make', what: 'make' + (targets.length ? ' ' + targets.join(' ') : ''), paths, targets, dir, slug: null }
+  }
+  if (w[0].includes('/') && !SYSTEM_BIN.test(w[0])) return file(w[0], w[0])
+  return null
+}
+
 // A line → its integration candidates, each with the dir it runs in (cd, pushd, git -C, env -C followed).
 export function commandSteps(line, cwd = null) {
   const out = []
   let here = cwd
+  let moved = false // a step before this one switched branches, in any dir
+  let edited = false // a step before this one changed a remote or its config: a later push's target is unknown
+  let ghEdited = false // … or gh's default repo: a later gh call's target is unknown
   for (const c of commands(line)) {
     const w = c.words
     const p = base(w[0])
@@ -476,21 +664,52 @@ export function commandSteps(line, cwd = null) {
       continue
     }
     const at = c.dir ? (/[$`~]/.test(c.dir) ? null : c.dir.startsWith('/') ? joinPath('/', c.dir) : here && joinPath(here, c.dir)) : here
-    if (p === 'gh') {
-      const k = ghStep(w, at)
-      if (k) out.push(k)
-    } else if (p === 'curl' || p === 'wget') {
+    if (p === 'gh' || p === 'hub') {
+      // hub is gh's elder: the same release and api steps, `pull-request` for a PR, and git's own commands.
+      const k = p === 'hub' && w[1] === 'pull-request' ? { kind: 'pr', what: 'hub pull-request', dir: at, slug: null } : ghStep(w, at, c.env)
+      if (k) out.push({ ...k, gh: true, slugUnknown: ghEdited })
+      if (w.includes('set-default') && w.includes('repo')) ghEdited = true
+      if (w.includes('checkout') && w.includes('pr')) moved = true
+    }
+    if (p === 'curl' || p === 'wget') {
       const k = httpStep(w, at)
       if (k) out.push(k)
-    } else {
+    } else if (p !== 'gh' && p !== 'git' && p !== 'hub') {
+      const k = codeStep(w, at)
+      if (k) out.push(k)
+    } else if (p !== 'gh') {
       const g = gitCall(w)
       if (!g) continue
-      const dir = g.unknown ? null : g.dir ? (g.dir.startsWith('/') ? joinPath('/', g.dir) : at && joinPath(at, g.dir)) : at
+      // GIT_DIR / GIT_WORK_TREE set on the line name the repo as --git-dir does.
+      const envDir = c.env?.get('GIT_WORK_TREE') || (c.env?.get('GIT_DIR') ?? '').replace(/\/\.git\/?$/, '') || c.env?.get('GIT_DIR') || null
+      const named = g.dir ?? envDir
+      const dir = g.unknown || (named && /[$`~]/.test(named)) ? null : named ? (named.startsWith('/') ? joinPath('/', named) : at && joinPath(at, named)) : at
+      const keys = [...g.cfg, ...envCfg(c.env)]
+      const retarget = keys.some((k) => REMOTE_CFG.test(k))
       if (g.sub === 'tag' && !tagListing(g.args)) out.push({ kind: 'step', what: 'git tag', dir, slug: null })
-      if (g.sub === 'push') out.push({ kind: 'push', what: 'git push', dir, slug: null, push: parsePush(g.args) })
+      // An alias can rename push or tag past this reader: defining one on a run's line is a step of its own.
+      if (keys.some((k) => k.startsWith('alias.'))) out.push({ kind: 'step', what: 'git -c alias.*', dir, slug: null })
+      if (g.sub === 'config' && g.args.some((x) => /^alias\./i.test(x)) && g.args.filter((x) => !x.startsWith('-')).length > 1) out.push({ kind: 'step', what: 'git config alias.*', dir, slug: null })
+      // Plumbing that writes a remote with no `push` in sight.
+      if (['send-pack', 'http-push'].includes(g.sub) || (g.sub === 'subtree' && g.args[0] === 'push')) out.push({ kind: 'step', what: 'git ' + g.sub, dir, slug: null })
+      const ref = refWrite(g)
+      if (ref) out.push({ kind: 'ref', what: 'git ' + g.sub + ' ' + ref, dir, slug: null, ref })
+      if (g.sub === 'push') out.push({ kind: 'push', what: 'git push', dir, slug: null, push: { ...parsePush(g.args), headMoved: moved, remoteEdited: edited || retarget } })
+      if (movesHead(g)) moved = true
+      if ((g.sub === 'remote' && ['add', 'set-url', 'rename', 'remove', 'rm'].includes(g.args[0])) || (g.sub === 'config' && g.args.some((x) => REMOTE_CFG.test(x)))) edited = true
     }
   }
   return out
+}
+
+// A local ref write below auto: a tag (as `git tag` is), the base branch, HEAD while the base is checked out (or
+// unread), or a ref the guard cannot read. Returns why it is refused, or null.
+export function judgeRef(ref, { current = null, bases = new Set(['main', 'master']) } = {}) {
+  if (ref === '--stdin' || /[$`]/.test(ref)) return 'git update-ref of a ref that cannot be read here'
+  if (ref.startsWith('refs/tags/')) return 'a tag written with ' + ref
+  const name = ref === 'HEAD' ? current : ref.replace(/^refs\/heads\//, '')
+  if (!name) return 'a write to HEAD while the branch checked out cannot be read'
+  return bases.has(name) ? 'a write to the base branch ' + name : null
 }
 
 // The first refusal a line earns, with what is known of its repo given (tests, and a line read alone):
@@ -499,13 +718,77 @@ export function integrationIn(line, { cwd = null, current = null, pushDst = null
   if (mode === 'auto') return null
   for (const c of commandSteps(line, cwd)) {
     if (c.kind === 'step') return c.what
-    if (mode === 'local' && c.kind !== 'step') return c.what
+    if (c.kind === 'ref') {
+      const why = judgeRef(c.ref, { current, bases: new Set(['main', 'master', b].filter(Boolean)) })
+      if (why) return why
+      continue
+    }
+    if (c.kind === 'hidden') return c.what
+    if (c.kind === 'file') continue // read in guardLine: a line alone has no files
+    if (mode === 'local') return c.what
     if (c.kind === 'push') {
       const why = judgePush(c.push, { current, pushDst, bases: new Set(['main', 'master', b].filter(Boolean)) })
       if (why) return why
     }
   }
   return null
+}
+
+// A make target's recipe and its prerequisites' recipes, read from the makefile's text; the whole text when the
+// target is not a plain rule here (a pattern rule, an include): what the guard reads before it lets make run.
+export function makeRecipe(text, targets) {
+  const rules = new Map()
+  let cur = null
+  let first = null
+  for (const line of String(text ?? '').split('\n')) {
+    if (line.startsWith('\t')) {
+      if (cur) for (const t of cur) rules.get(t).recipe.push(line)
+      continue
+    }
+    const m = /^([^\s:#=][^:=]*?)\s*::?(?!=)\s*([^;#]*)(?:;(.*))?/.exec(line)
+    if (!m || /^\s*(export|override|define|include|-include|ifeq|ifneq|ifdef|ifndef|else|endif)\b/.test(line)) {
+      if (line.trim()) cur = null
+      continue
+    }
+    cur = m[1].trim().split(/\s+/)
+    for (const t of cur) {
+      if (!rules.has(t)) rules.set(t, { deps: [], recipe: [] })
+      rules.get(t).deps.push(...m[2].trim().split(/\s+/).filter(Boolean))
+      if (m[3]) rules.get(t).recipe.push(m[3])
+      if (!first && !t.startsWith('.') && !t.includes('%')) first = t
+    }
+  }
+  const want = targets.length ? targets : first ? [first] : []
+  if (!want.length || want.some((t) => !rules.has(t))) return String(text ?? '')
+  const seen = new Set()
+  const out = []
+  const walk = (t, depth) => {
+    if (seen.has(t) || depth > 6 || !rules.has(t)) return
+    seen.add(t)
+    out.push(...rules.get(t).recipe)
+    for (const d of rules.get(t).deps) walk(d, depth + 1)
+  }
+  for (const t of want) walk(t, 0)
+  return out.join('\n')
+}
+
+// A file candidate → why it is refused below auto (its code calls a tool that can push, merge, tag or release),
+// or null. A path the line names through a variable cannot be read: refused. A file that is not there, or not
+// text, is no script to judge: the command runs (and fails on its own).
+async function fileRisk($, c) {
+  if (c.how === 'make') {
+    if (c.paths.some((x) => x === null)) return c.what + ' runs a makefile the guard cannot locate'
+    for (const f of c.paths) {
+      const text = await $.fs.read(f).catch(() => null)
+      if (text === null) continue
+      return MAKE_RISK.test(makeRecipe(text, c.targets)) ? c.what + ' runs a recipe that mentions push, merge, tag or release' : null
+    }
+    return null
+  }
+  if (!c.path) return c.what + ' runs a script the guard cannot locate (write its path out)'
+  const text = await $.fs.read(c.path).catch(() => null)
+  if (text === null || text.includes('\u0000')) return null
+  return SCRIPT_RISK.test(text) ? c.what + ' runs a script that calls git push, merge or tag, gh or curl to GitHub' : null
 }
 
 // ── the repo a command targets, and its mode ─────────────────────────────────
@@ -537,15 +820,16 @@ const trimSlash = (p) => (p.length > 1 ? p.replace(/\/+$/, '') : p)
 // The profile's integration for this repo, lowered by the repo's own caps. `repo` is { url, paths, name, home }
 // (a bare list of names is read as names only). projects[] entries match by `url` (the git remote) or `path`
 // (the checkout, or any worktree of it). An entry with neither counts by its exact `name` or `id`, and only for a
-// repo that cannot be told apart otherwise (no remote, or no checkout here): two folders can share a name, and a
-// clone of someone else's repo must not inherit `auto` from it. Repo caps never raise the mode.
+// checkout here with no remote: two folders can share a name, a clone of someone else's repo must not inherit
+// `auto` from it, and a repo the command names with no checkout here (-R, GH_REPO, a push URL) has only its URL
+// to go by. Repo caps never raise the mode.
 export function integrationOf(profile, repo, repoModes = []) {
   const p = profile && typeof profile === 'object' ? profile : {}
   const r = Array.isArray(repo) ? { names: repo } : repo && typeof repo === 'object' ? repo : {}
   const url = r.url ? normUrl(r.url) : null
   const paths = (r.paths ?? []).filter(Boolean).map(trimSlash)
   const names = (r.names ?? [r.name]).filter(Boolean)
-  const nameOk = !url || !paths.length
+  const nameOk = !url && paths.length > 0
   const home = (x) => (r.home && x.startsWith('~/') ? r.home + x.slice(1) : x)
   const located = (x) => (typeof x.url === 'string' && x.url) || (typeof x.path === 'string' && x.path)
   const byName = (x) => !located(x) && names.some((n) => n === x.name || n === x.id)
@@ -579,18 +863,33 @@ export function capsOf(text) {
   return out
 }
 
+// git said no (a nonzero exit): ''. git could not be run at all: the call throws, and the guard fails closed.
 const gitOut = async ($, dir, ...a) => {
-  const r = await $.process.run(['git', '-C', dir, ...a], PROBE).catch(() => null)
-  return r?.exitCode === 0 ? String(r.stdout ?? '').trim() : ''
+  const r = await $.process.run(['git', '-C', dir, ...a], PROBE)
+  if (!r || typeof r.exitCode !== 'number') throw new Error('git did not run')
+  return r.exitCode === 0 ? String(r.stdout ?? '').trim() : ''
 }
-const remotesOf = (text) => String(text).split('\n').map((l) => /^remote\.(.+)\.url\s+(\S+)/.exec(l.trim())).filter(Boolean).map((m) => ({ name: m[1], url: m[2] }))
+// `git config --get-regexp` lines → [{ name, url, pushurl, resolved }] per remote (pushurl and gh's default repo, if set).
+const remotesOf = (text) => {
+  const by = new Map()
+  for (const l of String(text).split('\n')) {
+    const m = /^remote\.(.+)\.(url|pushurl|gh-resolved)\s+(\S+)/.exec(l.trim())
+    if (!m) continue
+    const r = by.get(m[1]) ?? { name: m[1], url: null, pushurl: null, resolved: null }
+    if (m[2] === 'url') r.url ??= m[3]
+    else if (m[2] === 'pushurl') r.pushurl ??= m[3]
+    else r.resolved = m[3]
+    by.set(m[1], r)
+  }
+  return [...by.values()].filter((r) => r.url)
+}
 
 // A local dir → its repo: { root (the main checkout), dirs, url (origin's, else the first remote's), remotes, name }.
 async function localRepo($, dir, cache) {
   if (cache.has(dir)) return cache.get(dir)
   const common = await gitOut($, dir, 'rev-parse', '--path-format=absolute', '--git-common-dir')
   const root = common ? trimSlash(common.replace(/\/\.git\/?$/, '')) : null
-  const remotes = remotesOf(await gitOut($, dir, 'config', '--get-regexp', '^remote\\..*\\.url$'))
+  const remotes = remotesOf(await gitOut($, dir, 'config', '--get-regexp', '^remote\\..*\\.(url|pushurl|gh-resolved)$'))
   const url = (remotes.find((x) => x.name === 'origin') ?? remotes[0])?.url ?? null
   const dirs = [...new Set([dir, root].filter(Boolean))]
   const rec = { root, dirs, url, remotes, name: base(root ?? dir) }
@@ -619,19 +918,76 @@ async function repoCaps($, dirs) {
   return caps
 }
 
-// The mode for the repo a candidate targets: its dir's repo, or the repo it names (-R, repos/o/r) when that is
-// not the dir's own. A dir a variable names is read as the session's.
+// The mode for a repo the guard cannot place (a dir or remote a variable names, a target edited earlier on the
+// line): the profile's top-level integration, never a name or path match.
+const topMode = (profile) => integrationOf(profile, { url: null, paths: [], names: [], home: S.home }, [])
+
+// The mode for the repo a candidate targets: its dir's repo, or the repo it names (-R, GH_REPO, repos/o/r) when
+// that is not the dir's own. A dir a variable names cannot be placed: the top-level mode.
 async function modeFor($, profile, c, cwd, cache) {
-  const dir = c.dir ?? cwd
+  if (c.slugUnknown) return topMode(profile)
+  const dir = c.dir
   const local = dir ? await localRepo($, dir, cache) : null
+  if (!local && !c.slug) return topMode(profile)
   const named = c.slug ? normSlug(c.slug) : null
-  const mine = local && (!named || local.remotes.some((x) => sameRepo(normUrl(x.url), named)))
+  // The dir's own repo is its main remote's (origin, else the first): a fork's upstream is another repo.
+  const mine = local && (!named || (!!local.url && sameRepo(normUrl(local.url), named)))
   if (mine) return integrationOf(profile, { url: local.url, paths: local.dirs, name: local.name, home: S.home }, await repoCaps($, local.dirs))
   return integrationOf(profile, { url: named, paths: [], name: named ? base(named) : null, home: S.home }, [])
 }
 
+// gh with no -R or GH_REPO goes to the remote `gh repo set-default` picked (remote.<name>.gh-resolved), if any.
+async function ghDefault($, dir, cache) {
+  if (!dir) return null
+  const r = (await localRepo($, dir, cache)).remotes.find((x) => x.resolved)
+  return r ? (r.resolved === 'base' ? r.url : r.resolved) : null
+}
+
+// A path or file:// remote → its absolute path; null for a URL or scp-style host:path.
+function remotePath(u, dir) {
+  const s = String(u)
+  if (/^file:\/\//i.test(s)) return joinPath('/', s.replace(/^file:\/\/[^/]*/i, ''))
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(s) || /^[^/]+:/.test(s)) return null
+  if (s.startsWith('~/')) return S.home ? joinPath('/', S.home + s.slice(1)) : null
+  return s.startsWith('/') ? joinPath('/', s) : dir ? joinPath(dir, s) : null
+}
+
+// The mode for the repo a push writes to: the URL git itself would push to (a remote's pushurl, insteadOf
+// rewriting), compared with the dir's own repo. Another repo is judged by its URL (or path) alone.
+async function pushMode($, profile, c, cwd, cache) {
+  const r = c.push.remote
+  if (!c.dir || c.push.remoteEdited || (r && /[$`]/.test(r))) return topMode(profile)
+  const local = await localRepo($, c.dir, cache)
+  let url
+  if (r && !/^[\w.-]+$/.test(r)) url = (await gitOut($, c.dir, 'ls-remote', '--get-url', r)) || r
+  else {
+    let name = r
+    if (!name) {
+      const to = await gitOut($, c.dir, 'rev-parse', '--abbrev-ref', '@{push}')
+      name = local.remotes.map((x) => x.name).sort((x, y) => y.length - x.length).find((n) => to.startsWith(n + '/')) ?? 'origin'
+    }
+    url = await gitOut($, c.dir, 'remote', 'get-url', '--push', name)
+    // Not a remote: git tries the name as a path (a repo, a symlink to one, a checkout) before it gives up.
+    if (!url) url = (await gitOut($, c.dir, 'rev-parse', '--resolve-git-dir', name)) || (await gitOut($, c.dir, 'rev-parse', '--resolve-git-dir', name + '/.git'))
+  }
+  // Neither a remote nor a repo by that name: git refuses the push itself, so the dir's own mode stands.
+  if (!url || (local.url && sameRepo(normUrl(url), normUrl(local.url)))) return modeFor($, profile, { ...c, slug: null }, cwd, cache)
+  const path = remotePath(url, c.dir)
+  const paths = path ? [path.replace(/\/\.git$/, '')] : []
+  if (path && !local.url && local.dirs.includes(paths[0])) return modeFor($, profile, { ...c, slug: null }, cwd, cache)
+  return integrationOf(profile, { url: path ? null : url, paths, names: [], home: S.home }, [])
+}
+
 export async function integrationAllowed($, cwd) {
   return modeFor($, await readProfile($), { dir: cwd, slug: null }, cwd, new Map())
+}
+
+// The bases of the repo at `at`: main, master and the remote's default branch.
+async function basesOf($, at, remote = 'origin') {
+  const bases = new Set(['main', 'master'])
+  const head = at ? await gitOut($, at, 'symbolic-ref', '--short', 'refs/remotes/' + remote + '/HEAD') : ''
+  if (head) bases.add(head.startsWith(remote + '/') ? head.slice(remote.length + 1) : head.slice(head.indexOf('/') + 1))
+  return bases
 }
 
 // What a push is judged against: the branch checked out in its dir, where a bare `git push` goes, the bases.
@@ -639,9 +995,7 @@ async function pushInfo($, c, cwd, cache) {
   const dir = c.dir
   const at = dir ?? cwd
   const remote = c.push.remote && /^[\w.-]+$/.test(c.push.remote) ? c.push.remote : 'origin'
-  const bases = new Set(['main', 'master'])
-  const head = at ? await gitOut($, at, 'symbolic-ref', '--short', 'refs/remotes/' + remote + '/HEAD') : ''
-  if (head) bases.add(head.startsWith(remote + '/') ? head.slice(remote.length + 1) : head.slice(head.indexOf('/') + 1))
+  const bases = await basesOf($, at, remote)
   const current = dir ? (await gitOut($, dir, 'symbolic-ref', '--short', '-q', 'HEAD')) || null : null
   let pushDst = null
   if (current && !c.push.specs.length) {
@@ -664,10 +1018,25 @@ export async function guardLine($, line, cwd) {
   if (!cands.length) return null
   const profile = await readProfile($)
   const cache = new Map()
+  // GH_REPO in the session's own environment names gh's repo as one set on the line does.
+  const envRepo = cands.some((c) => c.gh && !c.slug) ? (await $.env.get('GH_REPO').catch(() => null)) || null : null
   for (const c of cands) {
-    const mode = await modeFor($, profile, c, cwd, cache)
+    const slug = c.gh && !c.slug ? envRepo ?? (await ghDefault($, c.dir, cache)) : c.slug
+    const mode = c.kind === 'push' ? await pushMode($, profile, c, cwd, cache) : await modeFor($, profile, { ...c, slug }, cwd, cache)
     if (mode === 'auto') continue
     if (c.kind === 'step') return DENY_INTEGRATION
+    if (c.kind === 'hidden') return denyHidden(c.what)
+    if (c.kind === 'file') {
+      const why = await fileRisk($, c)
+      if (why) return denyHidden(why)
+      continue
+    }
+    if (c.kind === 'ref') {
+      const current = c.dir ? (await gitOut($, c.dir, 'symbolic-ref', '--short', '-q', 'HEAD')) || null : null
+      const why = judgeRef(c.ref, { current, bases: await basesOf($, c.dir) })
+      if (why) return DENY_INTEGRATION + ' Refused: ' + why + '.'
+      continue
+    }
     if (mode === 'local') return DENY_LOCAL
     if (c.kind === 'push') {
       const why = judgePush(c.push, await pushInfo($, c, cwd, cache))
@@ -679,8 +1048,9 @@ export async function guardLine($, line, cwd) {
 
 // ── who is a run ─────────────────────────────────────────────────────────────
 // An agentille subagent, a worker pane (not a /agt-spawn pane: that is the person's own task), or the lead
-// on an /agt turn or while its run is in flight (routing.js runInFlight, on the clocks proofs.js moment($) read):
-// a question typed mid-run does not switch the guard off. A plain session has none of these.
+// on an /agt turn, from the turn its run names an id until that run's ✓/✗ card (proofs.js runHeld; no clock
+// or typed-reply count ends it), or while a run with no id is in flight (routing.js runInFlight, on the clocks
+// proofs.js moment($) read): a question typed mid-run does not switch the guard off. A plain session has none.
 export function fromRun(e, at) {
   if (e.agentId) {
     const a = S.live.get(e.agentId)
@@ -689,10 +1059,12 @@ export function fromRun(e, at) {
   if (S.worker) return S.worker.agent !== SPAWN_ROLE
   const self = splitName(S.wireName ?? S.selfName)
   if (self) return self.role !== SPAWN_ROLE
-  return !!S.agtTurn || inFlight(S, at)
+  return !!S.agtTurn || runHeld() || inFlight(S, at)
 }
 
 // ── worktree ownership ───────────────────────────────────────────────────────
+// Every worktree a run made is recorded: the one scripts/agt-worktree.sh prints (the documented way), or one a
+// literal `git worktree add` names. The cleaner and the .env sweep touch only those.
 // Literal `git worktree add <path> [-b <branch>] [<base>]` (either order), resolved against the dir it
 // runs in. Shell variables cannot be read here: such a path or branch comes back null. A fallback only;
 // the recorder diffs `git worktree list` around the call.
@@ -763,6 +1135,76 @@ export function newTrees(before, after, line) {
   return after.slice(1).filter((t) => !had.has(t.path) && named(t))
 }
 
+// scripts/agt-worktree.sh, the one documented way a run makes a slice tree, prints `path=<abs>` then
+// `branch=<name>` on stdout. Bash's result is { stdout, stderr }; a hook's own answer may be plain text.
+export const WT_SCRIPT = /\bagt-worktree\.sh\b/
+export function scriptTrees(result) {
+  const text = typeof result === 'string' ? result : typeof result?.stdout === 'string' ? result.stdout : ''
+  const out = []
+  let path = null
+  for (const raw of text.split('\n')) {
+    const l = raw.replace(/\r$/, '')
+    const p = /^path=(\/.+)$/.exec(l)
+    if (p) {
+      path = p[1]
+      continue
+    }
+    const b = /^branch=(\S+)$/.exec(l)
+    if (b && path) out.push({ path, branch: b[1] })
+    path = null
+  }
+  return out
+}
+
+// The slugs the line hands the script: the first word after it that is not an option or an option's value.
+const SCRIPT_VALUE_OPTS = new Set(['--base', '--branch'])
+export function scriptSlugs(line) {
+  const out = new Set()
+  let list = []
+  try {
+    list = commands(line)
+  } catch {
+    return out
+  }
+  for (const c of list) {
+    const i = c.words.findIndex((w) => base(w) === 'agt-worktree.sh')
+    if (i < 0) continue
+    for (let j = i + 1; j < c.words.length; j++) {
+      const w = c.words[j]
+      if (SCRIPT_VALUE_OPTS.has(w)) j++
+      else if (!w.startsWith('-')) {
+        out.add(w)
+        break
+      }
+    }
+  }
+  return out
+}
+
+// What the script printed counts only where git agrees: a linked tree (never the main checkout) listed at that
+// exact path, on that branch, and named as the script names it, <main checkout>-<slug> for a slug the line
+// passed. Echoed text that names any other directory, another session's tree included, claims nothing.
+export function claimedTrees(printed, after, slugs) {
+  const main = base(after?.[0]?.path)
+  const linked = (after ?? []).slice(1).filter((t) => !t.prunable && main && [...slugs].some((s) => base(t.path) === main + '-' + s))
+  return printed.map((p) => linked.find((t) => t.path === p.path && t.branch === p.branch)).filter(Boolean)
+}
+
+// One record per path. A tree made again or re-attached keeps the fork point it was first recorded with (a fix
+// round re-attaching must not make the slice look like it has no commits of its own); `at` is refreshed.
+export function recordTrees(list, made) {
+  for (const m of made) {
+    const i = list.findIndex((r) => r.path === m.path)
+    if (i >= 0) {
+      const old = list[i]
+      list.splice(i, 1)
+      if (old.head && (old.branch === m.branch || !m.branch)) m.head = old.head
+    }
+    list.push(m)
+  }
+  return list
+}
+
 const ownedRec = (r) => r && typeof r.path === 'string' && r.path.startsWith('/') && (r.branch === null || typeof r.branch === 'string')
 export function parseOwned(text, now = Date.now()) {
   try {
@@ -787,8 +1229,12 @@ async function ownFile($) {
   return worktreesFile(S.home, await leadPane($).catch(() => null))
 }
 
-export async function saveOwned($) {
+// Adds what a call made to the session's records and saves them. What an earlier session of the same lead (a
+// restart, a resume) saved is read in first, so a save never drops it and a re-attach keeps its fork point.
+export async function saveOwned($, made = []) {
   const file = await ownFile($)
+  if (file) for (const r of parseOwned(await $.fs.read(file).catch(() => ''))) if (!S.worktrees.some((m) => m.path === r.path)) S.worktrees.push(r)
+  recordTrees(S.worktrees, made)
   if (file) await $.fs.write(file, JSON.stringify(S.worktrees, null, 2) + '\n').catch(() => {})
 }
 
@@ -837,24 +1283,25 @@ export async function bashCall($, e, next) {
   const line = String(e.command ?? '')
   if (!fromRun(e, await moment($))) return next(e)
   const cwd = await $.session.cwd().catch(() => null)
-  const deny = await guardLine($, line, cwd).catch(() => null)
+  // Probing that throws is no answer: the command does not run unread.
+  const deny = await guardLine($, line, cwd).catch(() => DENY_UNREAD)
   if (deny) return { deny }
-  if (!/\bworktree\s+add\b/.test(line)) return next(e)
+  const script = WT_SCRIPT.test(line)
+  if (!script && !/\bworktree\s+add\b/.test(line)) return next(e)
   const before = cwd ? await listTrees($, cwd) : null
   const res = await next(e)
+  if (res?.deny) return res
   const after = before ? await listTrees($, cwd) : null
   const at = Date.now()
   const run = runOf(e)
-  let made = after ? newTrees(before, after, line).map((t) => ({ path: t.path, branch: t.branch, head: t.head ?? null, run, at })) : []
+  const had = new Set((before ?? []).map((t) => t.path))
+  // A tree that was already there (a re-attach) has no fork point to read from the call: recordTrees keeps the
+  // first record's, else none.
+  const rec = (t, src) => ({ path: t.path, branch: t.branch, head: had.has(t.path) ? null : t.head ?? null, run, at, src })
+  let made = after ? newTrees(before, after, line).map((t) => rec(t, 'add')) : []
+  if (script && after) for (const t of claimedTrees(scriptTrees(res?.result), after, scriptSlugs(line))) made = [...made.filter((m) => m.path !== t.path), rec(t, 'script')]
   // git could not be read around the call: the literal command is all there is.
-  if (!after && cwd) made = worktreeAdds(line, cwd).filter((w) => w.path && w.branch).map((w) => ({ path: w.path, branch: w.branch, head: null, run, at }))
-  if (made.length) {
-    for (const m of made) {
-      const i = S.worktrees.findIndex((r) => r.path === m.path)
-      if (i >= 0) S.worktrees.splice(i, 1)
-      S.worktrees.push(m)
-    }
-    await saveOwned($)
-  }
+  if (!after && cwd) made = worktreeAdds(line, cwd).filter((w) => w.path && w.branch).map((w) => ({ path: w.path, branch: w.branch, head: null, run, at, src: 'add' }))
+  if (made.length) await saveOwned($, made)
   return res
 }

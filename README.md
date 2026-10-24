@@ -251,6 +251,9 @@ A `—` means that column changes nothing for the role, and `risk=data` changes 
 - **The executor never leaves Sonnet;** only its effort moves (and on fix rounds: attempt 2 → high, attempt 3 and later → max).
 - **Escalation:** a plan REVISE puts the next planner on opus · max. Fable (about twice the cost of Opus) runs only when you type `--fable`, or with `routing.autoFable: true` after two REVISEs, or for the diagnose planner after two failed fixes, within `maxFablePerRun` and `fableWeeklyCeiling`.
 - **Check a route:** `/agt-info route <role> [size=…] [risk=…] [depth=…]` prints what a role would get, escalation rungs included.
+- **Cost ceiling (`routing.maxRunUsd`):** past it, every later planner, plan-reviewer, reviewer (design-reviewer included), ui-prototyper or adversary, subagent or pane, that would run Opus (or a ladder Fable) runs Sonnet at the same effort. Only the executor and a typed `--fable` keep their routes.
+  - **The estimate:** subagents are priced from their tokens at API list prices, and Herdr or tmux pane workers, which report no tokens, from their role, routed model and minutes open. A subscription is not billed per token, so this is an estimate. Prices and the formula: [docs/routing-cost.md](./docs/routing-cost.md).
+  - **You see it:** one toast and a band flag per run naming what was demoted. `/agt-info ledger` shows the estimate, and `/agt-info route` shows the pick past the ceiling.
 
 ## Contributing
 

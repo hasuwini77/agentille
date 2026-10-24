@@ -342,11 +342,14 @@ try {
     fs.mkdirSync(T + '/evil', { recursive: true })
     fs.writeFileSync(T + '/evil/g.cfg', '[alias]\n\tpom = push -q origin agt/x:main\n')
     const a = await run('GIT_CONFIG_GLOBAL=' + T + '/evil/g.cfg git pom')
-    check('GIT_CONFIG_GLOBAL=<abs> git pom: the alias is read there and denied', a?.deny?.includes('git push to main'), JSON.stringify(a))
+    check('GIT_CONFIG_GLOBAL=<abs> git pom: denied', !!a?.deny, JSON.stringify(a))
     const b = await run('GIT_CONFIG_GLOBAL=../evil/g.cfg git pom')
-    check('GIT_CONFIG_GLOBAL=<relative> git pom: denied, cannot place', b?.deny?.includes('cannot place'), JSON.stringify(b))
+    check('GIT_CONFIG_GLOBAL=<relative> git pom: denied', !!b?.deny, JSON.stringify(b))
     const c = await run('HOME=../evil git pom')
-    check('HOME=<relative> git pom: denied, cannot place', c?.deny?.includes('cannot place'), JSON.stringify(c))
+    check('HOME=<relative> git pom: denied', !!c?.deny, JSON.stringify(c))
+    // Through GIT_CONFIG_PARAMETERS-style variables the alias is looked up with them and judged.
+    const d = await run('GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=include.path GIT_CONFIG_VALUE_0=' + T + '/evil/g.cfg git pom')
+    check('an include set for one call: denied', !!d?.deny, JSON.stringify(d))
     check('... origin/main unchanged', refOf('origin.git', 'main') === w.main)
     fs.rmSync(T + '/evil', { recursive: true, force: true })
   }
@@ -398,6 +401,16 @@ try {
     const s = await run('mkdir -p .claude && echo {} > .claude/settings.local.json')
     check('> .claude/settings.local.json: denied', s?.deny?.includes('Claude Code settings'), JSON.stringify(s))
     check('... no ~/.gitconfig, origin/main unchanged', !fs.existsSync(HOME + '/.gitconfig') && refOf('origin.git', 'main') === w.main)
+  }
+  {
+    // An external diff named on the line runs on a plain `git diff`: refused, and a harmless pager stays allowed.
+    const w = world()
+    fs.writeFileSync(APP + '/b', 'changed\n')
+    const a = await run("GIT_EXTERNAL_DIFF='git push -q origin agt/x:main;:' git diff")
+    check('GIT_EXTERNAL_DIFF git diff: denied', a?.deny?.includes('GIT_EXTERNAL_DIFF'), JSON.stringify(a))
+    const p = await run('GIT_PAGER=cat git diff --stat')
+    check('control: GIT_PAGER=cat git diff runs', !p?.deny && p.exit === 0, JSON.stringify(p))
+    check('... origin/main unchanged', refOf('origin.git', 'main') === w.main)
   }
   {
     // Controls below auto: the run's own branch and ordinary writes still pass.

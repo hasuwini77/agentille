@@ -72,6 +72,17 @@ const PROTECT_CFG = /^(alias\.|core\.(hookspath|fsmonitor|sshcommand|pager|edito
 const VIEWER_CFG = /^(core\.(pager|editor)|pager\..+|sequence\.editor)$/i
 export const SAFE_PROGRAM = /^\s*((\/usr)?\/bin\/)?(true|false|cat|:|less|more)?\s*$/
 
+// Variables that make git run a program, or read a config that can name one.
+const GIT_CODE_ENV = /^(GIT_EXTERNAL_DIFF|GIT_SSH|GIT_SSH_COMMAND|GIT_ASKPASS|SSH_ASKPASS|GIT_EDITOR|GIT_SEQUENCE_EDITOR|GIT_PAGER|PAGER|EDITOR|VISUAL|GIT_PROXY_COMMAND|GIT_EXEC_PATH|GIT_TEMPLATE_DIR|GIT_CONFIG|GIT_CONFIG_GLOBAL|GIT_CONFIG_SYSTEM|HOME|XDG_CONFIG_HOME)$/
+// …unless the value is harmless: a viewer that runs nothing else, no config at all, or plain ssh with options.
+function safeCodeVar(k, v) {
+  const s = String(v ?? '')
+  if (/^(GIT_EDITOR|GIT_SEQUENCE_EDITOR|GIT_PAGER|PAGER|EDITOR|VISUAL)$/.test(k)) return SAFE_PROGRAM.test(s)
+  if (/^(GIT_CONFIG|GIT_CONFIG_GLOBAL|GIT_CONFIG_SYSTEM)$/.test(k)) return s === '/dev/null'
+  if (k === 'GIT_SSH_COMMAND') return /^\s*ssh(\s+[-\w.=\/@:,]+)*\s*$/.test(s) && !/command/i.test(s)
+  return false
+}
+
 // A config key set to a value: refused below auto, unless it is a viewer set to a harmless program.
 const protectedCfg = (k, v) => PROTECT_CFG.test(k) && !(VIEWER_CFG.test(k) && v !== undefined && SAFE_PROGRAM.test(v))
 
@@ -995,6 +1006,10 @@ export function commandSteps(line, cwd = null, depth = 0, homes = []) {
       if (g.sub === 'tag' && !tagListing(g.args)) out.push({ kind: 'step', what: 'git tag', dir, slug: null })
       // An alias or a hooks-path/push-config key set for one call changes a step past this reader.
       if (keys.some((k) => k.startsWith('alias.'))) out.push({ kind: 'step', what: 'git -c alias.*', dir, slug: null })
+      // A variable on the line that names a program git runs on its own (an external diff, ssh, askpass, the pager or
+      // editor, its exec path) or a config file it reads (which can hold any of those): as the config keys are.
+      const codeVar = [...(c.env ?? [])].find(([k, v]) => GIT_CODE_ENV.test(k) && !safeCodeVar(k, v))
+      if (codeVar) out.push({ kind: 'hidden', what: codeVar[0] + ' on the line names a program or config git runs', dir, slug: null })
       if (pairs.some((x) => protectedCfg(x.key, x.value) && !x.key.startsWith('alias.'))) out.push({ kind: 'protected', what: CFG_WHAT, dir, slug: null })
       // A word that is no git command may be an alias from git config (alias.pom = push origin HEAD:main): guardLine
       // looks it up in the repo the call targets and judges what it expands to.

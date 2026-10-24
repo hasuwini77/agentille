@@ -5,6 +5,7 @@ import { DEFAULT_PROFILE, guardLine as judge, loadRunProfile } from '../../hooks
 import { setRunProfile } from '../../hooks/proofs.js'
 import { Profile } from '../../hooks/profile.js'
 import { seed } from '../../hooks/store.js'
+import { commandSteps } from '../../hooks/guard-lex.js'
 
 // What the repo looks like to a line read alone: the slice branch is checked out, the base is main.
 const onSlice = { current: 'agt/x', cwd: '/w/app' }
@@ -1350,13 +1351,23 @@ describe('guard: an alias is looked up in the config the line points git at', ()
     const { ran, seen } = setup(on, { repos: { '/work/repo': { current: 'agt/x' } }, aliases: { st: 'status' } })
     await boot($)
     await typed($)
-    for (const line of ['GIT_CONFIG_GLOBAL=../evil/g.cfg git st', 'HOME=../evil git st', 'XDG_CONFIG_HOME=cfg git st', 'GIT_CONFIG_SYSTEM="$X" git st', 'export HOME=evil; git st']) {
-      expect([line, (await bash($, line)).deny]).toEqual([line, expect.stringContaining('cannot place')])
+    // A config home or file set on a git line is refused on its own (it can name code git runs), and the alias it
+    // would be read from is never looked up.
+    for (const line of ['GIT_CONFIG_GLOBAL=../evil/g.cfg git st', 'HOME=../evil git st', 'XDG_CONFIG_HOME=cfg git st', 'GIT_CONFIG_SYSTEM="$X" git st', 'export HOME=evil; git st', 'GIT_CONFIG_GLOBAL=/etc/g.cfg git st']) {
+      expect([line, (await bash($, line)).deny]).toEqual([line, expect.stringContaining('on the line names a program or config git runs')])
     }
     expect(seen.some((a) => a.join(' ').includes('alias.st'))).toBe(false)
-    // Placed (absolute): looked up, and a harmless expansion runs.
-    expect((await bash($, 'GIT_CONFIG_GLOBAL=/etc/g.cfg git st')).result).toBe('ok')
-    expect(ran).toEqual(['GIT_CONFIG_GLOBAL=/etc/g.cfg git st'])
+    expect(ran).toEqual([])
+  })
+
+  test('the alias candidate carries the config the line sets; one it cannot place is unreadable', async () => {
+    const [a] = commandSteps('GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=user.name GIT_CONFIG_VALUE_0=x git st', '/w').filter((x: any) => x.kind === 'alias')
+    expect(a.genv).toEqual({ GIT_CONFIG_COUNT: '1', GIT_CONFIG_KEY_0: 'user.name', GIT_CONFIG_VALUE_0: 'x' })
+    expect(a.unknown).toBe(false)
+    const [b] = commandSteps('HOME=../evil git st', '/w').filter((x: any) => x.kind === 'alias')
+    expect(b.unknown).toBe(true)
+    const [c] = commandSteps('GIT_CONFIG_GLOBAL=/etc/g.cfg git st', '/w').filter((x: any) => x.kind === 'alias')
+    expect([c.unknown, c.genv]).toEqual([false, { GIT_CONFIG_GLOBAL: '/etc/g.cfg' }])
   })
 })
 
@@ -1471,5 +1482,33 @@ describe('guard: settings, git and gh config, HEAD and linked-worktree state are
       expect([p, (await $.tool.call({ tool: 'Write', file_path: p, content: 'x' } as never))?.deny]).toEqual([p, expect.stringContaining('may not write')])
     }
     expect((await $.tool.call({ tool: 'Write', file_path: '/work/repo/src/settings.json', content: 'x' } as never))?.deny).toBeUndefined()
+  })
+})
+
+describe('guard: variables that make git run a program', () => {
+  test('an external diff, ssh, askpass, pager, editor, exec path or config file on a git line is refused; a harmless one is not', async () => {
+    for (const line of [
+      "GIT_EXTERNAL_DIFF='git push origin agt/x:main;:' git diff",
+      "GIT_SSH_COMMAND='sh -c x' git fetch",
+      "GIT_SSH_COMMAND='ssh -o ProxyCommand=x' git fetch",
+      'GIT_SSH=./s git fetch',
+      'GIT_ASKPASS=./a git push origin agt/x',
+      'GIT_EDITOR=./e.sh git commit',
+      'GIT_SEQUENCE_EDITOR=./e git rebase -i HEAD~2',
+      "GIT_PAGER='sh x' git log",
+      'EDITOR=./e git commit',
+      'GIT_EXEC_PATH=./bin git status',
+      'GIT_TEMPLATE_DIR=./t git init x',
+      'GIT_CONFIG_GLOBAL=./g.cfg git status',
+      'export GIT_EXTERNAL_DIFF=./d; git diff',
+    ]) expect([line, integrationIn(line, onSlice)]).toEqual([line, expect.stringContaining('on the line names a program or config git runs')])
+    for (const line of [
+      'GIT_EDITOR=true git rebase --continue',
+      'GIT_PAGER=cat git log',
+      'GIT_SEQUENCE_EDITOR=: git rebase -i HEAD~2',
+      "GIT_SSH_COMMAND='ssh -i /k/id -o StrictHostKeyChecking=no' git push origin agt/x",
+      'GIT_CONFIG_GLOBAL=/dev/null git status',
+      'GIT_EXTERNAL_DIFF=./d echo not git',
+    ]) expect([line, integrationIn(line, onSlice)]).toEqual([line, null])
   })
 })

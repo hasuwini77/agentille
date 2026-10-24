@@ -17,7 +17,7 @@ Pre-flight (the mod probes this once; manual equivalent): inside Herdr (`HERDR_E
 When the `## Pane transport` block says the tools are live, open every claude worker with `mcp__agentille__spawn_pane` and close it with `mcp__agentille__close_pane`, on Herdr and tmux alike:
 
 ```
-spawn_pane { run: "<run-id>", role: "exec-1", agent: "executor", header: "[agt run=<run-id> size=small mode=build slice=<slug>]", cwd: "<worktree>", task: "isolated: false\nbranch: agt/<slug>\nbase: <base>\n<full slice prompt>" }
+spawn_pane { run: "<run-id>", role: "exec-1", agent: "executor", header: "[agt run=<run-id> size=small mode=build slice=<slug>]", cwd: "<worktree>", task: "isolated: false\nbranch: feat/<slug>\nbase: <base>\n<full slice prompt>" }
 → Opened agt-<run-id>-exec-1 · sonnet · medium · herdr pane.
 close_pane { name: "agt-<run-id>-exec-1" }
 → Closed agt-<run-id>-exec-1.
@@ -31,7 +31,7 @@ The mod enforces the `agt-<run>-<role>` name (32 chars max), no duplicate name, 
 
 Pane answers never reach the mod's result hook, so a pane worker raises no `⚑`: read the harvest yourself. Still yours: the tmux done-file instruction and isolation, one worktree per slice.
 
-**Who makes the worktree.** In panes mode the lead does, before each `spawn_pane`, with the recipe in `factory.md` → "Worktree lifecycle" (run from the main checkout; it re-attaches on a fix round or resume), and passes that path as `cwd`. In subagent mode the executor makes its own. Every executor dispatch states `isolated:` in its task text, never left to the default: `isolated: false` on every `spawn_pane` (the lead already made the tree; `isolated` is an executor input, not a `spawn_pane` field, so it goes in `task`), and `isolated: true` on an `Agent` executor (it has no `cwd`, and its recipe finds a tree the lead already made). Pass `branch:` and `base:` with it, so a re-run worker computes the same branch and target.
+**Who makes the worktree.** In panes mode the lead does, before each `spawn_pane`, with the recipe in `factory.md` → "Worktree lifecycle" (run from the main checkout; it re-attaches on a fix round or resume), and passes that path as `cwd`. In subagent mode the executor makes its own. Every executor dispatch states `isolated:` in its task text, never left to the default: `isolated: false` on every `spawn_pane` (the lead already made the tree; `isolated` is an executor input, not a `spawn_pane` field, so it goes in `task`), and `isolated: true` on an `Agent` executor (it has no `cwd`, and its recipe finds a tree the lead already made). Pass `branch:` (the slice branch `factory.md` → "Integrate" names, written out) and `base:` with it, so a re-run worker computes the same branch and target.
 
 ## Codex workers
 
@@ -60,12 +60,12 @@ No wire message within the slice's expected time (a worker without the mod, a cr
 Manual recipe, only when the mod is off (Herdr):
 
 ```bash
-herdr worktree create --branch "agt/<slug>" --base "$BASE" --label "<slice>" --no-focus
+herdr worktree create --branch "feat/<slug>" --base "$BASE" --label "<slice>" --no-focus
 herdr pane split --current --direction right --cwd "<worktree>" --env "AGENTILLE_RUN=<run-id>" --no-focus
 herdr agent start "agt-<run-id>-exec-1" --kind claude --pane <pane-id>   # id: .result.pane.pane_id
 ```
 
-Then send one prompt: `isolated: false`, `branch:` and `base:`, the task, the profile block, the slice's file set, its verification command, its exit criterion. Spawn the whole wave first, then wait. Never focus. Names match `[a-z][a-z0-9_-]{0,31}`; keep the run id 6 chars. The `agt-` prefix is the reap authority.
+`feat/<slug>` stands for the slice branch `factory.md` → "Integrate" names (`fix/<slug>`, or `agt/<slug>` off a feature branch), written out. Then send one prompt: `isolated: false`, `branch:` and `base:`, the task, the profile block, the slice's file set, its verification command, its exit criterion. Spawn the whole wave first, then wait. Never focus. Names match `[a-z][a-z0-9_-]{0,31}`; keep the run id 6 chars. The `agt-` prefix is the reap authority.
 
 ## Harvest, then close
 

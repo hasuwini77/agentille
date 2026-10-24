@@ -2,14 +2,13 @@
 // prompt.submit and turn.complete here; the per-turn proofs, the answer memo, the run-end tidy, the worker's
 // publish and a subagent's report and ledger all start from these two. The proofs themselves are proofs.js's.
 
-import { S, isLead, Wire } from './state.js'
+import { S, isLead, Wire, Display } from './state.js'
 import { runState, writeRunFile, writeReport, fileRunOf } from './dispatch.js'
-import { DECK, addFlag } from './display.js'
+import { DECK, addFlag, clearFlags, setLastAnswer, mascotRest } from './display.js'
 import { flagOf, flagKey } from './focus.js'
 import { ANSWER_STYLE, RAW_STYLE } from './highlight.js'
 import { verdictChip, party, answerLine } from './links.js'
 import { addUsage, finish, ledger } from './live.js'
-import { BYE_MS } from './mascot.js'
 import { cleanWorkspace } from './reaper.js'
 import { typedPrompt, agtTurnStart, endRun, rawDone, sessionsAllowed, moment, runHeld } from './proofs.js'
 import { verdictOf } from './routing.js'
@@ -23,10 +22,10 @@ export async function onPromptSubmit($, e) {
   const { typed, agt } = typedPrompt(e.text, e.origin, await moment($))
   if (!typed) return e
   agtTurnStart(agt)
-  if (S.agtTurn) S.flags = []   // a new run starts with a clean slate
+  if (S.agtTurn) clearFlags()   // a new run starts with a clean slate
   if (S.agtTurn) await ensureTools($, 'panes')
   if (sessionsAllowed()) await ensureTools($, 'sessions')
-  if (S.agtTurn && S.deckAuto) void $.ui.open({ id: DECK, title: 'agentille' })
+  if (S.agtTurn && Display.deckAuto) void $.ui.open({ id: DECK, title: 'agentille' })
   if (S.rawTurn) return { ...e, context: [...(e.context ?? []), RAW_STYLE] }
   if (S.shapedTurn) return { ...e, context: [...(e.context ?? []), ANSWER_STYLE] }
   return e
@@ -37,8 +36,8 @@ export async function onTurnComplete($, e) {
   const a = e.agentId ? S.live.get(e.agentId) : undefined
   if (!e.agentId) S.leadTurn = false
   if (!e.agentId && e.reason === 'answer' && typeof e.answer === 'string') {
-    S.lastAnswer = { text: e.answer, ms: e.durationMs, id: null, shaped: S.shapedTurn, raw: S.rawTurn }
-    if (S.highlightOn && (S.agtTurn || S.highlightAll)) $.ui.invalidate('ui.render')
+    setLastAnswer({ text: e.answer, ms: e.durationMs, id: null, shaped: S.shapedTurn, raw: S.rawTurn })
+    if (Display.highlightOn && (S.agtTurn || Display.highlightAll)) $.ui.invalidate('ui.render')
     // A raw answer goes on the clipboard once; a later turn the person did not type is not raw.
     if (S.rawTurn) {
       rawDone()
@@ -50,17 +49,15 @@ export async function onTurnComplete($, e) {
     // lapses: the next worker pane needs the next typed /agt. A run nobody typed /agt for tidies nothing.
     const card = isLead() && /^[✓✗]/.test(e.answer.trimStart())
     if (card && S.agtTurn && S.agtTyped) {
-      S.flags = []
+      clearFlags()
       endRun()
       void cleanWorkspace($, { auto: true }).catch(() => {})
     } else if (card && runHeld()) endRun() // a card after the person typed in between still ends the run's guard
 
   }
-  if (!e.agentId && S.worker && S.mascot.working) {
+  if (!e.agentId && S.worker && Display.mascot.working) {
     const now = await $.clock.now()
-    S.mascot.working = false
-    S.mascot.ms = now - S.mascot.start
-    if (e.reason === 'answer') S.mascot.byeUntil = now + BYE_MS
+    mascotRest(now, e.reason === 'answer')
     ensureTicker($)
     $.ui.invalidate('ui.render')
   }

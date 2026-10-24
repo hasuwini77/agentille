@@ -1,18 +1,18 @@
 // agentille mod entry: wires the hooks. The state is in state.js; routing, panes, sessions, the reaper, the
 // timers, the worker's wire, display settings, drawing and run files each have a module beside this one.
 
-import { S, ctx, isLead, Profile } from './state.js'
+import { S, ctx, isLead, Profile, Display } from './state.js'
 import { registerAutocomplete } from './autocomplete.js'
 import { toolLabel, runPhases } from './board.js'
 import { cleanText } from './clean.js'
 import { routingView, ledgerView, completeReport, dispatchAgent } from './dispatch.js'
-import { DECK, applyDisplay, answerPanel, deckCommand, focusCommand, highlightCommand } from './display.js'
+import { DECK, applyDisplay, answerPanel, deckCommand, focusCommand, highlightCommand, setStoredRaw, setLastAnswer, mascotHello, mascotWorking } from './display.js'
 import { canDraw, drawingBlock, reportRun } from './drawing.js'
 import { highlightFor, litFor } from './highlight.js'
 import { parseInfoArgs, routeText, routingSummary, ledgerSummary, squadsSummary, overviewText } from './info.js'
 import { verdictChip } from './links.js'
 import { addUsage, ledger } from './live.js'
-import { HELLO_MS, parseWorker } from './mascot.js'
+import { parseWorker } from './mascot.js'
 import { PROBE, SPAWN_ROLE, transportBlock, paneName, newRunId, paneKey, parseSpawnArgs, herdrPromptArgv } from './panes.js'
 import { installedSkew, loadProfile, loadSquads, squadsView, tipOnce } from './profile.js'
 import { bashCall } from './guard.js'
@@ -30,6 +30,10 @@ import { onPromptSubmit, onTurnComplete } from './turns.js'
 import { dispatchedRun, agtTurnFromDispatch } from './proofs.js'
 import { parseHeader, roleOf } from './routing.js'
 import * as P from './panerec.js'
+
+// Per message id, whether a reply is lit and its highlight: only the AssistantMessage render below reads them.
+const litMemo = new Map()
+const hlMemo = new Map()
 
 export function register(on) {
   on('session.start', async ($, e, next) => {
@@ -60,12 +64,12 @@ export function register(on) {
     await $.command.register({ name: 'agt-deck', description: 'Open the agentille deck: the cast, routing timeline, wire log and tokens. auto = open on every /agt (saved as display.deck) · off', argumentHint: '[auto|off]', immediate: true })
     await $.command.register({ name: 'agt-tell', description: 'Send a message to a worker pane over the wire', argumentHint: '<worker> <message>', immediate: true })
     await $.command.register({ name: 'agt-spawn', description: 'Open a routed claude pane beside this one (Herdr or tmux); it closes itself once its answer is saved', argumentHint: '"task" [--model sonnet|opus|haiku|fable]' })
-    S.storedRaw = {
+    setStoredRaw({
       deckAuto: await $.store.get('deck:auto'),
       focusMode: await $.store.get('focus:mode'),
       highlightOn: await $.store.get('highlight:on'),
       highlightAll: await $.store.get('highlight:all'),
-    }
+    })
     applyDisplay()
     await $.command.register({ name: 'agt-info', description: 'Settings in effect, routing, ledger, squads, or a route dry-run: routing | ledger | squads | route <role>', argumentHint: '[routing|ledger|squads|route <role> [size=…] [risk=…] [depth=…]]', immediate: true })
     await $.command.register({ name: 'agt-highlight', description: 'Highlight replies: on (/agt replies lit; a paste-ready ask gets a plain-text note) · all (every typed question gets the answer shape) · off (nothing added to any prompt). Saved as display.highlight in profile.json; goes away in v4', argumentHint: '[on|all|off]', immediate: true })
@@ -121,7 +125,7 @@ export function register(on) {
     if (a.view === 'route') return { text: routeText({ ...a, depth: a.depth ?? Profile.depth }, Profile.settings, S.weeklyPct) }
     await loadSquads($)
     const log = S.runs.get(S.lastRun)?.log ?? []
-    return { text: overviewText({ display: S.display, squads: squadsSummary(Profile.squadRows), routing: routingSummary(log), ledger: ledgerSummary(ledger(S.live, S.lastRun, S.paneRoutes)) }) }
+    return { text: overviewText({ display: Display.display, squads: squadsSummary(Profile.squadRows), routing: routingSummary(log), ledger: ledgerSummary(ledger(S.live, S.lastRun, S.paneRoutes)) }) }
   })
 
   // Typed only: a plugin, a scheduled task or a notification never opens a pane.
@@ -253,17 +257,14 @@ export function register(on) {
   // A main-loop turn began (a subagent's run raises none). A worker's first one plays hello.
   on('turn.start', async ($, e, next) => {
     S.leadTurn = true
-    if (e.agentId === undefined) S.lastAnswer = null
+    if (e.agentId === undefined) setLastAnswer(null)
     if (S.worker) {
       const now = await $.clock.now()
-      if (!S.mascot.greeted) {
-        S.mascot.greeted = true
-        S.mascot.hiUntil = now + HELLO_MS
+      if (mascotHello(now)) {
         // tmux tags the pane name after the split, so the first poll can miss it: look once more.
         if (!S.selfName && S.transport && S.transport !== 'none') await pollNow($, S.transport)
       }
-      S.mascot.working = true
-      S.mascot.start = now
+      mascotWorking(now)
       ensureTicker($)
       $.ui.invalidate('ui.render')
     }
@@ -286,10 +287,10 @@ export function register(on) {
   // A long /agt reply: an essentials card on top, the body dim with its tokens lit. The
   // decision is memoised per message id so a reply does not restyle when a later turn changes.
   on('ui.render', { component: 'AssistantMessage' }, async ($, e, next) => {
-    if (!litFor(S.litMemo, e.requestId, { on: S.highlightOn, agtTurn: S.agtTurn || S.highlightAll })) return next(e)
+    if (!litFor(litMemo, e.requestId, { on: Display.highlightOn, agtTurn: S.agtTurn || Display.highlightAll })) return next(e)
     const final = e.surface === 'terminal' && !e.props?.isSummary ? answerPanel(e.requestId, e.props?.text) : null
-    if (S.rawIds.has(e.requestId)) return next(e)
-    const h = final ? null : highlightFor(S.hlMemo, e.requestId, e.props?.text)
+    if (Display.rawIds.has(e.requestId)) return next(e)
+    const h = final ? null : highlightFor(hlMemo, e.requestId, e.props?.text)
     if (!final && !h) return next(e)
     const els = $.ui.resolve(e)
     if (!els.Markdown) return next(e)

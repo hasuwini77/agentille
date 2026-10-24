@@ -16,7 +16,7 @@
 //
 // and the gates read them through spawnAllowed, sessionsAllowed, fableProof and runHeld.
 
-import { S, isLead } from './state.js'
+import { S, isLead, Display } from './state.js'
 import { SAFE_RUN } from './panes.js'
 import * as P from './panerec.js'
 import { isRawPrompt } from './highlight.js'
@@ -63,8 +63,8 @@ export function typedPrompt(text, origin, at = NO_MOMENT) {
   // pane (the lead parses its report) and never for a slash command or an /agt run. Asked for text to paste as is: no
   // panel and no answer style. Under display.highlight: off nothing is added, so the raw style needs on or all.
   const asked = !agt && isLead() && !String(text ?? '').trimStart().startsWith('/')
-  S.rawTurn = asked && S.highlightOn && isRawPrompt(text)
-  S.shapedTurn = !S.rawTurn && asked && S.highlightOn && S.highlightAll
+  S.rawTurn = asked && Display.highlightOn && isRawPrompt(text)
+  S.shapedTurn = !S.rawTurn && asked && Display.highlightOn && Display.highlightAll
   return { typed, agt }
 }
 

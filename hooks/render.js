@@ -2,7 +2,7 @@
 // band, built from the surface's own elements (`els`) and the state. Nothing here changes state; the one call
 // out is the ↗ button's jump to a pane.
 
-import { S, isLead, Timers, Wire, Profile } from './state.js'
+import { S, isLead, Timers, Wire, Profile, Display } from './state.js'
 import { ACCENT, FRAME_COLOR, DONE_COLOR, WIRE_COLOR, INK, hex, colorOf, chip, cast, boardRows, header, leadLine, wireRow, castColumns, routingLines, wireLines, tokenBars, swarm } from './board.js'
 import { focusLines } from './display.js'
 import { MARK, SPAN_COLOR, spans, bodyParts } from './highlight.js'
@@ -151,8 +151,8 @@ export const rule = (els, label) => els.Text({ dimColor: true, children: ['─�
 // band is short, off a terminal, or nothing is animating.
 export function workerBand(els, e, now) {
   const { Box, Text } = els
-  const mood = moodAt({ ...S.mascot, now })
-  const cap = caption({ mood, ...S.worker, ms: mood === 'working' ? now - S.mascot.start : S.mascot.ms })
+  const mood = moodAt({ ...Display.mascot, now })
+  const cap = caption({ mood, ...S.worker, ms: mood === 'working' ? now - Display.mascot.start : Display.mascot.ms })
   const capText = Text({ color: hex(MODEL_COLOR[modelKey(S.worker.model)]), wrap: 'truncate', children: [cap] })
   if (mood === 'idle' || e.surface !== 'terminal' || (e.props.maxRows ?? 0) < 5) return [capText]
   const [head, body, legs] = frame(mood, Timers.tick >> 1, S.worker.agent)

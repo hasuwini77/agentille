@@ -2,11 +2,70 @@
 // store and written back, the agent flags above the prompt, and the memo of which message closed an answer.
 
 import { S, Profile } from './state.js'
+import { makeStore } from './store.js'
 import { mergeFlags, paneFlags, parseFocusArgs, focusText } from './focus.js'
 import { isAnswerBlock, panel, parseHighlightArgs, highlightText } from './highlight.js'
 import { PROBE } from './panes.js'
 import { cleanDisplay, storedDisplay, resolveDisplay, highlightFlags, withDisplay, profileJson } from './settings.js'
 import { strandedNow } from './panerec.js'
+import { HELLO_MS, BYE_MS } from './mascot.js'
+
+// The display's store: the settings in effect and where each came from, the live switches they set, the agent flags
+// above the prompt, the newest answer and the memo of which message closed one, and the worker band's mascot. Read
+// through the Display view; written only by the transitions below.
+const { s: my, view } = makeStore('display.js', {
+  display: resolveDisplay({}, {}),  // the display settings in effect, and where each came from
+  profileDisplay: {},  // the valid keys of ~/.agentille/profile.json → display
+  storedRaw: {},  // the old $.store toggles, read once at session start (back-compat)
+  deckAuto: false,  // display.deck = auto: the deck opens on every typed /agt
+  focusOn: true,  // agent flags show above the prompt
+  highlightOn: false,  // /agt replies get an essentials card and lit tokens (display.highlight: on | all)
+  highlightAll: false,  // …and so does every other long reply (/agt-highlight all)
+  flags: [],  // [{ text, key, at }] from agent results this run
+  lastAnswer: null,  // { text, ms, id, shaped, raw } of the newest main-turn answer; its closing block draws as the panel
+  panelMemo: new Map(),  // message id → { text, panel() result }: the blocks that closed a main turn's answer
+  rawIds: new Set(),  // message ids that closed a raw answer: they draw as the engine does
+  mascot: { greeted: false, hiUntil: 0, byeUntil: 0, working: false, start: 0, ms: null },  // worker band, in $.clock.now() ms
+})
+export const Display = view
+
+// profile.json → display, as loadProfile read it.
+export function setProfileDisplay(d) {
+  my.profileDisplay = d
+}
+
+// The old $.store toggles, read once at session start.
+export function setStoredRaw(raw) {
+  my.storedRaw = raw
+}
+
+// The newest main-turn answer (null when a main turn starts).
+export function setLastAnswer(a) {
+  my.lastAnswer = a
+}
+
+// A run's flags come down: a new /agt run, or its ✓/✗ card.
+export function clearFlags() {
+  my.flags = []
+}
+
+// The worker band's mascot: hello on the first main turn (true only then), working while a turn runs, and a wave
+// when it ends on an answer.
+export function mascotHello(now) {
+  if (my.mascot.greeted) return false
+  my.mascot.greeted = true
+  my.mascot.hiUntil = now + HELLO_MS
+  return true
+}
+export function mascotWorking(now) {
+  my.mascot.working = true
+  my.mascot.start = now
+}
+export function mascotRest(now, waved) {
+  my.mascot.working = false
+  my.mascot.ms = now - my.mascot.start
+  if (waved) my.mascot.byeUntil = now + BYE_MS
+}
 
 export const DECK = 'agt-deck'
 
@@ -14,12 +73,12 @@ export const FLAG_TTL_MS = 30 * 60_000
 
 // profile.display → old store value → default, applied to the three live switches.
 export function applyDisplay() {
-  S.display = resolveDisplay(S.profileDisplay, storedDisplay(S.storedRaw))
-  S.deckAuto = S.display.values.deck === 'auto'
-  S.focusOn = S.display.values.focus
-  const h = highlightFlags(S.display.values.highlight)
-  S.highlightOn = h.on
-  S.highlightAll = h.all
+  my.display = resolveDisplay(my.profileDisplay, storedDisplay(my.storedRaw))
+  my.deckAuto = my.display.values.deck === 'auto'
+  my.focusOn = my.display.values.focus
+  const h = highlightFlags(my.display.values.highlight)
+  my.highlightOn = h.on
+  my.highlightAll = h.all
 }
 
 export const PROFILE_FILE = '/.agentille/profile.json'
@@ -64,7 +123,7 @@ export async function saveDisplay($, key, value) {
       return made !== null && made !== 0 ? 'could not create ~/.agentille' : 'could not write ' + shown
     }
   }
-  S.profileDisplay = cleanDisplay(next.display)
+  my.profileDisplay = cleanDisplay(next.display)
   applyDisplay()
   return null
 }
@@ -79,9 +138,9 @@ export async function setDisplay($, key, value) {
     key === 'focus' ? { focusMode: value ? 'on' : 'off' } :
     { highlightOn: value !== 'off', highlightAll: value === 'all' }
   const names = { deckAuto: 'deck:auto', focusMode: 'focus:mode', highlightOn: 'highlight:on', highlightAll: 'highlight:all' }
-  const profileWins = Object.hasOwn(S.profileDisplay, key) // a profile value comes back next session
-  S.storedRaw = { ...S.storedRaw, ...sets }
-  delete S.profileDisplay[key]
+  const profileWins = Object.hasOwn(my.profileDisplay, key) // a profile value comes back next session
+  my.storedRaw = { ...my.storedRaw, ...sets }
+  delete my.profileDisplay[key]
   applyDisplay()
   try {
     for (const [k, v] of Object.entries(sets)) await $.store.set(names[k], v)
@@ -95,33 +154,33 @@ export async function setDisplay($, key, value) {
 export const MOVED = (key) => '\nmoved: display.' + key + ' in ~/.agentille/profile.json — this command goes away in v4'
 
 export function addFlag($, key, text) {
-  S.flags = mergeFlags(S.flags, key, text, Date.now(), FLAG_TTL_MS)
+  my.flags = mergeFlags(my.flags, key, text, Date.now(), FLAG_TTL_MS)
   if (text) $.ui.toast('agt ⚑ ' + text)
 }
 
 export function focusLines(now) {
-  if (!S.focusOn) return []
-  const fresh = [...new Set(S.flags.filter((f) => now - f.at < FLAG_TTL_MS).map((f) => f.text))]
+  if (!my.focusOn) return []
+  const fresh = [...new Set(my.flags.filter((f) => now - f.at < FLAG_TTL_MS).map((f) => f.text))]
   return [...fresh, ...paneFlags(S.panes, strandedNow)].slice(0, 5)
 }
 
 // The panel for a message id, once it is known to close the newest answer; kept per id after that.
 export function answerPanel(id, text) {
   if (!id || typeof text !== 'string') return null
-  const hit = S.panelMemo.get(id)
+  const hit = my.panelMemo.get(id)
   if (hit && hit.text === text) return hit.p
-  if (!hit && !(S.lastAnswer && (S.lastAnswer.id === id || (!S.lastAnswer.id && isAnswerBlock(S.lastAnswer.text, text))))) return null
-  if (S.lastAnswer && !S.lastAnswer.id && !hit) S.lastAnswer.id = id
-  const own = S.lastAnswer?.id === id
-  if (own && S.lastAnswer.raw) {
-    S.rawIds.add(id)
-    if (S.rawIds.size > 200) S.rawIds.delete(S.rawIds.values().next().value)
+  if (!hit && !(my.lastAnswer && (my.lastAnswer.id === id || (!my.lastAnswer.id && isAnswerBlock(my.lastAnswer.text, text))))) return null
+  if (my.lastAnswer && !my.lastAnswer.id && !hit) my.lastAnswer.id = id
+  const own = my.lastAnswer?.id === id
+  if (own && my.lastAnswer.raw) {
+    my.rawIds.add(id)
+    if (my.rawIds.size > 200) my.rawIds.delete(my.rawIds.values().next().value)
     return null
   }
-  const p = panel(text, { ms: own ? S.lastAnswer.ms : undefined, shaped: own ? S.lastAnswer.shaped : false })
-  S.panelMemo.delete(id)
-  S.panelMemo.set(id, { text, p })
-  if (S.panelMemo.size > 200) S.panelMemo.delete(S.panelMemo.keys().next().value)
+  const p = panel(text, { ms: own ? my.lastAnswer.ms : undefined, shaped: own ? my.lastAnswer.shaped : false })
+  my.panelMemo.delete(id)
+  my.panelMemo.set(id, { text, p })
+  if (my.panelMemo.size > 200) my.panelMemo.delete(my.panelMemo.keys().next().value)
   return p
 }
 
@@ -131,10 +190,10 @@ export async function deckCommand($, e) {
   let note = ''
   if (a) {
     note = await setDisplay($, 'deck', a)
-    if (!S.deckAuto) return { text: 'deck: opens only when you type /agt-deck (display.deck: off)' + (note && '\n' + note) }
+    if (!my.deckAuto) return { text: 'deck: opens only when you type /agt-deck (display.deck: off)' + (note && '\n' + note) }
   }
   const o = await $.ui.open({ id: DECK, title: 'agentille' })
-  const auto = S.deckAuto ? ' · opens on every /agt (/agt-deck off to stop)' : ''
+  const auto = my.deckAuto ? ' · opens on every /agt (/agt-deck off to stop)' : ''
   const tail = note && '\n' + note
   if (o?.isPlaced === false) return { text: 'deck waits: ' + (o.reason ?? 'no surface here places panes') + auto + tail }
   return { text: 'deck open' + auto + tail }
@@ -148,7 +207,7 @@ export async function focusCommand($, e) {
     note = await setDisplay($, 'focus', a.on)
     $.ui.invalidate('ui.render')
   }
-  return { text: focusText(S.focusOn, focusLines(Date.now())) + (note && '\n' + note) + MOVED('focus') }
+  return { text: focusText(my.focusOn, focusLines(Date.now())) + (note && '\n' + note) + MOVED('focus') }
 }
 
 export async function highlightCommand($, e) {
@@ -159,5 +218,5 @@ export async function highlightCommand($, e) {
     note = await setDisplay($, 'highlight', !a.on ? 'off' : a.all ? 'all' : 'on')
     $.ui.invalidate('ui.render')
   }
-  return { text: highlightText(S.highlightOn, S.highlightAll) + (note && '\n' + note) + MOVED('highlight') }
+  return { text: highlightText(my.highlightOn, my.highlightAll) + (note && '\n' + note) + MOVED('highlight') }
 }

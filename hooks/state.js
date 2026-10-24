@@ -3,13 +3,13 @@
 // and the run files. Fields that are reassigned are read as S.name; the collections are destructured once.
 // What the lead keeps about each pane (harvest, wake, stranded, first seen, stage) is in panerec.js.
 
-import { resolveDisplay } from './settings.js'
 import { Timers } from './ticker.js'
 import { Wire } from './worker.js'
 import { Profile } from './profile.js'
+import { Display } from './display.js'
 
 // The read views of the stores the owner modules keep (store.js): read through these, written only by their owners.
-export { Timers, Wire, Profile }
+export { Timers, Wire, Profile, Display }
 
 export const S = {
   weeklyPct: null,
@@ -32,8 +32,6 @@ export const S = {
   sessionTools: false,  // open_sessions (and close_pane) registered: a typed ask for sessions arrived
   closeTool: false,  // close_pane registered, by whichever of the two came first
   transport: null,  // 'herdr' | 'tmux' | 'none', probed once at session start
-  focusOn: true,  // agent flags show above the prompt
-  flags: [],  // [{ text, key, at }] from agent results this run
   agtTurn: false,  // this turn is part of an /agt run (written only through proofs.js agtTurnStart / agtTurnFromDispatch)
   worktrees: [],  // { path, branch, head, run, at, src } of the worktrees this session's runs made (guard.js), saved to lead-<pane>.worktrees
   // The typed proofs: written only through proofs.js, read here and through ctx.
@@ -49,16 +47,8 @@ export const S = {
   workerProved: false,  // worker: its first typed prompt decided whether fable=forced holds here
   demotedToasted: new Set(),  // run ids told once that fable=forced was dropped for want of a typed --fable
   leadTurn: false,  // a main-loop turn is running: its idle panes are waiting for review
-  mascot: { greeted: false, hiUntil: 0, byeUntil: 0, working: false, start: 0, ms: null },  // worker band, in $.clock.now() ms
-  highlightOn: false,  // /agt replies get an essentials card and lit tokens (display.highlight: on | all)
-  highlightAll: false,  // …and so does every other long reply (/agt-highlight all)
-  litMemo: new Map(),  // message id → was it an /agt turn when first drawn
-  hlMemo: new Map(),  // message id → { text, highlight() result }
-  panelMemo: new Map(),  // message id → { text, panel() result }: the blocks that closed a main turn's answer
-  lastAnswer: null,  // { text, ms, id, shaped } of the newest main-turn answer; its closing block draws as the panel
   shapedTurn: false,  // this turn's prompt carried the answer style (display.highlight: all)
   rawTurn: false,  // this turn's prompt asked for text to paste as is: no panel, answer copied
-  rawIds: new Set(),  // message ids that closed a raw answer: they draw as the engine does
   runningVersion: null,  // this module's own agentille version, read from its plugin.json at session start
   hostVersion: null,  // Claude Code's version from $.session.version(), null when unknown
   hostOld: false,  // the host is older than skew.js MIN_HOST: pane tools are never registered
@@ -67,10 +57,6 @@ export const S = {
   leadModel: null,  // the main loop's model, for the tree's root
   wireName: null,  // worker: its own agt- name (AGENTILLE_NAME), where it publishes
   leadSession: null,  // worker: the lead's session id (AGENTILLE_LEAD), where it reports
-  deckAuto: false,  // display.deck = auto: the deck opens on every typed /agt
-  profileDisplay: {},  // the valid keys of ~/.agentille/profile.json → display
-  storedRaw: {},  // the old $.store toggles, read once at session start (back-compat)
-  display: resolveDisplay({}, {}),  // the display settings in effect, and where each came from
 }
 
 // This session is the lead: no worker env and no agt- name of its own. The one lead/worker predicate.

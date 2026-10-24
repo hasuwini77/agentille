@@ -1,7 +1,7 @@
 // agentille timers: the agent list refresh, the 5 s pane poll that runs while panes may exist, and the 300 ms
 // redraw ticker that runs while something works or animates.
 
-import { S, ctx } from './state.js'
+import { S, ctx, Display } from './state.js'
 import { makeStore } from './store.js'
 import { waving } from './live.js'
 import { moodAt } from './mascot.js'
@@ -66,7 +66,7 @@ export function ensurePolling($) {
 
 // Redraw while something works, a worker's mascot is animating or a finished subagent is
 // still waving (elapsed times tick, legs step); the ticker cancels itself once all are idle.
-export const animating = (now) => (!!S.worker && moodAt({ ...S.mascot, now }) !== 'idle') || [...S.live.values()].some((a) => waving(a, now))
+export const animating = (now) => (!!S.worker && moodAt({ ...Display.mascot, now }) !== 'idle') || [...S.live.values()].some((a) => waving(a, now))
 
 // The modules that follow the run on the ticker (the pinned status line) add a callback to ctx.onTick.
 // They get the three host calls they use as `io` (status.js ioOf has the same shape), with the `now` the

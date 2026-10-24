@@ -10,7 +10,7 @@ Pre-flight (the mod probes this once; manual equivalent): inside Herdr (`HERDR_E
 
 ## Pool size
 
-`poolSize = min(slices, resourceCap)`, `resourceCap = clamp(min(floor(freeRAM_MB / 700), max(2, cores - 2)), 2, 12)`. A vendor session is ~500–700 MB resident. At most 3 executors run at once (`SKILL.md` → "Hard rules"); queue the rest as waves. A pool of 1 means subagent mode.
+`poolSize = min(slices, resourceCap, 3)`, `resourceCap = min(floor(freeRAM_MB / 700), max(2, cores - 2))`. A vendor session is ~500–700 MB resident. The 3 is the executor cap every level shares (`SKILL.md` → "Hard rules"); queue the rest as waves. A pool under 2 means subagent mode. Heavy is not wider than medium: it buys panes (a real session per slice in its own worktree, the live wire, resume and steering), not more executors at once.
 
 ## Through the mod's tools
 

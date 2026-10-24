@@ -163,7 +163,7 @@ done
 readme_switches() { grep -F "off switch in the profile's \`display\` block" README.md; }
 check "README.md has its display switch sentence" '[ -n "$(readme_switches)" ]'
 for k in $(display_defaults | tr -d '{}' | tr ',' '\n' | sed 's/:.*//; s/ //g') sessions; do
-  check "docs/settings.md's switch table has a $k row" 'grep -qE "^\| \\\`$k\\\` " docs/settings.md'
+  check "docs/settings.md's switch table has a $k row" 'grep -qF "| \`$k\` " docs/settings.md'
   check "README.md's switch sentence names $k" 'readme_switches | grep -qF "\`$k\`"'
 done
 

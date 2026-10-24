@@ -1,40 +1,30 @@
 # agentille
 
-One command. Type `/agt "task"` in Claude Code and it plans, builds and reviews the work with the right model for each step. Small tasks stay cheap: it steps aside and just does them.
+One command. Type `/agt "task"` in Claude Code and that one prompt becomes a planned, built and reviewed change, each step on the model that fits it and, if you want, in your own voice (`/agentille-init`, optional, 1 minute). Small tasks stay cheap: a one-sentence task with no risk words (the typo, the rename) runs solo, with no agents and no card. A plain prompt never starts `/agt`: the skill runs only when you type it. Powered by [Systown AI Lab](https://systown.ai).
 
-Install (about 30 seconds, no profile or config needed):
+1. **Install** (about 30 seconds, no profile or config needed):
+   ```
+   /plugin marketplace add hasuwini77/agentille
+   /plugin install agentille@hasuwini77-agentille
+   ```
 
-```
-/plugin marketplace add hasuwini77/agentille
-/plugin install agentille@hasuwini77-agentille
-```
+2. **Type a task** in any repo:
+   ```
+   /agt "add a dark mode toggle to settings, persisted per user, with tests"
+   ```
 
-Try it in any repo:
+   It reads your repo and picks a level: low (it just does it, or one builder), medium (2–3 builders in parallel) or heavy (one Herdr or tmux pane per part). It hardens risky changes (auth, payments, data) with a red-team pass, leaves one reviewed PR per part for you to merge (merging on green is opt-in, see "What it touches") and closes every pane it opened.
 
-```
-/agt "add a dark mode toggle to settings, persisted per user, with tests"
-```
+3. **Read the card** it ends on. Everything else (plan, findings, each agent's full report) is in that `report.md`:
+   ```
+   ✓ dark mode toggle on /settings  ·  low  ·  4 files  ·  PR #12 ready  ·  6m
+   verify: npm test → 48 passed
+   review: PASS — code-reviewer design-reviewer
+   Open: ~/.agentille/state/run-a1b2/report.md
+   Next: gh pr merge 12 --merge
+   ```
 
-What happens: it reads your repo and picks a level: low (it just does it, or one builder), medium (2–3 builders in parallel) or heavy (one Herdr or tmux pane per part). It hardens risky changes (auth, payments, data) with a red-team pass, leaves one reviewed PR per part for you to merge (merging on green is opt-in, see "What it touches"), closes every pane it opened, and ends on one short card:
-
-```
-✓ dark mode toggle on /settings  ·  low  ·  4 files  ·  PR #12 ready  ·  6m
-verify: npm test → 48 passed
-review: PASS — code-reviewer design-reviewer
-Open: ~/.agentille/state/run-a1b2/report.md
-Next: gh pr merge 12 --merge
-```
-
-Everything else (plan, findings, each agent's full report) is in that `report.md`. A plain prompt never starts `/agt`: the skill runs only when you type it. The mod adds text to a prompt in exactly two cases, both under `display.highlight` (see Options): a short ask for paste-ready text gets a one-line "answer in plain text" note, and under `all` every typed question gets the answer-shape note. `highlight: off` adds nothing to any prompt. A one-sentence task with no risk words (the typo, the rename) runs solo: no agents, no card.
-
-Make it sound like you (optional, 1 minute): `/agentille-init`. Powered by [Systown AI Lab](https://systown.ai).
-
-What else ships beside `/agt`, each covered below:
-
-- `/storm`: research what to build next, then hand the picks to `/agt heavy`.
-- Sessions: "open two sessions" opens real Claude, Codex or shell panes beside yours.
-- The mod: the live dispatch band, model routing, the wire between panes, the deck (`/agt-deck`), reply highlighting and a small mascot in worker panes.
-- Setup skills: `/agentille-init` (your voice), `/agentille-project` and `/agentille-claude-md` (a repo's CLAUDE.md).
+Also in the box, each covered below: `/storm` researches what to build next and hands the picks to `/agt heavy`; "open two sessions" opens real Claude, Codex or shell panes beside yours; `/agentille-project` and `/agentille-claude-md` set up a repo's CLAUDE.md. The band, the deck and the wire belong to the mod (see Glossary).
 
 ## When to use it
 
@@ -53,6 +43,20 @@ Plain Claude is one developer. `/agt` is that developer plus a planner and a rev
 What you get over a plain prompt: a separate reviewer checks the work instead of the model that wrote it, each step runs on the model that fits it, independent parts build at the same time, a finished part's reviewers run together rather than one after another, and risky diffs get a red-team pass.
 
 Skip it for one-file edits, typos, renames and questions: a plain prompt is cheaper. Any run that is not solo costs more tokens than a plain prompt. What you buy is fewer wrong or unreviewed changes, not a lower bill.
+
+## Glossary
+
+- **Level:** how big the crew is. low (solo or one builder), medium (parallel subagents), heavy (panes).
+- **Slice:** one file-disjoint part of the task, built by one executor on its own branch. The dispatch header carries its slug as `piece=`.
+- **Executor, planner, reviewers, adversary:** the agent roles in `agents/`. Reviewers read and run tests; they never edit. The adversary writes tests that try to break a slice.
+- **Pane / worker:** a real Claude (or Codex) session in a Herdr or tmux pane, named `agt-<run>-<role>`, doing one slice. **Session:** a pane that is yours, opened with "open two sessions".
+- **The mod:** the JavaScript in `hooks/` that Claude Code loads beside the skill. It draws the band, routes models, carries the wire, opens and closes panes. The skill works without it.
+- **The band / switchboard:** the live dispatch tree above your prompt. **Deck:** the fuller side pane (`/agt-deck`). **Focus flags:** the `⚑` lines above the prompt (a REVISE, a FAIL, a blocked pane); they clear when the run's card prints.
+- **The wire:** how pane workers report back to your session when they finish.
+- **Run card:** the ≤8-line summary that ends every non-solo run. **Run dir:** `~/.agentille/state/run-<id>/`.
+- **Squad:** extra reviewers (payments, SEO, perf) a repo type adds. **Formation:** a run shape (duel, gauntlet, relay) that reshapes the workers.
+- **Mode:** `mode=` in the dispatch header is the work type (`build`, `fix`, `diagnose`, `review`, `research`), `--mode` is a deprecated flag for the level, and the merge policy is `integration`, never called a mode. `panes-mode.md` and `workflow-mode.md` are the docs for those two transports.
+- **Recon line:** the first line of a run, `recon: <level> · <transport> · <reason>`.
 
 ## Options
 
@@ -90,11 +94,11 @@ Everything lives in `~/.agentille/profile.json`. Every key is optional; a missin
 
 - `deck`: `auto` opens the deck on every `/agt`, `off` only when you type `/agt-deck`.
 - `focus`: agent flags (a REVISE, a FAIL, a blocked pane) above the prompt.
-- `highlight` (default `off`): `on` lights `/agt` replies, `all` every reply, `off` none.
+- `highlight` (default `off`): `on` lights `/agt` replies, `all` every reply, `off` none. The mod adds text to a prompt only in the two cases below (under `all`, and text to paste).
   - **The frame:** the answer that ends a lit turn draws between two rules (`╭─ ◆ agentille · time ─╮` above, `╰─╯` below) with nothing beside the text, so a selection copies no border or indent.
   - **Inside it:** the first line is the headline, bullets become • rows with paths, versions and refs lit, and your steps are numbered under an amber **── your move ──** divider (or "✓ nothing needed from you").
-  - **Under `all`:** each question you type also asks Claude for that shape: a one-line answer, at most 6 short bullets, and numbered steps only when you have something to do.
-  - **Text to paste:** ask for "no formatting", "plain text" or "copy-paste", or start with `raw:` (in a short prompt, or in the short first or last sentence of a long one), and under `on` or `all` the answer skips the frame, comes back as plain text and lands on your clipboard.
+  - **Under `all`:** each question you type also gets the answer-shape note, which asks Claude for that shape: a one-line answer, at most 6 short bullets, and numbered steps only when you have something to do.
+  - **Text to paste:** ask for "no formatting", "plain text" or "copy-paste", or start with `raw:` (in a short prompt, or in the short first or last sentence of a long one), and under `on` or `all` the prompt gets a one-line "answer in plain text" note, the answer skips the frame, comes back as plain text and lands on your clipboard.
   - **`off`** adds nothing to any prompt and copies nothing.
 
 `/agt-routing`, `/agt-ledger` and `/agt-squads` were removed in v3.14.0: use `/agt-info routing|ledger|squads`. `/agt-focus` and `/agt-highlight` still work and write this block.
@@ -158,6 +162,14 @@ Each role gets a model and an effort. The mod picks them from the dispatch heade
 - **Escalation:** a plan REVISE puts the next planner on opus · max. Fable (about twice the cost of Opus) runs only when you type `--fable`, or with `routing.autoFable: true` after two REVISEs or three failed fixes, within `maxFablePerRun` and `fableWeeklyCeiling`.
 - **Check a route:** `/agt-info route <role> [size=…] [risk=…] [depth=…]` prints what a role would get, escalation rungs included.
 
+## When something goes wrong
+
+- **See what is in effect:** `/agt-info` prints the settings in effect and where each value came from, the last run's routing and ledger, and the active squads. `/agt-info route <role>` dry-runs one route.
+- **Read the run:** every non-solo run writes `~/.agentille/state/run-<id>/report.md` (plan, findings, each agent's full report); the card's `Open:` line names it. A real failure starts the card with `✗ <what failed + where>`, and its `Next:` line is the fix.
+- **A version toast is not a failed run:** `agt ⚑ agentille vX is installed but this session runs vY — restart Claude Code before opening panes` means the plugin updated under a running session, and `/agt` refuses to open panes until you restart. `agt ⚑ Claude Code vX is older than the vY agentille needs` means pane tools stay off until you update Claude Code.
+- **No panes is not a failed run either:** without Herdr or tmux, heavy runs as a workflow or subagent waves, and the recon line (`recon: <level> · <transport> · <reason>`) says `workflow` or `subagent` instead of `panes`.
+- **Turn off the version check:** `AGENTILLE_UPDATE_CHECK=0` (see Network).
+
 ## Requirements
 
 | Need | For | Without it |
@@ -188,20 +200,6 @@ Before you type anything the mod does four small things: it draws its band above
 - **Network:** once a day at session start the hook fetches this repo's `plugin.json` from GitHub to compare versions (3 s timeout, nothing sent). `AGENTILLE_UPDATE_CHECK=0` turns it off. Research agents (`/storm`) read the web. An executor whose worktree has no `node_modules` to copy runs the project's own install, and the security reviewer runs `npm audit`; both reach the package registry. Nothing else goes out.
 - **Panes:** a plain session has no pane tools. The mod registers `spawn_pane` and `close_pane` on a turn where you typed `/agt`, and `open_sessions` (with `close_pane`) on a turn whose typed prompt asked for sessions, panes or terminals; each tool still checks that proof when called, so a task notification, plugin or peer message never opens a pane. A worker pane opened in the repo you are already in answers Claude's "trust this folder?" prompt for you; any other folder must be opened by hand once. Worker panes close when harvested. When your session ends (never on `/clear`), the sweep closes only the worker panes this session opened (listed in `~/.agentille/state/lead-<pane>.panes`), and of those only the idle or done ones whose answer is saved; a session that opened none closes nothing. Your own sessions close only when idle (Herdr) or when you close them (tmux).
 - **Models and cost:** every non-solo run costs more than a plain prompt. By default Opus runs the planner, the ui-prototyper and the design, security and payments reviewers; Sonnet runs the executor, the adversary and the plan-, code-, SEO- and perf-reviewers. A large slice moves the plan-, code- and perf-reviewers to Opus; auth or money risk moves the code-reviewer and the adversary to Opus. The executor never leaves Sonnet and the design-reviewer never leaves Opus; `thinkingDepth: quick` moves the other roles to Sonnet and skips the plan-reviewer. Haiku only classifies and scouts. Fable never, unless `--fable` or `routing.autoFable: true`. Every cell: Routing.
-
-## Glossary
-
-- **Level:** how big the crew is. low (solo or one builder), medium (parallel subagents), heavy (panes).
-- **Slice:** one file-disjoint part of the task, built by one executor on its own branch. The dispatch header carries its slug as `piece=`.
-- **Executor, planner, reviewers, adversary:** the agent roles in `agents/`. Reviewers read and run tests; they never edit. The adversary writes tests that try to break a slice.
-- **Pane / worker:** a real Claude (or Codex) session in a Herdr or tmux pane, named `agt-<run>-<role>`, doing one slice. **Session:** a pane that is yours, opened with "open two sessions".
-- **The mod:** the JavaScript in `hooks/` that Claude Code loads beside the skill. It draws the band, routes models, carries the wire, opens and closes panes. The skill works without it.
-- **The band / switchboard:** the live dispatch tree above your prompt. **Deck:** the fuller side pane (`/agt-deck`). **Focus flags:** the `⚑` lines above the prompt (a REVISE, a FAIL, a blocked pane); they clear when the run's card prints.
-- **The wire:** how pane workers report back to your session when they finish.
-- **Run card:** the ≤8-line summary that ends every non-solo run. **Run dir:** `~/.agentille/state/run-<id>/`.
-- **Squad:** extra reviewers (payments, SEO, perf) a repo type adds. **Formation:** a run shape (duel, gauntlet, relay) that reshapes the workers.
-- **Mode:** `mode=` in the dispatch header is the work type (`build`, `fix`, `diagnose`, `review`, `research`), `--mode` is a deprecated flag for the level, and the merge policy is `integration`, never called a mode. `panes-mode.md` and `workflow-mode.md` are the docs for those two transports.
-- **Recon line:** the first line of a run, `recon: <level> · <transport> · <reason>`.
 
 ## Contributing
 

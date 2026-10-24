@@ -1,5 +1,5 @@
 import { describe, expect, mock, test } from 'claude-code/testing'
-import { DENY_INTEGRATION, DENY_LOCAL, DENY_PUSH, DENY_UNREAD, capsOf, claimedTrees, integrationIn, integrationOf, joinPath, judgePush, newTrees, normSlug, normUrl, parseOwned, recordTrees, sameRepo, scriptSlugs, scriptTrees, splitCommands, worktreeAdds } from '../../hooks/guard.js'
+import { DENY_INTEGRATION, DENY_LOCAL, DENY_PUSH, DENY_UNREAD, capsOf, claimedTrees, integrationIn, integrationOf, joinPath, judgePush, newTrees, normSlug, normUrl, parseOwned, recordTrees, sameRemote, scriptSlugs, scriptTrees, splitCommands, worktreeAdds } from '../../hooks/guard.js'
 import { parseWorktrees } from '../../hooks/clean.js'
 
 // What the repo looks like to a line read alone: the slice branch is checked out, the base is main.
@@ -275,8 +275,8 @@ describe('guard: the repo a profile entry names', () => {
     expect(normUrl('https://github.com/me/app.git/')).toBe('github.com/me/app')
     expect(normUrl('ssh://git@github.com:22/me/app')).toBe('github.com/me/app')
     expect(normSlug('me/app')).toBe('github.com/me/app')
-    expect(sameRepo('github.com/me/app', 'me/app')).toBe(true)
-    expect(sameRepo('github.com/me/app', 'github.com/other/app')).toBe(false)
+    expect(sameRemote('github.com/me/app', 'me/app')).toBe(true)
+    expect(sameRemote('github.com/me/app', 'github.com/other/app')).toBe(false)
   })
 
   test('the profile decides; a repo config lowers it and never raises it', async () => {

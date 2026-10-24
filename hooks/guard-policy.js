@@ -909,7 +909,8 @@ async function madeByRun($, at, name, cache) {
 // the remote's default is not recorded (no origin/HEAD), every branch the remote has that the run did not make. An
 // agt/* branch is a run's, never base-like. { bases, guessed } — guessed: the default was not recorded, so the
 // branch checked out at the typed /agt is not taken on trust either.
-async function baseLike($, at, remote, current, cache) {
+// `keep`: a branch never added by the no-origin/HEAD fallback (a pane worker's own slice, workerTree).
+async function baseLike($, at, remote, current, cache, keep = null) {
   const bases = new Set(['main', 'master'])
   if (!at) return { bases, guessed: true }
   const head = await remoteHead($, at, remote)
@@ -923,17 +924,18 @@ async function baseLike($, at, remote, current, cache) {
   }
   if (head) return { bases, guessed: false }
   const { names } = await remoteBranches($, at, remote)
-  for (const n of names) if (!n.startsWith('agt/') && !(await madeByRun($, at, n, cache))) bases.add(n)
+  for (const n of names) if (!n.startsWith('agt/') && n !== keep && !(await madeByRun($, at, n, cache))) bases.add(n)
   return { bases, guessed: true }
 }
 
 // What a push is judged against: the branch checked out in its dir, where a bare `git push` goes, the bases.
-async function pushInfo($, c, cwd, cache) {
+async function pushInfo($, c, cwd, cache, tree = null) {
   const dir = c.dir
   const at = dir ?? cwd
   const remote = c.push.remote && /^[\w.-]+$/.test(c.push.remote) ? c.push.remote : 'origin'
   const current = dir ? (await gitOutOrThrow($, dir, 'symbolic-ref', '--short', '-q', 'HEAD')) || null : null
-  const { bases, guessed } = await baseLike($, at, remote, c.push.headMoved ? null : current, cache)
+  const keep = tree && at && tree.root === (await repoRoot($, at, cache).catch(() => null)) ? tree.branch : null
+  const { bases, guessed } = await baseLike($, at, remote, c.push.headMoved ? null : current, cache, keep)
   let pushDst = null
   let refspecs = []
   let pushDefault = null
@@ -999,12 +1001,26 @@ async function remoteHas($, at, remote, name) {
   return String(ls.stdout ?? '').trim() ? 'yes' : 'no'
 }
 
+// A pane worker's own slice: the branch checked out in the folder its pane started in, when that folder is a linked
+// worktree (its git dir is not the common one), as the lead makes one for each slice. A worker has no typed /agt and
+// sees none of the lead's records, so this is how its feat/* or fix/* slice stays its own on a fix round. The main
+// checkout never counts: the person's branch there is not a slice. { root, branch } or null, asked once per line.
+async function workerTree($, ctx) {
+  if (!ctx.worker || !ctx.cwd) return null
+  if (ctx.tree !== undefined) return ctx.tree
+  ctx.tree = null
+  const gd = await gitOutOrThrow($, ctx.cwd, 'rev-parse', '--path-format=absolute', '--git-dir')
+  const cd = await gitOutOrThrow($, ctx.cwd, 'rev-parse', '--path-format=absolute', '--git-common-dir')
+  if (gd && cd && trimSlash(gd) !== trimSlash(cd)) ctx.tree = await checkoutOf($, ctx.cwd)
+  return ctx.tree
+}
+
 // A branch the push names that is not base-like: the run's own when it is the agt/* slice branch checked out here,
 // one of its worktrees was made on it, one of its pushes created it, it is the branch checked out where /agt was
 // typed (and the remote's default is recorded, so that branch is known not to be the base), or the remote does not
 // have it yet (then it is noted in `made`, for bashCall to record once the push ran). One the remote already has
 // is someone else's (feat/* and fix/* are the person's prefixes too). Returns why it is refused, or null.
-async function othersBranch($, c, name, cwd, { current = false, guessed = true, made = [], cache = new Map() } = {}) {
+async function othersBranch($, c, name, cwd, { current = false, guessed = true, made = [], cache = new Map(), tree = null } = {}) {
   const at = c.dir ?? cwd
   if (current && name.startsWith('agt/')) return null
   if (!at) return 'git push ' + name + ' (a branch this run did not make, in a repo the guard cannot place)'
@@ -1012,6 +1028,7 @@ async function othersBranch($, c, name, cwd, { current = false, guessed = true, 
   const root = await repoRoot($, at, cache)
   const co = Worktrees.checkout
   const typed = current && !guessed && !!co && co.branch === name && co.root === root
+  if (current && tree && tree.branch === name && tree.root === root) return null
   const has = await remoteHas($, at, c.push.remote ?? 'origin', name)
   if (has === 'no') {
     if (root) made.push({ root, branch: name })
@@ -1036,9 +1053,10 @@ async function leaseOnto($, c, name, cwd, current, cache) {
 // Merging into a branch the remote has and the run did not make, then pushing it, is the integrate step `auto`
 // owns. A merge of the branch's own upstream (`git merge origin/<branch>`, `@{u}`) only catches up. Returns why it
 // is refused, or null.
-async function mergeInto($, c, target, current, cache) {
+async function mergeInto($, c, target, current, cache, tree = null) {
   if (!target || /[$`]/.test(target) || !c.dir) return null
   if (target.startsWith('agt/') && target === current) return null
+  if (tree && target === tree.branch && target === current && tree.root === (await repoRoot($, c.dir, cache).catch(() => null))) return null
   const catchUp = (x) => x === '@{u}' || x === '@{upstream}' || x === 'origin/' + target || x === 'refs/remotes/origin/' + target
   if (c.from?.length && c.from.every(catchUp)) return null
   if (await madeByRun($, c.dir, target, cache)) return null
@@ -1138,7 +1156,8 @@ async function aliasLine($, c) {
 // a blank or comment-only line, which runs nothing, gets through. A line that was read and named nothing to judge
 // (`echo hi`, `npm test`) has no candidates and runs; a part the lexer did not read (past its depth caps) is a
 // candidate of its own, so it never leaves the list empty.
-export async function guardLine($, line, cwd, out = {}) {
+// `worker`: the line is a pane worker's, whose own slice is the branch checked out where its pane started (workerTree).
+export async function guardLine($, line, cwd, out = {}, { worker = false } = {}) {
   let cands
   try {
     cands = commandSteps(line, cwd, 0, await homes($))
@@ -1148,7 +1167,7 @@ export async function guardLine($, line, cwd, out = {}) {
   if (!cands.length) return null
   const profile = await readProfile($)
   out.made = []
-  return judgeCands($, cands, { profile, cwd, cache: new Map(), envRepo: undefined, made: out.made }, 0)
+  return judgeCands($, cands, { profile, cwd, cache: new Map(), envRepo: undefined, made: out.made, worker }, 0)
 }
 
 // Whether a line holds anything but blanks and comments.
@@ -1213,20 +1232,23 @@ async function judgeCands($, cands, ctx, depth) {
     if (c.kind === 'local') {
       const here = c.dir ? (await gitOutOrThrow($, c.dir, 'symbolic-ref', '--short', '-q', 'HEAD')) || null : null
       const current = c.branch ? null : here
-      const why = judgeLocal(c.branch, { current, bases: (await baseLike($, c.dir, 'origin', here, cache)).bases })
+      const tree = await workerTree($, ctx)
+      const keep = tree && c.dir && tree.root === (await repoRoot($, c.dir, cache).catch(() => null)) ? tree.branch : null
+      const why = judgeLocal(c.branch, { current, bases: (await baseLike($, c.dir, 'origin', here, cache, keep)).bases })
       if (why) return DENY_INTEGRATION + ' Refused: ' + why + '.'
-      const into = c.merge && mode !== 'local' ? await mergeInto($, c, c.branch ?? here, here, cache) : null
+      const into = c.merge && mode !== 'local' ? await mergeInto($, c, c.branch ?? here, here, cache, tree) : null
       if (into) return DENY_INTEGRATION + ' Refused: ' + into + '.'
       continue
     }
     if (mode === 'local') return DENY_LOCAL
     if (c.kind === 'push') {
       const claims = []
-      const info = await pushInfo($, c, cwd, cache)
+      const tree = await workerTree($, ctx)
+      const info = await pushInfo($, c, cwd, cache, tree)
       const why = judgePush(c.push, { ...info, claim: (n, current) => claims.push({ n, current }) })
       if (why) return DENY_PUSH + ' Refused: ' + why + '.'
       for (const { n, current } of claims) {
-        const other = c.push.lease ? await leaseOnto($, c, n, cwd, current, cache) : await othersBranch($, c, n, cwd, { current, guessed: info.guessed, made: ctx.made, cache })
+        const other = c.push.lease ? await leaseOnto($, c, n, cwd, current, cache) : await othersBranch($, c, n, cwd, { current, guessed: info.guessed, made: ctx.made, cache, tree })
         if (other) return DENY_PUSH + ' Refused: ' + other + '.'
       }
       const tag = await followedTags($, c, c.dir ?? cwd, c.push.headMoved ? null : info.current)

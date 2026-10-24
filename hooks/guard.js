@@ -68,7 +68,8 @@ export async function bashCall($, e, next) {
   const cwd = await $.session.cwd().catch(() => null)
   // Probing that throws is no answer: the command does not run unread.
   const seen = {}
-  const deny = await guardLine($, line, cwd, seen).catch(() => DENY_UNREAD)
+  const worker = !!Session.worker || !!splitName(Session.wireName ?? Session.selfName)
+  const deny = await guardLine($, line, cwd, seen, { worker }).catch(() => DENY_UNREAD)
   if (deny) return { deny }
   // A branch the push creates on the remote stays the run's own once the remote has it.
   const created = seen.made ?? []

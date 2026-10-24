@@ -434,8 +434,8 @@ describe('guard: worktree adds', () => {
 
 // A run in a session with no pane transport: the ownership list lives in memory.
 // git: per dir, the branch checked out (`current`), its remote URL and its main checkout (default /work/repo).
-type Repo = { current?: string; remote?: string; common?: string; pushurl?: string; upstream?: string; tracking?: string }
-const setup = (on: any, o: { profile?: unknown; repoConfig?: unknown; env?: Record<string, string>; files?: Record<string, string>; repos?: Record<string, Repo>; feat?: boolean; broken?: boolean; aliases?: Record<string, string>; aliasBroken?: boolean; pyFind?: Record<string, string>; hooksPath?: string; remoteHeads?: string[]; originHead?: string; followTags?: boolean; tags?: string[]; remoteTags?: string[]; localTags?: string[]; gitConfigFiles?: string } = {}) => {
+type Repo = { current?: string; remote?: string; common?: string; pushurl?: string; upstream?: string; tracking?: string; gitDir?: string }
+const setup = (on: any, o: { profile?: unknown; repoConfig?: unknown; env?: Record<string, string>; files?: Record<string, string>; repos?: Record<string, Repo>; feat?: boolean; broken?: boolean; aliases?: Record<string, string>; aliasBroken?: boolean; pyFind?: Record<string, string>; hooksPath?: string; remoteHeads?: string[]; originHead?: string; followTags?: boolean; tags?: string[]; remoteTags?: string[]; localTags?: string[]; gitConfigFiles?: string; cwd?: string } = {}) => {
   const seen: string[][] = []
   const ran: string[] = []
   const git = { made: false, committed: false, feat: false }
@@ -445,7 +445,7 @@ const setup = (on: any, o: { profile?: unknown; repoConfig?: unknown; env?: Reco
   if (o.profile) files['/h/.agentille/profile.json'] = JSON.stringify(o.profile)
   if (o.repoConfig) files['/work/repo/.agentille/config.json'] = JSON.stringify(o.repoConfig)
   on('env.get', async ($: any, e: any) => ({ value: ({ HOME: '/h', ...(o.env ?? {}) } as any)[e.name] }))
-  on('session.cwd', async () => ({ value: '/work/repo' }))
+  on('session.cwd', async () => ({ value: o.cwd ?? '/work/repo' }))
   on('session.start', async ($: any, e: any) => ({ cwd: e.cwd }))
   on('command.register', async () => ({ value: undefined }))
   on('tool.register', async ($: any, e: any) => ({ value: { tool: 'mcp__agentille__' + e.name } }))
@@ -528,6 +528,8 @@ const setup = (on: any, o: { profile?: unknown; repoConfig?: unknown; env?: Reco
     // The hooks folder git runs: core.hooksPath when the test sets one, else the repo's .git/hooks.
     if (a.includes('--git-path hooks')) return out((o.hooksPath ?? '/work/repo/.git/hooks') + '\n')
     if (a.includes('rev-parse --path-format=absolute --git-common-dir') && repos[dir]?.common) return out(repos[dir].common + '\n')
+    // The checkout's own git dir: a linked worktree's lives under the main checkout's .git/worktrees.
+    if (a.endsWith('rev-parse --path-format=absolute --git-dir')) return out((repos[dir]?.gitDir ?? (dir === '/work/repo' ? '/work/repo/.git' : '')) + '\n', repos[dir]?.gitDir || dir === '/work/repo' ? 0 : 128)
     if (a.includes('symbolic-ref')) return out('', 1)
     if (a.includes('branch --merged')) return out('agt/other\n' + (git.made ? 'agt/x\n' : ''))
     if (a === 'git -C /work/repo rev-parse HEAD') return out(git.committed ? 'm2\n' : 'm1\n')
@@ -1683,6 +1685,26 @@ describe('guard: the run\'s own branches and the base-like ones', () => {
     expect((await bash($, 'git merge agt/x')).deny).toContain('the base branch develop')
     expect((await bash($, 'cd /work/repo-x && git push origin agt/x')).result).toBe('ok')
     expect(ran).toEqual(['cd /work/repo-x && git push origin agt/x'])
+  })
+
+  for (const originHead of ['main', undefined]) {
+    test('a pane worker on its feat/* slice in a linked worktree pushes it and merges the base into it' + (originHead ? '' : ', with no origin/HEAD'), async ($, on) => {
+      const slice = { current: 'feat/slug', gitDir: '/work/repo/.git/worktrees/repo-slug', common: '/work/repo/.git' }
+      const { ran } = setup(on, { env: { AGENTILLE_WORKER: 'executor:sonnet:medium' }, cwd: '/work/repo-slug', profile: { integration: 'pr' }, originHead, repos: { '/work/repo-slug': slice }, remoteHeads: ['main', 'feat/slug'] })
+      await boot($)
+      expect((await bash($, 'git push origin feat/slug')).result).toBe('ok')
+      expect((await bash($, 'git merge main')).result).toBe('ok')
+      expect((await bash($, 'git push origin HEAD:main')).deny).toContain('git push to main')
+      expect(ran).toEqual(['git push origin feat/slug', 'git merge main'])
+    })
+  }
+
+  test('a pane worker at the main checkout gains nothing: the person\'s feat/big there is not its slice', async ($, on) => {
+    const { ran } = setup(on, { env: { AGENTILLE_WORKER: 'executor:sonnet:medium' }, profile: { integration: 'pr' }, originHead: 'main', repos: { '/work/repo': { current: 'feat/big' } }, remoteHeads: ['main', 'feat/big'] })
+    await boot($)
+    expect((await bash($, 'git push origin feat/big')).deny).toContain('a branch the remote already has that this run did not make')
+    expect((await bash($, 'git merge agt/x')).deny).toContain('a merge into feat/big')
+    expect(ran).toEqual([])
   })
 
   test('the upstream of the branch checked out is base-like when it names another branch', async ($, on) => {

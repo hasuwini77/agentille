@@ -24,6 +24,7 @@ const sh = (cmd, cwd = T) => {
   return r.stdout.trim()
 }
 const APP = T + '/app'
+let CWD = APP // the session's folder: a worker pane's case moves it into its slice worktree
 const refOf = (bare, ref) => spawnSync('git', ['--git-dir=' + T + '/' + bare, 'rev-parse', '-q', '--verify', ref], { env, encoding: 'utf8' }).stdout.trim() || null
 
 // A fresh scratch world per case: origin.git (main), prod.git (empty, someone else's), app on agt/x one commit ahead.
@@ -53,13 +54,13 @@ const $ = {
       return { kind: s.isDirectory() ? 'dir' : s.isFile() ? 'file' : 'other', size: s.size, mtimeMs: s.mtimeMs, isLink: l.isSymbolicLink(), ...(realPath ? { realPath } : {}) }
     },
   },
-  session: { cwd: async () => APP },
+  session: { cwd: async () => CWD },
   env: { get: async () => null },
   clock: { now: async () => Date.now() },
   ui: { toast: () => {}, invalidate: () => {} },
   store: { get: async () => null, set: async () => {} },
 }
-const next = async (e) => { const r = spawnSync('bash', ['-c', e.command], { cwd: APP, env, encoding: 'utf8' }); return { result: (r.stdout + r.stderr).trim(), exit: r.status } }
+const next = async (e) => { const r = spawnSync('bash', ['-c', e.command], { cwd: CWD, env, encoding: 'utf8' }); return { result: (r.stdout + r.stderr).trim(), exit: r.status } }
 
 seed(Profile, { home: HOME })
 seed(Spawn, { transport: 'none' })
@@ -675,6 +676,40 @@ try {
     } finally {
       fs.writeFileSync(T + '/gitconfig', glob)
       fs.rmSync(T + '/ghooks', { recursive: true, force: true })
+    }
+  }
+  {
+    // A pane worker on a fix round: its feat/* slice is already on the remote and it has no typed /agt and none of
+    // the lead's records. The branch checked out in its own linked worktree is its slice: pushed, and the base merged
+    // into it, with or without origin/HEAD. The base itself, and the person's branch at the main checkout, are not.
+    const w = world()
+    const WT = T + '/w/app-slug'
+    sh('git worktree add -q -b feat/slug ' + WT + ' main && git -C ' + WT + ' push -q origin feat/slug', APP)
+    seed(Session, { worker: { agent: 'executor' } })
+    CWD = WT
+    try {
+      sh('echo s > s && git add s && git commit -qm s', WT)
+      const p = await run('git push -q origin feat/slug')
+      check('worker: push of its feat/slug slice (on the remote already): allowed and landed', !p?.deny && refOf('origin.git', 'feat/slug') === sh('git rev-parse HEAD', WT), JSON.stringify(p))
+      sh('echo m > m && git add m && git commit -qm m', APP)
+      const m = await run('git merge -q --no-edit agt/x')
+      check('worker: a merge into its own slice runs', !m?.deny && m.exit === 0, JSON.stringify(m))
+      sh('git remote set-head origin -d', WT)
+      const q = await run('git push -q origin feat/slug')
+      check('worker, no origin/HEAD: its slice is still its own, allowed and landed', !q?.deny && refOf('origin.git', 'feat/slug') === sh('git rev-parse HEAD', WT), JSON.stringify(q))
+      const b = await run('git push -q origin HEAD:main')
+      check('worker: a push of its slice onto main: denied', b?.deny?.includes('git push to main'), JSON.stringify(b))
+      check('... origin/main unchanged', refOf('origin.git', 'main') === w.main)
+      CWD = APP
+      sh('git remote set-head origin main && git checkout -q -b feat/big main && echo f > f && git add f && git commit -qm f && git push -q origin feat/big && echo g > g && git add g && git commit -qm g', APP)
+      const big = refOf('origin.git', 'feat/big')
+      const o = await run('git push -q origin feat/big')
+      check('worker at the main checkout: the person\'s feat/big is not its slice, denied', o?.deny?.includes('did not make'), JSON.stringify(o))
+      check('... origin feat/big unchanged', refOf('origin.git', 'feat/big') === big)
+    } finally {
+      CWD = APP
+      seed(Session, { worker: null })
+      sh('git checkout -q agt/x', APP)
     }
   }
   {

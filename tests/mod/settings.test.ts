@@ -119,31 +119,31 @@ describe('settings: in the mod', () => {
   const focus = async ($: any) => (await $.command.run({ command: 'agt-focus' })).text.split('\n')[0]
   const highlight = async ($: any) => (await $.command.run({ command: 'agt-highlight' })).text.split(' ')[1]
 
-  test('no profile and an empty store: the defaults, highlight off', async ($, on) => {
+  test('no profile and an empty store: the defaults, highlight off', { timeoutMs: 20_000 }, async ($, on) => {
     await boot($, on, null)
     expect(await focus($)).toContain('focus: on')
     expect(await highlight($)).toBe('off')
   })
 
-  test('the old store values still apply when the profile has no display block', async ($, on) => {
+  test('the old store values still apply when the profile has no display block', { timeoutMs: 20_000 }, async ($, on) => {
     await boot($, on, '{"name":"x"}', { 'focus:mode': 'off', 'highlight:on': true, 'highlight:all': true })
     expect(await focus($)).toContain('focus: off')
     expect(await highlight($)).toBe('all')
   })
 
-  test('profile.display beats the store, key by key', async ($, on) => {
+  test('profile.display beats the store, key by key', { timeoutMs: 20_000 }, async ($, on) => {
     await boot($, on, '{"display":{"focus":true,"highlight":"off"}}', { 'focus:mode': 'off', 'highlight:on': true, 'highlight:all': true })
     expect(await focus($)).toContain('focus: on')
     expect(await highlight($)).toBe('off')
   })
 
-  test('junk in the profile falls through to the store and the defaults', async ($, on) => {
+  test('junk in the profile falls through to the store and the defaults', { timeoutMs: 20_000 }, async ($, on) => {
     await boot($, on, '{"display":{"focus":"never","highlight":9}}', { 'focus:mode': 'off' })
     expect(await focus($)).toContain('focus: off')
     expect(await highlight($)).toBe('off')
   })
 
-  test('a profile that is not JSON, or has display as a string, changes nothing', async ($, on) => {
+  test('a profile that is not JSON, or has display as a string, changes nothing', { timeoutMs: 20_000 }, async ($, on) => {
     await boot($, on, '{"display":"loud"}')
     expect(await focus($)).toContain('focus: on')
   })

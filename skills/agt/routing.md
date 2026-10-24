@@ -16,7 +16,9 @@ First match wins; no model call.
 7. **refactor** — "refactor", "rename", "move", "extract", "split", "consolidate", "deduplicate" (whole words: "move" never matches "remove")
 8. **feature** — default
 
-Multipliers: **hasUI** (UI/UX/styling/component/page/screen, or a `.tsx/.css/.scss` file named) adds the design-reviewer, and the ui-prototyper on `design`/`feature`. **hasMulti** ("and", "also", "plus" joining verbs, or ≥3 deliverables) adds the planner.
+Multipliers: **hasUI** (UI/UX/styling/component/page/screen, or a `.tsx/.css/.scss` file named) adds the design-reviewer, and the ui-prototyper on `design`/`feature`, past the UI threshold below. **hasMulti** ("and", "also", "plus" joining verbs, or ≥3 deliverables) adds the planner.
+
+**UI threshold** (the cheap tier for small UI work). A `feature` or `bugfix` slice that is `size=small` and `risk=none` and changes one screen gets one executor plus the Sonnet code-reviewer: hasUI adds neither the ui-prototyper nor the design-reviewer. They join when the UI work spans more than one screen (a new page, a flow, a shared component used across screens), when the slice is `size=large`, or when the person asks for a design review or a prototype. The test is per slice, so a `medium` run of small one-screen slices stays on this tier. The `design` category is that ask, so it keeps both at any size, as does a `review` of UI code.
 
 ## Risk words
 
@@ -37,8 +39,8 @@ Only when the level table falls through. One inline Haiku call, never the planne
 |---|---|---|---|---|---|---|---|
 | planning | ✓ | ✓ | — | — | — | — | — |
 | research | ✓ (research prefix: comparison table, no code) | — | — | — | — | — | — |
-| feature | if hasMulti | if planner ran | if hasUI | ✓ (≤3 parallel) | ✓ | if hasUI | if auth/money/data |
-| bugfix | if ≥2 files | if planner ran | — | ✓ (debug discipline) | ✓ | if hasUI | — |
+| feature | if hasMulti | if planner ran | if hasUI, past the UI threshold | ✓ (≤3 parallel) | ✓ | if hasUI, past the UI threshold | if auth/money/data |
+| bugfix | if ≥2 files | if planner ran | — | ✓ (debug discipline) | ✓ | if hasUI, past the UI threshold | — |
 | refactor | if hasMulti | if planner ran | — | ✓ | ✓ (skip iff pure rename/move) | — | — |
 | design | — | — | ✓ | ✓ | if logic changed | ✓ | — |
 | debug | — | — | — | ✓ (debug loop) | after a fix lands | — | — |
@@ -51,7 +53,7 @@ Only when the level table falls through. One inline Haiku call, never the planne
 - Debug: attempts, the limit and the `mode=diagnose` planner after 2 failed attempts are `factory.md` → "Fix rounds".
 - Squads add payments / SEO / perf reviewers to the review step when the diff touches their domain (`squads.md`). Formations reshape the workers (`formations.md`).
 - Every reviewer column ticked for a slice runs **at once**: one message, parallel background calls (`SKILL.md` → "The contract" step 8).
-- Never more than 3 executors at once; batch the rest in waves.
+- Never more than 3 executors at once; batch the rest in waves. The mod counts a run's working executor subagents and open executor panes when an executor subagent is dispatched, and flags a 4th (`⚑ run <id>: 4th executor at once; the roster says 3` on the band, one toast, a `cap` field on that line of `routing.jsonl`); it never refuses the dispatch.
 
 ## Default routing
 
@@ -64,7 +66,7 @@ Model · effort per role. Size, risk and mode come from the dispatch header; the
 | ui-prototyper | opus · high | opus · high | — | sonnet · medium |
 | executor | sonnet · medium | sonnet · high | sonnet · high | sonnet · medium |
 | code-reviewer | sonnet · medium | opus · high | opus · high | sonnet · medium |
-| design-reviewer | opus · high | opus · high | opus · high | opus · high (never downgraded) |
+| design-reviewer | opus · high | opus · high | opus · high | sonnet · high |
 | security-reviewer | opus · high | opus · high | opus · max | sonnet · high |
 | payments-reviewer | opus · high | opus · high | opus · max | sonnet · high |
 | seo-reviewer | sonnet · medium | sonnet · high | — | sonnet · low |
@@ -84,7 +86,7 @@ Dispatch with aliases (`fable`/`opus`/`sonnet`/`haiku`), never pinned IDs. A pan
 ## Hard rules
 
 - **Never use Haiku for the executor**, and never change its model (effort only). Haiku is for Stage 2 classify and read-only scouts (`SKILL.md` → "The contract") only.
-- **Never downgrade the design-reviewer.**
+- **Never downgrade the design-reviewer** below opus · high, except under `thinkingDepth=quick`, where it runs sonnet · high like the other reviewers.
 - **Declare `model:` on every dispatch** (fallback when the mod is off).
 
 ## Escalation ladder
@@ -94,6 +96,10 @@ Evidence is observed by the mod, not claimed by the lead.
 - **Plan:** 1st REVISE → next planner runs opus · max. 2nd REVISE → next planner is a Fable candidate.
 - **Fix** (attempts per `slice=`, as `factory.md` → "Fix rounds" defines them): attempt 2 → executor effort high; attempt 3, only after a diagnose planner → max. One slice's rounds never raise another's effort. A `mode=diagnose` planner after 2 failed attempts → Fable candidate.
 - **Fable gate** (all must pass, else opus · max with the reason logged): candidate · `profile.routing.autoFable` is `true` (default `false`: Fable costs about twice Opus, so the ladder is opt-in) · fewer than `maxFablePerRun` (default 1) Fable spawns this run · weekly plan usage below `fableWeeklyCeiling` (default 60%).
+
+### Cost ceiling
+
+`profile.routing.maxRunUsd` (default `null`, off; any positive number turns it on) caps a run's estimated spend in US dollars. The mod estimates it from the run's agent tokens at API list prices per million tokens (input / output / cache read): Fable 10 / 50 / 0.25, Opus 4 / 20 / 0.20, Sonnet 2 / 10 / 0.20, Haiku 0.10 / 0.50 / 0.01, and a model it cannot name at Opus. It is an estimate, not a bill: a plan subscription is not billed per token, cache writes count as plain input, and pane workers report no tokens to the lead. Once the estimate reaches the ceiling, every later dispatch of the planner, plan-reviewer and code-, security-, payments-, SEO- and perf-reviewer that the table or the ladder puts on Opus (or a ladder Fable) runs Sonnet at the same effort. Its `routing.jsonl` line carries `"capped": true`, and the mod shows one toast and one band `⚑` per run. The executor, design-reviewer, ui-prototyper and adversary keep the table, and a typed `--fable` holds. When the run's log has a `capped` line, the card's `⚑` line says `maxRunUsd reached: later reviews ran Sonnet`.
 
 ### Advisor
 

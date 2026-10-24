@@ -1,5 +1,5 @@
 import { describe, expect, mock, test } from 'claude-code/testing'
-import { AGENT_SILENT_MS, AGT_GRACE_TYPED, AGT_INFLIGHT_MAX_MS, PANE_REST_MS, DEFAULTS, asksSessions, decide, demoteHeaderText, formationOf, ladderFixes, mentionsCodex, mentionsFable, parseHeader, proveHeader, roleOf, runInFlight, typedFable, verdictOf } from '../../hooks/routing.js'
+import { AGENT_SILENT_MS, AGT_GRACE_TYPED, AGT_INFLIGHT_MAX_MS, PANE_REST_MS, DEFAULTS, MAX_EXECUTORS_AT_ONCE, PRICES, asksSessions, decide, estimateRunUsd, executorCapFlag, executorsWorking, ordinal, demoteHeaderText, formationOf, ladderFixes, mentionsCodex, mentionsFable, parseHeader, proveHeader, roleOf, runInFlight, typedFable, verdictOf } from '../../hooks/routing.js'
 import { pieceOf } from '../../hooks/links.js'
 
 const fresh = () => ({ revise: 0, fixes: 0, fable: 0 })
@@ -49,7 +49,15 @@ describe('policy', () => {
     expect(decide({ role: 'code-reviewer', hdr: { size: 'large' }, run: fresh(), settings: S })).toMatchObject({ model: 'opus', effort: 'high' })
     expect(decide({ role: 'security-reviewer', hdr: { risk: 'money' }, run: fresh(), settings: S })).toMatchObject({ model: 'opus', effort: 'max' })
     expect(decide({ role: 'planner', hdr: {}, run: fresh(), depth: 'quick', settings: S })).toMatchObject({ model: 'sonnet', effort: 'medium' })
-    expect(decide({ role: 'design-reviewer', hdr: {}, run: fresh(), depth: 'quick', settings: S })).toMatchObject({ model: 'opus', effort: 'high' })
+  })
+
+  test('design-reviewer: sonnet · high under quick, like the other reviewers; opus · high under complex-only and always', async () => {
+    expect(decide({ role: 'design-reviewer', hdr: {}, run: fresh(), depth: 'quick', settings: S })).toMatchObject({ model: 'sonnet', effort: 'high' })
+    expect(decide({ role: 'design-reviewer', hdr: { size: 'large', risk: 'auth' }, run: fresh(), depth: 'quick', settings: S })).toMatchObject({ model: 'sonnet', effort: 'high' })
+    for (const depth of ['complex-only', 'always', null]) {
+      expect(decide({ role: 'design-reviewer', hdr: {}, run: fresh(), depth, settings: S })).toMatchObject({ model: 'opus', effort: 'high' })
+      expect(decide({ role: 'design-reviewer', hdr: { size: 'large' }, run: fresh(), depth, settings: S })).toMatchObject({ model: 'opus', effort: 'high' })
+    }
   })
 
   test('executor never changes model, only effort', async () => {
@@ -268,6 +276,182 @@ describe('workflow agents: runs, toast, deny', () => {
     const routing = (await $.command.run({ command: 'agt-info', args: 'routing' })).text
     expect(routing).toContain('planner → claude-fable-5')
     expect(routing).not.toContain('table says')
+  })
+})
+
+describe('executor cap: at most 3 at once', () => {
+  test('counts working executors of one run, subagents heard from lately and open executor panes', async () => {
+    const now = 5_000_000
+    const a = (o: Record<string, unknown>) => ({ run: 'r1', role: 'executor', state: 'working', start: now, heard: now, ...o })
+    const agents = new Map(Object.entries({
+      x1: a({}),
+      x2: a({ state: 'done' }),
+      x3: a({ run: 'r2' }),
+      x4: a({ role: 'code-reviewer' }),
+      x5: a({ heard: now - AGENT_SILENT_MS }), // cancelled: never completes, never counts
+    }))
+    const routes = [{ run: 'r1', agent: 'executor', end: null }, { run: 'r1', agent: 'executor', end: now }, { run: 'r1', agent: 'adversary', end: null }]
+    expect(executorsWorking(agents, routes, 'r1', now)).toBe(2)
+    expect(executorsWorking(new Map(), [], 'r1', now)).toBe(0)
+  })
+
+  test('the flag names the run and the count, only past the cap', async () => {
+    expect(MAX_EXECUTORS_AT_ONCE).toBe(3)
+    expect(executorCapFlag('r1', 3)).toBe(null)
+    expect(executorCapFlag('r1', 4)).toBe('run r1: 4th executor at once; the roster says 3')
+    expect(executorCapFlag('r1', 5)).toContain('5th executor')
+    expect([1, 2, 3, 4, 11, 12, 13, 21, 22, 23].map(ordinal)).toEqual(['1st', '2nd', '3rd', '4th', '11th', '12th', '13th', '21st', '22nd', '23rd'])
+  })
+
+  const boot = (on: any) => {
+    const toasts: string[] = []
+    const writes: Record<string, string> = {}
+    let n = 0
+    on('env.get', async ($: any, e: any) => ({ value: ({ HOME: '/h' } as any)[e.name] }))
+    on('session.start', async ($: any, e: any) => ({ cwd: e.cwd }))
+    on('command.register', async () => ({ value: undefined }))
+    on('fs.read', async () => ({ deny: 'no profile' }))
+    on('fs.write', async ($: any, e: any) => { writes[e.path] = e.text; return { value: undefined } })
+    on('store.get', async () => ({ value: null }))
+    on('store.set', async () => ({ value: undefined }))
+    on('ui.render', async () => ({ type: 'engine', ref: 0 }) as never)
+    on('ui.toast', async ($: any, e: any) => { toasts.push(e.text); return { value: undefined } })
+    on('turn.complete', async ($: any, e: any) => ({ text: e.answer }))
+    on('agent.spawn', async ($: any, e: any) => ({ model: e.model ?? 'sonnet', agentId: 'e' + n++ }))
+    mock.clock(on, { now: Date.now() })
+    return { toasts, writes }
+  }
+  const exec = ($: any, run: string, slice: string) => $.agent.spawn({ prompt: '[agt run=' + run + ' size=small mode=build slice=' + slice + ']\nbuild', subagentType: 'agentille:agentille-executor', model: 'sonnet' })
+  const band = ($: any) => $.ui.mount({ plugin: 'agentille', surface: 'terminal', component: 'AbovePrompt', props: { hasSurvey: false, isWorking: true, maxRows: 10, bodyColumns: 120 } as never })
+  const capToasts = (t: string[]) => t.filter((x) => x.includes('executor at once'))
+
+  test('a 4th executor of one run is dispatched as asked, with a toast, a band flag and a cap line in the routing log', async ($, on) => {
+    const { toasts, writes } = boot(on)
+    await $.session.start({ cwd: '/w', surface: null, isInteractive: false })
+    for (const s of ['a', 'b', 'c']) expect((await exec($, 'cap1', s)).model).toBe('sonnet')
+    expect(capToasts(toasts)).toEqual([])
+    const res = await exec($, 'cap1', 'd')
+    expect(res.agentId).toBe('e3') // never refused
+    expect(capToasts(toasts)).toEqual(['agt ⚑ run cap1: 4th executor at once; the roster says 3'])
+    const log = writes['/h/.agentille/state/run-cap1/routing.jsonl'].trim().split('\n').map((l) => JSON.parse(l))
+    expect(log.map((r) => r.cap ?? null)).toEqual([null, null, null, 'run cap1: 4th executor at once; the roster says 3'])
+    const ui = await band($)
+    expect(await ui.find({ type: 'Text', text: /⚑ run cap1: 4th executor at once/ })).toBeDefined()
+    await ui.unmount()
+  })
+
+  test('a finished executor frees its place, and another run\'s executors never count', async ($, on) => {
+    const { toasts } = boot(on)
+    await $.session.start({ cwd: '/w', surface: null, isInteractive: false })
+    for (const s of ['a', 'b', 'c']) await exec($, 'cap2', s)
+    await $.turn.complete({ agentId: 'e0', answer: 'done', durationMs: 10, isAborted: false, turnId: 'te0', reason: 'answer' } as never)
+    await exec($, 'cap2', 'd') // three at once again
+    await exec($, 'cap3', 'a') // another run
+    expect(capToasts(toasts)).toEqual([])
+  })
+})
+
+describe('maxRunUsd: a per-run cost ceiling', () => {
+  const C = { ...DEFAULTS, maxRunUsd: 5 }
+  const over = { ...fresh(), usd: 5 }
+  const under = { ...fresh(), usd: 4.99 }
+
+  test('the estimate prices each agent of the run by its model, cache reads included', async () => {
+    const agents = new Map(Object.entries({
+      p: { run: 'r1', model: 'claude-opus-5-5', input: 1_000_000, output: 100_000, cacheRead: 1_000_000 }, // 4 + 2 + 0.2
+      x: { run: 'r1', model: 'sonnet', input: 500_000, output: 0, cacheRead: 0 }, // 1
+      h: { run: 'r1', model: 'claude-haiku-5-5', input: 1_000_000, output: 0, cacheRead: 0 }, // 0.1
+      w: { run: 'r9', fileRun: 'r1', model: 'claude-fable-5-1', input: 0, output: 10_000, cacheRead: 0 }, // 0.5, filed under r1
+      o: { run: 'r2', model: 'opus', input: 9_000_000, output: 0, cacheRead: 0 }, // another run
+      u: { run: 'r1', model: 'inherit', input: 250_000, output: 0, cacheRead: 0 }, // unknown model: priced as Opus, 1
+    }))
+    expect(Math.round(estimateRunUsd(agents, 'r1') * 1e6) / 1e6).toBe(8.8)
+    expect(estimateRunUsd(new Map(), 'r1')).toBe(0)
+    expect(PRICES.sonnet.input).toBeLessThan(PRICES.opus.input)
+  })
+
+  test('off by default, and anything but a positive number is off', async () => {
+    expect(DEFAULTS.maxRunUsd).toBe(null)
+    for (const maxRunUsd of [null, 0, -1, '5', Infinity, NaN]) {
+      expect(decide({ role: 'code-reviewer', hdr: { size: 'large' }, run: { ...fresh(), usd: 1e6 }, settings: { ...DEFAULTS, maxRunUsd } as never })).toMatchObject({ model: 'opus', reason: 'table' })
+    }
+  })
+
+  test('below the ceiling nothing changes; at or past it an Opus reviewer or planner runs Sonnet at the same effort', async () => {
+    expect(decide({ role: 'code-reviewer', hdr: { size: 'large' }, run: under, settings: C })).toEqual({ model: 'opus', effort: 'high', reason: 'table', fable: false })
+    expect(decide({ role: 'code-reviewer', hdr: { size: 'large' }, run: over, settings: C })).toEqual({ model: 'sonnet', effort: 'high', reason: 'run ~$5.00 ≥ maxRunUsd $5.00', fable: false, capped: true })
+    expect(decide({ role: 'security-reviewer', hdr: { risk: 'money' }, run: over, settings: C })).toMatchObject({ model: 'sonnet', effort: 'max', capped: true })
+    expect(decide({ role: 'planner', hdr: {}, run: { ...over, revise: 1 }, settings: C })).toMatchObject({ model: 'sonnet', effort: 'max', reason: 'plan REVISE ×1 · run ~$5.00 ≥ maxRunUsd $5.00' })
+    expect(decide({ role: 'code-reviewer', hdr: {}, run: over, settings: C })).toMatchObject({ model: 'sonnet', reason: 'table' }) // already Sonnet: untouched
+  })
+
+  test('the executor, design-reviewer, ui-prototyper and adversary keep the table', async () => {
+    expect(decide({ role: 'executor', hdr: { size: 'large' }, run: over, settings: C })).toMatchObject({ model: 'sonnet', effort: 'high', reason: 'table' })
+    expect(decide({ role: 'design-reviewer', hdr: {}, run: over, settings: C })).toMatchObject({ model: 'opus', reason: 'table' })
+    expect(decide({ role: 'ui-prototyper', hdr: {}, run: over, settings: C })).toMatchObject({ model: 'opus', reason: 'table' })
+    expect(decide({ role: 'adversary', hdr: { risk: 'auth' }, run: over, settings: C })).toMatchObject({ model: 'opus', reason: 'table' })
+  })
+
+  test('a ladder Fable past the ceiling runs Sonnet and is not counted; a typed --fable is the person\'s and holds', async () => {
+    const d = decide({ role: 'planner', hdr: {}, run: { ...over, revise: 2 }, settings: { ...C, autoFable: true } })
+    expect(d).toMatchObject({ model: 'sonnet', fable: false, capped: true })
+    expect(decide({ role: 'planner', hdr: { fable: 'forced' }, run: over, settings: C })).toEqual({ model: 'fable', effort: 'high', reason: '--fable typed', fable: true })
+  })
+
+  const boot = (on: any, routing: object) => {
+    const toasts: string[] = []
+    const writes: Record<string, string> = {}
+    const seen: string[] = []
+    let n = 0
+    on('env.get', async ($: any, e: any) => ({ value: ({ HOME: '/h' } as any)[e.name] }))
+    on('session.start', async ($: any, e: any) => ({ cwd: e.cwd }))
+    on('command.register', async () => ({ value: undefined }))
+    on('fs.read', async ($: any, e: any) => e.path === '/h/.agentille/profile.json' ? { value: JSON.stringify({ routing }) } : { deny: 'ENOENT' })
+    on('fs.write', async ($: any, e: any) => { writes[e.path] = e.text; return { value: undefined } })
+    on('store.get', async () => ({ value: null }))
+    on('store.set', async () => ({ value: undefined }))
+    on('ui.render', async () => ({ type: 'engine', ref: 0 }) as never)
+    on('ui.toast', async ($: any, e: any) => { toasts.push(e.text); return { value: undefined } })
+    on('turn.complete', async ($: any, e: any) => ({ text: e.answer }))
+    on('agent.spawn', async ($: any, e: any) => { seen.push(e.model); return { model: e.model ?? 'sonnet', agentId: 'c' + n++ } })
+    mock.clock(on, { now: Date.now() })
+    return { toasts, writes, seen }
+  }
+  const review = ($: any, run: string) => $.agent.spawn({ prompt: '[agt run=' + run + ' size=large mode=review]\nreview', subagentType: 'agentille:agentille-code-reviewer', model: 'opus' })
+  const plan = ($: any, run: string) => $.agent.spawn({ prompt: '[agt run=' + run + ' size=small mode=build]\nplan', subagentType: 'agentille:agentille-planner', model: 'opus' })
+  const spend = ($: any, agentId: string, output: number) => $.turn.complete({ agentId, answer: 'ok', durationMs: 10, isAborted: false, turnId: 't' + agentId, reason: 'answer', usage: { input_tokens: 0, output_tokens: output } } as never)
+  const ceilingToasts = (t: string[]) => t.filter((x) => x.includes('maxRunUsd'))
+
+  test('in the mod: below the ceiling an opus · high code-reviewer stays Opus, past it the dispatch is rewritten to Sonnet with one toast per run', async ($, on) => {
+    const { toasts, writes, seen } = boot(on, { maxRunUsd: 1 })
+    await $.session.start({ cwd: '/w', surface: null, isInteractive: false })
+    await plan($, 'usd1') // c0 on opus
+    await spend($, 'c0', 25_000) // 25k Opus output = $0.50
+    await review($, 'usd1') // c1: under $1, the table holds
+    expect(seen).toEqual(['opus', 'opus'])
+    await spend($, 'c1', 25_000) // now $1.00
+    await review($, 'usd1') // c2: rewritten
+    await review($, 'usd1') // c3: rewritten, no second toast
+    expect(seen.slice(2)).toEqual(['sonnet', 'sonnet'])
+    expect(ceilingToasts(toasts)).toEqual(['agt ⚑ run usd1: ~$1.00 spent, past maxRunUsd $1.00; Opus reviewers and planners now run Sonnet'])
+    expect(toasts.filter((t) => t.startsWith('agt ↑'))).toEqual([])
+    const log = writes['/h/.agentille/state/run-usd1/routing.jsonl'].trim().split('\n').map((l) => JSON.parse(l))
+    expect(log.map((r) => r.capped ?? false)).toEqual([false, false, true, true])
+    expect(log[2].reason).toBe('run ~$1.00 ≥ maxRunUsd $1.00')
+    expect((await $.command.run({ command: 'agt-info', args: 'ledger' })).text).toContain('estimate ~$1.00 of maxRunUsd $1.00')
+    await review($, 'usd2') // another run starts at $0
+    expect(seen[4]).toBe('opus')
+  })
+
+  test('in the mod: with no ceiling set nothing is estimated or rewritten', async ($, on) => {
+    const { toasts, seen } = boot(on, {})
+    await $.session.start({ cwd: '/w', surface: null, isInteractive: false })
+    await plan($, 'usd3')
+    await spend($, 'c0', 10_000_000)
+    await review($, 'usd3')
+    expect(seen).toEqual(['opus', 'opus'])
+    expect(ceilingToasts(toasts)).toEqual([])
+    expect((await $.command.run({ command: 'agt-info', args: 'ledger' })).text).not.toContain('estimate')
   })
 })
 

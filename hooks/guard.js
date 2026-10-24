@@ -19,7 +19,7 @@
 // or curl is refused, and a script file, a sourced file or a make target is read first and refused when it pushes,
 // merges, tags or releases. Probing that fails denies the command: the guard never lets a line through unread.
 
-import { S, Profile, Runs, Spawn } from './state.js'
+import { S, Profile, Runs, Spawn, Proofs } from './state.js'
 import { parseWorktrees } from './clean.js'
 import { PROBE, SAFE_RUN, SPAWN_ROLE, splitName, paneKey } from './panes.js'
 import { ROLES } from './routing.js'
@@ -1059,7 +1059,7 @@ export function fromRun(e, at) {
   if (S.worker) return S.worker.agent !== SPAWN_ROLE
   const self = splitName(S.wireName ?? S.selfName)
   if (self) return self.role !== SPAWN_ROLE
-  return !!S.agtTurn || runHeld() || inFlight(flight, at)
+  return !!Proofs.agtTurn || runHeld() || inFlight(flight, at)
 }
 
 // ── worktree ownership ───────────────────────────────────────────────────────

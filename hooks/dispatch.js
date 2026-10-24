@@ -1,7 +1,7 @@
 // agentille run bookkeeping: per-run counters, the routing log and ledger under ~/.agentille/state/run-<id>/,
 // each subagent's raw report, and the Agents section the mod adds to a finished report.md.
 
-import { S, Profile, Panes } from './state.js'
+import { S, Profile, Panes, Proofs } from './state.js'
 import { makeStore } from './store.js'
 import { reportRun, reportTail } from './drawing.js'
 import { pieceOf, party, taskLine } from './links.js'
@@ -140,7 +140,7 @@ export async function dispatchAgent($, e, next) {
     return res
   }
 
-  const proof = proveHeader(parseHeader(e.prompt) ?? {}, { fableTyped: S.fableTyped })
+  const proof = proveHeader(parseHeader(e.prompt) ?? {}, { fableTyped: Proofs.fableTyped })
   const hdr = proof.hdr
   if (proof.demoted) {
     e = { ...e, prompt: demoteHeaderText(e.prompt) }

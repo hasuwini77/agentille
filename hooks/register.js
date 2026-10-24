@@ -1,7 +1,7 @@
 // agentille mod entry: wires the hooks. The state is in state.js; routing, panes, sessions, the reaper, the
 // timers, the worker's wire, display settings, drawing and run files each have a module beside this one.
 
-import { S, ctx, isLead, Profile, Display, Runs, Spawn, Panes } from './state.js'
+import { S, ctx, isLead, Profile, Display, Runs, Spawn, Panes, Proofs } from './state.js'
 import { registerAutocomplete } from './autocomplete.js'
 import { toolLabel, runPhases } from './board.js'
 import { cleanText } from './clean.js'
@@ -287,7 +287,7 @@ export function register(on) {
   // A long /agt reply: an essentials card on top, the body dim with its tokens lit. The
   // decision is memoised per message id so a reply does not restyle when a later turn changes.
   on('ui.render', { component: 'AssistantMessage' }, async ($, e, next) => {
-    if (!litFor(litMemo, e.requestId, { on: Display.highlightOn, agtTurn: S.agtTurn || Display.highlightAll })) return next(e)
+    if (!litFor(litMemo, e.requestId, { on: Display.highlightOn, agtTurn: Proofs.agtTurn || Display.highlightAll })) return next(e)
     const final = e.surface === 'terminal' && !e.props?.isSummary ? answerPanel(e.requestId, e.props?.text) : null
     if (Display.rawIds.has(e.requestId)) return next(e)
     const h = final ? null : highlightFor(hlMemo, e.requestId, e.props?.text)

@@ -9,6 +9,7 @@ import fs from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { S, Profile } from '../../hooks/state.js'
 import { seed } from '../../hooks/store.js'
+import { agtTurnFromDispatch } from '../../hooks/proofs.js'
 import { bashCall } from '../../hooks/guard.js'
 import { cleanGit } from '../../hooks/reaper.js'
 
@@ -51,7 +52,7 @@ const next = async (e) => {
 }
 
 seed(Profile, { home })
-S.agtTurn = true // an /agt turn: the guard records this session's worktrees
+agtTurnFromDispatch() // an /agt turn: the guard records this session's worktrees
 
 const listed = () => sh(['git', '-C', repo, 'worktree', 'list', '--porcelain']).stdout
 const call = (command) => bashCall($, { tool: 'Bash', command }, next)

@@ -2,7 +2,7 @@
 // prompt.submit and turn.complete here; the per-turn proofs, the answer memo, the run-end tidy, the worker's
 // publish and a subagent's report and ledger all start from these two. The proofs themselves are proofs.js's.
 
-import { S, isLead, Wire, Display, Runs } from './state.js'
+import { S, isLead, Wire, Display, Runs, Proofs } from './state.js'
 import { runState, writeRunFile, writeReport, fileRunOf } from './dispatch.js'
 import { DECK, addFlag, clearFlags, setLastAnswer, mascotRest } from './display.js'
 import { flagOf, flagKey } from './focus.js'
@@ -22,12 +22,12 @@ export async function onPromptSubmit($, e) {
   const { typed, agt } = typedPrompt(e.text, e.origin, await moment($))
   if (!typed) return e
   agtTurnStart(agt)
-  if (S.agtTurn) clearFlags()   // a new run starts with a clean slate
-  if (S.agtTurn) await ensureTools($, 'panes')
+  if (Proofs.agtTurn) clearFlags()   // a new run starts with a clean slate
+  if (Proofs.agtTurn) await ensureTools($, 'panes')
   if (sessionsAllowed()) await ensureTools($, 'sessions')
-  if (S.agtTurn && Display.deckAuto) void $.ui.open({ id: DECK, title: 'agentille' })
-  if (S.rawTurn) return { ...e, context: [...(e.context ?? []), RAW_STYLE] }
-  if (S.shapedTurn) return { ...e, context: [...(e.context ?? []), ANSWER_STYLE] }
+  if (Proofs.agtTurn && Display.deckAuto) void $.ui.open({ id: DECK, title: 'agentille' })
+  if (Proofs.rawTurn) return { ...e, context: [...(e.context ?? []), RAW_STYLE] }
+  if (Proofs.shapedTurn) return { ...e, context: [...(e.context ?? []), ANSWER_STYLE] }
   return e
 }
 
@@ -36,10 +36,10 @@ export async function onTurnComplete($, e) {
   const a = e.agentId ? Runs.live.get(e.agentId) : undefined
   if (!e.agentId) S.leadTurn = false
   if (!e.agentId && e.reason === 'answer' && typeof e.answer === 'string') {
-    setLastAnswer({ text: e.answer, ms: e.durationMs, id: null, shaped: S.shapedTurn, raw: S.rawTurn })
-    if (Display.highlightOn && (S.agtTurn || Display.highlightAll)) $.ui.invalidate('ui.render')
+    setLastAnswer({ text: e.answer, ms: e.durationMs, id: null, shaped: Proofs.shapedTurn, raw: Proofs.rawTurn })
+    if (Display.highlightOn && (Proofs.agtTurn || Display.highlightAll)) $.ui.invalidate('ui.render')
     // A raw answer goes on the clipboard once; a later turn the person did not type is not raw.
-    if (S.rawTurn) {
+    if (Proofs.rawTurn) {
       rawDone()
       const r = await $.ui.copy({ text: e.answer.trim() }).catch(() => null)
       $.ui.toast(r?.isCopied ? 'Copied to the clipboard: paste it as is.' : 'agentille: could not copy the answer (' + (r?.reason ?? 'error') + ')')
@@ -48,7 +48,7 @@ export async function onTurnComplete($, e) {
     // what the run leaves behind is tidied (finished orphans, merged worktrees), and the typed proof
     // lapses: the next worker pane needs the next typed /agt. A run nobody typed /agt for tidies nothing.
     const card = isLead() && /^[✓✗]/.test(e.answer.trimStart())
-    if (card && S.agtTurn && S.agtTyped) {
+    if (card && Proofs.agtTurn && Proofs.agtTyped) {
       clearFlags()
       endRun()
       void cleanWorkspace($, { auto: true }).catch(() => {})

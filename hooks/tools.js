@@ -2,7 +2,7 @@
 // the mod holds (proofs.js: spawnAllowed, sessionsAllowed), the installed version and the transport before it touches a pane;
 // register.js only wires them to tool.call.
 
-import { S, isLead, Profile, Spawn, Panes, Sessions } from './state.js'
+import { S, isLead, Profile, Spawn, Panes, Sessions, Proofs } from './state.js'
 import { demoteToast, runState, writeRunFile, setLastRun, addRoute, addDecision } from './dispatch.js'
 import { pieceOf, party, taskLine } from './links.js'
 import { PROBE, newRunId, doneFile, paneKey, answerFile, tmuxKillArgv, placePlan, codexNote, herdrCloseArgv, paneRole, spawnToolInput, closeTarget, sessionName, sessionsToolInput, sessionsNote, droppedNote } from './panes.js'
@@ -33,7 +33,7 @@ export async function spawnPane($, e) {
   }
   const t = await transportOf($)
   if (t === 'none') return { deny: 'No pane transport here: run the slice as a subagent.' }
-  if (!S.agtTyped) return { deny: spawnAllowed() }
+  if (!Proofs.agtTyped) return { deny: spawnAllowed() }
   await pollNow($, t) // the panes as they are now: one that closed since the last poll no longer keeps the run going
   const at = await moment($)
   const why = spawnAllowed(null, flight, at)
@@ -44,7 +44,7 @@ export async function spawnPane($, e) {
   if (other) return { deny: other }
   // Codex is the person's pick, never the lead's: their /agt prompt or their newest typed prompt names it.
   const codex = a.vendor === 'codex'
-  if (codex && !mentionsCodex(S.agtPrompt) && !mentionsCodex(S.lastTyped)) return { deny: 'vendor "codex" runs only when the person asked for Codex in their prompt, so run this slice as a Claude pane.' }
+  if (codex && !mentionsCodex(Proofs.agtPrompt) && !mentionsCodex(Proofs.lastTyped)) return { deny: 'vendor "codex" runs only when the person asked for Codex in their prompt, so run this slice as a Claude pane.' }
   if (codex && t !== 'herdr') return { deny: 'Codex panes need Herdr; run this slice as a Claude pane or subagent.' }
   const proof = proveHeader(a.hdr, { fableTyped: fableProof() })
   if (proof.demoted) {
@@ -136,7 +136,7 @@ export async function openSessions($, e) {
   const t = await transportOf($)
   if (t === 'none') return { deny: 'No pane transport here: sessions open as panes only inside Herdr or tmux.' }
   if (!sessionsAllowed()) return { deny: 'open_sessions runs only on a turn where the person typed a request for sessions, panes or terminals.' }
-  const a = sessionsToolInput(e, { typed: S.lastTyped, fableTyped: mentionsFable(S.lastTyped) })
+  const a = sessionsToolInput(e, { typed: Proofs.lastTyped, fableTyped: mentionsFable(Proofs.lastTyped) })
   if (a.error) return { deny: a.error }
   if (a.kind === 'codex' && t !== 'herdr') return { deny: 'Codex sessions need Herdr.' }
   const cwd = a.cwd ?? (await $.session.cwd())

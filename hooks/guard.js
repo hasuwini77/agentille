@@ -1063,6 +1063,8 @@ export function fromRun(e, at) {
 }
 
 // ── worktree ownership ───────────────────────────────────────────────────────
+// Every worktree a run made is recorded: the one scripts/agt-worktree.sh prints (the documented way), or one a
+// literal `git worktree add` names. The cleaner and the .env sweep touch only those.
 // Literal `git worktree add <path> [-b <branch>] [<base>]` (either order), resolved against the dir it
 // runs in. Shell variables cannot be read here: such a path or branch comes back null. A fallback only;
 // the recorder diffs `git worktree list` around the call.
@@ -1133,6 +1135,76 @@ export function newTrees(before, after, line) {
   return after.slice(1).filter((t) => !had.has(t.path) && named(t))
 }
 
+// scripts/agt-worktree.sh, the one documented way a run makes a slice tree, prints `path=<abs>` then
+// `branch=<name>` on stdout. Bash's result is { stdout, stderr }; a hook's own answer may be plain text.
+export const WT_SCRIPT = /\bagt-worktree\.sh\b/
+export function scriptTrees(result) {
+  const text = typeof result === 'string' ? result : typeof result?.stdout === 'string' ? result.stdout : ''
+  const out = []
+  let path = null
+  for (const raw of text.split('\n')) {
+    const l = raw.replace(/\r$/, '')
+    const p = /^path=(\/.+)$/.exec(l)
+    if (p) {
+      path = p[1]
+      continue
+    }
+    const b = /^branch=(\S+)$/.exec(l)
+    if (b && path) out.push({ path, branch: b[1] })
+    path = null
+  }
+  return out
+}
+
+// The slugs the line hands the script: the first word after it that is not an option or an option's value.
+const SCRIPT_VALUE_OPTS = new Set(['--base', '--branch'])
+export function scriptSlugs(line) {
+  const out = new Set()
+  let list = []
+  try {
+    list = commands(line)
+  } catch {
+    return out
+  }
+  for (const c of list) {
+    const i = c.words.findIndex((w) => base(w) === 'agt-worktree.sh')
+    if (i < 0) continue
+    for (let j = i + 1; j < c.words.length; j++) {
+      const w = c.words[j]
+      if (SCRIPT_VALUE_OPTS.has(w)) j++
+      else if (!w.startsWith('-')) {
+        out.add(w)
+        break
+      }
+    }
+  }
+  return out
+}
+
+// What the script printed counts only where git agrees: a linked tree (never the main checkout) listed at that
+// exact path, on that branch, and named as the script names it, <main checkout>-<slug> for a slug the line
+// passed. Echoed text that names any other directory, another session's tree included, claims nothing.
+export function claimedTrees(printed, after, slugs) {
+  const main = base(after?.[0]?.path)
+  const linked = (after ?? []).slice(1).filter((t) => !t.prunable && main && [...slugs].some((s) => base(t.path) === main + '-' + s))
+  return printed.map((p) => linked.find((t) => t.path === p.path && t.branch === p.branch)).filter(Boolean)
+}
+
+// One record per path. A tree made again or re-attached keeps the fork point it was first recorded with (a fix
+// round re-attaching must not make the slice look like it has no commits of its own); `at` is refreshed.
+export function recordTrees(list, made) {
+  for (const m of made) {
+    const i = list.findIndex((r) => r.path === m.path)
+    if (i >= 0) {
+      const old = list[i]
+      list.splice(i, 1)
+      if (old.head && (old.branch === m.branch || !m.branch)) m.head = old.head
+    }
+    list.push(m)
+  }
+  return list
+}
+
 const ownedRec = (r) => r && typeof r.path === 'string' && r.path.startsWith('/') && (r.branch === null || typeof r.branch === 'string')
 export function parseOwned(text, now = Date.now()) {
   try {
@@ -1157,8 +1229,12 @@ async function ownFile($) {
   return worktreesFile(S.home, await leadPane($).catch(() => null))
 }
 
-export async function saveOwned($) {
+// Adds what a call made to the session's records and saves them. What an earlier session of the same lead (a
+// restart, a resume) saved is read in first, so a save never drops it and a re-attach keeps its fork point.
+export async function saveOwned($, made = []) {
   const file = await ownFile($)
+  if (file) for (const r of parseOwned(await $.fs.read(file).catch(() => ''))) if (!S.worktrees.some((m) => m.path === r.path)) S.worktrees.push(r)
+  recordTrees(S.worktrees, made)
   if (file) await $.fs.write(file, JSON.stringify(S.worktrees, null, 2) + '\n').catch(() => {})
 }
 
@@ -1210,22 +1286,22 @@ export async function bashCall($, e, next) {
   // Probing that throws is no answer: the command does not run unread.
   const deny = await guardLine($, line, cwd).catch(() => DENY_UNREAD)
   if (deny) return { deny }
-  if (!/\bworktree\s+add\b/.test(line)) return next(e)
+  const script = WT_SCRIPT.test(line)
+  if (!script && !/\bworktree\s+add\b/.test(line)) return next(e)
   const before = cwd ? await listTrees($, cwd) : null
   const res = await next(e)
+  if (res?.deny) return res
   const after = before ? await listTrees($, cwd) : null
   const at = Date.now()
   const run = runOf(e)
-  let made = after ? newTrees(before, after, line).map((t) => ({ path: t.path, branch: t.branch, head: t.head ?? null, run, at })) : []
+  const had = new Set((before ?? []).map((t) => t.path))
+  // A tree that was already there (a re-attach) has no fork point to read from the call: recordTrees keeps the
+  // first record's, else none.
+  const rec = (t, src) => ({ path: t.path, branch: t.branch, head: had.has(t.path) ? null : t.head ?? null, run, at, src })
+  let made = after ? newTrees(before, after, line).map((t) => rec(t, 'add')) : []
+  if (script && after) for (const t of claimedTrees(scriptTrees(res?.result), after, scriptSlugs(line))) made = [...made.filter((m) => m.path !== t.path), rec(t, 'script')]
   // git could not be read around the call: the literal command is all there is.
-  if (!after && cwd) made = worktreeAdds(line, cwd).filter((w) => w.path && w.branch).map((w) => ({ path: w.path, branch: w.branch, head: null, run, at }))
-  if (made.length) {
-    for (const m of made) {
-      const i = S.worktrees.findIndex((r) => r.path === m.path)
-      if (i >= 0) S.worktrees.splice(i, 1)
-      S.worktrees.push(m)
-    }
-    await saveOwned($)
-  }
+  if (!after && cwd) made = worktreeAdds(line, cwd).filter((w) => w.path && w.branch).map((w) => ({ path: w.path, branch: w.branch, head: null, run, at, src: 'add' }))
+  if (made.length) await saveOwned($, made)
   return res
 }

@@ -8,7 +8,7 @@
   "plugins": [
     {
       "name": "agentille",
-      "description": "One command for Claude Code: /agt plans, builds and reviews with the right model per step, steps aside on small tasks, and ends on one short card. Zero setup.",
+      "description": "One typed command runs the work: /agt plans, builds and reviews with the right model per step, steps aside on small tasks, and ends on one short card; a few /agt-* commands read or tidy. Zero setup.",
       "author": {
         "name": "Systown AI Lab"
       },

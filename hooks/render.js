@@ -2,7 +2,7 @@
 // band, built from the surface's own elements (`els`) and the state. Nothing here changes state; the one call
 // out is the ↗ button's jump to a pane.
 
-import { S, isLead } from './state.js'
+import { S, isLead, Timers } from './state.js'
 import { ACCENT, FRAME_COLOR, DONE_COLOR, WIRE_COLOR, INK, hex, colorOf, chip, cast, boardRows, header, leadLine, wireRow, castColumns, routingLines, wireLines, tokenBars, swarm } from './board.js'
 import { focusLines } from './display.js'
 import { MARK, SPAN_COLOR, spans, bodyParts } from './highlight.js'
@@ -155,7 +155,7 @@ export function workerBand(els, e, now) {
   const cap = caption({ mood, ...S.worker, ms: mood === 'working' ? now - S.mascot.start : S.mascot.ms })
   const capText = Text({ color: hex(MODEL_COLOR[modelKey(S.worker.model)]), wrap: 'truncate', children: [cap] })
   if (mood === 'idle' || e.surface !== 'terminal' || (e.props.maxRows ?? 0) < 5) return [capText]
-  const [head, body, legs] = frame(mood, S.tick >> 1, S.worker.agent)
+  const [head, body, legs] = frame(mood, Timers.tick >> 1, S.worker.agent)
   const orange = hex(MASCOT_COLOR)
   return [Text({ color: orange, children: [head] }), Text({ color: orange, children: [body] }), Box({ flexDirection: 'row', children: [Text({ color: orange, children: [legs + '   '] }), capText] })]
 }
@@ -179,8 +179,8 @@ export async function switchboard($, e, next) {
 
   const rows = nest(linkPieces(cast(scene, S.live, S.lastRun)))
   const cols = (e.props.bodyColumns ?? 80) - 4
-  const view = boardRows(rows, { now, tick: S.tick, cols, wire: S.wireStatus, transport: S.transport, view: e.props.view?.agentId ?? null })
-  const sw = swarm({ agents: S.live, routes: S.paneRoutes, run: S.lastRun, tick: S.tick })
+  const view = boardRows(rows, { now, tick: Timers.tick, cols, wire: S.wireStatus, transport: S.transport, view: e.props.view?.agentId ?? null })
+  const sw = swarm({ agents: S.live, routes: S.paneRoutes, run: S.lastRun, tick: Timers.tick })
   const room = Math.max(1, (e.props.maxRows ?? 10) - 4 - kids.length - (wire ? 1 : 0) - (sw ? 1 : 0))
   const waiting = rows.filter((r) => r.state === 'working').length
   const inner = [boardHeader(els, header({ run: S.lastRun, formation: S.runs.get(S.lastRun)?.formation, squads: S.squads.map((q) => q.name), loops: loopText(S.runs.get(S.lastRun)) }), S.runningVersion)]
@@ -212,7 +212,7 @@ export async function deck($, e) {
   }
   if (rows.length) {
     kids.push(rule(els, 'cast'))
-    const c = castColumns(rows, { cols, tick: S.tick >> 1, frameOf: frame, moodOf: (r) => (r.kind === 'sub' ? agentMood(r, now) : r.state === 'working' ? 'working' : 'bye') })
+    const c = castColumns(rows, { cols, tick: Timers.tick >> 1, frameOf: frame, moodOf: (r) => (r.kind === 'sub' ? agentMood(r, now) : r.state === 'working' ? 'working' : 'bye') })
     const orange = hex(MASCOT_COLOR)
     const line = (pick) => Box({ flexDirection: 'row', children: c.cells.map(pick) })
     for (const i of [0, 1, 2]) kids.push(line((m) => Text({ color: orange, dimColor: m.dim, children: [m.lines[i]] })))

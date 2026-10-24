@@ -5,6 +5,10 @@
 
 import { DEFAULTS } from './routing.js'
 import { resolveDisplay } from './settings.js'
+import { Timers } from './ticker.js'
+
+// The read views of the stores the owner modules keep (store.js): read through these, written only by their owners.
+export { Timers }
 
 export const S = {
   settings: { ...DEFAULTS },
@@ -34,10 +38,6 @@ export const S = {
   squadBlock: '',
   squadRows: [],  // every squad scored, for /agt-info squads; null when squads.json is unreadable
   transport: null,  // 'herdr' | 'tmux' | 'none', probed once at session start
-  tick: 0,
-  pollTimer: null,  // pane polling: runs only while panes may exist
-  quietPolls: 0,
-  tickTimer: null,  // redraw ticker: runs only while something works
   focusOn: true,  // agent flags show above the prompt
   flags: [],  // [{ text, key, at }] from agent results this run
   agtTurn: false,  // this turn is part of an /agt run (written only through proofs.js agtTurnStart / agtTurnFromDispatch)
@@ -81,8 +81,6 @@ export const S = {
   profileDisplay: {},  // the valid keys of ~/.agentille/profile.json → display
   storedRaw: {},  // the old $.store toggles, read once at session start (back-compat)
   display: resolveDisplay({}, {}),  // the display settings in effect, and where each came from
-  listAt: 0,
-  listBusy: false,
 }
 
 // This session is the lead: no worker env and no agt- name of its own. The one lead/worker predicate.
@@ -93,7 +91,7 @@ export const isLead = () => !S.worker && !S.selfName
 export const ctx = {
   live: S.live,
   get run() { return S.lastRun },
-  get tick() { return S.tick },
+  get tick() { return Timers.tick },
   get panes() { return S.panes },
   get routes() { return S.paneRoutes },
   get isLead() { return isLead() },

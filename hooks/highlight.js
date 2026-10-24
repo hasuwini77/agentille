@@ -154,7 +154,7 @@ export function essentials(text) {
   return ['next', 'flag', 'done'].filter((k) => found[k]).map((kind) => ({ kind, text: found[kind] }))
 }
 
-// A line → coloured pieces. Backtick delimiters are dropped; the texts rejoin to the line.
+// A line → coloured spans. Backtick delimiters are dropped; the texts rejoin to the line.
 export function spans(line) {
   const out = []
   const push = (text, kind) => {

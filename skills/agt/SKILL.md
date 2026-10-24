@@ -92,4 +92,3 @@ Ask: <preTaskQuestioning>. Depth: <thinkingDepth>.
 Still honored when typed, never suggested:
 
 - `--mode solo|subagent|panes|herdr` (= low|medium|heavy|heavy), `--plan` (stop after the plan review; "go" resumes it), `--formation <f>` (that formation). All three go away in v4.
-- `piece=` in the dispatch header: the mod still reads it for one release; write `slice=`.

@@ -116,8 +116,8 @@ export function parseHeader(prompt) {
     const i = pair.indexOf('=')
     if (i > 0) h[pair.slice(0, i)] = pair.slice(i + 1)
   }
-  // `slice=<slug>` is the docs' name for `piece=`: both parse, and `piece=` wins when a header carries the two.
-  if (h.slice !== undefined && h.piece === undefined) h.piece = h.slice
+  // `slice=<slug>` names the slice. The older `piece=` still parses as its alias, and wins when a header carries the two.
+  if (h.piece !== undefined) h.slice = h.piece
   return h
 }
 
@@ -267,12 +267,12 @@ function base(role, hdr, depth) {
   return row.base
 }
 
-// Fix rounds count per piece (factory.md → "Fix rounds": at most 2 per piece), so two pieces in fix rounds never push each
-// other up the ladder. `run.fixesByPiece` maps piece → rounds ('' = no piece). Without a piece (a diagnose planner, a
-// single-piece run) the ladder sees the worst piece.
-export function ladderFixes(run, piece) {
-  const by = run?.fixesByPiece ?? {}
-  if (piece) return by[piece] ?? 0
+// Fix rounds count per slice (factory.md → "Fix rounds": at most 2 per slice), so two slices in fix rounds never push each
+// other up the ladder. `run.fixesBySlice` maps slice → rounds ('' = no slice). Without a slice (a diagnose planner, a
+// single-slice run) the ladder sees the worst slice.
+export function ladderFixes(run, slice) {
+  const by = run?.fixesBySlice ?? {}
+  if (slice) return by[slice] ?? 0
   const all = Object.values(by)
   return all.length ? Math.max(...all) : 0
 }

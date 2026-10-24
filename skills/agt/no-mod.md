@@ -22,7 +22,7 @@ Before the first dispatch, seed TodoWrite with one todo per phase the roster act
 
 ## Pane transport
 
-Probe it yourself, once: inside Herdr (`HERDR_ENV=1`, `herdr` on PATH) or tmux (`$TMUX`, `tmux` on PATH), Herdr first. Otherwise fall through silently to a workflow or subagent waves (`panes-mode.md` → "When panes open").
+Probe it yourself, once: inside Herdr (`HERDR_ENV=1`, `herdr` on PATH) or tmux (`$TMUX`, `tmux` on PATH), Herdr first. Otherwise fall through silently to a workflow or subagent waves (`transport-panes.md` → "When panes open").
 
 ## Spawning a pane worker
 
@@ -48,4 +48,4 @@ tmux set-option -p -t <id> allow-set-title off
 tmux select-pane -t <id> -T <name>
 ```
 
-Keep the `--`, and escape `#` as `##` in `<cwd>`. Harvest, close and the done file are the same as with the mod (`panes-mode.md` → "Harvest, then close" and "tmux transport"); with no wire, read each worker with the read loop there.
+Keep the `--`, and escape `#` as `##` in `<cwd>`. Harvest, close and the done file are the same as with the mod (`transport-panes.md` → "Harvest, then close" and "tmux transport"); with no wire, read each worker with the read loop there.

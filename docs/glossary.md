@@ -3,7 +3,7 @@
 The words the README and the reference pages use, one meaning each.
 
 - **Level:** how big the crew is. low (solo or one builder), medium (parallel subagents), heavy (panes). You force one with `/agt low|medium|heavy "task"`.
-- **Transport:** how a run's workers execute: `solo` (Claude does it itself), `subagent`, `panes` (Herdr or tmux) or `workflow`. The recon line names it. `panes-mode.md` and `workflow-mode.md` in `skills/agt/` describe two of them.
+- **Transport:** how a run's workers execute: `solo` (Claude does it itself), `subagent`, `panes` (Herdr or tmux) or `workflow`. The recon line names it. `transport-panes.md` and `transport-workflow.md` in `skills/agt/` describe two of them.
 - **Integration:** what a finished slice becomes, set by `integration` in your profile: `pr` (default), `auto`, `push` or `local`. A repo can only lower it.
 - **Work type:** what one dispatch is for, written in the dispatch header as `work=`: `build`, `fix`, `diagnose`, `review` or `research`. The older spelling `mode=` is still read: deprecated; removed in 4.0.0.
 - **Mode:** only the `--mode` flag's name for a level: `solo` (low), `subagent` (medium), `panes` or `herdr` (heavy). Deprecated; removed in 4.0.0. Type the level instead.

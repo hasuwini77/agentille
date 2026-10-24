@@ -6,7 +6,7 @@ A multiplexer tracks one agent per pane, so pane workers have a readable lifecyc
 ## When panes open
 
 Panes only on the heavy level (detected, or typed `/agt heavy`) and for `/agt-spawn`. Only the executor (one per slice) and the adversary may be panes. Planners, plan-reviewers, the ui-prototyper and ALL reviewers are always subagents; a single executor is a subagent. `low` and `medium` never open panes.
-No pane transport: workflow if the `Workflow` tool exists, else subagent waves (`workflow-mode.md`).
+No pane transport: workflow if the `Workflow` tool exists, else subagent waves (`transport-workflow.md`).
 
 Pre-flight: the mod probes the transport once (Herdr first, then tmux) and names it in the `## Pane transport` block; none → fall through silently. Never drive a session from outside one. Without the mod: `no-mod.md` → "Pane transport".
 

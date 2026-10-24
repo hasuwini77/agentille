@@ -35,14 +35,14 @@ The first word may force a level; otherwise detect it. First match wins.
 | 3 | verb is `review` | low · subagent: reviewers in parallel, in the background |
 | 4 | verb is `debug` | low · subagent: the executor's debug loop |
 | 5 | ALL hold: one sentence, no architectural verb (refactor, design, architect, migrate, redesign, restructure), no list of deliverables, no auth/money/data words (`routing.md` → "Risk words": a login *form* is not auth) | low · solo |
-| 6 | ≥2 file-disjoint slices AND (any slice is ≥~30 min of work, needs its own dev server, simulator or browser, or there are >3 slices) | heavy · panes in Herdr or tmux, else workflow (`workflow-mode.md`), else subagent waves |
+| 6 | ≥2 file-disjoint slices AND (any slice is ≥~30 min of work, needs its own dev server, simulator or browser, or there are >3 slices) | heavy · panes in Herdr or tmux, else workflow (`transport-workflow.md`), else subagent waves |
 | 7 | ≥2 file-disjoint slices, each small | medium · subagent |
 | 8 | otherwise | Stage 2 classify (`routing.md`) |
 
 - **low**: solo, or one executor plus the reviewers its diff needs. A forced `low` on a multi-slice task builds the slices one after another with one executor.
 - **medium**: planner, then up to 3 executor subagents at once (each in its own worktree), then the review fan-out.
-- **heavy**: planner, then one pane per slice through `spawn_pane` (`panes-mode.md`), at most 3 at once like medium. Planners and reviewers stay subagents. Slices merge one at a time.
-  Heavy differs from medium by panes, not by width: a real session per slice in its own worktree, the live wire, and resume. A task that asks for Codex workers runs heavy (`panes-mode.md` → "Codex workers").
+- **heavy**: planner, then one pane per slice through `spawn_pane` (`transport-panes.md`), at most 3 at once like medium. Planners and reviewers stay subagents. Slices merge one at a time.
+  Heavy differs from medium by panes, not by width: a real session per slice in its own worktree, the live wire, and resume. A task that asks for Codex workers runs heavy (`transport-panes.md` → "Codex workers").
 - **Risk gate:** auth, money or data work (`routing.md` → "Risk words") never runs solo, and runs the gauntlet when the repo has a test runner (`formations.md`). A screen merely named login or checkout is `risk=none`.
 - Two flags: `--fable` (`routing.md` → "Escalation ladder") and `--local`, which runs this one /agt as `integration: local` whatever the profile says, `projects[]` entries included: merge locally, push nothing, open no PR. The mod holds it for you and your subagents; say it in each pane worker's task. Older flags still work: "Deprecated" at the end.
 
@@ -72,7 +72,7 @@ Print the recon line before anything else: `recon: <level> · <transport> · <on
    - Never build a plan the last review did not approve.
 8. **Build, then review**, in dependency order, pipelined: review each finished slice while the others build. Every reviewer a slice needs goes out in ONE message as parallel background `Agent` calls. Fix rounds resume the same executor (`factory.md` → "Fix rounds").
 9. **Gate and integrate.** P0/P1 block. Then the escalate checklist decides merge or ⚑ (`factory.md` → "Gate" and "Integrate"). The profile sets `integration`, and a repo can only lower it. Remove each slice's worktree once the gate decides (`factory.md` → "Worktree lifecycle").
-10. **Close everything.** Close each `agt-<run>-*` pane the moment its answer is harvested, then confirm the run lists zero panes (`panes-mode.md` → "Harvest, then close"). Stop every background subagent once its handoff is used.
+10. **Close everything.** Close each `agt-<run>-*` pane the moment its answer is harvested, then confirm the run lists zero panes (`transport-panes.md` → "Harvest, then close"). Stop every background subagent once its handoff is used.
 11. **Report, then the card.** Write `report.md` once, never print it, then print the final card (`display.md`). That card is the only end-of-run output.
 
 ## Dispatch header

@@ -1,10 +1,9 @@
 // agentille worker side of the wire: what this pane publishes about itself, the answer it saves under the run,
 // the done message it sends its lead, and (lead side) the status each visible worker last published.
 
-import { Session } from './session.js'
+import { Session, ctx } from './session.js'
 import { Profile } from './profile.js'
 import { Spawn } from './spawn.js'
-import { Panes } from './reaper.js'
 import { makeStore } from './store.js'
 import { writeRunFile } from './dispatch.js'
 import { short, elapsed } from './live.js'
@@ -100,11 +99,11 @@ export async function reportDone($, answer) {
 // Lead: what each visible worker last published.
 export async function readWire($) {
   const now = Date.now()
-  for (const p of Panes.panes) {
+  for (const p of ctx.panes) {
     const rec = await $.store.get(statusKey(p.name)).catch(() => null)
     if (freshStatus(rec, p.name, now)) my.wireStatus.set(p.name, rec)
   }
-  for (const k of [...my.wireStatus.keys()]) if (!Panes.panes.some((p) => p.name === k)) my.wireStatus.delete(k)
+  for (const k of [...my.wireStatus.keys()]) if (!ctx.panes.some((p) => p.name === k)) my.wireStatus.delete(k)
 }
 
 // ── drawing (takes resolved elements, never $) ────────────────────────────────

@@ -1440,6 +1440,8 @@ describe('guard: a cp link, or interpreter code that links, is judged by its sou
       'cp -s ~/.agentille/profile.json p.json',
       'cp --symbolic-link .git/config cfg',
       'cp -l .git/hooks/pre-push h',
+      'link ~/.agentille/profile.json p.json',
+      'link .git/config cfg',
       "python3 -c \"import os; os.link(os.path.expanduser('~/.agentille'), 'x')\"",
       "node -e \"require('fs').symlinkSync(require('os').homedir() + '/.agentille', 'x')\"",
       "perl -e 'link(\"$ENV{HOME}/.agentille/profile.json\", \"p\")'",

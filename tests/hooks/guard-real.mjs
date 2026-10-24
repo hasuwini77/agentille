@@ -390,6 +390,8 @@ try {
     const b = await run(`printf '{"integration":"auto"}' > p.json`)
     check('control: the write to p.json runs (it is no link)', !b?.deny && b.exit === 0, JSON.stringify(b))
     check('... the profile is still pr', JSON.parse(fs.readFileSync(HOME + '/.agentille/profile.json', 'utf8')).integration === 'pr')
+    const l = await run('link ~/.agentille/profile.json p2.json')
+    check('link ~/.agentille/profile.json: denied', l?.deny?.includes('may not write'), JSON.stringify(l))
     const p = await run('git push -q origin agt/x:main')
     check('... and the base push is denied', !!p?.deny && refOf('origin.git', 'main') === w.main, JSON.stringify(p))
   }

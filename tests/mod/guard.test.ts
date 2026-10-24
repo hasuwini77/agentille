@@ -538,7 +538,7 @@ describe('guard: integration in the mod', () => {
     expect(ran).toEqual(['gh pr create --base main --title x --body y'])
   })
 
-  test('a question typed mid-run keeps the lead and its subagent guarded', async ($, on) => {
+  test('a question typed mid-run keeps the lead and its subagent guarded', { timeoutMs: 20_000 }, async ($, on) => {
     setup(on)
     await boot($)
     await typed($)

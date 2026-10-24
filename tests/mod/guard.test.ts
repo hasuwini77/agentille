@@ -774,6 +774,19 @@ describe('guard: worktree ownership and the run-end tidy', () => {
     expect(seen).toContainEqual(['git', '-C', '/work/repo-f', 'clean', '-fqX', '--', '.env*'])
   })
 
+  test('a tree whose branch a record names, but at another path, is not the run\'s and is never removed', async ($, on) => {
+    // The lead's saved record names agt/x at a path that is gone; /work/repo-x is on agt/x, made by another session.
+    const rec = JSON.stringify([{ path: '/work/repo-x-old', branch: 'agt/x', head: 'm1', run: 'r1', at: Date.now(), src: 'add' }])
+    const { seen, git } = setup(on, { env: { HERDR_PANE_ID: 'w1:p1' }, files: { '/h/.agentille/state/lead-w1-p1.worktrees': rec } })
+    git.made = true
+    git.committed = true
+    await boot($)
+    await typed($)
+    const r = await $.command.run({ command: 'agt-clean', args: '', origin: { kind: 'composer' } } as never)
+    expect(r.text).toContain('agt/x (not opened by this session)')
+    expect(seen.some((a) => a.includes('/work/repo-x') && (a.includes('remove') || a.includes('clean')))).toBe(false)
+  })
+
   test('a session that recorded no worktree removes nothing', async ($, on) => {
     const { seen } = setup(on)
     await boot($)

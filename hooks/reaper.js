@@ -289,7 +289,8 @@ export async function pruneRuns($, run, r) {
 // old; a feat/* or fix/* tree stays for the lead. sweepEnv (a run's end, /agt-clean) first deletes the .env*
 // copies at the top of every tree recorded at that exact path, whatever its branch, so secrets never outlive the
 // run: `git clean -X` removes only untracked files git ignores, so a tracked or un-ignored .env.example stays.
-// The live checkout and a tree matched only by its branch name are never swept.
+// The live checkout and a tree matched only by its branch name are never swept: a tree is owned only at a recorded
+// path, and a record's branch name counts only for a branch with no tree left (worktreePlan's branch deletes).
 export async function cleanGit($, run, r, { sweepEnv = false } = {}) {
   const cwd = await $.session.cwd().catch(() => null)
   if (!cwd) return
@@ -301,7 +302,7 @@ export async function cleanGit($, run, r, { sweepEnv = false } = {}) {
   const paths = new Set(mine.map((o) => o.path))
   const names = new Set(mine.map((o) => o.branch).filter(Boolean))
   const born = new Map(mine.map((o) => [o.path, o.head]))
-  const owned = (t) => (t.path && paths.has(t.path)) || (!!t.branch && names.has(t.branch))
+  const owned = (t) => (t.path ? paths.has(t.path) : !!t.branch && names.has(t.branch))
   const linked = trees.slice(1).filter((t) => !t.prunable && t.path !== cwd)
   // Ages first: deleting a .env copy touches the directory, and would make every swept tree look fresh.
   const ages = new Map()

@@ -5,9 +5,8 @@
 //                 (.agentille/config.json, a CLAUDE.md or AGENTS.md saying `local-only` or `no-mistakes`),
 //                 never raise it. Below `auto`, a run's merge, tag, release and API merge are denied, and so is
 //                 any push but one of its own branch; under `local` it pushes nothing and opens no PR.
-//   ownership   — every worktree a run made is recorded: the one scripts/agt-worktree.sh prints, or one a
-//                 literal `git worktree add` names, so the cleaner touches only those and never another
-//                 session's fresh checkout.
+//   ownership   — every worktree a run's `git worktree add` created is recorded, so the cleaner removes
+//                 only those and never another session's fresh checkout.
 //
 // A session where /agt was never typed is untouched: its Bash runs as the engine runs it.
 //
@@ -694,6 +693,8 @@ export function fromRun(e, at) {
 }
 
 // ── worktree ownership ───────────────────────────────────────────────────────
+// Every worktree a run made is recorded: the one scripts/agt-worktree.sh prints (the documented way), or one a
+// literal `git worktree add` names. The cleaner and the .env sweep touch only those.
 // Literal `git worktree add <path> [-b <branch>] [<base>]` (either order), resolved against the dir it
 // runs in. Shell variables cannot be read here: such a path or branch comes back null. A fallback only;
 // the recorder diffs `git worktree list` around the call.

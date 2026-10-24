@@ -1,5 +1,5 @@
 import { describe, expect, mock, test } from 'claude-code/testing'
-import { advisorEnv, EFFORTS, PANE_RULE, splitPlan, tmuxEvenArgv, SPAWN_TOOL, closeTarget, paneRole, doneFile, spawnToolInput, TOOL_MODELS, herdrCloseArgv, herdrPaneIdOf, herdrPromptArgv, herdrSplitArgv, herdrStartArgv, isFreshDone, rowIsLead, newRunId, paneName, parseSpawnArgs, parseTmuxList, pickTransport, quietSpawn, reapPool, scopeRows, splitName, tmuxKillArgv, tmuxPaneAgents, tmuxPaneIdOf, tmuxSplitArgv, tmuxTagArgvs, transportBlock, TMUX_LIST_FORMAT } from '../../hooks/panes.js'
+import { advisorEnv, EFFORTS, PANE_RULE, splitPlan, tmuxEvenArgv, tmuxTitleLockArgv, SPAWN_TOOL, closeTarget, paneRole, doneFile, spawnToolInput, TOOL_MODELS, herdrCloseArgv, herdrPaneIdOf, herdrPromptArgv, herdrSplitArgv, herdrStartArgv, isFreshDone, rowIsLead, newRunId, paneName, parseSpawnArgs, parseTmuxList, pickTransport, quietSpawn, reapPool, scopeRows, splitName, tmuxKillArgv, tmuxPaneAgents, tmuxPaneIdOf, tmuxSplitArgv, tmuxTagArgvs, transportBlock, TMUX_LIST_FORMAT } from '../../hooks/panes.js'
 import { agentStatusOf, codexNote, codexTask, dialogKeys, herdrKeysArgv, herdrReadArgv, herdrTabArgv, herdrTabIds, herdrTabListArgv, herdrTabOf, herdrGetArgv, placePlan, screenLine, startupDialog, tabIdsOf, tabsFile } from '../../hooks/panes.js'
 import { DONE_GRACE_MS, reapPlan } from '../../hooks/live.js'
 import { ROLES, roleOf } from '../../hooks/routing.js'
@@ -221,9 +221,9 @@ describe('spawn', () => {
     expect(tmuxTagArgvs('%7', 'agt-ab12cd-spawn')).toEqual([
       ['tmux', 'set-option', '-p', '-t', '%7', '@agt', 'agt-ab12cd-spawn'],
       ['tmux', 'set-option', '-p', '-t', '%7', '@agt_vendor', 'claude'],
-      ['tmux', 'set-option', '-p', '-t', '%7', 'allow-set-title', 'off'],
       ['tmux', 'select-pane', '-t', '%7', '-T', 'agt-ab12cd-spawn'],
     ])
+    expect(tmuxTitleLockArgv('%7')).toEqual(['tmux', 'set-option', '-p', '-t', '%7', 'allow-set-title', 'off'])
   })
 
   test('pane ids are read strictly from the command output', async () => {
@@ -499,6 +499,14 @@ describe('/agt-spawn', () => {
     expect(r.text).toMatch(/^Could not open a tmux pane/)
     expect(seen[seen.length - 1]).toEqual(['tmux', 'kill-pane', '-t', '%9'])
     expect(seen.some((a) => a[1] === 'select-pane')).toBe(false)
+  })
+
+  test('tmux without allow-set-title (older than 3.3) still opens the pane, titled', async ($, on) => {
+    const seen = setup(on, { TMUX: '/tmp/tmux-1/default,1,0', TMUX_PANE: '%1', SHELL: '/bin/zsh' }, { 'tmux split-window': { stdout: '%9\n' }, 'tmux set-option -p -t %9 allow-set-title': { exitCode: 1, stderr: 'invalid option: allow-set-title' } })
+    const r = await run($, 'do the thing')
+    expect(r.text).toMatch(/^Opened agt-[a-z0-9]{6}-spawn · sonnet · tmux pane\.$/)
+    expect(seen.some((a) => a[1] === 'select-pane' && a[4] === '-T')).toBe(true)
+    expect(seen.some((a) => a[1] === 'kill-pane')).toBe(false)
   })
 
   test('HERDR_ENV=1 with a herdr that will not answer falls back to tmux', async ($, on) => {

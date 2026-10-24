@@ -227,7 +227,7 @@ A `—` means that column changes nothing for the role, and `risk=data` changes 
 | Claude Code 2.1.294+ | the mod's pane tools: heavy panes, `/agt-spawn`, sessions | the mod still draws the band and routes models; pane tools stay off (a toast says so) and heavy runs as a workflow or subagent waves |
 | `git` | every level | nothing works |
 | `gh` (GitHub CLI, logged in) | PRs, issues, `auto` merges | `integration` falls back to `push` or `local` |
-| [Herdr](https://github.com/hasuwini77/herdr) (install from its repo) or tmux (`brew install tmux`, `apt install tmux`) | the heavy level (one pane per slice), `/agt-spawn`, sessions | heavy runs as a workflow or subagent waves |
+| [Herdr](https://github.com/hasuwini77/herdr) (install from its repo) or tmux 3.3+ (`brew install tmux`, `apt install tmux`; an older tmux works but a worker may rename its pane) | the heavy level (one pane per slice), `/agt-spawn`, sessions | heavy runs as a workflow or subagent waves |
 | Herdr | Codex worker panes, auto-closing idle sessions | tmux panes stay open until you close them |
 | Codex CLI, logged in | "codex builds the API slice" | the slice runs on Claude |
 | Playwright MCP plugin (`mcp__plugin_playwright_playwright__*`) and a running dev server | the design reviewer's screenshots and axe scan | the design reviewer reads code only and says so |

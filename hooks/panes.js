@@ -198,10 +198,13 @@ export function tmuxTagArgvs(id, name) {
   return [
     ['tmux', 'set-option', '-p', '-t', id, '@agt', name],
     ['tmux', 'set-option', '-p', '-t', id, '@agt_vendor', 'claude'],
-    ['tmux', 'set-option', '-p', '-t', id, 'allow-set-title', 'off'],
     ['tmux', 'select-pane', '-t', id, '-T', name],
   ]
 }
+
+// Keeps the worker from renaming its own pane (the lead reads panes by title). The pane option exists from tmux 3.3;
+// on an older tmux the call fails and the pane still opens, titled, so it is run best-effort, apart from the tags.
+export const tmuxTitleLockArgv = (id) => ['tmux', 'set-option', '-p', '-t', id, 'allow-set-title', 'off']
 
 export function tmuxPaneIdOf(stdout) {
   const id = String(stdout ?? '').trim()
@@ -692,7 +695,7 @@ export function tmuxSessionSplitArgv({ target, cwd, direction, shell, kind, mode
 }
 
 export const tmuxTitleArgvs = (id, name) => [
-  ['tmux', 'set-option', '-p', '-t', id, 'allow-set-title', 'off'],
+  tmuxTitleLockArgv(id),
   ['tmux', 'select-pane', '-t', id, '-T', name],
 ]
 export const tmuxTypeArgvs = (id, command) => [['tmux', 'send-keys', '-t', id, '-l', '--', command], ['tmux', 'send-keys', '-t', id, 'Enter']]

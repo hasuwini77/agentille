@@ -1278,3 +1278,65 @@ describe('guard: protected writes and package scripts in the mod', () => {
     expect((await bash($, 'npx release-it')).deny).toContain('cannot read')
   })
 })
+
+describe('guard: config that runs code, and .gitattributes', () => {
+  test('a filter, diff driver, pager, editor, helper or include is a config write; a harmless viewer is not', async () => {
+    for (const line of [
+      "git config filter.f.clean 'git push origin agt/x:main; cat'",
+      'git config --global filter.f.smudge ./s.sh',
+      'git config --system filter.f.process ./p',
+      'git -c filter.f.clean=./x add c',
+      'git config diff.external ./d.sh',
+      'git config diff.x.textconv ./t.sh',
+      'git -c diff.x.command=./c diff',
+      'git config merge.m.driver ./m.sh',
+      "git -c core.pager='sh -c x' log",
+      'git config core.editor ./e.sh',
+      'git config sequence.editor ./e.sh',
+      'git config gpg.program ./g',
+      'git config gpg.ssh.program ./g',
+      'git config credential.helper ./h',
+      'git config credential.https://example.test.helper ./h',
+      'git config include.path ../evil.cfg',
+      'git config includeIf.gitdir:~/.path ../evil.cfg',
+      'git config core.attributesFile ./attrs',
+      'git config -f x.cfg diff.x.textconv y',
+      'GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=filter.f.smudge GIT_CONFIG_VALUE_0=x git status',
+      "GIT_CONFIG_PARAMETERS=\"'diff.external'='./d'\" git diff",
+    ]) expect([line, integrationIn(line, onSlice)]).toEqual([line, expect.stringContaining('git config key')])
+    for (const line of [
+      'git -c core.pager=cat log',
+      'git -c core.editor=true rebase --continue',
+      'git config core.pager less',
+      'git -c pager.log=false log',
+      'git config --get filter.f.clean',
+      'git config --unset diff.external',
+    ]) expect([line, integrationIn(line, onSlice)]).toEqual([line, null])
+  })
+
+  test('a .gitattributes anywhere is a protected write: a redirect, tee, cp, sed -i or interpreter code', async () => {
+    for (const line of [
+      "echo '* filter=f' > .gitattributes",
+      "printf '* diff=x' >> src/.gitattributes",
+      'tee .gitattributes < a',
+      'cp attrs .gitattributes',
+      'mv attrs sub/.GitAttributes',
+      'sed -i s/a/b/ .gitattributes',
+      "echo '* filter=f' > .git/info/attributes",
+      "python3 -c \"open('.gitattributes','w').write('* filter=f')\"",
+    ]) expect([line, integrationIn(line, onSlice)]).toEqual([line, expect.any(String)])
+    expect(integrationIn('cat .gitattributes', onSlice)).toBe(null)
+  })
+
+  test('in the mod: the filter chain is refused at both steps, and the Write tool cannot add .gitattributes', async ($, on) => {
+    const { ran } = setup(on, { profile: { integration: 'pr' } })
+    await boot($)
+    await typed($)
+    expect((await bash($, "git config filter.f.clean 'git push origin agt/x:main; cat'")).deny).toContain('git config key')
+    expect((await bash($, "echo '* filter=f' > .gitattributes")).deny).toContain('may not write')
+    expect((await $.tool.call({ tool: 'Write', file_path: '/work/repo/.gitattributes', content: '* filter=f' } as never)).deny).toContain('may not write')
+    expect((await $.tool.call({ tool: 'Edit', file_path: '/work/repo/web/.gitattributes', old_string: 'a', new_string: 'b' } as never)).deny).toContain('may not write')
+    expect((await bash($, 'git -c core.pager=cat log')).result).toBe('ok')
+    expect(ran).toEqual(['git -c core.pager=cat log'])
+  })
+})

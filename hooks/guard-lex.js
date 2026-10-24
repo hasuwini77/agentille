@@ -34,6 +34,7 @@ export function protectedPath(raw, abs, homes = []) {
     : /(^|\/)\.git\/packed-refs$/i.test(s) ? '.git/packed-refs'
     : MODULE_GIT.test(s) ? 'a submodule\'s .git/modules config, hooks or refs'
     : /(^|\/)\.git$/i.test(s) ? 'the worktree .git file'
+    : /(^|\/)\.gitattributes$/i.test(s) ? '.gitattributes (it names the filters and diff drivers git runs)'
     : null
   return git(a) ?? git(r)
 }
@@ -42,12 +43,23 @@ export function protectedPath(raw, abs, homes = []) {
 const MODULE_GIT = /(^|\/)\.git\/modules\/(?:[^/]+\/)+?(config$|hooks(\/|$)|refs(\/|$)|packed-refs$)/i
 
 
-// git config keys a run may not set below auto: aliases (rename a step past the reader), the hooks path, the
-// fsmonitor hook and the ssh command (each runs code), a remote's push URL or refspec, push.default, URL rewriting,
-// receive.* — anything that runs code or changes where or how a push lands.
-const PROTECT_CFG = /^(alias\.|core\.hookspath$|core\.fsmonitor$|core\.sshcommand$|push\.default$|remote\..*\.(push|pushurl)$|url\..*\.(push)?insteadof$|receive\.)/i
+// git config keys a run may not set below auto: aliases (rename a step past the reader), every key whose value is a
+// command git runs on its own (the hooks path, fsmonitor, the ssh command, a clean/smudge filter or merge driver,
+// an external diff or textconv, the pager, the editors, a gpg program, a credential helper, a diff or merge tool),
+// an include (it pulls in any of these), a remote's push URL or refspec, push.default, URL rewriting, receive.* —
+// anything that runs code or changes where or how a push lands.
+const PROTECT_CFG = /^(alias\.|core\.(hookspath|fsmonitor|sshcommand|pager|editor|askpass|gitproxy|attributesfile)$|push\.default$|remote\..*\.(push|pushurl)$|url\..*\.(push)?insteadof$|receive\.|filter\.|diff\.external$|diff\..+\.(textconv|command)$|merge\..+\.driver$|pager\.|sequence\.editor$|gpg\.(.+\.)?program$|credential\.(.+\.)?helper$|include\.path$|includeif\..+\.path$|(diff|merge)tool\..+\.cmd$|uploadpack\.packobjectshook$|sendemail\.(.+\.)?(tocmd|cccmd|sendmailcmd)$)/i
 
-const CFG_WHAT = 'a git config key (core.hooksPath, core.fsmonitor, core.sshCommand, push.default, remote push, URL rewriting or receive.*)'
+// Keys that name a pager or an editor: setting one to a program that runs nothing else (`-c core.pager=cat`,
+// `-c core.editor=true`, as a run does to keep git from waiting) is allowed.
+const VIEWER_CFG = /^(core\.(pager|editor)|pager\..+|sequence\.editor)$/i
+export const SAFE_PROGRAM = /^\s*((\/usr)?\/bin\/)?(true|false|cat|:|less|more)?\s*$/
+
+// A config key set to a value: refused below auto, unless it is a viewer set to a harmless program.
+const protectedCfg = (k, v) => PROTECT_CFG.test(k) && !(VIEWER_CFG.test(k) && v !== undefined && SAFE_PROGRAM.test(v))
+
+const CFG_WHAT = 'a git config key that runs code or moves a push (core.hooksPath, core.fsmonitor, core.sshCommand, a filter, diff or merge driver, the pager or editor, a credential helper, an include, push.default, remote push, URL rewriting or receive.*)'
+
 
 
 // Whether a `git config …` writes a value (as opposed to reading or unsetting one): a `set` verb, `--add`/
@@ -480,7 +492,7 @@ export function splitCommands(line) {
 
 
 // git's own options before the subcommand: -C <dir> is where it runs. `unknown`: a dir it names through a
-// variable, which cannot be read here. `cfg`: the config keys -c / --config-env set for this one call.
+// variable, which cannot be read here. `cfg`: the config -c / --config-env sets for this one call, as { key, value }.
 const GIT_VALUE_OPTS = new Set(['-C', '-c', '--git-dir', '--work-tree', '--namespace', '--exec-path', '--config-env', '--super-prefix'])
 
 // git's own commands (its builtins and the commands it ships as scripts). git runs one of these whatever an
@@ -519,7 +531,8 @@ export function gitCall(words) {
       if (k === '-C') dir = dir ? joinPath(dir, v) : v
       if (k === '--work-tree' || k === '--git-dir') dir = k === '--git-dir' ? v.replace(/\/\.git\/?$/, '') || v : v
       if ((k === '-C' || k === '--work-tree' || k === '--git-dir') && /[$`~]/.test(v)) unknown = true
-      if (k === '-c' || k === '--config-env') cfg.push(v.split('=')[0].toLowerCase())
+      if (k === '-c') cfg.push({ key: v.split('=')[0].toLowerCase(), value: v.includes('=') ? v.slice(v.indexOf('=') + 1) : 'true' })
+      if (k === '--config-env') cfg.push({ key: v.split('=')[0].toLowerCase(), value: undefined }) // read from a variable
       i += k === w ? 2 : 1
     } else i++
   }
@@ -657,12 +670,14 @@ function refWrite(g) {
 // Config keys that change where a push goes: a remote's URL, its rewriting, a branch's push remote, an include.
 const REMOTE_CFG = /^(remote|url|branch|include|includeif)\./i
 
-// GIT_CONFIG_KEY_<n> and GIT_CONFIG_PARAMETERS set config for one call, as -c does.
+// GIT_CONFIG_KEY_<n> (with GIT_CONFIG_VALUE_<n>) and GIT_CONFIG_PARAMETERS set config for one call, as -c does:
+// [{ key, value }], the value undefined where it cannot be read.
 function envCfg(env) {
   const keys = []
   for (const [k, v] of env ?? []) {
-    if (/^GIT_CONFIG_KEY_\d+$/.test(k)) keys.push(String(v).toLowerCase())
-    if (k === 'GIT_CONFIG_PARAMETERS') for (const m of String(v).matchAll(/'([^'=]+)'?=/g)) keys.push(m[1].toLowerCase())
+    const n = /^GIT_CONFIG_KEY_(\d+)$/.exec(k)
+    if (n) keys.push({ key: String(v).toLowerCase(), value: env.get('GIT_CONFIG_VALUE_' + n[1]) })
+    if (k === 'GIT_CONFIG_PARAMETERS') for (const m of String(v).matchAll(/'([^'=]+)'?=/g)) keys.push({ key: m[1].toLowerCase(), value: undefined })
   }
   return keys
 }
@@ -704,7 +719,7 @@ function riskyCode(code) {
 }
 
 // Interpreter code that names the trust root or the repo's own git state: it may write them directly.
-const PROTECT_IN_CODE = /\.agentille\/|\.git\/config|\.git\/hooks|\.git\/refs|\.git\/info|packed-refs|\.git\/modules\/\S*(config|hooks|refs)/i
+const PROTECT_IN_CODE = /\.agentille\/|\.gitattributes|\.git\/config|\.git\/hooks|\.git\/refs|\.git\/info|packed-refs|\.git\/modules\/\S*(config|hooks|refs)/i
 
 // A script that pushes, merges, tags or releases: per line, git with push/merge/tag/send-pack/update-ref, gh or
 // hub with a merge, release, api or alias, curl or wget at GitHub.
@@ -938,12 +953,13 @@ export function commandSteps(line, cwd = null, depth = 0, homes = []) {
       const envDir = c.env?.get('GIT_WORK_TREE') || (c.env?.get('GIT_DIR') ?? '').replace(/\/\.git\/?$/, '') || c.env?.get('GIT_DIR') || null
       const named = g.dir ?? envDir
       const dir = g.unknown || (named && /[$`~]/.test(named)) ? null : named ? (named.startsWith('/') ? joinPath('/', named) : at && joinPath(at, named)) : at
-      const keys = [...g.cfg, ...envCfg(c.env)]
+      const pairs = [...g.cfg, ...envCfg(c.env)]
+      const keys = pairs.map((x) => x.key)
       const retarget = keys.some((k) => REMOTE_CFG.test(k))
       if (g.sub === 'tag' && !tagListing(g.args)) out.push({ kind: 'step', what: 'git tag', dir, slug: null })
       // An alias or a hooks-path/push-config key set for one call changes a step past this reader.
       if (keys.some((k) => k.startsWith('alias.'))) out.push({ kind: 'step', what: 'git -c alias.*', dir, slug: null })
-      if (keys.some((k) => PROTECT_CFG.test(k) && !k.startsWith('alias.'))) out.push({ kind: 'protected', what: CFG_WHAT, dir, slug: null })
+      if (pairs.some((x) => protectedCfg(x.key, x.value) && !x.key.startsWith('alias.'))) out.push({ kind: 'protected', what: CFG_WHAT, dir, slug: null })
       // A word that is no git command may be an alias from git config (alias.pom = push origin HEAD:main): guardLine
       // looks it up in the repo the call targets and judges what it expands to.
       if (!GIT_COMMANDS.has(g.sub) && !g.sub.startsWith('-')) {
@@ -963,7 +979,8 @@ export function commandSteps(line, cwd = null, depth = 0, homes = []) {
         }
       }
       // `git config <key> <value>` setting a protected key (the hooks path, a remote's push, URL rewriting, …).
-      if (g.sub === 'config' && gitConfigSets(g.args) && g.args.some((x) => PROTECT_CFG.test(x))) out.push(/^alias\./i.test(g.args.find((x) => PROTECT_CFG.test(x)) ?? '') ? { kind: 'step', what: 'git config alias.*', dir, slug: null } : { kind: 'protected', what: CFG_WHAT, dir, slug: null })
+      const set = g.sub === 'config' && gitConfigSets(g.args) ? g.args.findIndex((x, n) => protectedCfg(x, g.args[n + 1])) : -1
+      if (set >= 0) out.push(/^alias\./i.test(g.args[set]) ? { kind: 'step', what: 'git config alias.*', dir, slug: null } : { kind: 'protected', what: CFG_WHAT, dir, slug: null })
       // Plumbing that writes a remote with no `push` in sight.
       if (['send-pack', 'http-push'].includes(g.sub) || (g.sub === 'subtree' && g.args[0] === 'push')) out.push({ kind: 'step', what: 'git ' + g.sub, dir, slug: null })
       const ref = refWrite(g)

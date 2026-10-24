@@ -325,6 +325,17 @@ try {
     check('... origin/main unchanged', refOf('origin.git', 'main') === w.main)
   }
   {
+    // A clean filter runs on a plain `git add`: setting one, and the .gitattributes that turns it on, are both refused.
+    const w = world()
+    const a = await run("git config filter.f.clean 'git push -q origin agt/x:main; cat'")
+    check('git config filter.f.clean: denied as a config write', a?.deny?.includes('git config key'), JSON.stringify(a))
+    const b = await run("echo '* filter=f' > .gitattributes")
+    check('echo > .gitattributes: denied', b?.deny?.includes('may not write'), JSON.stringify(b))
+    const c = await run('echo c > c && git add c')
+    check('control: a plain git add runs', !c?.deny && c.exit === 0, JSON.stringify(c))
+    check('... no filter set, no attributes written, origin/main unchanged', !fs.existsSync(APP + '/.gitattributes') && refOf('origin.git', 'main') === w.main)
+  }
+  {
     // Controls below auto: the run's own branch and ordinary writes still pass.
     world()
     const ok = await run('git push -q -u origin agt/x')

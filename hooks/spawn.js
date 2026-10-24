@@ -85,9 +85,14 @@ export async function sameRepo($, a, b) {
 // whose project config matches the lead checkout's (sameConfig). A folder below either root is never accepted. With
 // no list nothing but the lead's own cwd and checkout root is accepted.
 const OWN_BRANCH = /^agt\/[A-Za-z0-9._/-]+$/
-const CONFIG_FILES = ['.mcp.json', '.claude/settings.json', '.claude/settings.local.json']
-const CONFIG_DIRS = ['.claude/agents', '.claude/commands']
+// Absent in the worktree is fine for these (settings.local.json and CLAUDE.local.md are gitignored, so a fresh
+// worktree has none); present, they must be the lead checkout's byte for byte.
+const CONFIG_FILES = ['.mcp.json', '.claude/settings.json', '.claude/settings.local.json', 'CLAUDE.local.md']
+// These must match both ways: absent on both sides, or the same bytes.
+const MEMORY_FILES = ['CLAUDE.md', 'AGENTS.md', '.claude/CLAUDE.md']
+const CONFIG_DIRS = ['.claude/agents', '.claude/commands', '.claude/skills', '.claude/hooks']
 const TREE_MAX = 500
+const REFS_MAX = 64
 // The worktree paths a lead-<pane>.worktrees file names: the `path` of each JSON record (guard.js), or the absolute
 // paths on a plain one-per-line list. Branch names are skipped: a branch can be checked out anywhere.
 export function listedPaths(listed) {
@@ -138,18 +143,82 @@ async function configTree($, dir) {
   return (await missing($, dir)) && out.size === 0 ? out : null
 }
 
-// The worktree brings no project config of its own: what it has is the lead checkout's, byte for byte.
+// The repo-relative files a command line may run: each word that is a path (holds a `/`) or names a script, with
+// $CLAUDE_PROJECT_DIR (bare or braced) read as the checkout's root and an absolute path under `top` made relative.
+// Other variables, `~` and absolute paths outside the checkout are the same file for both sides, so they are skipped.
+// Over-reading is safe: a word that is no file is absent on both sides, and absent on both sides is equal.
+const SCRIPT = /\.(?:sh|bash|zsh|fish|js|mjs|cjs|ts|mts|py|rb|pl|php|lua)$/i
+export function commandPaths(command, top) {
+  const out = []
+  for (let w of String(command ?? '').split(/[\s;|&()<>=,]+/)) {
+    w = w.replace(/^["'`]+|["'`]+$/g, '')
+    const rooted = /^\$\{?CLAUDE_PROJECT_DIR\}?["']?(?=\/|$)/
+    if (rooted.test(w)) w = w.replace(rooted, '').replace(/^\/+/, '')
+    else if (w.startsWith(top + '/')) w = w.slice(top.length + 1)
+    else if (w.startsWith('/')) continue
+    if (!w || w.startsWith('-') || w.startsWith('~') || w.includes('$')) continue
+    w = w.replace(/^(?:\.\/)+/, '')
+    if (w && (w.includes('/') || SCRIPT.test(w))) out.push(w)
+  }
+  return out
+}
+
+// Every command string a settings file runs: hook commands and statusLine.command (any `command` key), and the
+// helpers that run a command (apiKeyHelper, awsAuthRefresh, awsCredentialExport, otelHeadersHelper).
+const HELPER_KEYS = new Set(['command', 'apiKeyHelper', 'awsAuthRefresh', 'awsCredentialExport', 'otelHeadersHelper'])
+function settingsCommands(value, out = []) {
+  if (Array.isArray(value)) for (const v of value) settingsCommands(v, out)
+  else if (value && typeof value === 'object') {
+    for (const [k, v] of Object.entries(value)) {
+      if (HELPER_KEYS.has(k) && typeof v === 'string') out.push(v)
+      else settingsCommands(v, out)
+    }
+  }
+  return out
+}
+
+// The command and args of every .mcp.json server.
+function mcpCommands(json) {
+  const servers = json && typeof json === 'object' ? json.mcpServers : null
+  if (!servers || typeof servers !== 'object') return []
+  return Object.values(servers).flatMap((v) => (v && typeof v === 'object' ? [v.command, ...(Array.isArray(v.args) ? v.args : [])] : [])).filter((x) => typeof x === 'string')
+}
+
+async function sameText($, a, b) {
+  const [x, y] = await Promise.all([configFile($, a), configFile($, b)])
+  return x !== UNREADABLE && y !== UNREADABLE && x === y
+}
+
+// The worktree brings no project config of its own: what it has is the lead checkout's, byte for byte. That is the
+// .mcp.json, settings and local files (CONFIG_FILES, absent in the worktree is fine), CLAUDE.md, AGENTS.md and
+// .claude/CLAUDE.md (MEMORY_FILES, absent on both sides or the same), .claude/agents, commands, skills and hooks
+// (CONFIG_DIRS, every file, nested ones too), and every repo file a settings command or an .mcp.json server names
+// (commandPaths): settings.json can stay byte for byte the same while the hook script it runs changes. A settings
+// or .mcp.json file that does not parse refuses.
 export async function sameConfig($, top, leadTop) {
+  const mine = new Map()
   for (const f of CONFIG_FILES) {
-    const mine = await configFile($, top + '/' + f)
-    if (mine === ABSENT) continue
-    if (mine === UNREADABLE || mine !== (await configFile($, leadTop + '/' + f))) return false
+    const text = await configFile($, top + '/' + f)
+    if (text === ABSENT) continue
+    if (text === UNREADABLE || text !== (await configFile($, leadTop + '/' + f))) return false
+    mine.set(f, text)
   }
+  for (const f of MEMORY_FILES) if (!(await sameText($, top + '/' + f, leadTop + '/' + f))) return false
   for (const d of CONFIG_DIRS) {
-    const [mine, lead] = await Promise.all([configTree($, top + '/' + d), configTree($, leadTop + '/' + d)])
-    if (!mine || !lead || mine.size !== lead.size) return false
-    for (const [k, v] of mine) if (lead.get(k) !== v) return false
+    const [here, lead] = await Promise.all([configTree($, top + '/' + d), configTree($, leadTop + '/' + d)])
+    if (!here || !lead || here.size !== lead.size) return false
+    for (const [k, v] of here) if (lead.get(k) !== v) return false
   }
+  const commands = []
+  try {
+    for (const f of ['.claude/settings.json', '.claude/settings.local.json']) if (mine.has(f)) commands.push(...settingsCommands(JSON.parse(mine.get(f))))
+    if (mine.has('.mcp.json')) commands.push(...mcpCommands(JSON.parse(mine.get('.mcp.json'))))
+  } catch {
+    return false
+  }
+  const refs = [...new Set(commands.flatMap((c) => commandPaths(c, top)))]
+  if (refs.length > REFS_MAX) return false
+  for (const r of refs) if (!(await sameText($, top + '/' + r, leadTop + '/' + r))) return false
   return true
 }
 

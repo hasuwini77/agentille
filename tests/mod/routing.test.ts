@@ -1,5 +1,6 @@
 import { describe, expect, mock, test } from 'claude-code/testing'
-import { DEFAULTS, asksSessions, decide, demoteHeaderText, formationOf, ladderFixes, mentionsFable, parseHeader, proveHeader, roleOf, typedFable, verdictOf } from '../../hooks/routing.js'
+import { AGENT_SILENT_MS, AGT_GRACE_TYPED, DEFAULTS, asksSessions, decide, demoteHeaderText, formationOf, ladderFixes, mentionsCodex, mentionsFable, parseHeader, proveHeader, roleOf, runInFlight, typedFable, verdictOf } from '../../hooks/routing.js'
+import { pieceOf } from '../../hooks/links.js'
 
 const fresh = () => ({ revise: 0, fixes: 0, fable: 0 })
 const S = { autoFable: true, maxFablePerRun: 1, fableWeeklyCeiling: 60 }
@@ -8,6 +9,15 @@ describe('policy', () => {
   test('parses the dispatch header', async () => {
     expect(parseHeader('[agt run=a1 size=large risk=auth mode=fix fable=auto]\nBuild it')).toEqual({ run: 'a1', size: 'large', risk: 'auth', mode: 'fix', fable: 'auto' })
     expect(parseHeader('Build it')).toBe(null)
+  })
+
+  test('slice=<slug> is an alias of piece=: both name the slice, piece= wins when a header has both', async () => {
+    expect(parseHeader('[agt run=a1 mode=build slice=api]')).toMatchObject({ piece: 'api', slice: 'api' })
+    expect(parseHeader('[agt run=a1 mode=build piece=api]')).toMatchObject({ piece: 'api' })
+    expect(parseHeader('[agt run=a1 piece=api slice=ui]')!.piece).toBe('api')
+    expect(pieceOf(parseHeader('[agt run=a1 slice=search-ui]'))).toBe('search-ui')
+    expect(pieceOf(parseHeader('[agt run=a1 piece=search-ui]'))).toBe('search-ui')
+    expect(pieceOf(parseHeader('[agt run=a1 mode=build]'))).toBe(null)
   })
 
   test('only agentille roles are routed', async () => {
@@ -303,6 +313,36 @@ describe('typed proof', () => {
     expect(demoteHeaderText(undefined)).toBe('')
   })
 
+  test('runInFlight: a typed /agt proves its own run, not the session', async () => {
+    const now = 1_000_000
+    const st = (o: Record<string, unknown> = {}) => ({ agtTyped: true, panes: [], live: new Map(), lastRun: 'r1', agtTypedSince: AGT_GRACE_TYPED, ...o })
+    const pane = (role: string, state: string) => ({ name: 'agt-r1-' + role, role, state })
+    const agent = (o: Record<string, unknown>) => new Map([['a1', { run: 'r1', state: 'working', start: now, heard: now, ...o }]])
+    expect(runInFlight(st({ agtTyped: false, agtTypedSince: 0 }), now)).toBe(false)
+    expect(runInFlight(st({ agtTypedSince: 0 }), now)).toBe(true)
+    expect(runInFlight(st({ agtTypedSince: AGT_GRACE_TYPED - 1 }), now)).toBe(true)
+    expect(runInFlight(st(), now)).toBe(false)
+    expect(runInFlight(st({ panes: [pane('exec-1', 'working')] }), now)).toBe(true)
+    expect(runInFlight(st({ panes: [pane('exec-1', 'blocked')] }), now)).toBe(true)
+    expect(runInFlight(st({ panes: [pane('exec-1', 'done'), pane('exec-2', 'idle')] }), now)).toBe(false)
+    expect(runInFlight(st({ panes: [pane('spawn', 'working')] }), now)).toBe(false)
+    expect(runInFlight(st({ live: agent({}) }), now)).toBe(true)
+    expect(runInFlight(st({ live: agent({ state: 'done' }) }), now)).toBe(false)
+    expect(runInFlight(st({ live: agent({ run: 'r0' }) }), now)).toBe(false)
+    expect(runInFlight(st({ live: agent({ run: 'adhoc' }), lastRun: 'adhoc' }), now)).toBe(false)
+    expect(runInFlight(st({ live: agent({ heard: now - AGENT_SILENT_MS }) }), now)).toBe(false) // cancelled: never completes
+  })
+
+  test('mentionsCodex: the word on its own, not a tool or flag that contains it', async () => {
+    expect(mentionsCodex('codex builds the API slice')).toBe(true)
+    expect(mentionsCodex('/agt heavy ship it with Codex.')).toBe(true)
+    expect(mentionsCodex('two codexes, one per slice')).toBe(true)
+    expect(mentionsCodex('then run /codex-reviewer on it')).toBe(false)
+    expect(mentionsCodex('bump codex-cli')).toBe(false)
+    expect(mentionsCodex('the codexify helper')).toBe(false)
+    expect(mentionsCodex('')).toBe(false)
+  })
+
   test('open_sessions needs a typed ask for sessions', async () => {
     expect(asksSessions('open three sessions')).toBe(true)
     expect(asksSessions('Start 2 codex panes in the api folder')).toBe(true)
@@ -342,5 +382,25 @@ describe('typed proof', () => {
     expect(asksSessions('Can you fire up a codex pane beside this one')).toBe(true)
     expect(asksSessions('fix the bug. Then open a shell')).toBe(true)
     expect(asksSessions('Open a new terminal in ../api and run the tests')).toBe(true)
+  })
+
+  test('a session noun followed by another noun names a thing, not a pane', async () => {
+    expect(asksSessions('Start a terminal emulator project in Rust')).toBe(false)
+    expect(asksSessions('give me a session summary of what we did')).toBe(false)
+    expect(asksSessions('Next spawn a shell injection test suite')).toBe(false)
+    expect(asksSessions('open the session manager and raise the timeout')).toBe(false)
+    expect(asksSessions('start a session replay for the bug')).toBe(false)
+    expect(asksSessions('open three Claude sessions')).toBe(true)
+    expect(asksSessions('fire up 2 codex panes for the api')).toBe(true)
+    expect(asksSessions('give me a shell')).toBe(true)
+    expect(asksSessions('open a shell running htop')).toBe(true)
+    expect(asksSessions('open a session that ships it')).toBe(true)
+    expect(asksSessions('open sessions: 2 claude, 1 codex')).toBe(true)
+    expect(asksSessions('open panes 2 claude')).toBe(true) // a count or kind right after the noun
+    expect(asksSessions('open a shell `npm test`')).toBe(true)
+    expect(asksSessions('open a terminal session')).toBe(true)
+    expect(asksSessions('open a terminal pane')).toBe(true)
+    expect(asksSessions('open a terminal window')).toBe(true)
+    expect(asksSessions('open a new terminal tab')).toBe(true)
   })
 })

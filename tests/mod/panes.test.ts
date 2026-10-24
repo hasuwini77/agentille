@@ -742,6 +742,48 @@ describe('pane tools: in the mod', () => {
     expect((await $.tool.call({ tool: 'mcp__agentille__spawn_pane', run: 'k7f2ab', role: 'exec-1', task: 'build the filter', ...EXEC })).result).toContain('Opened agt-k7f2ab-exec-1')
   })
 
+  test('spawn_pane lasts while the typed /agt run is in flight, not for the session', async ($, on) => {
+    setup(on, TMUX, { 'tmux split-window': { stdout: '%9\n' } })
+    const call = (role: string) => $.tool.call({ tool: 'mcp__agentille__spawn_pane', run: 'k7f2ab', role, task: 'build the filter', ...EXEC })
+    const plain = (text: string, kind = 'composer') => $.prompt.submit({ text, origin: { kind } } as never)
+    await typed($)
+    // The run asked a question and the person answered: still the run's.
+    await plain('the second option')
+    expect((await call('exec-1')).result).toContain('Opened agt-k7f2ab-exec-1')
+    // Turns the run wakes itself (a worker report, a notification) never end it.
+    for (let n = 0; n < 6; n++) await plain('[agt wire] done', 'notification')
+    expect((await call('exec-2')).result).toContain('Opened agt-k7f2ab-exec-2')
+    // No card came (an error, an interrupt), no pane is listed and the person moved on: the proof lapses.
+    await plain('thanks')
+    await plain('now fix the login form')
+    expect((await call('exec-3')).deny).toContain('/agt was typed')
+    await plain('[agt wire] done', 'notification')
+    expect((await call('exec-3')).deny).toContain('/agt was typed')
+    // The next typed /agt starts a new proof.
+    await typed($, '/agt ship the rest')
+    expect((await call('exec-3')).result).toContain('Opened agt-k7f2ab-exec-3')
+  })
+
+  test('a worker pane still working keeps the run in flight; an /agt-spawn pane does not', async ($, on) => {
+    let rows = [['%1', '', 'claude', '0', '@1']]
+    setup(on, TMUX, { 'tmux split-window': { stdout: '%9\n' }, 'tmux list-panes': () => ({ stdout: rows.map((r) => r.join(T)).join('\n') + '\n' }) })
+    await $.session.start({ cwd: '/work/repo', surface: null, isInteractive: false })
+    const call = (role: string) => $.tool.call({ tool: 'mcp__agentille__spawn_pane', run: 'k7f2ab', role, task: 'build the filter', ...EXEC })
+    const plain = (text: string) => $.prompt.submit({ text, origin: { kind: 'composer' } } as never)
+    await typed($)
+    rows = [...rows, ['%9', 'agt-k7f2ab-exec-1', 'claude', '0', '@1']]
+    expect((await call('exec-1')).result).toContain('Opened agt-k7f2ab-exec-1')
+    for (const t of ['one', 'two', 'three', 'four']) await plain(t)
+    expect((await call('exec-2')).result).toContain('Opened agt-k7f2ab-exec-2')
+    // exec-1 and exec-2 close; only a pane the person opened with /agt-spawn is left, and it is not the run's.
+    const opened = (await $.command.run({ command: 'agt-spawn', args: '"look around"', origin: { kind: 'composer' } } as never)).text
+    const name = opened.match(/agt-[a-z0-9]{6}-spawn/)[0]
+    rows = [rows[0], ['%7', name, 'claude', '0', '@1']]
+    expect((await call('exec-3')).deny).toBe('spawn_pane opens worker panes only while the typed /agt run is in flight; the next run needs the next typed /agt.')
+    await plain('five')
+    expect((await call('exec-3')).deny).toContain('/agt was typed')
+  })
+
   test('fable=forced without a typed --fable is dropped from the worker task, once per run', async ($, on) => {
     const toasts: string[] = []
     const { seen } = setup(on, TMUX, { 'tmux split-window': { stdout: '%9\n' } })
@@ -819,6 +861,29 @@ describe('pane tools: in the mod', () => {
     expect(String(r.text ?? r.error ?? JSON.stringify(r))).toContain('needs a one-time trust')
     expect(seen.some((a) => a[0] === 'herdr' && a[1] === 'agent' && a[2] === 'keys')).toBe(false)
     expect(seen[seen.length - 1]).toEqual(['herdr', 'pane', 'close', 'w1:p5'])
+  })
+
+  test('vendor codex needs the person to name Codex: the lead never picks it on its own', async ($, on) => {
+    const HERDR = { HERDR_ENV: '1', HERDR_PANE_ID: 'w1:p1', HOME: '/h' }
+    const { seen } = setup(on, HERDR, { 'herdr pane split': { stdout: JSON.stringify({ result: { pane: { pane_id: 'w1:p5' } } }) } })
+    const r = await spawn($, { run: 'k7f2ab', role: 'exec-1', task: 'build the filter', vendor: 'codex', ...EXEC })
+    expect(r.deny).toBe('vendor "codex" runs only when the person asked for Codex in their prompt, so run this slice as a Claude pane.')
+    expect(seen.some((a) => a.slice(0, 3).join(' ') === 'herdr pane split')).toBe(false)
+    // "/codex-reviewer" names another tool, not a Codex worker.
+    await typed($, '/agt ship it, then /codex-reviewer the diff')
+    expect((await $.tool.call({ tool: 'mcp__agentille__spawn_pane', run: 'k7f2ab', role: 'exec-1', task: 'build the filter', vendor: 'codex', ...EXEC })).deny).toContain('asked for Codex')
+    await typed($, '/agt heavy ship it, codex builds the API slice')
+    const ok = await $.tool.call({ tool: 'mcp__agentille__spawn_pane', run: 'k7f2ab', role: 'exec-1', task: 'build the filter', vendor: 'codex', ...EXEC })
+    expect(ok.result).toContain('Opened agt-k7f2ab-exec-1 · codex')
+    expect(seen.find((a) => a.slice(0, 3).join(' ') === 'herdr agent start')).toContain('codex')
+  })
+
+  test('vendor codex on tmux: the gate passes on a typed ask, then Herdr is required', async ($, on) => {
+    setup(on, TMUX, { 'tmux split-window': { stdout: '%9\n' } })
+    const r = await spawn($, { run: 'k7f2ab', role: 'exec-1', task: 'build the filter', vendor: 'codex', ...EXEC })
+    expect(r.deny).toContain('asked for Codex')
+    await typed($, '/agt use Codex for the api slice')
+    expect((await $.tool.call({ tool: 'mcp__agentille__spawn_pane', run: 'k7f2ab', role: 'exec-1', task: 'build the filter', vendor: 'codex', ...EXEC })).deny).toContain('Codex panes need Herdr')
   })
 
   test('no transport: a typed /agt registers none', async ($, on) => {
@@ -962,6 +1027,96 @@ describe('pane tools: in the mod', () => {
     expect((await close($, 'agt-k7f2ab-spawn')).deny).toContain('typed /agt-spawn')
     expect((await close($, 'agt-k7f2ab-exec-2')).deny).toContain('No pane named')
     expect(seen.filter((a) => a[1] === 'kill-pane').length).toBe(1)
+  })
+})
+
+// The folder-trust prompt is accepted for a worktree of the lead's repo only when the lead made it: an agt/*, feat/*
+// or fix/* branch on the lead's lead-<pane>.worktrees list, or, with no list, one that brings no settings of its own.
+describe('pane tools: folder trust', () => {
+  const trust = ' Do you trust the files in this folder?\n\n /work/wt\n\n ❯ 1. Yes, proceed\n   2. No, exit'
+  const setup = (on: any, { branch = 'agt/k7f2ab-exec-1', files = {} as Record<string, string> } = {}) => {
+    const seen: string[][] = []
+    const vars: Record<string, string> = { HERDR_ENV: '1', HERDR_PANE_ID: 'w1:p1', HOME: '/h' }
+    on('env.get', async ($: any, e: any) => ({ value: vars[e.name] }))
+    on('session.cwd', async () => ({ value: '/work/repo' }))
+    on('session.start', async ($: any, e: any) => ({ cwd: e.cwd }))
+    on('command.register', async () => ({ value: undefined }))
+    on('tool.register', async ($: any, e: any) => ({ value: { tool: 'mcp__agentille__' + e.name } }))
+    on('fs.read', async ($: any, e: any) => (e.path in files ? { value: files[e.path] } : { deny: 'ENOENT' }))
+    on('fs.write', async () => ({ value: undefined }))
+    on('fs.exists', async () => ({ value: false }))
+    on('fs.stat', async ($: any, e: any) => (e.path.startsWith('/work/') ? { value: { kind: 'dir', size: 0, mtimeMs: 0, isLink: false } } : { deny: 'ENOENT' }))
+    on('store.get', async () => ({ value: undefined }))
+    on('store.set', async () => ({ value: undefined }))
+    on('ui.panes', async () => ({ value: [] }))
+    on('prompt.submit', async ($: any, e: any) => ({ text: e.text }))
+    const table: Record<string, any> = {
+      'herdr pane split': { stdout: JSON.stringify({ result: { pane: { pane_id: 'w1:p5' } } }) },
+      'herdr agent start': { exitCode: 1, stderr: 'agent_not_ready' },
+      'herdr agent read': { stdout: trust },
+      'herdr agent get': { stdout: JSON.stringify({ result: { agent: { agent_status: 'idle' } } }) },
+      'git -C /work/wt rev-parse --path-format=absolute --git-common-dir': { stdout: '/work/repo/.git\n' },
+      'git -C /work/repo rev-parse --path-format=absolute --git-common-dir': { stdout: '/work/repo/.git\n' },
+      'git -C /work/wt rev-parse --show-toplevel': { stdout: '/work/wt\n' },
+      'git -C /work/repo rev-parse --show-toplevel': { stdout: '/work/repo\n' },
+      'git -C /work/wt symbolic-ref --short HEAD': { stdout: branch + '\n' },
+    }
+    on('process.run', async ($: any, e: any) => {
+      seen.push(e.argv)
+      const key = Object.keys(table).find((k) => e.argv.join(' ').startsWith(k))
+      return { value: { exitCode: 0, stdout: '', stderr: '', ...(key === undefined ? {} : table[key]) } }
+    })
+    const clock = mock.clock(on, { now: 1_000_000 })
+    return { seen, clock }
+  }
+  const EXEC = { agent: 'executor', header: '[agt run=k7f2ab size=small mode=build]' }
+  // The keys go out 300 ms apart and the cleared screen is polled every 500 ms: the clock runs until the call settles.
+  const spawn = async ($: any, clock: any) => {
+    await $.session.start({ cwd: '/work/repo', surface: null, isInteractive: false })
+    await $.prompt.submit({ text: '/agt ship it', origin: { kind: 'composer' } } as never)
+    let out: any
+    const call = $.tool.call({ tool: 'mcp__agentille__spawn_pane', run: 'k7f2ab', role: 'exec-1', task: 'build the filter', cwd: '/work/wt', ...EXEC }).then((r: any) => (out = r))
+    for (let n = 0; n < 200 && out === undefined; n++) await clock.advance(250)
+    await call
+    return out
+  }
+  const accepted = (seen: string[][]) => seen.some((a) => a.slice(0, 3).join(' ') === 'herdr agent send-keys')
+  const LIST = '/h/.agentille/state/lead-w1-p1.worktrees'
+
+  test('an agt/* worktree on the lead\'s list is trusted', async ($, on) => {
+    const { seen, clock } = setup(on, { files: { [LIST]: '/work/wt\tagt/k7f2ab-exec-1\n' } })
+    expect((await spawn($, clock)).result).toContain('Opened agt-k7f2ab-exec-1')
+    expect(accepted(seen)).toBe(true)
+  })
+
+  test('a feat/* worktree the list does not name is refused', async ($, on) => {
+    const { seen, clock } = setup(on, { branch: 'feat/other', files: { [LIST]: '/work/elsewhere\nagt/k7f2ab-exec-2\n' } })
+    expect(JSON.stringify(await spawn($, clock))).toContain('needs a one-time trust')
+    expect(accepted(seen)).toBe(false)
+  })
+
+  test('a contributor branch of the same repo is refused, list or not', async ($, on) => {
+    const { seen, clock } = setup(on, { branch: 'contrib-change', files: { [LIST]: '/work/wt\n' } })
+    expect(JSON.stringify(await spawn($, clock))).toContain('needs a one-time trust')
+    expect(accepted(seen)).toBe(false)
+  })
+
+  test('no list: a fix/* worktree with no settings of its own is trusted', async ($, on) => {
+    const { seen, clock } = setup(on, { branch: 'fix/login', files: { '/work/repo/.claude/settings.json': '{}' } })
+    expect((await spawn($, clock)).result).toContain('Opened agt-k7f2ab-exec-1')
+    expect(accepted(seen)).toBe(true)
+  })
+
+  test('no list: settings that match the lead checkout\'s are trusted', async ($, on) => {
+    const same = setup(on, { files: { '/work/repo/.claude/settings.json': '{"a":1}', '/work/wt/.claude/settings.json': '{"a":1}' } })
+    expect((await spawn($, same.clock)).result).toContain('Opened agt-k7f2ab-exec-1')
+    expect(accepted(same.seen)).toBe(true)
+  })
+
+  test('no list: a worktree whose own settings.local.json adds a hook is refused', async ($, on) => {
+    const { seen, clock } = setup(on, { files: { '/work/wt/.claude/settings.local.json': '{"hooks":{"SessionStart":[]}}' } })
+    expect(JSON.stringify(await spawn($, clock))).toContain('needs a one-time trust')
+    expect(accepted(seen)).toBe(false)
   })
 })
 
@@ -1519,7 +1674,7 @@ describe('startup dialogs', () => {
   })
 })
 
-import { MAX_SESSIONS, OPEN_SESSIONS_TOOL, SESSION_KINDS, herdrSessionSplitArgv, herdrSessionStartArgv, herdrSessionTabArgv, herdrTerminalOf, sessionName, sessionsNote, sessionsToolInput, stripFable, tmuxSessionSplitArgv, tmuxTitleArgvs, tmuxTypeArgvs } from '../../hooks/panes.js'
+import { MAX_SESSIONS, OPEN_SESSIONS_TOOL, SESSION_KINDS, herdrSessionSplitArgv, herdrSessionStartArgv, herdrSessionTabArgv, herdrTerminalOf, sessionName, sessionsNote, sessionsToolInput, shellCommands, stripFable, tmuxSessionSplitArgv, tmuxTitleArgvs, tmuxTypeArgvs } from '../../hooks/panes.js'
 
 describe('sessions: helpers', () => {
   test('a shell task must appear in the typed prompt; --fable is stripped from a Claude task unless typed', () => {
@@ -1532,7 +1687,24 @@ describe('sessions: helpers', () => {
     expect(stripFable('a --fable b --fableish')).toBe('a b --fableish')
   })
 
-  test('session names are s-<run>-<n>, never agt-, so no reaper, band or sweep picks them up', () => {
+  test('a shell task is a quoted span or the rest of the ask, never a span the prompt says not to run', () => {
+    const shell = (task: string, typed: string) => sessionsToolInput({ kind: 'shell', tasks: [task] }, { typed }).error
+    expect(shell('rm -rf ~/Documents', 'open a shell. Do NOT run rm -rf ~/Documents under any circumstance')).toContain('runs only as the person typed it')
+    expect(shell('rm -rf ~/Documents', 'open a shell and never run `rm -rf ~/Documents`')).toContain('runs only as the person typed it')
+    expect(shell('rm -rf dist', 'open a shell and run `npm test`. Don\'t run "rm -rf dist"')).toContain('runs only as the person typed it')
+    expect(shell('rm -rf x', 'open a shell and don\'t run rm -rf x')).toContain('runs only as the person typed it')
+    expect(shell('npm run', 'open a shell and run npm run dev')).toContain('runs only as the person typed it') // a substring is not the command
+    expect(shell('npm test', 'open a shell and run `npm test`. Don\'t run "rm -rf dist"')).toBeUndefined()
+    expect(shell('make dev', 'open a shell that runs "make dev"')).toBeUndefined()
+    expect(shell('git status', 'Can you open a shell and run git status?')).toBeUndefined()
+    expect(shell('npm test', 'Open a new terminal in ../api and run npm test')).toBeUndefined()
+    expect(shell('node index.js', 'open a shell and run node index.js.')).toBeUndefined()
+    expect(shell('cd .. && ls', 'open a shell: cd .. && ls')).toBeUndefined()
+    expect(shell('htop', 'give me a shell \u2018htop\u2019')).toBeUndefined()
+    expect([...shellCommands('open a shell and run npm run dev in it')]).toEqual(['npm run dev'])
+  })
+
+  test('session names are s-<run>-<n>, never agt-, so the band and the worker reaper never pick them up', () => {
     expect(sessionName('k7f2ab', 1)).toBe('s-k7f2ab-1')
     expect(sessionName('k7f2ab', 8)).toBe('s-k7f2ab-8')
     expect(sessionName('k7f2ab', 0)).toBe(null)
@@ -1543,6 +1715,10 @@ describe('sessions: helpers', () => {
 
   test('the tool loads eagerly and says when to use it', () => {
     expect(OPEN_SESSIONS_TOOL.isDeferred).toBe(false)
+    // What the reaper and the SessionEnd sweep really do, not "no reaper".
+    expect(OPEN_SESSIONS_TOOL.description).not.toContain('no reaper')
+    expect(OPEN_SESSIONS_TOOL.description).toContain('closed after 10 minutes idle and unfocused, and at session end when idle')
+    expect(sessionsNote('herdr', 'claude')).toContain('closed after 10 minutes idle and unfocused, and at session end when idle')
     expect(OPEN_SESSIONS_TOOL.description).toContain('open or start sessions')
     expect(OPEN_SESSIONS_TOOL.description).toContain('never answer it with subagents')
     expect(OPEN_SESSIONS_TOOL.inputSchema.properties.model.enum).not.toContain('fable')
@@ -1654,6 +1830,18 @@ describe('sessions: in the mod', () => {
     expect((await $.tool.call({ tool: 'mcp__agentille__open_sessions', count: 1 })).deny).toContain('typed a request for sessions')
   })
 
+  test('the ask is per turn: a notification turn after it opens nothing', async ($, on) => {
+    next = 4
+    const { seen } = setup(on, HERDR, { 'herdr pane split': herdrSplit })
+    await asked($, 'open a session')
+    expect((await $.tool.call({ tool: 'mcp__agentille__open_sessions', count: 1 })).result).toMatch(/^Opened s-/)
+    await $.prompt.submit({ text: 'background task finished', origin: { kind: 'notification' } } as never)
+    expect((await $.tool.call({ tool: 'mcp__agentille__open_sessions', count: 3 })).deny).toContain('typed a request for sessions')
+    await $.prompt.submit({ text: 'peer message', origin: { kind: 'peer' } } as never)
+    expect((await $.tool.call({ tool: 'mcp__agentille__open_sessions', count: 3 })).deny).toContain('typed a request for sessions')
+    expect(seen.filter((a) => a.slice(0, 3).join(' ') === 'herdr pane split')).toHaveLength(1)
+  })
+
   test('open_sessions is registered on the typed ask, with close_pane once; a later /agt adds spawn_pane only', async ($, on) => {
     const a = setup(on, TMUX, { 'tmux list-panes': { stdout: ['%1', '', 'claude', '0', '@1'].join('\t') + '\n' } })
     await $.session.start({ cwd: '/work/repo', surface: null, isInteractive: false })
@@ -1713,6 +1901,15 @@ describe('sessions: in the mod', () => {
     await asked($, 'open a session with --fable and ship it')
     await $.tool.call({ tool: 'mcp__agentille__open_sessions', tasks: ['/agt --fable ship it'] })
     expect(seen.filter((a) => a.slice(0, 3).join(' ') === 'herdr agent prompt').at(-1)!.at(-1)).toBe('/agt --fable ship it')
+  })
+
+  test('a shell session never runs a command the prompt said not to run', async ($, on) => {
+    next = 4
+    const { seen } = setup(on, HERDR, { 'herdr pane split': herdrSplit })
+    await asked($, 'open a shell. Do NOT run rm -rf ~/Documents under any circumstance')
+    expect((await $.tool.call({ tool: 'mcp__agentille__open_sessions', kind: 'shell', tasks: ['rm -rf ~/Documents'] })).deny).toContain('runs only as the person typed it')
+    expect(seen.some((a) => a.slice(0, 3).join(' ') === 'herdr pane split')).toBe(false)
+    expect((await $.tool.call({ tool: 'mcp__agentille__open_sessions', kind: 'shell' })).result).toContain('· shell ·')
   })
 
   test('herdr: a shell session runs its command and starts no agent', async ($, on) => {
@@ -1805,7 +2002,7 @@ describe('sessions: the idle sweep', () => {
   })
 
   test('the note tells a herdr lead the sessions close themselves; tmux ones only on request', () => {
-    expect(sessionsNote('herdr', 'claude')).toContain('closes itself after 10 minutes idle')
+    expect(sessionsNote('herdr', 'claude')).toContain('is closed after 10 minutes idle')
     expect(sessionsNote('tmux', 'claude')).toContain('close only on request')
   })
 

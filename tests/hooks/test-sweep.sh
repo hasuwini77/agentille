@@ -39,7 +39,7 @@ seed() { # the lead w1:p0's state: panes it opened, its run tab, its sessions, a
   rm -rf "$S"; mkdir -p "$S/run-r1/agents" "$S/run-r2/agents"
   printf 'agt-r1-exec-1\nagt-r1-exec-2\nagt-r1-exec-4\nagt-r1-exec-5\nagt-r2-exec-1\n' > "$S/lead-w1-p0.panes"
   printf 't2\n' > "$S/lead-w1-p0.tabs"
-  printf 's-r1-1\ns-r1-2\n' > "$S/lead-w1-p0.sessions"
+  printf 's-r1-1\ns-r1-2\ns-r1-3\n' > "$S/lead-w1-p0.sessions"
   : > "$S/run-r1/done-exec-1"                 # exec-1: done marker
   : > "$S/run-r2/agents/pane-exec-1.p5.md"    # r2 exec-1 in pane p5: its own answer file
   : > "$S/run-r1/agents/pane-exec-6.md"       # a saved answer of a pane this lead never opened
@@ -63,7 +63,9 @@ cat > "$T/herdr.json" <<'J'
  {"pane_id":"p8","name":"agt-r1-exec-6","tab_id":"t1","agent_status":"done"},
  {"pane_id":"p9","name":"agt-notes","tab_id":"t1","agent_status":"idle"},
  {"pane_id":"p10","name":"scratch","tab_id":"t1","agent_status":"idle"},
- {"pane_id":"p11","name":"agt-r1-exec-5","tab_id":"t1","agent_status":"dead"}
+ {"pane_id":"p11","name":"agt-r1-exec-5","tab_id":"t1","agent_status":"dead"},
+ {"pane_id":"p12","name":"s-zz-1","tab_id":"t1","agent_status":"idle","focused":false},
+ {"pane_id":"p13","name":"s-r1-3","tab_id":"t1","agent_status":"idle","focused":true}
 ]}}
 J
 seed; : > "$LOG"
@@ -80,6 +82,8 @@ check "herdr: another session's done worker, answer saved, kept" '! closed "herd
 check "herdr: a person's pane named agt-notes kept" '! closed "herdr pane close p9"'
 check "herdr: non-agt pane kept" '! closed "herdr pane close p10"'
 check "herdr: session with an unread answer kept" '! closed "herdr pane close p7"'
+check "herdr: another lead's idle unfocused session kept" '! closed "herdr pane close p12"'
+check "herdr: own idle session the person has focused kept" '! closed "herdr pane close p13"'
 check "herdr: self kept" '! closed "herdr pane close p0"'
 check "herdr: lead state files removed" '[ ! -e "$S/lead-w1-p0.panes" ] && [ ! -e "$S/lead-w1-p0.tabs" ] && [ ! -e "$S/lead-w1-p0.sessions" ]'
 

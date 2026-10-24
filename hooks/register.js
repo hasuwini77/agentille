@@ -19,7 +19,7 @@ import { installedSkew, loadProfile, loadSquads, squadsView, tipOnce } from './p
 import { bashCall } from './guard.js'
 import { pollNow, cleanWorkspace } from './reaper.js'
 import { cardBox, answerBox, switchboard, deck } from './render.js'
-import { parseHeader, typedFable, asksSessions, verdictOf } from './routing.js'
+import { parseHeader, typedFable, asksSessions, verdictOf, runInFlight } from './routing.js'
 import { registerRows } from './rows.js'
 import { hostMessage, hostTooOld, hostVersionOf, skewMessage } from './skew.js'
 import { detectTransport, transportOf, openPane, ensureTools, loadOwned, savePanes } from './spawn.js'
@@ -157,13 +157,23 @@ export function register(on) {
   // and neither is one whose origin the host did not name.
   on('prompt.submit', async ($, e, next) => {
     const k = e.origin?.kind
-    if (k !== 'composer' && k !== 'bridge') return next(e)
+    const typed = k === 'composer' || k === 'bridge'
+    const agt = typed && isAgtPrompt(e.text)
+    // Per-turn proofs end with their turn, whatever starts the next one: a notification after a typed "open a
+    // session" opens none. The /agt proof lasts while its run is in flight (routing.js runInFlight); in a lead,
+    // the first turn after that run is over drops it and its --fable, so a later header proves nothing.
+    S.sessionsAsked = false
+    S.rawTurn = false
+    S.shapedTurn = false
+    if (typed && !agt) S.agtTypedSince += 1
+    if (!S.selfName && !S.worker && S.agtTyped && !agt && !runInFlight(S)) { S.agtTyped = false; S.fableTyped = false }
+    if (!typed) return next(e)
     S.lastTyped = String(e.text ?? '')
-    S.agtTurn = isAgtPrompt(e.text)
+    S.agtTurn = agt
     if (S.agtTurn) S.flags = []   // a new run starts with a clean slate
-    // What the person typed is the only proof the dispatch headers get: a typed /agt unlocks spawn_pane
-    // for the session, --fable on it is what makes fable=forced hold, and only a typed ask opens sessions.
-    if (S.agtTurn) { S.agtTyped = true; S.fableTyped = typedFable(e.text) }
+    // What the person typed is the only proof the dispatch headers get: a typed /agt unlocks spawn_pane for its
+    // run, --fable on it is what makes fable=forced hold, and only a typed ask opens sessions, on that turn.
+    if (S.agtTurn) { S.agtTyped = true; S.agtTypedSince = 0; S.fableTyped = typedFable(e.text); S.agtPrompt = S.lastTyped }
     if (S.agtTurn) await ensureTools($, 'panes')
     // A worker's proof is its first prompt: the lead already rewrote fable=forced there when nobody typed --fable.
     if (S.worker && !S.workerProved) { S.workerProved = true; S.fableTyped = parseHeader(e.text)?.fable === 'forced' || typedFable(e.text) }
@@ -172,11 +182,11 @@ export function register(on) {
     if (S.agtTurn && S.deckAuto) void $.ui.open({ id: DECK, title: 'agentille' })
     // Under display.highlight: all, a typed question in the lead session asks for the panel's shape.
     // Never in a worker pane (the lead parses its report) and never for a slash command or an /agt run.
-    const typed = !S.agtTurn && !S.selfName && !S.worker && !String(e.text ?? '').trimStart().startsWith('/')
+    const asked = !S.agtTurn && !S.selfName && !S.worker && !String(e.text ?? '').trimStart().startsWith('/')
     // Asked for text to paste as is: no panel and no answer style. Under display.highlight: off nothing is
     // added to any prompt and nothing is copied, so the raw style needs highlight on or all.
-    S.rawTurn = typed && S.highlightOn && isRawPrompt(e.text)
-    S.shapedTurn = !S.rawTurn && typed && S.highlightOn && S.highlightAll
+    S.rawTurn = asked && S.highlightOn && isRawPrompt(e.text)
+    S.shapedTurn = !S.rawTurn && asked && S.highlightOn && S.highlightAll
     if (S.rawTurn) return next({ ...e, context: [...(e.context ?? []), RAW_STYLE] })
     if (S.shapedTurn) return next({ ...e, context: [...(e.context ?? []), ANSWER_STYLE] })
     return next(e)

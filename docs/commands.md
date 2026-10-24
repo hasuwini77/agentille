@@ -29,4 +29,5 @@ Still honored when typed, never suggested. Each one is deprecated; removed in 4.
 | `/agt-focus [on\|off]` | set `display.focus` in your profile ([settings.md](./settings.md#older-commands)) |
 | `/agt-highlight [on\|all\|off]` | set `display.highlight` in your profile ([settings.md](./settings.md#older-commands)) |
 | `/agt --mode solo\|subagent\|panes\|herdr` | `/agt low\|medium\|heavy` |
-| `/agt --plan` · `/agt --formation <f>` | no replacement: the run picks its own formation |
+| `/agt --plan` | no replacement |
+| `/agt --formation <f>` | no replacement: the run picks its formation |

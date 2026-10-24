@@ -1,6 +1,6 @@
 import { describe, expect, mock, test } from 'claude-code/testing'
 import { AGENT_SILENT_MS, AGT_GRACE_TYPED, AGT_INFLIGHT_MAX_MS, PANE_REST_MS, PANE_EST_MAX_MS, PANE_TOKENS_PER_MIN, CEILING_ROLES, ROLES, paneUsd, DEFAULTS, MAX_EXECUTORS_AT_ONCE, PRICES, asksSessions, decide, estimateRunUsd, executorCapFlag, executorsWorking, ordinal, demoteHeaderText, formationOf, ladderFixes, mentionsCodex, mentionsFable, parseHeader, proveHeader, roleOf, runInFlight, typedFable, verdictOf } from '../../hooks/routing.js'
-import { pieceOf } from '../../hooks/links.js'
+import { sliceOf } from '../../hooks/links.js'
 
 const fresh = () => ({ revise: 0, fixes: 0, fable: 0 })
 const S = { autoFable: true, maxFablePerRun: 1, fableWeeklyCeiling: 60 }
@@ -11,13 +11,13 @@ describe('policy', () => {
     expect(parseHeader('Build it')).toBe(null)
   })
 
-  test('slice=<slug> is an alias of piece=: both name the slice, piece= wins when a header has both', async () => {
-    expect(parseHeader('[agt run=a1 mode=build slice=api]')).toMatchObject({ piece: 'api', slice: 'api' })
-    expect(parseHeader('[agt run=a1 mode=build piece=api]')).toMatchObject({ piece: 'api' })
-    expect(parseHeader('[agt run=a1 piece=api slice=ui]')!.piece).toBe('api')
-    expect(pieceOf(parseHeader('[agt run=a1 slice=search-ui]'))).toBe('search-ui')
-    expect(pieceOf(parseHeader('[agt run=a1 piece=search-ui]'))).toBe('search-ui')
-    expect(pieceOf(parseHeader('[agt run=a1 mode=build]'))).toBe(null)
+  test('slice=<slug> names the slice; the older piece= is its alias and wins when a header has both', async () => {
+    expect(parseHeader('[agt run=a1 mode=build slice=api]')).toMatchObject({ slice: 'api' })
+    expect(parseHeader('[agt run=a1 mode=build piece=api]')).toMatchObject({ slice: 'api' })
+    expect(parseHeader('[agt run=a1 piece=api slice=ui]')!.slice).toBe('api')
+    expect(sliceOf(parseHeader('[agt run=a1 slice=search-ui]'))).toBe('search-ui')
+    expect(sliceOf(parseHeader('[agt run=a1 piece=search-ui]'))).toBe('search-ui')
+    expect(sliceOf(parseHeader('[agt run=a1 mode=build]'))).toBe(null)
   })
 
   test('only agentille roles are routed', async () => {
@@ -80,14 +80,14 @@ describe('Fable is rare', () => {
     expect(decide({ role: 'planner', hdr: {}, run: { ...fresh(), revise: 2 }, settings: S })).toMatchObject({ model: 'fable', fable: true })
   })
 
-  test('fix rounds count per piece: one piece in fix rounds never escalates another', async () => {
-    const run = { ...fresh(), fixes: 3, fixesByPiece: { learn: 2, resolve: 1 } }
+  test('fix rounds count per slice: one slice in fix rounds never escalates another', async () => {
+    const run = { ...fresh(), fixes: 3, fixesBySlice: { learn: 2, resolve: 1 } }
     expect(ladderFixes(run, 'resolve')).toBe(1)
     expect(ladderFixes(run, 'learn')).toBe(2)
     expect(ladderFixes(run, 'fit')).toBe(0)
-    expect(ladderFixes(run, null)).toBe(2) // no piece: the worst piece
+    expect(ladderFixes(run, null)).toBe(2) // no slice: the worst slice
     expect(ladderFixes(fresh(), null)).toBe(0)
-    // resolve's first fix round (1 + this dispatch = 2 overall, but 1 on its piece) stays at table effort
+    // resolve's first fix round (1 + this dispatch = 2 overall, but 1 on its slice) stays at table effort
     expect(decide({ role: 'executor', hdr: { mode: 'fix', size: 'large' }, run: { ...run, fixes: ladderFixes(run, 'resolve') }, settings: S }).reason).toBe('table')
   })
 
@@ -243,6 +243,21 @@ describe('workflow agents: runs, toast, deny', () => {
     expect(await shownRun(ui, 'runG')).toBe(true)
     expect(await shownRun(ui, 'runH')).toBe(false)
     await ui.unmount()
+  })
+
+  test('a lead names its run in session-<id>.run, and the ledger lists each slice from its first dispatch', async ($, on) => {
+    const { writes } = setup(on)
+    on('session.id', async () => ({ value: 'lead-sid' }))
+    await $.session.start({ cwd: '/w', surface: null, isInteractive: false })
+    await $.agent.spawn({ prompt: '[agt run=runS1 size=small mode=build slice=api]\nbuild the api', subagentType: 'agentille:agentille-executor' } as never) // w0
+    expect(writes['/h/.agentille/state/session-lead-sid.run']).toBe('runS1\n')
+    const slices = () => JSON.parse(writes['/h/.agentille/state/run-runS1/ledger.json']).slices
+    expect(slices()).toEqual({ api: { executor: 'working' } })
+    await $.agent.spawn({ prompt: '[agt run=runS1 size=small mode=review slice=api]\nreview the api diff', subagentType: 'agentille:agentille-code-reviewer' } as never) // w1
+    await finish($, 'w0')
+    expect(slices()).toEqual({ api: { executor: 'done', 'code-reviewer': 'working' } })
+    await $.agent.spawn({ prompt: 'no header', subagentType: 'Explore' } as never) // an ad hoc agent names no run
+    expect(writes['/h/.agentille/state/session-lead-sid.run']).toBe('runS1\n')
   })
 
   test('a headerless workflow agent files its routing line and tokens under adhoc, not the band run', async ($, on) => {
@@ -525,7 +540,7 @@ describe('typed proof', () => {
 
   test('rewrites fable=forced on the prompt first line only', async () => {
     expect(demoteHeaderText('[agt run=a1 fable=forced]\nBuild fable=forced now')).toBe('[agt run=a1 fable=forced]\nBuild fable=forced now'.replace('fable=forced]', 'fable=auto]'))
-    expect(demoteHeaderText('[agt run=a1 fable=forced piece=x]')).toBe('[agt run=a1 fable=auto piece=x]')
+    expect(demoteHeaderText('[agt run=a1 fable=forced slice=x]')).toBe('[agt run=a1 fable=auto slice=x]')
     expect(demoteHeaderText('no header\nfable=forced')).toBe('no header\nfable=forced')
     expect(demoteHeaderText(undefined)).toBe('')
   })

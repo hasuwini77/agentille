@@ -1,4 +1,4 @@
-// agentille stores: each piece of session state lives in the module that writes it. makeStore gives that module
+// agentille stores: each part of session state lives in the module that writes it. makeStore gives that module
 // the record it writes (`s`) and a read view for everyone else (`view`): the view reads the live record, and any
 // assignment, delete or defineProperty on it throws, naming the owner whose transitions make the change. The view
 // is shallow: a Map, Set or array it holds is the owner's own object, changed only through the owner's transitions.

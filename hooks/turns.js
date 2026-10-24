@@ -75,9 +75,9 @@ export async function onTurnComplete($, e) {
   }
   if (a) {
     a.tool = null
-    if (a.routed) addFlag($, flagKey(a.role, a.piece), flagOf(a.role, e.answer))
+    if (a.routed) addFlag($, flagKey(a.role, a.slice), flagOf(a.role, e.answer))
     a.verdict = verdictChip(a.role, e.answer)
-    if (a.routed && a.run !== 'adhoc') noteWire({ from: party(a.role, a.piece), to: 'lead', kind: 'done', summary: answerLine(a.role, e.answer), at: Date.now(), via: 'sub' })
+    if (a.routed && a.run !== 'adhoc') noteWire({ from: party(a.role, a.slice), to: 'lead', kind: 'done', summary: answerLine(a.role, e.answer), at: Date.now(), via: 'sub' })
     if (a.role === 'plan-reviewer' && verdictOf(e.answer) === 'REVISE') runState(fileRunOf(a)).revise += 1
     if (a.input + a.output === 0) addUsage(a, e.usage)
     finish(a, Date.now(), e.durationMs)

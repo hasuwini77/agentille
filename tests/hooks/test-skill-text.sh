@@ -77,12 +77,17 @@ done
 # a script injected from a CDN names an exact version
 check "every CDN URL in a prompt file is pinned" '! grep -rhoE "(cdn\.jsdelivr\.net/npm|unpkg\.com)/[^ \`\"]+" skills agents | grep -vE "/(@[a-z0-9-]+/)?[a-z0-9.-]+@[0-9]+\.[0-9]+\.[0-9]+" | grep -q .'
 
-# the lead re-enters a run from its files after a compaction, and the update check runs on compaction too
+# the lead re-enters a run from its files after a compaction: the compact hook prints where the run stands, and the
+# update check still runs at startup and resume
 reentry() { grep -F "compaction" skills/agt/SKILL.md | grep -F "Re-enter"; }
 check "SKILL.md has a re-entry rule" '[ -n "$(reentry)" ]'
 check "the re-entry rule names ledger.json and context-pack.md" 'reentry | grep -F "ledger.json" | grep -qF "context-pack.md"'
 check "SKILL.md never re-dispatches a finished slice" 'has skills/agt/SKILL.md "Never re-dispatch a finished slice"'
-check "a SessionStart hook fires on compact" 'grep -qE "\"matcher\": *\"[^\"]*compact" hooks/hooks.json'
+# the hook lines of one SessionStart matcher: from its "matcher" line to the next matcher or hook event
+matcher_block() { awk -v m="\"matcher\": \"$1\"" 'index($0, m) { on = 1; next } on && /"matcher"|"SessionEnd"/ { on = 0 } on' hooks/hooks.json; }
+check "the compact hook runs the re-entry script" 'matcher_block compact | grep -qF "hooks/agentille-compact.sh"'
+check "the re-entry script exists and is executable" '[ -x hooks/agentille-compact.sh ]'
+check "the update check still runs at startup and resume" 'matcher_block "startup|resume" | grep -qF "hooks/agentille-update-check.sh"'
 
 # setup skills that say "typed only" disable model invocation
 for f in skills/agentille-init/SKILL.md skills/agentille-project/SKILL.md; do

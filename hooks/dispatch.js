@@ -1,10 +1,10 @@
 // agentille run bookkeeping: per-run counters, the routing log and ledger under ~/.agentille/state/run-<id>/,
 // each subagent's raw report, and the Agents section the mod adds to a finished report.md.
 
-import { Profile, Panes, Proofs, Session } from './state.js'
+import { Profile, Panes, Proofs, Session, isLead } from './state.js'
 import { makeStore } from './store.js'
 import { reportRun, reportTail } from './drawing.js'
-import { pieceOf, party, taskLine } from './links.js'
+import { sliceOf, party, taskLine } from './links.js'
 import { newAgent, short, ledger, ledgerText } from './live.js'
 import { SAFE_RUN, splitName } from './panes.js'
 import { formationOf, roleOf, parseHeader, proveHeader, demoteHeaderText, ladderFixes, decide, executorsWorking, executorCapFlag, estimateRunUsd, maxRunUsdOf, usd } from './routing.js'
@@ -21,6 +21,7 @@ const { s: my, view } = makeStore('dispatch.js', {
   live: new Map(),  // agentId → live agent (live.js)
   decisions: [],  // this session, for /agt-info routing
   paneRoutes: [],  // PaneRoute[], append-only: how each worker this lead opened was routed
+  sessionRun: null,  // the run session-<session id>.run names (markRun)
 })
 export const Runs = view
 const wfToasted = new Set()  // run:role pairs whose drift the person was told once
@@ -76,7 +77,7 @@ export function runSpend(runId) {
 }
 
 export function runState(id) {
-  if (!my.runs.has(id)) my.runs.set(id, { revise: 0, fixes: 0, fixesByPiece: {}, fable: 0, formation: null, log: [], reports: {} })
+  if (!my.runs.has(id)) my.runs.set(id, { revise: 0, fixes: 0, fixesBySlice: {}, fable: 0, formation: null, log: [], reports: {} })
   return my.runs.get(id)
 }
 
@@ -101,6 +102,21 @@ export async function writeRunFile($, runId, name, text) {
     await $.fs.write(Profile.home + '/.agentille/state/run-' + runId + '/' + name, text)
   } catch {
     // the run dir is the orchestrator's; logging never blocks a dispatch
+  }
+}
+
+// A lead names the run it dispatches for in ~/.agentille/state/session-<session id>.run, written once per run, and
+// refreshes the run's ledger.json, so the ledger lists each slice from its first dispatch. The SessionStart hook for
+// a compaction (agentille-compact.sh) reads both to print where the run stands.
+export async function markRun($, runId) {
+  if (!isLead() || !Profile.home || !SAFE_RUN.test(runId) || runId === 'adhoc') return
+  await writeRunFile($, runId, 'ledger.json', JSON.stringify(ledger(my.live, runId, my.paneRoutes), null, 2) + '\n')
+  if (!Session.sessionId || my.sessionRun === runId) return
+  try {
+    await $.fs.write(Profile.home + '/.agentille/state/session-' + Session.sessionId + '.run', runId + '\n')
+    my.sessionRun = runId
+  } catch {
+    // the hook then prints nothing; a dispatch never waits on it
   }
 }
 
@@ -167,7 +183,7 @@ export async function dispatchAgent($, e, next) {
     if (named && (my.lastRun === 'adhoc' || !busy)) my.lastRun = named
     agtTurnFromDispatch()
     // The table pick follows the run in progress (its REVISEs); `run` is only where the log goes.
-    const d = decide({ role, hdr, run: { ...runState(runId), fixes: ladderFixes(runState(runId), pieceOf(hdr)) }, depth: Profile.depth, settings: Profile.settings, weeklyPct: Session.weeklyPct })
+    const d = decide({ role, hdr, run: { ...runState(runId), fixes: ladderFixes(runState(runId), sliceOf(hdr)) }, depth: Profile.depth, settings: Profile.settings, weeklyPct: Session.weeklyPct })
     const res = await next(e)
     if (res.deny) return res
     const off = short(res.model) !== short(d.model)
@@ -175,7 +191,7 @@ export async function dispatchAgent($, e, next) {
     if (res.agentId) {
       const a = heard(newAgent({ id: res.agentId, role, routed: false, model: res.model, effort: null, reason: off ? drift : null, run: runId, now: Date.now(), parentId: e.parentAgentId ?? null }), e)
       a.fileRun = fileRun
-      a.piece = pieceOf(hdr)
+      a.slice = sliceOf(hdr)
       my.live.set(res.agentId, a)
     }
     const rec = { at: new Date().toISOString(), role, model: res.model, effort: null, reason: drift, asked: e.model ?? null, agentId: res.agentId ?? null, kind: 'workflow' }
@@ -196,16 +212,16 @@ export async function dispatchAgent($, e, next) {
   const run = runState(runId)
   run.formation = formationOf(hdr) ?? run.formation
   if (role === 'executor' && hdr.mode === 'fix') {
-    const key = pieceOf(hdr) ?? ''
+    const key = sliceOf(hdr) ?? ''
     run.fixes += 1
-    run.fixesByPiece[key] = (run.fixesByPiece[key] ?? 0) + 1
+    run.fixesBySlice[key] = (run.fixesBySlice[key] ?? 0) + 1
   }
   const shared = Number((await $.store.get('fable:' + runId)) ?? 0)
   run.fable = Math.max(run.fable, shared)
 
   // The run's spend so far, estimated from its agents' tokens and its panes' minutes, only when a ceiling is set.
   const spent = runSpend(runId)
-  const d = decide({ role, hdr, run: { ...run, fixes: ladderFixes(run, pieceOf(hdr)), usd: spent }, depth: Profile.depth, settings: Profile.settings, weeklyPct: Session.weeklyPct })
+  const d = decide({ role, hdr, run: { ...run, fixes: ladderFixes(run, sliceOf(hdr)), usd: spent }, depth: Profile.depth, settings: Profile.settings, weeklyPct: Session.weeklyPct })
   const res = await next({ ...e, model: d.model })
   if (res.deny) return res
 
@@ -213,15 +229,16 @@ export async function dispatchAgent($, e, next) {
     run.fable += 1
     await $.store.set('fable:' + runId, run.fable)
   }
-  const piece = pieceOf(hdr)
+  const slice = sliceOf(hdr)
   // At most 3 executors at once: counted before this one joins, subagents and the run's executor panes alike.
   const cap = role === 'executor' && runId !== 'adhoc' && res.agentId ? executorCapFlag(runId, executorsWorking(my.live, my.paneRoutes, runId) + 1) : null
-  if (res.agentId) my.live.set(res.agentId, { ...newAgent({ id: res.agentId, role, routed: true, model: res.model, effort: d.effort, reason: d.reason, run: runId, now: Date.now(), parentId: e.parentAgentId ?? null }), piece })
-  if (runId !== 'adhoc') noteWire({ from: 'lead', to: party(role, piece), kind: 'task', summary: taskLine(e.prompt) || role, at: Date.now(), via: 'sub' })
+  if (res.agentId) my.live.set(res.agentId, { ...newAgent({ id: res.agentId, role, routed: true, model: res.model, effort: d.effort, reason: d.reason, run: runId, now: Date.now(), parentId: e.parentAgentId ?? null }), slice })
+  if (runId !== 'adhoc') noteWire({ from: 'lead', to: party(role, slice), kind: 'task', summary: taskLine(e.prompt) || role, at: Date.now(), via: 'sub' })
   const rec = { at: new Date().toISOString(), role, model: res.model, effort: d.effort, reason: d.reason, asked: e.model ?? null, agentId: res.agentId ?? null, ...(cap && { cap }), ...(d.capped && { capped: true }) }
   my.decisions.push(rec)
   run.log.push(JSON.stringify(rec))
   await writeRunFile($, runId, 'routing.jsonl', run.log.join('\n') + '\n')
+  await markRun($, runId)
   if (cap) addFlag($, 'cap|' + runId, cap) // the band's ⚑ line and one toast; the dispatch itself goes ahead
   if (d.capped) ceilingOnce($, runId, run, spent, role, d)
   else if (d.reason !== 'table') $.ui.toast('agt ↑ ' + role + ' → ' + short(res.model) + ' · ' + d.effort + ' — ' + d.reason)

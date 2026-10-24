@@ -1,5 +1,5 @@
 // agentille text: the long strings the mod hands the model (pane tool descriptions, the /agt prompt's pane block,
-// the sessions notes), wrapped here so they read as prose. Each joins its pieces with one space, so the text the
+// the sessions notes), wrapped here so they read as prose. Each joins its parts with one space, so the text the
 // model sees is one line, as before. A leaf: it imports nothing, so panes.js can build its tools from it at load.
 
 const line = (...parts) => parts.join(' ')

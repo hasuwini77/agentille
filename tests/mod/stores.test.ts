@@ -12,7 +12,7 @@ import { addFlag, clearFlags, mascotHello, mascotWorking, mascotRest } from '../
 import { noteWire, pubTool } from '../../hooks/worker.js'
 import { ensureTicker } from '../../hooks/ticker.js'
 
-// Each piece of session state lives in the module that writes it; everyone else reads it through a view.
+// Each part of session state lives in the module that writes it; everyone else reads it through a view.
 const VIEWS = { Session, Proofs, Runs, Spawn, Panes, Sessions, Profile, Display, Wire, Timers, Worktrees }
 
 describe('stores: a module writes only its own', () => {

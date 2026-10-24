@@ -3,8 +3,8 @@
 // register.js only wires them to tool.call.
 
 import { isLead, Profile, Spawn, Panes, Sessions, Proofs, Session, markSkewToasted } from './state.js'
-import { demoteToast, runState, writeRunFile, runSpend, ceilingOnce, setLastRun, addRoute, addDecision } from './dispatch.js'
-import { pieceOf, party, taskLine } from './links.js'
+import { demoteToast, runState, writeRunFile, runSpend, ceilingOnce, setLastRun, addRoute, addDecision, markRun } from './dispatch.js'
+import { sliceOf, party, taskLine } from './links.js'
 import { PROBE, newRunId, doneFile, paneKey, answerFile, tmuxKillArgv, placePlan, codexNote, herdrCloseArgv, paneRole, spawnToolInput, closeTarget, sessionName, sessionsToolInput, sessionsNote, droppedNote } from './panes.js'
 import { installedSkew } from './profile.js'
 import { pollNow } from './reaper.js'
@@ -62,10 +62,10 @@ export async function spawnPane($, e) {
   setLastRun(a.run)
   const run = runState(a.run)
   run.formation = formationOf(a.hdr) ?? run.formation
-  // Counted only once the pane opens: a failed split is not a fix attempt. The ladder sees this piece's rounds only.
+  // Counted only once the pane opens: a failed split is not a fix attempt. The ladder sees this slice's rounds only.
   const isFix = a.agent === 'executor' && a.hdr.mode === 'fix'
-  const fixKey = pieceOf(a.hdr) ?? ''
-  const fixes = ladderFixes(run, pieceOf(a.hdr)) + (isFix ? 1 : 0)
+  const fixKey = sliceOf(a.hdr) ?? ''
+  const fixes = ladderFixes(run, sliceOf(a.hdr)) + (isFix ? 1 : 0)
   run.fable = Math.max(run.fable, Number((await $.store.get('fable:' + a.run)) ?? 0))
   // Codex runs on the person's own config: no routed model or effort, no Fable count.
   // The ceiling counts this run's subagents and its pane workers (estimated from their minutes open).
@@ -98,7 +98,7 @@ export async function spawnPane($, e) {
   P.rec(id).firstSeen = now
   if (isFix) {
     run.fixes += 1
-    run.fixesByPiece[fixKey] = (run.fixesByPiece[fixKey] ?? 0) + 1
+    run.fixesBySlice[fixKey] = (run.fixesBySlice[fixKey] ?? 0) + 1
   }
   if (d.fable) {
     run.fable += 1
@@ -108,13 +108,14 @@ export async function spawnPane($, e) {
   opened.push({ id, name: a.name, run: a.run, tab })
   ownName(a.name)
   await savePanes($)
-  const piece = pieceOf(a.hdr)
-  addRoute({ name: a.name, run: a.run, role: a.role, agent: a.agent, model: d.model, effort: d.effort, reason: d.reason, start: Date.now(), end: null, piece, verdict: null })
-  noteWire({ from: 'lead', to: party(shortName(a.name), piece), kind: 'task', summary: taskLine(a.task) || a.agent, at: Date.now() })
+  const slice = sliceOf(a.hdr)
+  addRoute({ name: a.name, run: a.run, role: a.role, agent: a.agent, model: d.model, effort: d.effort, reason: d.reason, start: Date.now(), end: null, slice, verdict: null })
+  noteWire({ from: 'lead', to: party(shortName(a.name), slice), kind: 'task', summary: taskLine(a.task) || a.agent, at: Date.now() })
   const rec = { at: new Date().toISOString(), role: a.agent, model: d.model, effort: d.effort, reason: d.reason, asked: a.asked, agentId: null, kind: 'pane', pane: a.name, ...(d.capped && { capped: true }) }
   addDecision(rec)
   run.log.push(JSON.stringify(rec))
   await writeRunFile($, a.run, 'routing.jsonl', run.log.join('\n') + '\n')
+  await markRun($, a.run)
   await pollNow($, t)
   ensurePolling($)
   ensureTicker($)

@@ -6,7 +6,7 @@ import { isLead, Timers, Wire, Profile, Display, Runs, Spawn, Panes, Session } f
 import { ACCENT, FRAME_COLOR, DONE_COLOR, WIRE_COLOR, INK, hex, colorOf, chip, cast, boardRows, header, leadLine, wireRow, castColumns, routingLines, wireLines, tokenBars, swarm } from './board.js'
 import { focusLines } from './display.js'
 import { MARK, SPAN_COLOR, spans, bodyParts } from './highlight.js'
-import { linkPieces, loopText } from './links.js'
+import { linkSlices, loopText } from './links.js'
 import { ledger, stage } from './live.js'
 import { MASCOT_COLOR, MODEL_COLOR, modelKey, frame, caption, moodAt, agentMood } from './mascot.js'
 import { PROBE, focusArgv } from './panes.js'
@@ -177,7 +177,7 @@ export async function switchboard($, e, next) {
   // No agent rows: the newest wire message alone, no frame.
   if (scene.rows.length === 0) return els.Box({ flexDirection: 'column', children: [...kids, ...(wire ? [wireLine(els, wire)] : []), theirs] })
 
-  const rows = nest(linkPieces(cast(scene, Runs.live, Runs.lastRun)))
+  const rows = nest(linkSlices(cast(scene, Runs.live, Runs.lastRun)))
   const cols = (e.props.bodyColumns ?? 80) - 4
   const view = boardRows(rows, { now, tick: Timers.tick, cols, wire: Wire.wireStatus, transport: Spawn.transport, view: e.props.view?.agentId ?? null })
   const sw = swarm({ agents: Runs.live, routes: Runs.paneRoutes, run: Runs.lastRun, tick: Timers.tick })

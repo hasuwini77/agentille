@@ -30,6 +30,17 @@ A framed dispatch tree above your prompt, rooted at your session.
   - a role the lead respawns is a new pane and starts unharvested, even while the earlier pane is still open.
 - **Until then** the pane stays open and is flagged once (`⚑ <name> done, not harvested`, or `idle, not harvested`).
 
+## Pane layout and cleanup
+
+- **Layout:** the first worker splits right of the lead, and later workers stack below the previous worker. On Herdr, a run with `layout: "tab"` stacks its workers in their own `agt-<run>` tab; the lead's tab stays whole, and the tab closes with its last worker.
+- **The reaper:** the mod closes a harvested `agt-` pane about 10 s after it reads `done`, and 60 s after `idle` while the lead is not mid-turn. `/agt-spawn` panes and Codex panes close the same way. On tmux, a pane counts as `done` once its done file exists, and closes once it is harvested and `done` has held about 10 s.
+- **Never touched:** a `working`, `blocked` or `unknown` pane, and any pane without the `agt-` prefix. A role the lead respawns is a new pane and starts unharvested.
+- **At session end:** the SessionEnd sweep closes only the `agt-` panes this lead opened (recorded in `~/.agentille/state/lead-<pane>.panes`). Of those it closes only the `idle` or `done` ones whose answer is saved (an answer file or done marker exists). `/clear` never triggers it, and a session that opened no panes sweeps nothing.
+
+## After a compaction
+
+When a session with an `/agt` run in flight compacts, a hook prints a short `[agt re-entry]` block into the new context: the run id, how its workers run (subagent, panes or workflow), one line per slice with each role's state (working or done), and which files to re-read before the next dispatch. The mod names the session's run in `~/.agentille/state/session-<session id>.run` at the run's first dispatch, and refreshes the run's `ledger.json` on each dispatch so every slice shows from the start. A run whose `report.md` is written, or that has not changed in a day, counts as over: the hook prints nothing.
+
 ## Best with Herdr
 
 - Workers are labeled in Herdr's sidebar, and a row's `↗` jumps to its pane.

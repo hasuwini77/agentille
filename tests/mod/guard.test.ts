@@ -585,6 +585,41 @@ describe('guard: integration in the mod', () => {
     expect(ran).toEqual(['cd /work/repo-x && git push -u origin HEAD', 'git -C /work/repo-x push', 'git push -u origin agt/x'])
   })
 
+  test('/agt --local runs that one run under integration local: no push, no PR, whatever the profile says', async ($, on) => {
+    const { ran } = setup(on)
+    await boot($)
+    await typed($, '/agt --local fix the typo in the footer')
+    expect((await bash($, 'git push -u origin agt/x')).deny).toBe(DENY_LOCAL)
+    expect((await bash($, 'cd /work/repo-x && git push -u origin HEAD')).deny).toBe(DENY_LOCAL)
+    expect((await bash($, 'gh pr create --base main --title x --body y')).deny).toBe(DENY_LOCAL)
+    expect((await bash($, 'git commit -m "fix: typo"')).result).toBe('ok')
+    expect(ran).toEqual(['git commit -m "fix: typo"'])
+    // The flag holds for its own run only: after the card, the next /agt is back on the default, pr.
+    await card($)
+    await typed($, '/agt fix the typo in the footer')
+    expect((await bash($, 'git push -u origin agt/x')).result).toBe('ok')
+  })
+
+  test('without --local the default pr lets the run push its own branch', async ($, on) => {
+    const { ran } = setup(on)
+    await boot($)
+    await typed($, '/agt fix the typo in the footer')
+    expect((await bash($, 'git push -u origin agt/x')).result).toBe('ok')
+    expect(ran).toEqual(['git push -u origin agt/x'])
+  })
+
+  test('--local wins over a projects[] entry that says auto for the repo', async ($, on) => {
+    const { ran } = setup(on, {
+      profile: { integration: 'auto', projects: [{ url: 'https://github.com/me/repo', integration: 'auto' }] },
+      repos: { '/work/repo': { current: 'main', remote: 'git@github.com:me/repo.git' }, '/work/repo-x': { current: 'agt/x', remote: 'git@github.com:me/repo.git' } },
+    })
+    await boot($)
+    await typed($, '/agt --local ship it')
+    expect((await bash($, 'git push -u origin agt/x')).deny).toBe(DENY_LOCAL)
+    expect((await bash($, 'gh pr merge 3 --merge')).deny).toEqual(expect.any(String))
+    expect(ran).toEqual([])
+  })
+
   test('the repo the command targets decides, not the session\'s', async ($, on) => {
     setup(on, {
       profile: { projects: [{ url: 'https://github.com/me/repo', integration: 'auto' }] },

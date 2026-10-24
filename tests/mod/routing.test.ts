@@ -1,5 +1,5 @@
 import { describe, expect, mock, test } from 'claude-code/testing'
-import { AGENT_SILENT_MS, AGT_GRACE_TYPED, AGT_INFLIGHT_MAX_MS, PANE_REST_MS, PANE_EST_MAX_MS, PANE_TOKENS_PER_MIN, CEILING_ROLES, ROLES, paneUsd, DEFAULTS, MAX_EXECUTORS_AT_ONCE, PRICES, asksSessions, decide, estimateRunUsd, executorCapFlag, executorsWorking, ordinal, demoteHeaderText, formationOf, ladderFixes, mentionsCodex, mentionsFable, parseHeader, proveHeader, roleOf, runInFlight, typedFable, verdictOf, leadUsd, runStop } from '../../hooks/routing.js'
+import { AGENT_SILENT_MS, AGT_GRACE_TYPED, AGT_INFLIGHT_MAX_MS, PANE_REST_MS, PANE_EST_MAX_MS, PANE_TOKENS_PER_MIN, CEILING_ROLES, ROLES, paneUsd, DEFAULTS, MAX_EXECUTORS_AT_ONCE, PRICES, asksSessions, decide, estimateRunUsd, executorCapFlag, executorsWorking, ordinal, demoteHeaderText, formationOf, ladderFixes, mentionsCodex, mentionsFable, parseHeader, proveHeader, roleOf, runInFlight, typedFable, typedLocal, verdictOf, leadUsd, runStop } from '../../hooks/routing.js'
 import { sliceOf } from '../../hooks/links.js'
 import { addLeadUsage } from '../../hooks/dispatch.js'
 import { Runs } from '../../hooks/state.js'
@@ -753,6 +753,21 @@ describe('typed proof', () => {
     expect(typedFable('open a session with --fable and ship it')).toBe(false)
     expect(mentionsFable('open a session with --fable and ship it')).toBe(true) // a plain ask for a session carries the flag into it
     expect(mentionsFable('open a --fableish session')).toBe(false)
+  })
+
+  test('--local is read by the same parser: the flag region or the last word, never inside the task', async () => {
+    expect(typedLocal('/agt --local fix the typo in the footer')).toBe(true)
+    expect(typedLocal('/agt "fix the typo" --local')).toBe(true)
+    expect(typedLocal('/agt heavy --local --fable fix it')).toBe(true)
+    expect(typedFable('/agt heavy --local --fable fix it')).toBe(true)
+    expect(typedLocal('/agt --mode panes --local go')).toBe(true)
+    expect(typedLocal('/agentille:agt --local go')).toBe(true)
+    expect(typedLocal('/agt fix the --local flag')).toBe(false)
+    expect(typedLocal('/agt ship the --localish thing')).toBe(false)
+    expect(typedLocal('run it with --local')).toBe(false)
+    expect(typedLocal('/agt --fable go')).toBe(false)
+    expect(typedFable('/agt --local go')).toBe(false)
+    expect(typedLocal(null)).toBe(false)
   })
 
   test('fable=forced holds only with a typed --fable', async () => {

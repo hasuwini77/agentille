@@ -138,25 +138,29 @@ export function parseHeader(prompt) {
   return h
 }
 
-// Proof that the person typed `--fable` on the /agt line. The dispatch header is written by the
-// model, so `fable=forced` on its own proves nothing; the mod keeps what the typed prompt said.
-// The flag counts in the flag region right after `/agt` (with the level) or as the line's last word:
+// Proof that the person typed a flag on the /agt line. The dispatch header is written by the model, so
+// `fable=forced` on its own proves nothing; the mod keeps what the typed prompt said.
+// A flag counts in the flag region right after `/agt` (with the level) or as the line's last word:
 // "/agt heavy fix the --fable flag parser" names a flag inside the task and proves nothing.
+//   --fable  the Fable ceiling on judgment roles (typedFable)
+//   --local  this one run under `integration: local` (typedLocal; guard.js loadRunProfile snapshots it)
 const LEVELS = new Set(['low', 'medium', 'heavy', 'next'])
-export function typedFable(text) {
+export function typedFlag(text, flag) {
   const first = String(text ?? '').split('\n', 1)[0].trim()
   const words = first.split(/\s+/)
   if (!/^\/(agentille:)?agt$/.test(words[0] ?? '')) return false
-  if (words.length > 1 && words[words.length - 1] === '--fable') return true
+  if (words.length > 1 && words[words.length - 1] === flag) return true
   let value = false // the word after --mode or --formation is that flag's value
   for (const w of words.slice(1)) {
-    if (w === '--fable') return true
+    if (w === flag) return true
     if (value) { value = false; continue }
     if (w === '--mode' || w === '--formation') value = true
     else if (!LEVELS.has(w) && !w.startsWith('--')) return false
   }
   return false
 }
+export const typedFable = (text) => typedFlag(text, '--fable')
+export const typedLocal = (text) => typedFlag(text, '--local')
 
 // `--fable` anywhere in a typed ask for sessions ("open a session with --fable and ship it"): the flag then rides
 // into the session's first prompt. Not a proof for a dispatch header; typedFable above is.

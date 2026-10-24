@@ -159,6 +159,14 @@ for k in $(display_defaults | tr -d '{}' | tr ',' '\n' | sed 's/:.*//; s/ //g');
   check "the init skill's display row lists the values $k takes" 'init_display_values | grep -qE "[{ ]$k: [^,}]+[,}]"'
 done
 
+# every display switch, and the top-level sessions key, is a row of settings.md's switch table and named in the README's switch sentence
+readme_switches() { grep -F "off switch in the profile's \`display\` block" README.md; }
+check "README.md has its display switch sentence" '[ -n "$(readme_switches)" ]'
+for k in $(display_defaults | tr -d '{}' | tr ',' '\n' | sed 's/:.*//; s/ //g') sessions; do
+  check "docs/settings.md's switch table has a $k row" 'grep -qE "^\| \\\`$k\\\` " docs/settings.md'
+  check "README.md's switch sentence names $k" 'readme_switches | grep -qF "\`$k\`"'
+done
+
 # setup skills that say "typed only" disable model invocation
 for f in skills/agentille-init/SKILL.md skills/agentille-project/SKILL.md skills/agentille-claude-md/SKILL.md; do
   check "$f disables model invocation" 'grep -qE "^disable-model-invocation: true$" "$f"'

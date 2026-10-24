@@ -123,9 +123,9 @@ describe('links: in the mod', () => {
 
   test('a reviewer of a slice sits under its executor and turns into its verdict', { timeoutMs: 20_000 }, async ($, on) => {
     spawnAs(on)
-    await $.agent.spawn({ prompt: '[agt run=lkrun size=small mode=build slice=api]\nbuild the api', subagentType: 'agentille:agentille-executor' })
-    await $.agent.spawn({ prompt: '[agt run=lkrun size=small mode=build slice=web]\nbuild the page', subagentType: 'agentille:agentille-executor' })
-    await $.agent.spawn({ prompt: '[agt run=lkrun size=small mode=review slice=api]\nreview the api diff', subagentType: 'agentille:agentille-code-reviewer' })
+    await $.agent.spawn({ prompt: '[agt run=lkrun size=small work=build slice=api]\nbuild the api', subagentType: 'agentille:agentille-executor' })
+    await $.agent.spawn({ prompt: '[agt run=lkrun size=small work=build slice=web]\nbuild the page', subagentType: 'agentille:agentille-executor' })
+    await $.agent.spawn({ prompt: '[agt run=lkrun size=small work=review slice=api]\nreview the api diff', subagentType: 'agentille:agentille-code-reviewer' })
     const ui = await mount($)
     const trees = (await ui.findAll({ type: 'Text', text: /^[│ ]*[├└]─/ })).map((t: any) => t.text)
     expect(trees.some((t: string) => /^[│ ]+└─/.test(t))).toBe(true) // one row is nested under another
@@ -138,8 +138,8 @@ describe('links: in the mod', () => {
 
   test('a one-slice run nests its reviewer under the executor without any slice=', { timeoutMs: 20_000 }, async ($, on) => {
     spawnAs(on)
-    await $.agent.spawn({ prompt: '[agt run=onerun size=small mode=build]\nbuild it', subagentType: 'agentille:agentille-executor' })
-    await $.agent.spawn({ prompt: '[agt run=onerun size=small mode=review]\nreview it', subagentType: 'agentille:agentille-code-reviewer' })
+    await $.agent.spawn({ prompt: '[agt run=onerun size=small work=build]\nbuild it', subagentType: 'agentille:agentille-executor' })
+    await $.agent.spawn({ prompt: '[agt run=onerun size=small work=review]\nreview it', subagentType: 'agentille:agentille-code-reviewer' })
     const ui = await mount($)
     const trees = (await ui.findAll({ type: 'Text', text: /^[│ ]*[├└]─/ })).map((t: any) => t.text)
     expect(trees.some((t: string) => /^[│ ]+└─/.test(t))).toBe(true)
@@ -148,9 +148,9 @@ describe('links: in the mod', () => {
 
   test('a REVISE and a fix attempt show as loops in the band header', async ($, on) => {
     spawnAs(on)
-    await $.agent.spawn({ prompt: '[agt run=looprun size=small mode=build]\nplan', subagentType: 'agentille:agentille-plan-reviewer' })
+    await $.agent.spawn({ prompt: '[agt run=looprun size=small work=build]\nplan', subagentType: 'agentille:agentille-plan-reviewer' })
     await $.turn.complete({ agentId: 'lk1', answer: 'VERDICT: REVISE', durationMs: 10, isAborted: false, turnId: 'tl1', reason: 'answer', usage: {} } as never)
-    await $.agent.spawn({ prompt: '[agt run=looprun size=small mode=fix]\nfix it', subagentType: 'agentille:agentille-executor' })
+    await $.agent.spawn({ prompt: '[agt run=looprun size=small work=fix]\nfix it', subagentType: 'agentille:agentille-executor' })
     const ui = await mount($)
     expect(await ui.find({ type: 'Text', text: /plan ↺1 · fix ×1/ })).toBeDefined()
     await ui.unmount()

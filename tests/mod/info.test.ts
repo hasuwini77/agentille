@@ -169,7 +169,7 @@ describe('info: in the mod', () => {
 
   test('after a dispatch the overview carries one routing line and one ledger line', async ($, on) => {
     await boot($, on, null)
-    await $.agent.spawn({ prompt: '[agt run=ab12cd size=large mode=build]\nplan it', subagentType: 'agentille:agentille-planner' })
+    await $.agent.spawn({ prompt: '[agt run=ab12cd size=large work=build]\nplan it', subagentType: 'agentille:agentille-planner' })
     const t = await info($)
     expect(t).toMatch(/routing: 1 dispatch · opus 1/)
     expect(t).toMatch(/ledger: run ab12cd · 1 agent /)
@@ -177,7 +177,7 @@ describe('info: in the mod', () => {
 
   test('routing, ledger and squads print exactly what the old commands print', async ($, on) => {
     await boot($, on, null)
-    await $.agent.spawn({ prompt: '[agt run=ab12cd size=large mode=build]\nplan it', subagentType: 'agentille:agentille-planner' })
+    await $.agent.spawn({ prompt: '[agt run=ab12cd size=large work=build]\nplan it', subagentType: 'agentille:agentille-planner' })
     expect(await info($, 'routing')).toBe('planner → opus · xhigh')
     expect(await info($, 'ledger')).toContain('run ab12cd')
     const squads = await info($, 'squads')

@@ -44,16 +44,19 @@ export function register(on) {
     } catch {
       setRunningVersion(null)
     }
+    // The session-start toasts belong to the band: display.band off → none. The profile's band is in effect now (it
+    // has no stored value); applyDisplay runs again below once the old store toggles are read.
+    applyDisplay()
     const skew = await installedSkew($)
     if (skew) {
       markSkewToasted()
-      $.ui.toast('agt ⚑ ' + skewMessage(skew, Session.runningVersion))
+      if (Display.bandOn) $.ui.toast('agt ⚑ ' + skewMessage(skew, Session.runningVersion))
     }
     // The host's own version: too old for the mod's pane tools → one toast, and ensureTools registers none.
     setHostVersion(hostVersionOf(await Promise.resolve().then(() => $.session.version()).catch(() => null)))
     if (Session.hostVersion && hostTooOld(Session.hostVersion)) {
       markHostOld()
-      $.ui.toast('agt ⚑ ' + hostMessage(Session.hostVersion))
+      if (Display.bandOn) $.ui.toast('agt ⚑ ' + hostMessage(Session.hostVersion))
     }
     await probeTransport($)
     const worker = parseWorker(await $.env.get('AGENTILLE_WORKER'))
@@ -72,9 +75,9 @@ export function register(on) {
     })
     applyDisplay()
     await $.command.register({ name: 'agt-info', description: 'Settings in effect, routing, ledger, squads, or a route dry-run: routing | ledger | squads | route <role>', argumentHint: '[routing|ledger|squads|route <role> [size=…] [risk=…] [depth=…]]', immediate: true })
-    await $.command.register({ name: 'agt-highlight', description: 'Highlight replies: on (/agt replies lit; a paste-ready ask gets a plain-text note) · all (every typed question gets the answer shape) · off (nothing added to any prompt). Saved as display.highlight in profile.json; goes away in v4', argumentHint: '[on|all|off]', immediate: true })
+    await $.command.register({ name: 'agt-highlight', description: 'Highlight replies: on (/agt replies lit; a paste-ready ask gets a plain-text note) · all (every typed question gets the answer shape) · off (nothing added to any prompt). Saved as display.highlight in profile.json. Deprecated; removed in 4.0.0', argumentHint: '[on|all|off]', immediate: true })
     await $.command.register({ name: 'agt-clean', description: 'Tidy up now: close finished agt panes, remove merged agt/* worktrees and branches this session\'s runs made, drop run folders untouched for 14 days. Anything still working, unmerged or made elsewhere stays', immediate: true })
-    await $.command.register({ name: 'agt-focus', description: 'Agent flags above the prompt (a REVISE, a FAIL, a blocked pane): on · off. Saved as display.focus in profile.json; goes away in v4', argumentHint: '[on|off]', immediate: true })
+    await $.command.register({ name: 'agt-focus', description: 'Agent flags above the prompt (a REVISE, a FAIL, a blocked pane): on · off. Saved as display.focus in profile.json. Deprecated; removed in 4.0.0', argumentHint: '[on|off]', immediate: true })
     if (Spawn.transport !== 'none') {
       // One look now: a lead restarted mid-run takes back the panes it opened (lead-<pane>.panes) and no other
       // session's. It reaps only those whose answer was written after this look; an older one is flagged

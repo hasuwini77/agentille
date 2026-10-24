@@ -61,7 +61,7 @@ Malformed JSON → `low` plus a one-line note; never crash. If the level hinges 
 
 ## Default routing
 
-Model · effort per role. Size, risk and mode come from the dispatch header; the mod enforces this table (`hooks/routing.js`), and the lead passes the model as a fallback.
+Model · effort per role. Size, risk and the work type (`work=`) come from the dispatch header; the mod enforces this table (`hooks/routing.js`), and the lead passes the model as a fallback.
 
 | role | default | size=large | risk auth/money | thinkingDepth=quick |
 |---|---|---|---|---|

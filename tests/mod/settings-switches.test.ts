@@ -28,7 +28,7 @@ const boot = async ($: any, on: any, display: object | null, env: Record<string,
   await $.session.start({ cwd: '/w', surface: null, isInteractive: false })
   return { lines, clock, rendered }
 }
-const review = ($: any, run: string, role = 'code-reviewer') => $.agent.spawn({ prompt: '[agt run=' + run + ' size=large mode=review]\nreview', subagentType: 'agentille:agentille-' + role })
+const review = ($: any, run: string, role = 'code-reviewer') => $.agent.spawn({ prompt: '[agt run=' + run + ' size=large work=review]\nreview', subagentType: 'agentille:agentille-' + role })
 const fail = ($: any, agentId: string) => $.turn.complete({ agentId, answer: 'VERDICT: FAIL\nP0: token logged', durationMs: 10, isAborted: false, turnId: 't' + agentId, reason: 'answer' } as never)
 const band = ($: any) => $.ui.mount({ plugin: 'agentille', surface: 'terminal', component: 'AbovePrompt', props: { hasSurvey: false, isWorking: true, maxRows: 10, bodyColumns: 100 } as never })
 const deck = ($: any) => $.ui.mount({ plugin: 'agentille', surface: 'terminal', component: 'Pane', requestId: 'agt-deck', props: { title: 'agentille', isFocused: false, bodyColumns: 100, placement: 'dock' } as never })

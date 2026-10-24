@@ -79,11 +79,11 @@ Print the recon line before anything else: `recon: <level> · <transport> · <on
 
 Every `agentille:agentille-*` dispatch prompt starts with one line:
 
-`[agt run=<id> size=<small|large> risk=<none|auth|money|data> mode=<build|fix|diagnose|review|research> fable=<auto|forced> formation=<none|duel|gauntlet|relay> slice=<slug>]`
+`[agt run=<id> size=<small|large> risk=<none|auth|money|data> work=<build|fix|diagnose|review|research> fable=<auto|forced> formation=<none|duel|gauntlet|relay> slice=<slug>]`
 
 - `size=large`: plan ≥6 steps or a shared contract, a third plan's review, or a diff with logic in >1 file, >~150 LoC, or a public API/schema change.
 - `risk`: `routing.md` → "Risk words" (sessions, tokens, guards → `auth`; payments, webhooks → `money`; migrations → `data`; a form or page with no such logic → `none`).
-- `mode=fix` on every fix round, including a `SendMessage` to the kept executor (a `RESUME:` after an early stop stays `mode=build`); `diagnose` for the read-only root-cause planner.
+- `work=` is the work type: `work=fix` on every fix round, including a `SendMessage` to the kept executor (a `RESUME:` after an early stop stays `work=build`); `diagnose` for the read-only root-cause planner. The older spelling `mode=` is still read the same way.
 - `fable=forced` only when the user typed `--fable`.
 - `slice=<slug>` (lowercase, ≤24 chars) names the slice: its executor, adversary and reviewers share it. Omit it for planning roles and single-slice runs.
 
@@ -116,4 +116,5 @@ Ask: <preTaskQuestioning>. Depth: <thinkingDepth>.
 
 Still honored when typed, never suggested:
 
-- `--mode solo|subagent|panes|herdr` (= low|medium|heavy|heavy), `--plan` (stop after the plan review; "go" resumes it), `--formation <f>` (that formation). All three go away in v4.
+- `--mode solo|subagent|panes|herdr` (= low|medium|heavy|heavy), `--plan` (stop after the plan review; "go" resumes it), `--formation <f>` (that formation): each deprecated; removed in 4.0.0.
+- In the dispatch header, `mode=` for `work=` and `piece=` for `slice=`: deprecated; removed in 4.0.0.

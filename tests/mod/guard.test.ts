@@ -553,7 +553,7 @@ describe('guard: integration in the mod', () => {
     setup(on)
     await boot($)
     await typed($)
-    await $.agent.spawn({ prompt: '[agt run=gd1 size=small mode=build]\nbuild', subagentType: 'agentille:agentille-executor', model: 'sonnet' })
+    await $.agent.spawn({ prompt: '[agt run=gd1 size=small work=build]\nbuild', subagentType: 'agentille:agentille-executor', model: 'sonnet' })
     await typed($, 'how is it going?')
     expect((await bash($, 'gh pr merge 3')).deny).toBe(DENY_INTEGRATION)
   })
@@ -864,7 +864,7 @@ describe('guard: it fails closed', () => {
 
 // The lead's guard lasts for its run, not for a clock window: a run that named its id is guarded until its card.
 describe('guard: the lead stays guarded for the whole run', () => {
-  const sub = (run: string) => ({ prompt: '[agt run=' + run + ' size=small mode=build]\nbuild', subagentType: 'agentille:agentille-executor', model: 'sonnet' })
+  const sub = (run: string) => ({ prompt: '[agt run=' + run + ' size=small work=build]\nbuild', subagentType: 'agentille:agentille-executor', model: 'sonnet' })
   // In steps: the redraw ticker keeps a short interval while the band shows the run.
   const later = async (clock: any, ms: number) => { for (let t = 0; t < ms; t += 60_000) await clock.advance(60_000) }
   const subDone = async ($: any) => {

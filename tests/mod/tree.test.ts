@@ -211,7 +211,7 @@ describe('tree: in the mod', () => {
     let n = 0
     on('agent.spawn', async () => ({ model: 'claude-sonnet-5', agentId: 'sp' + ++n }))
     await boot($, on, [])
-    await $.agent.spawn({ prompt: '[agt run=nestrun size=large mode=build]\nlead', subagentType: 'agentille:agentille-executor' })
+    await $.agent.spawn({ prompt: '[agt run=nestrun size=large work=build]\nlead', subagentType: 'agentille:agentille-executor' })
     await $.agent.spawn({ prompt: 'scan', subagentType: 'Explore', parentAgentId: 'sp1' } as never)
     const ui = await mount($)
     expect(await ui.find({ type: 'Text', text: /Explore/ })).toBeDefined()
@@ -253,7 +253,7 @@ describe('tree: in the mod', () => {
     on('agent.spawn', async () => ({ model: 'claude-sonnet-5', agentId: 'sp1' }))
     const { calls } = await boot($, on, () => { throw new Error('no agent list') })
     expect(calls.list).toBe(1)
-    await $.agent.spawn({ prompt: '[agt run=boom size=large mode=build]\nlead', subagentType: 'agentille:agentille-executor' })
+    await $.agent.spawn({ prompt: '[agt run=boom size=large work=build]\nlead', subagentType: 'agentille:agentille-executor' })
     const ui = await mount($)
     expect(await ui.find({ type: 'Text', text: /executor/ })).toBeDefined()
     await ui.unmount()

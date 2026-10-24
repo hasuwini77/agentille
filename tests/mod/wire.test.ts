@@ -261,7 +261,7 @@ describe('deck', () => {
     expect(r.text).toContain("saved in this machine's mod store, not in profile.json: no home folder")
     expect(stored['deck:auto']).toBe(true)
     expect(opened).toEqual(['agt-deck'])
-    await $.agent.spawn({ prompt: '[agt run=deckrun size=large mode=review]\nreview', subagentType: 'agentille:agentille-planner' })
+    await $.agent.spawn({ prompt: '[agt run=deckrun size=large work=review]\nreview', subagentType: 'agentille:agentille-planner' })
     const ui = await $.ui.mount({ plugin: 'agentille', surface: 'terminal', component: 'Pane', requestId: 'agt-deck', props: { title: 'agentille', isFocused: false, bodyColumns: 100, placement: 'dock' } as never })
     expect(await ui.find({ type: 'Text', text: /── routing/ })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: /planner/ })).toBeDefined()

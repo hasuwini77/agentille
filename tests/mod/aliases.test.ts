@@ -1,8 +1,8 @@
 import { describe, expect, mock, test } from 'claude-code/testing'
 
 const PROFILE = '/u/.agentille/profile.json'
-const MOVED_FOCUS = 'moved: display.focus in ~/.agentille/profile.json — this command goes away in v4'
-const MOVED_HIGHLIGHT = 'moved: display.highlight in ~/.agentille/profile.json — this command goes away in v4'
+const MOVED_FOCUS = 'moved: display.focus in ~/.agentille/profile.json — this command is deprecated; removed in 4.0.0'
+const MOVED_HIGHLIGHT = 'moved: display.highlight in ~/.agentille/profile.json — this command is deprecated; removed in 4.0.0'
 
 describe('aliases: in the mod', () => {
   const squadConfig = { squads: [{ name: 'saas', label: 'Micro SaaS', minScore: 2, signals: { deps: ['stripe', 'next-auth'], paths: [] }, adds: ['payments-reviewer'], checklists: {} }] }

@@ -67,7 +67,7 @@ Each surface the mod draws has its own key in the `display` block. An invalid va
 
 | key | values | default | `off` (or the other value) does |
 |---|---|---|---|
-| `band` | `on`, `off` | `on` | Draws nothing above the prompt: the run's tree, the wire line, the `⚑` flags and a worker pane's own band all live there and go with it. |
+| `band` | `on`, `off` | `on` | Draws nothing above the prompt: the run's tree, the wire line, the `⚑` flags and a worker pane's own band all live there and go with it. The session-start toasts (a newer agentille installed, a Claude Code too old for the pane tools) go with it too; `spawn_pane` still refuses with the same message. |
 | `statusLine` | `on`, `off` | `on` | Pins no status line under the prompt, and clears one an earlier reload left pinned. |
 | `mascot` | `on`, `off` | `on` | Drops the figure from a worker pane's band and from the deck's cast. A worker keeps its one-line caption (role, model, effort, elapsed); the deck keeps each agent's role and model. |
 | `rows` | `on`, `off` | `on` | Leaves every `Agent` call in the transcript as Claude Code's own row, and a `Workflow` call without the agents listed under it. This covers a plain subagent you never ran through `/agt` and an `/agt` run's own agents alike. |
@@ -117,7 +117,7 @@ The viewports the design reviewer screenshots when your task names none: any of 
 
 `/agt-routing`, `/agt-ledger` and `/agt-squads` were removed in v3.14.0: use `/agt-info routing|ledger|squads`.
 
-Two commands still work and write the `display` block, but both are deprecated and go away in v4:
+Two commands still work and write the `display` block. Both are deprecated; removed in 4.0.0:
 
 | You type | You get | Instead |
 |---|---|---|

@@ -22,7 +22,7 @@ It reads each **Bash** line the way the shell would: words, quotes, `$( )`, back
 - a package script: `npm`, `pnpm`, `yarn` or `bun run x`, the `prex` and `postx` scripts beside it, `npm test` and `npm start` (and the same for pnpm and yarn), and `pnpm`, `yarn` or `bun <name>` when the word is not one of the manager's own commands and a script of that name exists, all from the nearest `package.json`;
 - a `python -m pkg.mod` module, looked for in the command's folder and then each `PYTHONPATH` entry, with its parent packages' `__init__.py`;
 - a `node` (or `bun`) file and the files it imports with a relative static import, one level deep;
-- a git alias from your git config, for any word after `git` that is not one of git's own commands, looked up in the repo the command targets;
+- a git alias from your git config, for any word after `git` that is not one of git's own commands, looked up in the repo the command targets and with the config variables the line sets (`HOME`, `XDG_CONFIG_HOME`, `GIT_CONFIG_GLOBAL`, `GIT_CONFIG_SYSTEM`, `GIT_CONFIG_NOSYSTEM`, `GIT_CONFIG_PARAMETERS`, `GIT_CONFIG_COUNT`/`KEY_<n>`/`VALUE_<n>`);
 - the line `git submodule foreach` runs.
 
 It follows what a script runs one hop at a time, five hops deep: a package script that runs `npm run y`, `sh tools/x.sh`, `node tools/x.mjs` or `python -m tools.x` has that step read in turn, and so on.
@@ -53,7 +53,7 @@ It fails closed and refuses. That covers:
 - inside a package script's own text, a step it cannot place, find or read, or a chain more than five hops deep;
 - a relative import of a `node` file that it cannot find (in a file a shell script runs, it is skipped);
 - a `python -m` module found nowhere, or a `PYTHONPATH` entry it cannot read before the module is found;
-- a git alias it cannot look up, or one in a repo it cannot place;
+- a git alias it cannot look up, one in a repo it cannot place, or one whose config the line names with a relative path or a variable;
 - a line nested deeper than it reads (see the depth limits below), or one it cannot parse at all;
 - the repo itself, when git cannot be asked.
 

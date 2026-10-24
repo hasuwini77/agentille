@@ -1340,3 +1340,18 @@ describe('guard: config that runs code, and .gitattributes', () => {
     expect(ran).toEqual(['git -c core.pager=cat log'])
   })
 })
+
+describe('guard: an alias is looked up in the config the line points git at', () => {
+  test('a home or config file the lookup cannot place makes the alias unreadable', async ($, on) => {
+    const { ran, seen } = setup(on, { repos: { '/work/repo': { current: 'agt/x' } }, aliases: { st: 'status' } })
+    await boot($)
+    await typed($)
+    for (const line of ['GIT_CONFIG_GLOBAL=../evil/g.cfg git st', 'HOME=../evil git st', 'XDG_CONFIG_HOME=cfg git st', 'GIT_CONFIG_SYSTEM="$X" git st', 'export HOME=evil; git st']) {
+      expect([line, (await bash($, line)).deny]).toEqual([line, expect.stringContaining('cannot place')])
+    }
+    expect(seen.some((a) => a.join(' ').includes('alias.st'))).toBe(false)
+    // Placed (absolute): looked up, and a harmless expansion runs.
+    expect((await bash($, 'GIT_CONFIG_GLOBAL=/etc/g.cfg git st')).result).toBe('ok')
+    expect(ran).toEqual(['GIT_CONFIG_GLOBAL=/etc/g.cfg git st'])
+  })
+})

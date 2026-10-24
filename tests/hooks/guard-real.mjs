@@ -336,6 +336,21 @@ try {
     check('... no filter set, no attributes written, origin/main unchanged', !fs.existsSync(APP + '/.gitattributes') && refOf('origin.git', 'main') === w.main)
   }
   {
+    // An alias is read from the config the line points git at: a global config named on the line is looked up there,
+    // and one the lookup cannot place (a relative path) refuses.
+    const w = world()
+    fs.mkdirSync(T + '/evil', { recursive: true })
+    fs.writeFileSync(T + '/evil/g.cfg', '[alias]\n\tpom = push -q origin agt/x:main\n')
+    const a = await run('GIT_CONFIG_GLOBAL=' + T + '/evil/g.cfg git pom')
+    check('GIT_CONFIG_GLOBAL=<abs> git pom: the alias is read there and denied', a?.deny?.includes('git push to main'), JSON.stringify(a))
+    const b = await run('GIT_CONFIG_GLOBAL=../evil/g.cfg git pom')
+    check('GIT_CONFIG_GLOBAL=<relative> git pom: denied, cannot place', b?.deny?.includes('cannot place'), JSON.stringify(b))
+    const c = await run('HOME=../evil git pom')
+    check('HOME=<relative> git pom: denied, cannot place', c?.deny?.includes('cannot place'), JSON.stringify(c))
+    check('... origin/main unchanged', refOf('origin.git', 'main') === w.main)
+    fs.rmSync(T + '/evil', { recursive: true, force: true })
+  }
+  {
     // Controls below auto: the run's own branch and ordinary writes still pass.
     world()
     const ok = await run('git push -q -u origin agt/x')

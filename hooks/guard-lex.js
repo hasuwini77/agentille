@@ -670,6 +670,11 @@ function refWrite(g) {
 // Config keys that change where a push goes: a remote's URL, its rewriting, a branch's push remote, an include.
 const REMOTE_CFG = /^(remote|url|branch|include|includeif)\./i
 
+// The variables that decide which config an alias is read from: the repo, the home and XDG folders, the global and
+// system config files, and config set for one call. CONFIG_HOME_ENV: those that name a file or folder.
+const ALIAS_ENV = /^(GIT_DIR|GIT_WORK_TREE|HOME|XDG_CONFIG_HOME|GIT_CONFIG|GIT_CONFIG_GLOBAL|GIT_CONFIG_SYSTEM|GIT_CONFIG_NOSYSTEM|GIT_CONFIG_PARAMETERS|GIT_CONFIG_COUNT|GIT_CONFIG_(KEY|VALUE)_\d+)$/
+const CONFIG_HOME_ENV = /^(HOME|XDG_CONFIG_HOME|GIT_CONFIG|GIT_CONFIG_GLOBAL|GIT_CONFIG_SYSTEM)$/
+
 // GIT_CONFIG_KEY_<n> (with GIT_CONFIG_VALUE_<n>) and GIT_CONFIG_PARAMETERS set config for one call, as -c does:
 // [{ key, value }], the value undefined where it cannot be read.
 function envCfg(env) {
@@ -963,9 +968,12 @@ export function commandSteps(line, cwd = null, depth = 0, homes = []) {
       // A word that is no git command may be an alias from git config (alias.pom = push origin HEAD:main): guardLine
       // looks it up in the repo the call targets and judges what it expands to.
       if (!GIT_COMMANDS.has(g.sub) && !g.sub.startsWith('-')) {
+        // The variables on the line that change which config git reads: the lookup sees them too. One that names a
+        // config file or home the lookup cannot place (relative, or through a variable) makes the alias unreadable.
         const genv = {}
-        for (const k of ['GIT_DIR', 'GIT_WORK_TREE']) if (c.env?.get(k)) genv[k] = c.env.get(k)
-        out.push({ kind: 'alias', what: 'git ' + g.sub, sub: g.sub, args: g.args, loc: g.loc, at, unknown: g.unknown || Object.values(genv).some((v) => /[$`~]/.test(v)), genv, dir, slug: null, headMoved: moved, remoteEdited: edited || retarget })
+        for (const [k, v] of c.env ?? []) if (ALIAS_ENV.test(k)) genv[k] = v
+        const unplaced = Object.entries(genv).some(([k, v]) => /[$`~]/.test(v) || (CONFIG_HOME_ENV.test(k) && v !== '' && !v.startsWith('/')))
+        out.push({ kind: 'alias', what: 'git ' + g.sub, sub: g.sub, args: g.args, loc: g.loc, at, unknown: g.unknown || unplaced, genv, dir, slug: null, headMoved: moved, remoteEdited: edited || retarget })
         continue
       }
       // git submodule foreach '<line>': the line runs in each submodule, a repo of its own the guard cannot place.

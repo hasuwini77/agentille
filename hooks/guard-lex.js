@@ -857,6 +857,16 @@ export function commandSteps(line, cwd = null, depth = 0) {
         out.push({ kind: 'alias', what: 'git ' + g.sub, sub: g.sub, args: g.args, loc: g.loc, at, unknown: g.unknown || Object.values(genv).some((v) => /[$`~]/.test(v)), genv, dir, slug: null, headMoved: moved, remoteEdited: edited || retarget })
         continue
       }
+      // git submodule foreach '<line>': the line runs in each submodule, a repo of its own the guard cannot place.
+      if (g.sub === 'submodule') {
+        const k = g.args.indexOf('foreach')
+        if (k >= 0 && g.args.slice(0, k).every((x) => x.startsWith('-'))) {
+          const rest = g.args.slice(k + 1)
+          while (rest.length && /^(--recursive|-q|--quiet)$/.test(rest[0])) rest.shift()
+          if (rest.length && depth < 3) for (const x of commandSteps(rest.join(' '), null, depth + 1)) out.push({ ...x, what: x.what + ' (in git submodule foreach)' })
+          else if (rest.length) out.push({ kind: 'hidden', what: 'git submodule foreach nests deeper than the guard reads', dir, slug: null })
+        }
+      }
       // `git config <key> <value>` setting a protected key (the hooks path, a remote's push, URL rewriting, …).
       if (g.sub === 'config' && gitConfigSets(g.args) && g.args.some((x) => PROTECT_CFG.test(x))) out.push(/^alias\./i.test(g.args.find((x) => PROTECT_CFG.test(x)) ?? '') ? { kind: 'step', what: 'git config alias.*', dir, slug: null } : { kind: 'protected', what: CFG_WHAT, dir, slug: null })
       // Plumbing that writes a remote with no `push` in sight.

@@ -268,6 +268,18 @@ try {
     check('... origin/main unchanged', refOf('origin.git', 'main') === w.main)
   }
   {
+    // git submodule foreach runs its line in another repo: a push there is judged too.
+    const w = world()
+    sh('git -c protocol.file.allow=always submodule -q add ' + T + '/origin.git sub && git commit -qm sub', APP)
+    const f = await run("git submodule foreach -q 'git push -q origin HEAD:main'")
+    check('git submodule foreach push to main: denied', f?.deny?.includes('git push to main'), JSON.stringify(f))
+    const g = await run("git submodule foreach 'git push -q origin HEAD'")
+    check('git submodule foreach push of HEAD: denied (HEAD there cannot be read)', !!g?.deny, JSON.stringify(g))
+    const ok = await run("git submodule foreach -q 'git status --short'")
+    check('control: git submodule foreach status runs', !ok?.deny && ok.exit === 0, JSON.stringify(ok))
+    check('... origin/main unchanged', refOf('origin.git', 'main') === w.main)
+  }
+  {
     // Controls below auto: the run's own branch and ordinary writes still pass.
     world()
     const ok = await run('git push -q -u origin agt/x')

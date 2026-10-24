@@ -995,6 +995,13 @@ describe('guard: git aliases from config', () => {
     expect(ran).toEqual(['git pom'])
   })
 
+  test('git submodule foreach: its line is judged, in a repo the guard cannot place', async () => {
+    expect(integrationIn("git submodule foreach 'git push origin HEAD:main'", onSlice)).toBe('git push to main')
+    expect(integrationIn("git submodule --quiet foreach --recursive 'git tag v1'", onSlice)).toBe('git tag (in git submodule foreach)')
+    expect(integrationIn("git submodule foreach 'echo x >> .git/config'", onSlice)).toBe('.git/config (in git submodule foreach)')
+    expect(integrationIn("git submodule foreach 'git status'", onSlice)).toBeNull()
+  })
+
   test('an alias set for one call or written to config stays a step of its own', async () => {
     expect(integrationIn('git -c alias.p=push p origin agt/x:main', onSlice)).toBe('git -c alias.*')
     expect(integrationIn('git config alias.p push && git p origin HEAD:main', onSlice)).toBe('git config alias.*')

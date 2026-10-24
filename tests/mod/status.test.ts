@@ -47,7 +47,7 @@ describe('status: in the mod', () => {
   }
   const measure = ($: any, over: object = {}) => $.session.measure({ context: { window: 200_000, percent: 42 }, rateLimits: [], changed: ['context'], ...over } as never)
   const done = ($: any, agentId: string) => $.turn.complete({ agentId, answer: 'APPROVE', durationMs: 10, isAborted: false, turnId: 't' + agentId, reason: 'answer', usage: { input_tokens: 1200, output_tokens: 300 } } as never)
-  const review = ($: any, run: string) => $.agent.spawn({ prompt: '[agt run=' + run + ' size=large mode=review]\nreview', subagentType: 'agentille:agentille-code-reviewer' })
+  const review = ($: any, run: string) => $.agent.spawn({ prompt: '[agt run=' + run + ' size=large work=review]\nreview', subagentType: 'agentille:agentille-code-reviewer' })
 
   test('pins the run, with the measured session cost and no per-agent dollars', { timeoutMs: 20_000 }, async ($, on) => {
     const { lines } = await boot($, on)

@@ -644,11 +644,11 @@ describe('paneRole', () => {
 })
 
 describe('pane tools: input', () => {
-  const header = '[agt run=k7f2ab size=small mode=build]'
+  const header = '[agt run=k7f2ab size=small work=build]'
   const ok = { run: 'k7f2ab', role: 'exec-1', task: 'build the search filter', agent: 'executor', header }
 
   test('a valid spawn defaults to sonnet and the session cwd', async () => {
-    expect(spawnToolInput(ok)).toEqual({ run: 'k7f2ab', role: 'exec-1', name: 'agt-k7f2ab-exec-1', agent: 'executor', header, hdr: { run: 'k7f2ab', size: 'small', mode: 'build' }, asked: null, model: 'sonnet', task: 'build the search filter', cwd: null, layout: 'stack', vendor: 'claude' })
+    expect(spawnToolInput(ok)).toEqual({ run: 'k7f2ab', role: 'exec-1', name: 'agt-k7f2ab-exec-1', agent: 'executor', header, hdr: { run: 'k7f2ab', size: 'small', work: 'build', mode: 'build' }, asked: null, model: 'sonnet', task: 'build the search filter', cwd: null, layout: 'stack', vendor: 'claude' })
     expect(spawnToolInput({ ...ok, model: 'haiku', cwd: '/w/wt-1' })).toMatchObject({ asked: 'haiku', model: 'haiku', cwd: '/w/wt-1' })
   })
 
@@ -732,7 +732,7 @@ describe('pane tools: in the mod', () => {
     return { seen, tools, clock }
   }
   const TMUX = { TMUX: '/tmp/tmux-1/default,1,0', TMUX_PANE: '%1', SHELL: '/bin/zsh', HOME: '/h' }
-  const EXEC = { agent: 'executor', header: '[agt run=k7f2ab size=small mode=build]' }
+  const EXEC = { agent: 'executor', header: '[agt run=k7f2ab size=small work=build]' }
   // Every spawn follows a typed /agt: the tool is denied until the person typed one (`typed` sends that prompt).
   const typed = ($: any, text = '/agt ship it') => $.prompt.submit({ text, origin: { kind: 'composer' } } as never)
   const spawn = async ($: any, input: Record<string, unknown>) => { await typed($); return $.tool.call({ tool: 'mcp__agentille__spawn_pane', ...input }) }
@@ -756,7 +756,7 @@ describe('pane tools: in the mod', () => {
     on('turn.complete', async ($: any, e: any) => ({ text: e.answer }))
     setup(on, TMUX, { 'tmux split-window': { stdout: '%9\n' } })
     await $.session.start({ cwd: '/work/repo', surface: null, isInteractive: false })
-    const RISK = '[agt run=k7f2ab size=small risk=auth mode=build]'
+    const RISK = '[agt run=k7f2ab size=small risk=auth work=build]'
     await typed($)
     const planner: any = await $.agent.spawn({ prompt: RISK + '\nplan', subagentType: 'agentille:agentille-planner', model: 'opus' })
     await $.turn.complete({ agentId: planner.agentId, answer: 'ok', durationMs: 10, isAborted: false, turnId: 't0', reason: 'answer', usage: { input_tokens: 0, output_tokens: 750_000 } } as never) // $15.00 of Opus
@@ -814,7 +814,7 @@ describe('pane tools: in the mod', () => {
     let rows = [['%1', '', 'claude', '0', '@1']]
     setup(on, TMUX, { 'tmux split-window': { stdout: '%9\n' }, 'tmux list-panes': () => ({ stdout: rows.map((r) => r.join(T)).join('\n') + '\n' }) })
     await $.session.start({ cwd: '/work/repo', surface: null, isInteractive: false })
-    const call = (run: string, role: string) => $.tool.call({ tool: 'mcp__agentille__spawn_pane', run, role, task: 'build the filter', agent: 'executor', header: '[agt run=' + run + ' size=small mode=build]' })
+    const call = (run: string, role: string) => $.tool.call({ tool: 'mcp__agentille__spawn_pane', run, role, task: 'build the filter', agent: 'executor', header: '[agt run=' + run + ' size=small work=build]' })
     await typed($, '/agt heavy ship it')
     rows = [...rows, ['%9', 'agt-k7f2ab-exec-1', 'claude', '0', '@1']]
     expect((await call('k7f2ab', 'exec-1')).result).toContain('Opened agt-k7f2ab-exec-1')
@@ -830,10 +830,10 @@ describe('pane tools: in the mod', () => {
 
   test('the run id is learned from a routed dispatch on the typed turn, and its turn may open any id', async ($, on) => {
     setup(on, TMUX, { 'tmux split-window': { stdout: '%9\n' } })
-    const call = (run: string, role: string) => $.tool.call({ tool: 'mcp__agentille__spawn_pane', run, role, task: 'build the filter', agent: 'executor', header: '[agt run=' + run + ' size=small mode=build]' })
+    const call = (run: string, role: string) => $.tool.call({ tool: 'mcp__agentille__spawn_pane', run, role, task: 'build the filter', agent: 'executor', header: '[agt run=' + run + ' size=small work=build]' })
     const plain = (text: string, kind = 'composer') => $.prompt.submit({ text, origin: { kind } } as never)
     await typed($, '/agt heavy ship it')
-    await $.agent.spawn({ prompt: '[agt run=k7f2ab size=small mode=build]\nplan it', subagentType: 'agentille:agentille-planner', model: 'opus' } as never)
+    await $.agent.spawn({ prompt: '[agt run=k7f2ab size=small work=build]\nplan it', subagentType: 'agentille:agentille-planner', model: 'opus' } as never)
     await plain('the second option') // the person answers the planner's question
     expect((await call('zq81mx', 'exec-1')).deny).toContain('only for run k7f2ab')
     expect((await call('k7f2ab', 'exec-1')).result).toContain('Opened agt-k7f2ab-exec-1')
@@ -848,7 +848,7 @@ describe('pane tools: in the mod', () => {
 
   test('a typed turn that named no run: the first pane on a later turn names it', async ($, on) => {
     setup(on, TMUX, { 'tmux split-window': { stdout: '%9\n' } })
-    const call = (run: string, role: string) => $.tool.call({ tool: 'mcp__agentille__spawn_pane', run, role, task: 'build the filter', agent: 'executor', header: '[agt run=' + run + ' size=small mode=build]' })
+    const call = (run: string, role: string) => $.tool.call({ tool: 'mcp__agentille__spawn_pane', run, role, task: 'build the filter', agent: 'executor', header: '[agt run=' + run + ' size=small work=build]' })
     await typed($, '/agt heavy ship it')
     await $.prompt.submit({ text: 'yes, go', origin: { kind: 'composer' } } as never)
     expect((await call('k7f2ab', 'exec-1')).result).toContain('Opened agt-k7f2ab-exec-1')
@@ -897,10 +897,10 @@ describe('pane tools: in the mod', () => {
     const toasts: string[] = []
     const { seen } = setup(on, TMUX, { 'tmux split-window': { stdout: '%9\n' } })
     on('ui.toast', async ($: any, e: any) => { toasts.push(e.text ?? String(e)); return { value: undefined } })
-    const hdr = '[agt run=k7f2ab size=small mode=build fable=forced]'
+    const hdr = '[agt run=k7f2ab size=small work=build fable=forced]'
     await spawn($, { run: 'k7f2ab', role: 'exec-1', task: hdr + '\nbuild the filter', agent: 'executor', header: hdr })
     let split = seen.filter((a) => a[1] === 'split-window').at(-1)!
-    expect(split.at(-1)).toBe('[agt run=k7f2ab size=small mode=build fable=auto]\nbuild the filter')
+    expect(split.at(-1)).toBe('[agt run=k7f2ab size=small work=build fable=auto]\nbuild the filter')
     expect(toasts.filter((t) => t.includes('fable=forced dropped'))).toHaveLength(1)
     await spawn($, { run: 'k7f2ab', role: 'exec-2', task: hdr + '\nbuild the sort', agent: 'executor', header: hdr })
     expect(toasts.filter((t) => t.includes('fable=forced dropped'))).toHaveLength(1)
@@ -1043,7 +1043,7 @@ describe('pane tools: in the mod', () => {
 
   test('the adversary is a pane too, and the worker env names its agent', async ($, on) => {
     const { seen } = setup(on, TMUX, { 'tmux split-window': { stdout: '%9\n' } })
-    const r = await spawn($, { run: 'k7f2ab', role: 'adv', task: 'break the filter', agent: 'adversary', header: '[agt run=k7f2ab size=small mode=build]' })
+    const r = await spawn($, { run: 'k7f2ab', role: 'adv', task: 'break the filter', agent: 'adversary', header: '[agt run=k7f2ab size=small work=build]' })
     expect(r.result).toMatch(/^Opened agt-k7f2ab-adv · \w+ · \w+ · tmux pane\./)
     const split = seen.find((a) => a[1] === 'split-window')!
     expect(split.some((x) => x.startsWith('AGENTILLE_WORKER=adversary:'))).toBe(true)
@@ -1051,27 +1051,42 @@ describe('pane tools: in the mod', () => {
 
   test('reviewers, even on opus, and the planning roles are denied and open nothing', async ($, on) => {
     const { seen } = setup(on, TMUX, { 'tmux split-window': { stdout: '%9\n' } })
-    const big = await spawn($, { run: 'k7f2ab', role: 'review', task: 'review the diff', agent: 'code-reviewer', header: '[agt run=k7f2ab size=large mode=review]' })
+    const big = await spawn($, { run: 'k7f2ab', role: 'review', task: 'review the diff', agent: 'code-reviewer', header: '[agt run=k7f2ab size=large work=review]' })
     expect(big.deny).toContain('code-reviewer runs as a subagent')
-    const small = await spawn($, { run: 'k7f2ab', role: 'review', task: 'review the diff', agent: 'code-reviewer', header: '[agt run=k7f2ab size=small mode=review]' })
+    const small = await spawn($, { run: 'k7f2ab', role: 'review', task: 'review the diff', agent: 'code-reviewer', header: '[agt run=k7f2ab size=small work=review]' })
     expect(small.deny).toContain('subagent')
-    const plan = await spawn($, { run: 'k7f2ab', role: 'plan', task: 'plan the work', agent: 'planner', header: '[agt run=k7f2ab size=large mode=build]' })
+    const plan = await spawn($, { run: 'k7f2ab', role: 'plan', task: 'plan the work', agent: 'planner', header: '[agt run=k7f2ab size=large work=build]' })
     expect(plan.deny).toContain('planner')
     expect(seen.some((a) => a[1] === 'split-window')).toBe(false)
   })
 
   test('a fix-mode executor reaches effort high on its second pane, with the reason', async ($, on) => {
     setup(on, TMUX, { 'tmux split-window': { stdout: '%9\n' } })
-    const fix = { agent: 'executor', header: '[agt run=k7f2ab size=small mode=fix]' }
+    const fix = { agent: 'executor', header: '[agt run=k7f2ab size=small work=fix]' }
     expect((await spawn($, { run: 'k7f2ab', role: 'fix-1', task: 'fix it', ...fix })).result).toBe('Opened agt-k7f2ab-fix-1 · sonnet · medium · tmux pane.')
     expect((await spawn($, { run: 'k7f2ab', role: 'fix-2', task: 'fix it again', ...fix })).result).toBe('Opened agt-k7f2ab-fix-2 · sonnet · high · tmux pane. (fix attempt 2)')
   })
 
+  test('a legacy mode=fix header counts fix attempts the same as work=fix', async ($, on) => {
+    setup(on, TMUX, { 'tmux split-window': { stdout: '%9\n' } })
+    const fix = { agent: 'executor', header: '[agt run=k7f2ab size=small mode=fix]' }
+    expect((await spawn($, { run: 'k7f2ab', role: 'fix-1', task: 'fix it', ...fix })).result).toBe('Opened agt-k7f2ab-fix-1 · sonnet · medium · tmux pane.')
+    const now = { agent: 'executor', header: '[agt run=k7f2ab size=small work=fix]' }
+    expect((await spawn($, { run: 'k7f2ab', role: 'fix-2', task: 'fix it again', ...now })).result).toBe('Opened agt-k7f2ab-fix-2 · sonnet · high · tmux pane. (fix attempt 2)')
+  })
+
+  test('a work=fix subagent dispatch counts toward the next one, in either spelling', async ($, on) => {
+    setup(on, TMUX, {})
+    await $.agent.spawn({ prompt: '[agt run=k7f2ab size=small work=fix]\nfix', subagentType: 'agentille:agentille-executor' })
+    await $.agent.spawn({ prompt: '[agt run=k7f2ab size=small mode=fix]\nfix again', subagentType: 'agentille:agentille-executor' })
+    expect((await $.command.run({ command: 'agt-info', args: 'routing' })).text).toContain('executor → sonnet · high')
+  })
+
   test('a failed split is not a fix attempt', async ($, on) => {
     setup(on, TMUX, { 'tmux split-window': { exitCode: 1 } })
-    const fix = { agent: 'executor', header: '[agt run=k7f2ab size=small mode=fix]' }
+    const fix = { agent: 'executor', header: '[agt run=k7f2ab size=small work=fix]' }
     expect((await spawn($, { run: 'k7f2ab', role: 'fix-1', task: 'fix it', ...fix })).deny).toContain('Could not open')
-    await $.agent.spawn({ prompt: '[agt run=k7f2ab size=small mode=fix]\nfix', subagentType: 'agentille:agentille-executor' })
+    await $.agent.spawn({ prompt: '[agt run=k7f2ab size=small work=fix]\nfix', subagentType: 'agentille:agentille-executor' })
     expect((await $.command.run({ command: 'agt-info', args: 'routing' })).text).toBe('executor → sonnet · medium')
   })
 
@@ -1079,7 +1094,7 @@ describe('pane tools: in the mod', () => {
     const { seen } = setup(on, TMUX, { 'tmux split-window': { stdout: '%9\n' } })
     const sets: any[] = []
     on('store.set', async ($: any, e: any) => { sets.push(e); return { value: undefined } })
-    const r = await spawn($, { run: 'k7f2ab', role: 'sec', task: 'audit the diff', agent: 'security-reviewer', header: '[agt run=k7f2ab size=large risk=auth mode=review fable=forced]' })
+    const r = await spawn($, { run: 'k7f2ab', role: 'sec', task: 'audit the diff', agent: 'security-reviewer', header: '[agt run=k7f2ab size=large risk=auth work=review fable=forced]' })
     expect(r.deny).toContain('security-reviewer runs as a subagent')
     expect(seen.some((a) => a[1] === 'split-window')).toBe(false)
     expect(sets).toEqual([])
@@ -1192,7 +1207,7 @@ describe('pane tools: folder trust', () => {
     const clock = mock.clock(on, { now: 1_000_000 })
     return { seen, clock, toasts }
   }
-  const EXEC = { agent: 'executor', header: '[agt run=k7f2ab size=small mode=build]' }
+  const EXEC = { agent: 'executor', header: '[agt run=k7f2ab size=small work=build]' }
   // The keys go out 300 ms apart and the cleared screen is polled every 500 ms: the clock runs until the call settles.
   const spawn = async ($: any, clock: any) => {
     await $.session.start({ cwd: '/work/repo', surface: null, isInteractive: false })
@@ -1618,7 +1633,7 @@ describe('herdr reaper', () => {
   // A role can be respawned (a fix, a retry): the second pane of agt-r9-executor is a new worker.
   const respawn = async ($: any) => {
     await $.prompt.submit({ text: '/agt ship it', origin: { kind: 'composer' } } as never)
-    return $.tool.call({ tool: 'mcp__agentille__spawn_pane', run: 'r9', role: 'executor', task: 'redo the filter, tests first', agent: 'executor', header: '[agt run=r9 size=small mode=build]' })
+    return $.tool.call({ tool: 'mcp__agentille__spawn_pane', run: 'r9', role: 'executor', task: 'redo the filter, tests first', agent: 'executor', header: '[agt run=r9 size=small work=build]' })
   }
   const finish = (l: any, id: string) => { l.agents.find((a: any) => a.pane_id === id).agent_status = 'done' }
   const flagged = (l: any) => l.toasts.filter((t: string) => t.includes('agt-r9-executor done, not harvested')).length
@@ -1646,7 +1661,7 @@ describe('herdr reaper', () => {
     expect((await respawn($)).result).toContain('Opened agt-r9-executor')
     await begin($)
     await $.turn.complete({ answer: '✓ shipped · 1 slice', durationMs: 10, isAborted: false, turnId: 't1', reason: 'answer' })
-    const r = await $.tool.call({ tool: 'mcp__agentille__spawn_pane', run: 'r9', role: 'executor', task: 'one more', agent: 'executor', header: '[agt run=r9 size=small mode=build]' })
+    const r = await $.tool.call({ tool: 'mcp__agentille__spawn_pane', run: 'r9', role: 'executor', task: 'one more', agent: 'executor', header: '[agt run=r9 size=small work=build]' })
     expect(r.deny).toContain('/agt was typed')
     expect(l.closed).toEqual([])
   })
@@ -2001,7 +2016,7 @@ describe('pane instance keys', () => {
 
 describe('run tabs', () => {
   test('layout and vendor validate, with stack and claude as defaults', () => {
-    const base = { run: 'ab12cd', role: 'exec-1', task: 'build the thing end to end', agent: 'executor', header: '[agt run=ab12cd size=m risk=low mode=build fable=0]' }
+    const base = { run: 'ab12cd', role: 'exec-1', task: 'build the thing end to end', agent: 'executor', header: '[agt run=ab12cd size=m risk=low work=build fable=0]' }
     const ok = spawnToolInput(base) as { layout: string; vendor: string }
     expect([ok.layout, ok.vendor]).toEqual(['stack', 'claude'])
     expect((spawnToolInput({ ...base, layout: 'tab', vendor: 'codex' }) as { layout: string; vendor: string }).layout).toBe('tab')

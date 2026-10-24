@@ -64,7 +64,7 @@ describe('skew: in the mod', () => {
   }
   const spawn = async ($: any) => {
     await $.prompt.submit({ text: '/agt ship it', origin: { kind: 'composer' } } as never)
-    return $.tool.call({ tool: 'mcp__agentille__spawn_pane', run: 'k7f2ab', role: 'exec-1', task: 'build one', agent: 'executor', header: '[agt run=k7f2ab size=small mode=build]' })
+    return $.tool.call({ tool: 'mcp__agentille__spawn_pane', run: 'k7f2ab', role: 'exec-1', task: 'build one', agent: 'executor', header: '[agt run=k7f2ab size=small work=build]' })
   }
   const MSG = 'agentille v3.6.0 is installed but this session runs v3.5.1 — restart Claude Code before opening panes'
 

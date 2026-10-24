@@ -123,7 +123,7 @@ export function roleOf(subagentType) {
   return Object.hasOwn(TABLE, role) ? role : null
 }
 
-// "[agt run=a1b2 size=large risk=auth mode=fix fable=auto]" on the prompt's first line
+// "[agt run=a1b2 size=large risk=auth work=fix fable=auto]" on the prompt's first line
 export function parseHeader(prompt) {
   const first = String(prompt ?? '').split('\n', 1)[0]
   const m = /^\s*\[agt\s+([^\]]*)\]/.exec(first)
@@ -135,6 +135,10 @@ export function parseHeader(prompt) {
   }
   // `slice=<slug>` names the slice. The older `piece=` still parses as its alias, and wins when a header carries the two.
   if (h.piece !== undefined) h.slice = h.piece
+  // `work=<type>` is the work type (build, fix, diagnose, review, research). The older `mode=` still parses as its
+  // alias until 4.0.0, and wins when a header carries the two, as `piece=` does; both keys hold the one value.
+  if (h.mode !== undefined) h.work = h.mode
+  if (h.work !== undefined) h.mode = h.work
   return h
 }
 

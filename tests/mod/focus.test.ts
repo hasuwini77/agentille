@@ -114,7 +114,7 @@ describe('focus: in the mod', () => {
 
   test('a failing review flags the band and toasts', { timeoutMs: 20_000 }, async ($, on) => {
     const { toasts } = setup(on)
-    await $.agent.spawn({ prompt: '[agt run=f1 size=small mode=review]\nreview', subagentType: 'agentille:agentille-code-reviewer', model: 'sonnet' })
+    await $.agent.spawn({ prompt: '[agt run=f1 size=small work=review]\nreview', subagentType: 'agentille:agentille-code-reviewer', model: 'sonnet' })
     await complete($, 'VERDICT: FAIL\nP0: token logged', 'r1')
     expect(toasts).toContain('agt ⚑ code-reviewer: FAIL — blocks ship')
     const ui = await band($)
@@ -125,7 +125,7 @@ describe('focus: in the mod', () => {
   test('the run\'s final card takes every flag down', async ($, on) => {
     setup(on)
     await $.prompt.submit({ text: '/agt "ship it"', origin: { kind: 'composer' } } as never)
-    await $.agent.spawn({ prompt: '[agt run=f2 size=small mode=review]\nreview', subagentType: 'agentille:agentille-code-reviewer', model: 'sonnet' })
+    await $.agent.spawn({ prompt: '[agt run=f2 size=small work=review]\nreview', subagentType: 'agentille:agentille-code-reviewer', model: 'sonnet' })
     await complete($, 'VERDICT: CONCERNS\nP1: unused import', 'r1')
     let ui = await band($)
     expect(await ui.find({ type: 'Text', text: /⚑ code-reviewer: CONCERNS/ })).toBeDefined()
@@ -155,7 +155,7 @@ describe('focus: in the mod', () => {
     on('command.register', async () => ({ value: undefined }))
     setup(on)
     await $.session.start({ cwd: '/w', surface: null, isInteractive: false })
-    await $.agent.spawn({ prompt: '[agt run=f2 size=small mode=review]\nreview', subagentType: 'agentille:agentille-code-reviewer', model: 'sonnet' })
+    await $.agent.spawn({ prompt: '[agt run=f2 size=small work=review]\nreview', subagentType: 'agentille:agentille-code-reviewer', model: 'sonnet' })
     await complete($, 'VERDICT: CONCERNS\nP1: unchecked input', 'r1')
     await $.command.run({ command: 'agt-focus', args: 'off' })
     expect(JSON.parse(files['/u/.agentille/profile.json']).display).toEqual({ focus: false })
@@ -243,7 +243,7 @@ describe('focus: a typed /agt starts with no flags', () => {
   test('a flag one run raised is gone when the next /agt is typed', { timeoutMs: 20_000 }, async ($, on) => {
     await boot($, on)
     await typed($, '/agt build the importer')
-    await $.agent.spawn({ prompt: '[agt run=fl1run size=small mode=build]\nbreak the importer', subagentType: 'agentille:agentille-adversary' } as never)
+    await $.agent.spawn({ prompt: '[agt run=fl1run size=small work=build]\nbreak the importer', subagentType: 'agentille:agentille-adversary' } as never)
     // No ✓/✗ card: the run is still open, so only the next typed /agt can clear what it raised.
     await $.turn.complete({ agentId: 'w0', answer: 'BROKEN: 2\nempty file, BOM header', durationMs: 10, isAborted: false, turnId: 'tw0', reason: 'answer' } as never)
     expect(await focus($)).toContain('⚑ adversary broke 2 cases')
@@ -256,7 +256,7 @@ describe('focus: a typed /agt starts with no flags', () => {
   test('a prompt that is not /agt keeps the flag', { timeoutMs: 20_000 }, async ($, on) => {
     await boot($, on)
     await typed($, '/agt build the importer')
-    await $.agent.spawn({ prompt: '[agt run=fl2run size=small mode=build]\nbreak the importer', subagentType: 'agentille:agentille-adversary' } as never)
+    await $.agent.spawn({ prompt: '[agt run=fl2run size=small work=build]\nbreak the importer', subagentType: 'agentille:agentille-adversary' } as never)
     await $.turn.complete({ agentId: 'w0', answer: 'BROKEN: 1', durationMs: 10, isAborted: false, turnId: 'tw0', reason: 'answer' } as never)
     await typed($, 'what broke?')
     expect(await focus($)).toContain('⚑ adversary broke 1 case')

@@ -9,17 +9,31 @@ const S = { autoFable: true, maxFablePerRun: 1, fableWeeklyCeiling: 60 }
 
 describe('policy', () => {
   test('parses the dispatch header', async () => {
-    expect(parseHeader('[agt run=a1 size=large risk=auth mode=fix fable=auto]\nBuild it')).toEqual({ run: 'a1', size: 'large', risk: 'auth', mode: 'fix', fable: 'auto' })
+    expect(parseHeader('[agt run=a1 size=large risk=auth work=fix fable=auto]\nBuild it')).toEqual({ run: 'a1', size: 'large', risk: 'auth', work: 'fix', mode: 'fix', fable: 'auto' })
     expect(parseHeader('Build it')).toBe(null)
   })
 
+  test('work=<type> is the work type; the older mode= is its alias and wins when a header has both', async () => {
+    expect(parseHeader('[agt run=a1 work=fix]')).toMatchObject({ work: 'fix', mode: 'fix' })
+    expect(parseHeader('[agt run=a1 mode=fix]')).toMatchObject({ work: 'fix', mode: 'fix' })
+    expect(parseHeader('[agt run=a1 mode=fix work=build]')).toMatchObject({ work: 'fix', mode: 'fix' })
+    expect(parseHeader('[agt run=a1 work=build mode=fix]')).toMatchObject({ work: 'fix', mode: 'fix' })
+    expect(parseHeader('[agt run=a1 size=small]')!.work).toBe(undefined)
+    const w = parseHeader('[agt run=a1 work=diagnose]')!
+    const m = parseHeader('[agt run=a1 mode=diagnose]')!
+    for (const hdr of [w, m]) expect(decide({ role: 'planner', hdr, run: { ...fresh(), fixes: 2 }, settings: S }).model).toBe('fable')
+    for (const hdr of [parseHeader('[agt run=a1 work=fix]')!, parseHeader('[agt run=a1 mode=fix]')!]) {
+      expect(decide({ role: 'executor', hdr, run: { ...fresh(), fixes: 2 }, settings: S }).effort).toBe('high')
+    }
+  })
+
   test('slice=<slug> names the slice; the older piece= is its alias and wins when a header has both', async () => {
-    expect(parseHeader('[agt run=a1 mode=build slice=api]')).toMatchObject({ slice: 'api' })
-    expect(parseHeader('[agt run=a1 mode=build piece=api]')).toMatchObject({ slice: 'api' })
+    expect(parseHeader('[agt run=a1 work=build slice=api]')).toMatchObject({ slice: 'api' })
+    expect(parseHeader('[agt run=a1 work=build piece=api]')).toMatchObject({ slice: 'api' })
     expect(parseHeader('[agt run=a1 piece=api slice=ui]')!.slice).toBe('api')
     expect(sliceOf(parseHeader('[agt run=a1 slice=search-ui]'))).toBe('search-ui')
     expect(sliceOf(parseHeader('[agt run=a1 piece=search-ui]'))).toBe('search-ui')
-    expect(sliceOf(parseHeader('[agt run=a1 mode=build]'))).toBe(null)
+    expect(sliceOf(parseHeader('[agt run=a1 work=build]'))).toBe(null)
   })
 
   test('only agentille roles are routed', async () => {
@@ -145,7 +159,7 @@ describe('mod', () => {
     let seen: string | undefined
     on('store.get', async () => ({ value: null }))
     on('agent.spawn', async ($, e) => { seen = e.model; return { model: e.model ?? 'inherit', agentId: 'a1' } })
-    await $.agent.spawn({ prompt: '[agt run=t1 size=large mode=review]\nreview', subagentType: 'agentille:agentille-code-reviewer', model: 'sonnet' })
+    await $.agent.spawn({ prompt: '[agt run=t1 size=large work=review]\nreview', subagentType: 'agentille:agentille-code-reviewer', model: 'sonnet' })
     expect(seen).toBe('opus')
   })
 
@@ -158,7 +172,7 @@ describe('mod', () => {
 })
 
 describe('workflow agents: runs, toast, deny', () => {
-  const hdr = (run: string) => '[agt run=' + run + ' size=large mode=review]\nreview'
+  const hdr = (run: string) => '[agt run=' + run + ' size=large work=review]\nreview'
   const wf = (run: string | null, role = 'code-reviewer', index = 1) => ({ prompt: run ? hdr(run) : 'review', subagentType: 'agentille:agentille-' + role, workflow: { runId: 'wf_1', agentIndex: index } }) as never
   const band = ($: any) => $.ui.mount({ plugin: 'agentille', surface: 'terminal', component: 'AbovePrompt', props: { hasSurvey: false, isWorking: true, maxRows: 10, bodyColumns: 100 } as never })
   // `herdr`: the rows `herdr agent list` shows to a lead inside herdr; left out, there is no pane transport.
@@ -251,11 +265,11 @@ describe('workflow agents: runs, toast, deny', () => {
     const { writes } = setup(on)
     on('session.id', async () => ({ value: 'lead-sid' }))
     await $.session.start({ cwd: '/w', surface: null, isInteractive: false })
-    await $.agent.spawn({ prompt: '[agt run=runS1 size=small mode=build slice=api]\nbuild the api', subagentType: 'agentille:agentille-executor' } as never) // w0
+    await $.agent.spawn({ prompt: '[agt run=runS1 size=small work=build slice=api]\nbuild the api', subagentType: 'agentille:agentille-executor' } as never) // w0
     expect(writes['/h/.agentille/state/session-lead-sid.run']).toBe('runS1\n')
     const slices = () => JSON.parse(writes['/h/.agentille/state/run-runS1/ledger.json']).slices
     expect(slices()).toEqual({ api: { executor: 'working' } })
-    await $.agent.spawn({ prompt: '[agt run=runS1 size=small mode=review slice=api]\nreview the api diff', subagentType: 'agentille:agentille-code-reviewer' } as never) // w1
+    await $.agent.spawn({ prompt: '[agt run=runS1 size=small work=review slice=api]\nreview the api diff', subagentType: 'agentille:agentille-code-reviewer' } as never) // w1
     await finish($, 'w0')
     expect(slices()).toEqual({ api: { executor: 'done', 'code-reviewer': 'working' } })
     await $.agent.spawn({ prompt: 'no header', subagentType: 'Explore' } as never) // an ad hoc agent names no run
@@ -338,7 +352,7 @@ describe('executor cap: at most 3 at once', () => {
     mock.clock(on, { now: Date.now() })
     return { toasts, writes }
   }
-  const exec = ($: any, run: string, slice: string) => $.agent.spawn({ prompt: '[agt run=' + run + ' size=small mode=build slice=' + slice + ']\nbuild', subagentType: 'agentille:agentille-executor', model: 'sonnet' })
+  const exec = ($: any, run: string, slice: string) => $.agent.spawn({ prompt: '[agt run=' + run + ' size=small work=build slice=' + slice + ']\nbuild', subagentType: 'agentille:agentille-executor', model: 'sonnet' })
   const band = ($: any) => $.ui.mount({ plugin: 'agentille', surface: 'terminal', component: 'AbovePrompt', props: { hasSurvey: false, isWorking: true, maxRows: 10, bodyColumns: 120 } as never })
   const capToasts = (t: string[]) => t.filter((x) => x.includes('executor at once'))
 
@@ -469,8 +483,8 @@ describe('maxRunUsd: a per-run cost ceiling', () => {
     mock.clock(on, { now: Date.now() })
     return { toasts, writes, seen }
   }
-  const review = ($: any, run: string) => $.agent.spawn({ prompt: '[agt run=' + run + ' size=large mode=review]\nreview', subagentType: 'agentille:agentille-code-reviewer', model: 'opus' })
-  const plan = ($: any, run: string) => $.agent.spawn({ prompt: '[agt run=' + run + ' size=small mode=build]\nplan', subagentType: 'agentille:agentille-planner', model: 'opus' })
+  const review = ($: any, run: string) => $.agent.spawn({ prompt: '[agt run=' + run + ' size=large work=review]\nreview', subagentType: 'agentille:agentille-code-reviewer', model: 'opus' })
+  const plan = ($: any, run: string) => $.agent.spawn({ prompt: '[agt run=' + run + ' size=small work=build]\nplan', subagentType: 'agentille:agentille-planner', model: 'opus' })
   const spend = ($: any, agentId: string, output: number) => $.turn.complete({ agentId, answer: 'ok', durationMs: 10, isAborted: false, turnId: 't' + agentId, reason: 'answer', usage: { input_tokens: 0, output_tokens: output } } as never)
   const ceilingToasts = (t: string[]) => t.filter((x) => x.includes('maxRunUsd'))
 
@@ -566,7 +580,7 @@ describe('maxRunUsd: a per-run cost ceiling', () => {
     expect(decide({ role: 'executor', hdr: {}, run: { ...fresh(), usd: 1e6 }, settings: { ...S, maxRunUsd: null } as never }).stop).toBe(undefined)
   })
 
-  const build = ($: any, run: string) => $.agent.spawn({ prompt: '[agt run=' + run + ' size=small mode=build]\nbuild', subagentType: 'agentille:agentille-executor', model: 'sonnet' })
+  const build = ($: any, run: string) => $.agent.spawn({ prompt: '[agt run=' + run + ' size=small work=build]\nbuild', subagentType: 'agentille:agentille-executor', model: 'sonnet' })
 
   test('in the mod: stopAtCeiling false keeps the demotion and lets the executor through', async ($, on) => {
     const { seen } = boot(on, { maxRunUsd: 1, stopAtCeiling: false })
@@ -630,13 +644,13 @@ describe('maxRunUsd: a per-run cost ceiling', () => {
     await $.prompt.submit({ text: '/agt heavy ship it', origin: { kind: 'composer' } } as never)
     await plan($, 'pstop1')
     await spend($, 'p0', 50_000) // $1.00 of Opus output: at the ceiling
-    const r = await $.tool.call({ tool: 'mcp__agentille__spawn_pane', run: 'pstop1', role: 'exec-1', task: 'build one', agent: 'executor', header: '[agt run=pstop1 size=small mode=build]' }) as any
+    const r = await $.tool.call({ tool: 'mcp__agentille__spawn_pane', run: 'pstop1', role: 'exec-1', task: 'build one', agent: 'executor', header: '[agt run=pstop1 size=small work=build]' }) as any
     expect(r.deny).toBe('agt ✗ run ~$1.00 reached its cost ceiling, maxRunUsd $1.00, and routing.stopAtCeiling is on: no more dispatches this run. Raise routing.maxRunUsd in ~/.agentille/profile.json (or set stopAtCeiling to false) to go on.')
     expect(argvs.some((a) => a[1] === 'split-window')).toBe(false)
   })
 
   const STOP_LINE = 'agt ✗ run ~$1.00 reached its cost ceiling, maxRunUsd $1.00, and routing.stopAtCeiling is on: no more dispatches this run. Raise routing.maxRunUsd in ~/.agentille/profile.json (or set stopAtCeiling to false) to go on.'
-  const wfAgent = ($: any, run: string, role: string, index: number, model: string) => $.agent.spawn({ prompt: '[agt run=' + run + ' size=small mode=build]\nwork', subagentType: 'agentille:agentille-' + role, model, workflow: { runId: 'wf_' + run, agentIndex: index } } as never)
+  const wfAgent = ($: any, run: string, role: string, index: number, model: string) => $.agent.spawn({ prompt: '[agt run=' + run + ' size=small work=build]\nwork', subagentType: 'agentille:agentille-' + role, model, workflow: { runId: 'wf_' + run, agentIndex: index } } as never)
 
   test('in the mod: a workflow executor under the ceiling runs; past it with stopAtCeiling on it is denied before the engine sees it', async ($, on) => {
     const { seen, writes, toasts } = boot(on, { maxRunUsd: 1, stopAtCeiling: true })
@@ -720,7 +734,7 @@ describe('maxRunUsd: a per-run cost ceiling', () => {
     await $.prompt.submit({ text: '/agt --fable ship it', origin: { kind: 'composer' } } as never)
     await plan($, 'fb1') // c0 on opus: its header asks for no Fable
     await spend($, 'c0', 50_000) // $1.00: at the ceiling
-    const forced = () => $.agent.spawn({ prompt: '[agt run=fb1 size=small mode=build fable=forced]\nplan', subagentType: 'agentille:agentille-planner', model: 'opus' })
+    const forced = () => $.agent.spawn({ prompt: '[agt run=fb1 size=small work=build fable=forced]\nplan', subagentType: 'agentille:agentille-planner', model: 'opus' })
     await forced()
     await forced()
     expect(seen).toEqual(['opus', 'fable', 'fable'])

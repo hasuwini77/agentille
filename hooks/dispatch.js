@@ -27,12 +27,18 @@ export function demoteToast($, run) {
   $.ui.toast('agt ⚑ fable=forced dropped: --fable was not typed, the ladder applies')
 }
 
-// Once per run: the maxRunUsd ceiling was reached and the first dispatch was demoted. One toast and a band ⚑ line;
-// every later demotion shows only in the routing log (`capped: true`).
-export function ceilingOnce($, runId, run, spent) {
+// Once per run: the maxRunUsd ceiling was reached and the first dispatch (subagent or pane) was demoted. One toast and
+// a band ⚑ line that name what was demoted and what follows; every later demotion shows only in the routing log
+// (`capped: true`).
+export function ceilingOnce($, runId, run, spent, role, d) {
   if (run.ceilingToasted) return
   run.ceilingToasted = true
-  addFlag($, 'ceiling|' + runId, 'run ' + runId + ': ~' + usd(spent) + ' spent, past maxRunUsd ' + usd(maxRunUsdOf(S.settings)) + '; Opus reviewers and planners now run Sonnet')
+  addFlag($, 'ceiling|' + runId, 'run ' + runId + ': ~' + usd(spent) + ' spent, past maxRunUsd ' + usd(maxRunUsdOf(S.settings)) + '; ' + role + ' ' + (d.from ?? 'opus') + ' → sonnet, and every later Opus or Fable planner, reviewer, ui-prototyper and adversary runs Sonnet (the executor keeps its route)')
+}
+
+// The run's spend so far for the ceiling, subagents and pane workers alike, or null when no ceiling is set.
+export function runSpend(runId) {
+  return maxRunUsdOf(S.settings) == null ? null : estimateRunUsd(live, runId, paneRoutes)
 }
 
 export function runState(id) {
@@ -52,7 +58,7 @@ export function routingView() {
 export function ledgerView() {
   const text = ledgerText(ledger(live, S.lastRun, paneRoutes))
   const max = maxRunUsdOf(S.settings)
-  return max == null ? text : text + '\nestimate ~' + usd(estimateRunUsd(live, S.lastRun)) + ' of maxRunUsd ' + usd(max) + ' (list prices; pane workers not counted)'
+  return max == null ? text : text + '\nestimate ~' + usd(estimateRunUsd(live, S.lastRun, paneRoutes)) + ' of maxRunUsd ' + usd(max) + ' (list prices; pane workers estimated from their minutes open)'
 }
 
 export async function writeRunFile($, runId, name, text) {
@@ -163,8 +169,8 @@ export async function dispatchAgent($, e, next) {
   const shared = Number((await $.store.get('fable:' + runId)) ?? 0)
   run.fable = Math.max(run.fable, shared)
 
-  // The run's spend so far, estimated from its agents' tokens, only when a maxRunUsd ceiling is set.
-  const spent = maxRunUsdOf(S.settings) == null ? null : estimateRunUsd(live, runId)
+  // The run's spend so far, estimated from its agents' tokens and its panes' minutes, only when a ceiling is set.
+  const spent = runSpend(runId)
   const d = decide({ role, hdr, run: { ...run, fixes: ladderFixes(run, pieceOf(hdr)), usd: spent }, depth: S.depth, settings: S.settings, weeklyPct: S.weeklyPct })
   const res = await next({ ...e, model: d.model })
   if (res.deny) return res
@@ -183,7 +189,7 @@ export async function dispatchAgent($, e, next) {
   run.log.push(JSON.stringify(rec))
   await writeRunFile($, runId, 'routing.jsonl', run.log.join('\n') + '\n')
   if (cap) addFlag($, 'cap|' + runId, cap) // the band's ⚑ line and one toast; the dispatch itself goes ahead
-  if (d.capped) ceilingOnce($, runId, run, spent)
+  if (d.capped) ceilingOnce($, runId, run, spent, role, d)
   else if (d.reason !== 'table') $.ui.toast('agt ↑ ' + role + ' → ' + short(res.model) + ' · ' + d.effort + ' — ' + d.reason)
   $.ui.invalidate('ui.render')
   return res

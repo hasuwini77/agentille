@@ -27,6 +27,7 @@ export const S = {
   selfTab: null,  // herdr: the lead's own tab, where its workers split
   selfWorkspace: null,  // herdr: the lead's workspace, where a run tab opens
   ownedTabs: new Set(),  // herdr: run tabs this session created; its panes are reaped, closed and swept like the lead's tab's
+  trustUnresolvedTold: false,  // the once-per-session note that a worktree's config runs a command the mod cannot follow
   paneTools: false,  // spawn_pane (and close_pane) registered: a typed /agt arrived in this lead session
   sessionTools: false,  // open_sessions (and close_pane) registered: a typed ask for sessions arrived
   closeTool: false,  // close_pane registered, by whichever of the two came first

@@ -77,7 +77,8 @@ describe('info: route dry-run', () => {
     expect(t.split('\n')[0]).toBe('code-reviewer size=large → opus · high · table')
     expect(t).toMatch(/past maxRunUsd \$5\.00\s+sonnet · high · run ~\$5\.00 ≥ maxRunUsd \$5\.00/)
     expect(route('executor', {}, null, { ...DEFAULTS, maxRunUsd: 5 } as never)).not.toContain('maxRunUsd')
-    expect(route('code-reviewer', { size: 'large' })).not.toContain('maxRunUsd')
+    expect(route('code-reviewer', { size: 'large' }, null, { ...DEFAULTS, maxRunUsd: null } as never)).not.toContain('maxRunUsd')
+    expect(route('code-reviewer', { size: 'large' })).toContain('past maxRunUsd $15.00') // the default ceiling
   })
 
   test('a role with no ladder says so', () => {

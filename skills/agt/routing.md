@@ -103,10 +103,11 @@ Evidence is observed by the mod, not claimed by the lead.
 
 ### Cost ceiling
 
-`profile.routing.maxRunUsd` (default `null`, off; any positive number turns it on) caps a run's estimated spend in US dollars. The mod sums each agent's input, output and cache-read tokens times that model's API list price per million tokens. The price table and what the estimate leaves out: `docs/routing-cost.md` at the plugin root.
+`profile.routing.maxRunUsd` (default `15`; `null`, `0` or anything but a positive number turns it off) caps a run's estimated spend in US dollars. Subagents are priced from their tokens at API list prices; a pane worker reports no tokens, so `paneUsd` in `hooks/routing.js` estimates it from its role, routed model and minutes open (a Codex pane counts $0).
+The price table, the pane formula and what the estimate leaves out: `docs/routing-cost.md` at the plugin root.
 
-- **Past the ceiling,** every later dispatch of the planner, plan-reviewer and code-, security-, payments-, SEO- and perf-reviewer that the table or the ladder puts on Opus (or a ladder Fable) runs Sonnet at the same effort. The executor, design-reviewer, ui-prototyper and adversary keep the table, and a typed `--fable` holds.
-- **The card:** that dispatch's `routing.jsonl` line carries `"capped": true`, and the mod shows one toast and one band `⚑` per run. When the run's log has a `capped` line, the card's `⚑` line says `maxRunUsd reached: later reviews ran Sonnet`.
+- **Past the ceiling,** every later dispatch, subagent or pane, of a role the table or the ladder puts on Opus (or a ladder Fable) runs Sonnet at the same effort: the planner, the plan-reviewer, every reviewer (design-reviewer and a duel's judge included), the ui-prototyper and the adversary. Only the executor, which never changes model, and a typed `--fable` keep their route.
+- **The card:** that dispatch's `routing.jsonl` line carries `"capped": true`, and the mod shows one toast and one band `⚑` per run that name the role it demoted first (`code-reviewer opus → sonnet`). When the run's log has a `capped` line, the card's `⚑` line says `maxRunUsd reached: later Opus roles ran Sonnet`.
 
 ### Advisor
 

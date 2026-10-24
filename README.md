@@ -117,7 +117,7 @@ Everything lives in `~/.agentille/profile.json`. Every key is optional, and a mi
   "integration": "pr",
   "thinkingDepth": "complex-only",
   "projects": [{ "url": "https://github.com/you/my-app", "integration": "auto" }],
-  "routing": { "autoFable": false, "maxFablePerRun": 1, "fableWeeklyCeiling": 60, "maxRunUsd": null },
+  "routing": { "autoFable": false, "maxFablePerRun": 1, "fableWeeklyCeiling": 60, "maxRunUsd": 15 },
   "display": { "deck": "off", "focus": true, "highlight": "off" }
 }
 ```
@@ -139,10 +139,10 @@ Everything lives in `~/.agentille/profile.json`. Every key is optional, and a mi
   The design-reviewer keeps opus · high under `complex-only` and `always`, and the executor stays on Sonnet either way.
 - `routing.autoFable`: `true` lets the escalation ladder reach Fable (about twice the cost of Opus) after two plan REVISEs, or for the diagnose planner after two failed fixes, at most `maxFablePerRun` times and only under `fableWeeklyCeiling` percent of your weekly plan. Default `false`: Fable only when you type `--fable`.
   The mod holds the model to that: a dispatch header claiming `fable=forced` in a session where you did not type `--fable` is rewritten to `fable=auto`, with a toast.
-- `routing.maxRunUsd` (default `null`, off): a per-run cost ceiling in US dollars.
-  - **The estimate:** the mod prices the run's agent tokens at API list prices. It is an estimate: a subscription is not billed per token, and pane workers report no tokens. Prices and the formula: [docs/routing-cost.md](./docs/routing-cost.md).
-  - **Past the ceiling,** every later planner, plan-reviewer and code-, security-, payments-, SEO- or perf-reviewer that would run Opus (or a ladder Fable) runs Sonnet at the same effort. The executor, the design-reviewer, the ui-prototyper, the adversary and a typed `--fable` keep their routes.
-  - **You see it:** one toast and a band flag per run. `/agt-info ledger` shows the estimate, and `/agt-info route` shows the pick past the ceiling.
+- `routing.maxRunUsd` (default `15`; `null` turns it off): a per-run cost ceiling in US dollars.
+  - **The estimate:** the mod prices subagents from their tokens at API list prices, and Herdr or tmux pane workers, which report no tokens, from their role, routed model and minutes open. It is an estimate: a subscription is not billed per token. Prices and the formula: [docs/routing-cost.md](./docs/routing-cost.md).
+  - **Past the ceiling,** every later planner, plan-reviewer, reviewer (design-reviewer included), ui-prototyper or adversary, subagent or pane, that would run Opus (or a ladder Fable) runs Sonnet at the same effort. Only the executor and a typed `--fable` keep their routes.
+  - **You see it:** one toast and a band flag per run naming what was demoted. `/agt-info ledger` shows the estimate, and `/agt-info route` shows the pick past the ceiling.
 - `deck`: `auto` opens the deck on every `/agt`, `off` only when you type `/agt-deck`.
 - `focus`: agent flags (a REVISE, a FAIL, a blocked pane) above the prompt.
 - `highlight` (default `off`): `on` lights `/agt` replies, `all` every reply, `off` none. The mod adds text to a prompt only under `all` and for text to paste; the answer frame, the answer-shape note, plain-text answers and the older commands that write this block: [docs/settings.md](./docs/settings.md).
@@ -269,7 +269,7 @@ Everything else waits for a typed `/agt`, `/storm` or a session ask. When you do
 - **Models and cost:** every non-solo run costs more than a plain prompt.
   - By default Opus runs the planner, the ui-prototyper and the design, security and payments reviewers; Sonnet runs the executor, the adversary and the plan-, code-, SEO- and perf-reviewers.
   - A large slice moves the plan-, code- and perf-reviewers to Opus; auth or money risk moves the code-reviewer and the adversary to Opus.
-  - The executor never leaves Sonnet; the design-reviewer stays on Opus except under `thinkingDepth: quick`, which moves every reviewer and the planner to Sonnet and skips the plan-reviewer. `routing.maxRunUsd` demotes later Opus planners and reviewers to Sonnet once a run's estimated spend passes it.
+  - The executor never leaves Sonnet; the design-reviewer stays on Opus except under `thinkingDepth: quick`, which moves every reviewer and the planner to Sonnet and skips the plan-reviewer. `routing.maxRunUsd` (default $15) demotes every later Opus role but the executor to Sonnet once a run's estimated spend, pane workers included, passes it.
   - Haiku only classifies and scouts. Fable never, unless `--fable` or `routing.autoFable: true`. Every cell: Routing.
 
 ## Contributing

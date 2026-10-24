@@ -60,7 +60,7 @@ check "hook tests skipped, dev machine: exit 0" '[ "$rc" = 0 ]'
 check "hook tests skipped, dev machine: WARN not FAIL" 'printf "%s" "$out" | grep -q "WARN.*hook tests skipped" && ! printf "%s" "$out" | grep -q "FAIL.*hook tests skipped"'
 out=$(run CI=true); rc=$?
 check "hook tests skipped, CI=true: run fails" '[ "$rc" != 0 ]'
-check "hook tests skipped, CI=true: FAIL names the variable" 'printf "%s" "$out" | grep -q "FAIL.*hook tests skipped (AGENTILLE_VALIDATE_SKIP_HOOK_TESTS set"'
+check "hook tests skipped, CI=true: FAIL names the variable and the fix" 'printf "%s" "$out" | grep -q "FAIL.*hook tests skipped (AGENTILLE_VALIDATE_SKIP_HOOK_TESTS set.*unset it on the runner"'
 check "hook tests skipped, CI=true: the only FAIL" '[ "$(printf "%s\n" "$out" | grep -c "FAIL")" = 1 ]'
 
 # a failing mod import is a FAIL (the entry point is overridable for this test only)

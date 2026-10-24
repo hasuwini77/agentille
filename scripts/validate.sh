@@ -375,7 +375,11 @@ hdr "Hook scripts"
 # run does not run the hook tests again. Nothing else should set it, and under CI=true it is a FAIL:
 # the runner must never go green with the hook tests skipped.
 for t in tests/hooks/test-*.sh; do
-  [ -n "${AGENTILLE_VALIDATE_SKIP_HOOK_TESTS:-}" ] && { skip_or_fail "hook tests skipped (AGENTILLE_VALIDATE_SKIP_HOOK_TESTS set: inner run of test-validate-gate.sh)"; break; }
+  if [ -n "${AGENTILLE_VALIDATE_SKIP_HOOK_TESTS:-}" ]; then
+    m="hook tests skipped (AGENTILLE_VALIDATE_SKIP_HOOK_TESTS set: inner run of test-validate-gate.sh)"
+    if [ "${CI:-}" = "true" ]; then fail "$m: CI=true, unset it on the runner"; else warn "$m"; fi
+    break
+  fi
   [ -e "$t" ] || { warn "no tests/hooks/test-*.sh found"; break; }
   tout=$(bash "$t" 2>&1); trc=$?
   if [ "$trc" = 0 ]; then pass "$t: $(printf '%s\n' "$tout" | tail -1)"; else fail "$t failed:"; printf '%s\n' "$tout" | tail -12 | sed 's/^/    /'; fi

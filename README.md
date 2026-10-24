@@ -124,6 +124,7 @@ Everything lives in `~/.agentille/profile.json`. Every key is optional, and a mi
 - `routing.advisorOnOpus` (default `true`): `false` starts Opus and Fable pane workers without Claude Code's advisor tool; Sonnet workers keep it.
 - `routing.maxRunUsd` (default `15`; `null` turns it off): a per-run cost ceiling in US dollars, estimated from the agents' tokens, the lead's own tokens on the run and pane minutes. Past it, every later role but the executor that would run Opus runs Sonnet, with one toast and a band flag. How the estimate works and what it demotes: [docs/routing-cost.md](./docs/routing-cost.md) and [Routing](#routing).
 - `routing.stopAtCeiling` (default `false`): `true` refuses every dispatch, subagent, pane or workflow agent and whatever the role, once the run's estimate reaches `maxRunUsd`, instead of moving later roles to Sonnet. The deny line names the estimate and the ceiling.
+- `routing.stopAtWeeklyPct` (default `0`, off): a number from 1 to 100 refuses every later dispatch once your subscription's seven-day usage percent is at or above it. `maxRunUsd` is an API-list-price estimate, not your plan's quota; this is the quota gate. Details: [docs/routing-cost.md](./docs/routing-cost.md).
 - `display.band` (default `on`): `off` draws nothing above the prompt, the run's tree, its `⚑` flags and a worker's own band included.
 - `display.statusLine` (default `on`): `off` pins no status line under the prompt.
 - `display.mascot` (default `on`): `off` drops the figure from worker panes and the deck; a worker keeps its one-line caption.

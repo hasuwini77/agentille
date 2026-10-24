@@ -325,7 +325,7 @@ export async function dispatchAgent($, e, next) {
   }
   // A workflow script's agent: the engine ignores a model rewrite there (and logs a failure line), so it runs on the
   // model the script chose, and the lead must name the routed model in the script. Log that model, not the table's,
-  // and flag a mismatch. A deny does hold there, so routing.stopAtCeiling is enforced.
+  // and flag a mismatch. A deny does hold there, so the run's stop (stopAtCeiling, stopAtWeeklyPct) is enforced.
   if (e.workflow) {
     // Its prompt may carry no header: it then joins the run in progress rather than reset it. A header
     // names its run, but the band moves to it only when the current run has nothing working, subagent or pane.
@@ -374,7 +374,7 @@ export async function dispatchAgent($, e, next) {
   // The run's spend so far, estimated from its agents' tokens and its panes' minutes, only when a ceiling is set.
   const spent = runSpend(runId)
   const d = decide({ role, hdr, run: { ...run, fixes: ladderFixes(run, sliceOf(hdr)), usd: spent }, depth: Profile.depth, settings: Profile.settings, weeklyPct: Session.weeklyPct })
-  // routing.stopAtCeiling: the run is at its ceiling, so nothing more is dispatched, whatever the role.
+  // routing.stopAtCeiling or stopAtWeeklyPct: the run is stopped, so nothing more is dispatched, whatever the role.
   if (d.stop) return { deny: d.stop }
   const res = await next({ ...e, model: d.model })
   if (res.deny) return res

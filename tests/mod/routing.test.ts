@@ -1,5 +1,5 @@
 import { describe, expect, mock, test } from 'claude-code/testing'
-import { AGENT_SILENT_MS, AGT_GRACE_TYPED, AGT_INFLIGHT_MAX_MS, PANE_REST_MS, PANE_EST_MAX_MS, PANE_TOKENS_PER_MIN, CEILING_ROLES, ROLES, paneUsd, DEFAULTS, MAX_EXECUTORS_AT_ONCE, PRICES, asksSessions, decide, estimateRunUsd, executorCapFlag, executorsWorking, ordinal, demoteHeaderText, formationOf, ladderFixes, mentionsCodex, mentionsFable, parseHeader, proveHeader, roleOf, runInFlight, typedFable, verdictOf, leadUsd } from '../../hooks/routing.js'
+import { AGENT_SILENT_MS, AGT_GRACE_TYPED, AGT_INFLIGHT_MAX_MS, PANE_REST_MS, PANE_EST_MAX_MS, PANE_TOKENS_PER_MIN, CEILING_ROLES, ROLES, paneUsd, DEFAULTS, MAX_EXECUTORS_AT_ONCE, PRICES, asksSessions, decide, estimateRunUsd, executorCapFlag, executorsWorking, ordinal, demoteHeaderText, formationOf, ladderFixes, mentionsCodex, mentionsFable, parseHeader, proveHeader, roleOf, runInFlight, typedFable, verdictOf, leadUsd, runStop } from '../../hooks/routing.js'
 import { sliceOf } from '../../hooks/links.js'
 import { addLeadUsage } from '../../hooks/dispatch.js'
 import { Runs } from '../../hooks/state.js'
@@ -652,6 +652,52 @@ describe('maxRunUsd: a per-run cost ceiling', () => {
     await wfAgent($, 'wfs2', 'security-reviewer', 2, 'opus') // the script names Opus; the table past the ceiling says Sonnet
     expect(seen).toEqual(['opus', 'sonnet', 'opus']) // the mod cannot rewrite a workflow agent's model
     expect(toasts).toContain('agt workflow security-reviewer runs opus — table says sonnet · high')
+  })
+
+  test('stopAtWeeklyPct: off by default; 1–100 stops every role once the seven-day percent reaches it; unknown never stops', async () => {
+    expect(DEFAULTS.stopAtWeeklyPct).toBe(0)
+    const W = { ...DEFAULTS, maxRunUsd: null, stopAtWeeklyPct: 80 } as never
+    for (const role of ROLES) {
+      expect(decide({ role, hdr: {}, run: fresh(), settings: W, weeklyPct: 79.9 }).stop).toBe(undefined)
+      expect(decide({ role, hdr: {}, run: fresh(), settings: W, weeklyPct: 80 }).stop).toBe('agt ✗ the subscription has used 80% of its seven-day limit, at or above routing.stopAtWeeklyPct 80%: no more dispatches this run. Raise routing.stopAtWeeklyPct in ~/.agentille/profile.json (or set it to 0) to go on.')
+    }
+    expect(decide({ role: 'executor', hdr: {}, run: fresh(), settings: W, weeklyPct: 92.46 }).stop).toContain('used 92.5% of')
+    expect(decide({ role: 'executor', hdr: {}, run: fresh(), settings: W, weeklyPct: null }).stop).toBe(undefined) // not reported yet
+    expect(decide({ role: 'executor', hdr: {}, run: fresh(), settings: W }).stop).toBe(undefined)
+    expect(decide({ role: 'executor', hdr: {}, run: fresh(), settings: DEFAULTS, weeklyPct: 100 }).stop).toBe(undefined) // off by default
+    for (const stopAtWeeklyPct of [0, null, -5, 0.5, 101, '80', NaN, Infinity]) {
+      expect(decide({ role: 'executor', hdr: {}, run: fresh(), settings: { ...DEFAULTS, stopAtWeeklyPct } as never, weeklyPct: 100 }).stop).toBe(undefined)
+    }
+    expect(decide({ role: 'executor', hdr: {}, run: fresh(), settings: { ...DEFAULTS, stopAtWeeklyPct: 100 } as never, weeklyPct: 100 }).stop).toContain('stopAtWeeklyPct 100%')
+    // A typed --fable is stopped too, and nothing counts as a Fable spawn.
+    expect(decide({ role: 'planner', hdr: { fable: 'forced' }, run: fresh(), settings: W, weeklyPct: 95 })).toMatchObject({ fable: false, stop: expect.stringContaining('95%') })
+    // The gate stands on its own: no maxRunUsd, no stopAtCeiling. A caller that passes no percent (a Codex pane) is not gated.
+    expect(runStop({ usd: 0 }, W, 90)).toContain('routing.stopAtWeeklyPct 80%')
+    expect(runStop({ usd: 0 }, W)).toBe(null)
+    // Both gates set: the ceiling's line wins, since it names the run's own spend.
+    expect(runStop({ usd: 5 }, { ...C, stopAtCeiling: true, stopAtWeeklyPct: 50 } as never, 90)).toContain('maxRunUsd $5.00')
+  })
+
+  test('in the mod: stopAtWeeklyPct denies subagent and workflow dispatches once the seven-day percent reaches it', async ($, on) => {
+    const { seen } = boot(on, { stopAtWeeklyPct: 85 })
+    on('session.measure', async ($: any, e: any) => ({ changed: e.changed }) as never)
+    const measure = (percentUsed: number) => $.session.measure({ context: { window: 200_000, percent: 10 }, rateLimits: [{ kind: 'seven_day', percentUsed }], changed: ['rateLimits'] } as never)
+    try {
+      await $.session.start({ cwd: '/w', surface: null, isInteractive: false })
+      await build($, 'wk1') // no percent reported yet: dispatched
+      await measure(84)
+      await build($, 'wk1')
+      expect(seen).toEqual(['sonnet', 'sonnet'])
+      await measure(85)
+      const x = await build($, 'wk1')
+      expect((x as any).deny).toBe('agt ✗ the subscription has used 85% of its seven-day limit, at or above routing.stopAtWeeklyPct 85%: no more dispatches this run. Raise routing.stopAtWeeklyPct in ~/.agentille/profile.json (or set it to 0) to go on.')
+      expect((x as any).deny.split('\n')).toHaveLength(1)
+      expect(((await review($, 'wk1')) as any).deny).toContain('stopAtWeeklyPct 85%')
+      expect(((await wfAgent($, 'wk1', 'executor', 1, 'sonnet')) as any).deny).toContain('stopAtWeeklyPct 85%')
+      expect(seen).toEqual(['sonnet', 'sonnet']) // nothing more reached the engine
+    } finally {
+      await measure(0) // the percent lives in the mod's Session store: leave it low for whatever runs next
+    }
   })
 
 })

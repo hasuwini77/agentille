@@ -43,9 +43,9 @@ export { DENY_INTEGRATION, DENY_PUSH, DENY_LOCAL, DENY_UNREAD, denyHidden, denyP
 export { OWNED_TTL_MS, worktreeAdds, newTrees, WT_SCRIPT, scriptTrees, scriptSlugs, claimedTrees, recordTrees, parseOwned, Worktrees, worktreesFile, saveOwned, ownedWorktrees, forgetOwned } from './guard-own.js'
 
 // ── who is a run ─────────────────────────────────────────────────────────────
-// An agentille subagent, a worker pane (not a /agt-spawn pane: that is the person's own task), or the lead
-// on an /agt turn, from the turn its run names an id until that run's ✓/✗ card (proofs.js runHeld; no clock
-// or typed-reply count ends it), or while a run with no id is in flight (routing.js runInFlight, on the clocks
+// An agentille subagent, a worker pane (not a /agt-spawn pane: that is the person's own task), or the lead from
+// its typed /agt until that run's ✓/✗ card (proofs.js runHeld; no clock or typed-reply count ends it, and a run
+// that never names an id is held the same way), or while a run is in flight (routing.js runInFlight, on the clocks
 // proofs.js moment($) read): a question typed mid-run does not switch the guard off. A plain session has none.
 export function fromRun(e, at) {
   if (e.agentId) {

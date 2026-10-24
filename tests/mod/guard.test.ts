@@ -818,6 +818,17 @@ describe('guard: the lead stays guarded for the whole run', () => {
     expect((await bash($, 'gh pr merge 9 --merge')).deny).toBe(DENY_INTEGRATION)
   })
 
+  test('a run that never names an id stays guarded past three typed replies, until its card', async ($, on) => {
+    const { ran } = setup(on, { profile: { integration: 'pr' } })
+    await boot($)
+    await typed($)
+    for (const t of ['a', 'b', 'c']) await typed($, t)
+    expect((await bash($, 'git push origin HEAD:main')).deny).toContain('git push to main')
+    await card($)
+    expect((await bash($, 'git push origin HEAD:main')).result).toBe('ok')
+    expect(ran).toEqual(['git push origin HEAD:main'])
+  })
+
   test('a dispatch on a later turn names the run when the /agt turn did not', { timeoutMs: 20_000 }, async ($, on) => {
     const { clock } = setup(on)
     await boot($)

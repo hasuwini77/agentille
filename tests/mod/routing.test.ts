@@ -1,5 +1,5 @@
 import { describe, expect, mock, test } from 'claude-code/testing'
-import { DEFAULTS, asksSessions, decide, demoteHeaderText, formationOf, ladderFixes, parseHeader, proveHeader, roleOf, typedFable, verdictOf } from '../../hooks/routing.js'
+import { DEFAULTS, asksSessions, decide, demoteHeaderText, formationOf, ladderFixes, mentionsFable, parseHeader, proveHeader, roleOf, typedFable, verdictOf } from '../../hooks/routing.js'
 
 const fresh = () => ({ revise: 0, fixes: 0, fable: 0 })
 const S = { autoFable: true, maxFablePerRun: 1, fableWeeklyCeiling: 60 }
@@ -73,9 +73,9 @@ describe('Fable is rare', () => {
     expect(decide({ role: 'executor', hdr: { mode: 'fix', size: 'large' }, run: { ...run, fixes: ladderFixes(run, 'resolve') }, settings: S }).reason).toBe('table')
   })
 
-  test('diagnosis goes to Fable only after 3 failed fixes', async () => {
-    expect(decide({ role: 'planner', hdr: { mode: 'diagnose' }, run: { ...fresh(), fixes: 2 }, settings: S }).fable).toBe(false)
-    expect(decide({ role: 'planner', hdr: { mode: 'diagnose' }, run: { ...fresh(), fixes: 3 }, settings: S }).model).toBe('fable')
+  test('diagnosis goes to Fable only after the 2 fix attempts a slice gets', async () => {
+    expect(decide({ role: 'planner', hdr: { mode: 'diagnose' }, run: { ...fresh(), fixes: 1 }, settings: S }).fable).toBe(false)
+    expect(decide({ role: 'planner', hdr: { mode: 'diagnose' }, run: { ...fresh(), fixes: 2 }, settings: S }).model).toBe('fable')
   })
 
   test('the gate blocks: cap, weekly ceiling, opt-out', async () => {
@@ -146,14 +146,15 @@ describe('workflow agents: runs, toast, deny', () => {
     const toasts: string[] = []
     const writes: Record<string, string> = {}
     let n = 0
-    on('env.get', async ($: any, e: any) => ({ value: ({ HOME: '/h', ...(herdr && { HERDR_ENV: '1' }) } as any)[e.name] }))
+    on('env.get', async ($: any, e: any) => ({ value: ({ HOME: '/h', ...(herdr && { HERDR_ENV: '1', HERDR_PANE_ID: 'w1:p1' }) } as any)[e.name] }))
     if (herdr) {
       on('tool.register', async () => ({ value: undefined }))
       on('process.run', async ($: any, e: any) => ({ value: { exitCode: 0, stdout: e.argv[1] === 'agent' ? JSON.stringify({ result: { agents: herdr } }) : '', stderr: '' } }))
     }
     on('session.start', async ($: any, e: any) => ({ cwd: e.cwd }))
     on('command.register', async () => ({ value: undefined }))
-    on('fs.read', async ($: any, e: any) => profile && e.path.endsWith('/.agentille/profile.json') ? { value: JSON.stringify(profile) } : { deny: 'no profile' })
+    // The herdr panes listed are this lead's own (its lead-w1-p1.panes file names them).
+    on('fs.read', async ($: any, e: any) => profile && e.path.endsWith('/.agentille/profile.json') ? { value: JSON.stringify(profile) } : herdr && e.path.endsWith('/lead-w1-p1.panes') ? { value: herdr.map((p: any) => p.name).join('\n') + '\n' } : { deny: 'no profile' })
     on('fs.write', async ($: any, e: any) => { writes[e.path] = e.text; return { value: undefined } })
     on('store.get', async () => ({ value: null }))
     on('ui.render', async () => ({ type: 'engine', ref: 0 }) as never)
@@ -269,6 +270,18 @@ describe('typed proof', () => {
     expect(typedFable(null)).toBe(false)
   })
 
+  test('--fable counts in the flag region after /agt and its level, or as the last word, never inside the task', async () => {
+    expect(typedFable('/agt heavy --fable fix it')).toBe(true)
+    expect(typedFable('/agt --fable heavy fix it')).toBe(true)
+    expect(typedFable('/agentille:agt --fable go')).toBe(true)
+    expect(typedFable('/agt --mode panes --fable go')).toBe(true)
+    expect(typedFable('/agt heavy fix the --fable flag parser')).toBe(false)
+    expect(typedFable('/agt --mode panes fix the --fable thing')).toBe(false)
+    expect(typedFable('open a session with --fable and ship it')).toBe(false)
+    expect(mentionsFable('open a session with --fable and ship it')).toBe(true) // a plain ask for a session carries the flag into it
+    expect(mentionsFable('open a --fableish session')).toBe(false)
+  })
+
   test('fable=forced holds only with a typed --fable', async () => {
     const hdr = { run: 'a1', fable: 'forced' }
     expect(proveHeader(hdr, { fableTyped: true })).toEqual({ hdr, demoted: false })
@@ -318,5 +331,16 @@ describe('typed proof', () => {
     expect(asksSessions('open two windows')).toBe(false)
     expect(asksSessions('open a shell in ../api')).toBe(true)
     expect(asksSessions('start a session, then fix the file')).toBe(true)
+  })
+
+  test('a question or a request about sessions is not an ask for one', async () => {
+    expect(asksSessions('why does my app start two shells when I launch it?')).toBe(false)
+    expect(asksSessions('give me a summary of the sessions middleware')).toBe(false)
+    expect(asksSessions('open sessions.js and fix the leak')).toBe(false)
+    expect(asksSessions('how do I launch a shell from node?')).toBe(false)
+    expect(asksSessions('please open 3 sessions here')).toBe(true)
+    expect(asksSessions('Can you fire up a codex pane beside this one')).toBe(true)
+    expect(asksSessions('fix the bug. Then open a shell')).toBe(true)
+    expect(asksSessions('Open a new terminal in ../api and run the tests')).toBe(true)
   })
 })

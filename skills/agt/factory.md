@@ -35,7 +35,7 @@ cp "$ROOT"/.env* . 2>/dev/null || true
   || cp -R "$ROOT/node_modules" . 2>/dev/null; }   # copy-on-write when the filesystem has it, else a plain copy; never a symlink or hardlink
 ```
 
-On a fix round or resume, pass the same `base:` and `branch:` again: `BASE` from `HEAD` is right only on the first build, from the checkout the run started in.
+On a fix round or resume, pass the same `base:` and `branch:` again: `BASE` from `HEAD` is right only on the first build, from the checkout the run started in. The lead runs it with `BASE_INPUT` set to the run's `$BASE` and `BRANCH_INPUT` to the slice branch, inside a subshell `( … )`, so its own shell stays in the main checkout: otherwise the next slice forks from the previous slice's branch, and the gate's diffs and merges run inside a slice tree.
 
 ## Fix rounds — resume, don't respawn
 

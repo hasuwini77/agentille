@@ -26,7 +26,7 @@ What a finished slice becomes.
   - `pr` (default) pushes a branch and opens a PR per slice.
   - `auto` merges each PR on green with a merge commit, deletes the branch and pushes a version tag.
   - `push` pushes each slice branch, no PR, no merge.
-  - `local` merges locally and pushes nothing.
+  - `local`: each slice is built on its own branch and merged into the branch you were on with a merge commit; nothing is pushed and no PR is opened.
   - Without `gh`, `pr` behaves as `push`.
 - **For one run:** `/agt --local "task"` runs that one `/agt` under `local`, whatever the profile says (`projects[]` entries included): the mod snapshots `local` at the typed `/agt` and the guard refuses every push and PR for the lead and its subagents until the run's card. The next `/agt` is back on the profile. No profile file is needed.
 - **Your profile decides:** that repo's `projects[].integration` entry (matched by `url`, the `origin` remote, or `path`; `/agentille-project` writes both), then the top-level `integration`, then `pr`.

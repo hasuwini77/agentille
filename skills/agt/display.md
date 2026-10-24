@@ -33,7 +33,7 @@ With the mod drawing, it draws the band instead and you do nothing. Without it, 
 Every agent's output starts with a head; relay the head, never the body:
 
 - reviewers: `VERDICT: PASS|CONCERNS|FAIL · P0:n P1:n P2:n`, then `FIX: <file:line> <one line>` per P0/P1
-- planner: `PLAN: <n> steps · <p> parallel-safe · <w> waves` · ui-prototyper: `BLUEPRINT: <name> ready · <stack>`
+- planner: `PLAN: <n> steps · <p> parallel-safe · <w> waves`; as `work=diagnose`: `ROOT CAUSE: <one line>` then `FIX PLAN:`; as `work=research`: `CONTEXT-PACK: <n> findings` · ui-prototyper: `BLUEPRINT: <name> ready · <stack>`
 - plan-reviewer: `VERDICT: APPROVE` or `VERDICT: REVISE · BLOCKER:n HIGH:n LOW:n`, then `FIX: <step> <one line>` per BLOCKER/HIGH
 - adversary: `BROKEN: n · HELD: n`, then `FIX:` per broken case
 - executor: `<what changed · files · verified yes/no>`, then `FIX:` per known remaining defect; or one stop line: `CONTEXT …`, `BLOCKED: <need>`, `STUCK: <the assumption that failed or the check that will not pass>`, `CONTRACT: <what and why>` (each routed in `factory.md` → "Fix rounds"). Its `VERIFICATION:` block is body evidence the gate reads, not the head.

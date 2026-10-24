@@ -8,7 +8,7 @@ Automatic on feature and bugfix work with `risk` auth/money/data and a test runn
 
 1. Executor builds with `integration: local` (nothing pushed until the gauntlet clears).
 2. `agentille:agentille-adversary` writes 3–8 tests meant to break the diff and reports `BROKEN: n · HELD: n`.
-3. `BROKEN: 0` clears the gauntlet: the lead re-dispatches the kept executor with `INTEGRATE:` and the run's real `integration:` to push the slice branch and open the PR (`factory.md` → "Integrate"), then the reviewers run. Otherwise the broken cases go back to the executor (`mode=fix`, tests not weakened), then one more adversary round with new cases only.
+3. `BROKEN: 0` clears the gauntlet: the lead re-dispatches the kept executor with `INTEGRATE:` and the run's real `integration:` to push the slice branch and open the PR (`factory.md` → "Integrate"), then the reviewers run. Otherwise the broken cases go back to the executor (`work=fix`, tests not weakened), then one more adversary round with new cases only.
 4. Still broken after round 2: stop and put the cases on the card's `⚑`. The tests stay as regression tests.
 
 ## duel — best of two

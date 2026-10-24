@@ -167,6 +167,14 @@ for k in $(display_defaults | tr -d '{}' | tr ',' '\n' | sed 's/:.*//; s/ //g') 
   check "README.md's switch sentence names $k" 'readme_switches | grep -qF "\`$k\`"'
 done
 
+# the dispatch header's work type is spelled work= everywhere an agent reads it; mode= lives only in SKILL.md's
+# alias note and deprecation line and in commands.md's deprecated rows
+check "no prompt file emits mode= (SKILL.md keeps the alias note only)" '! grep -l "mode=" skills/agt/*.md agents/*.md | grep -qv "skills/agt/SKILL.md"'
+check "SKILL.md names mode= only as the alias or the deprecation" '! grep "mode=" skills/agt/SKILL.md | grep -vqE "work=|deprecated"'
+# every work= value the prose dispatches has an output head in the agent file that receives it
+check "the planner defines the diagnose head factory.md dispatches" 'has skills/agt/factory.md "work=diagnose" && has agents/agentille-planner.md "ROOT CAUSE:" && has agents/agentille-planner.md "FIX PLAN:" && has skills/agt/display.md "ROOT CAUSE:"'
+check "the planner defines the research head routing.md names" 'has agents/agentille-planner.md "CONTEXT-PACK:" && has skills/agt/display.md "CONTEXT-PACK:"'
+
 # setup skills that say "typed only" disable model invocation
 for f in skills/agentille-init/SKILL.md skills/agentille-project/SKILL.md skills/agentille-claude-md/SKILL.md; do
   check "$f disables model invocation" 'grep -qE "^disable-model-invocation: true$" "$f"'

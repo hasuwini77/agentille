@@ -113,7 +113,7 @@ export function wakeDue(pool, seen, wireDone, woken, now) {
   })
 }
 
-// How to read a pane from its transport: herdr by agent name, unwrapped, as panes-mode.md's harvest
+// How to read a pane from its transport: herdr by agent name, unwrapped, as transport-panes.md's harvest
 // loop does; tmux by pane `id`.
 export function readCommand(transport, id, name) {
   if (transport === 'herdr') return NAME_RE.test(String(name ?? '')) ? 'herdr agent read ' + name + ' --source recent-unwrapped --lines 200' : null

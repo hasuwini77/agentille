@@ -35,23 +35,23 @@ Every later command names that printed path written out (`cd <path> && …`, `gi
 
 The executor already holds the slice in context; a fresh one would re-read the repo.
 
-- **Subagent executor:** keep its agent id. Send the P0/P1 `FIX:` lines with `SendMessage`, starting with the `[agt … mode=fix …]` header: "fix these in the slice's worktree, commit, re-verify, reply in your output format".
-  Fallback when the agent is gone: a fresh `mode=fix` executor (`isolated: true`) seeded with its checkpoint, `branch:`, `base:` and the findings; it re-attaches ("Worktree lifecycle").
+- **Subagent executor:** keep its agent id. Send the P0/P1 `FIX:` lines with `SendMessage`, starting with the `[agt … work=fix …]` header: "fix these in the slice's worktree, commit, re-verify, reply in your output format".
+  Fallback when the agent is gone: a fresh `work=fix` executor (`isolated: true`) seeded with its checkpoint, `branch:`, `base:` and the findings; it re-attaches ("Worktree lifecycle").
 - **Pane executor:** its pane closed on harvest. Open a fresh pane executor (`isolated: false`) with `cwd` = the slice's worktree (re-attach it first if it is gone), the branch, its answer file path and the findings.
 
-**One definition.** A fix attempt is one `mode=fix` executor dispatch for a slice: a `SendMessage` round or a fresh fix executor. It is counted per `slice=`, and the effort ladder reads this same counter (`routing.md` → "Escalation ladder"). **Limit: 2 per slice.** One `mode=diagnose` planner per slice, whichever row below asks first, may add a 3rd. Every event a slice can meet:
+**One definition.** A fix attempt is one `work=fix` executor dispatch for a slice: a `SendMessage` round or a fresh fix executor. It is counted per `slice=`, and the effort ladder reads this same counter (`routing.md` → "Escalation ladder"). **Limit: 2 per slice.** One `work=diagnose` planner per slice, whichever row below asks first, may add a 3rd. Every event a slice can meet:
 
 | Event | Fix attempt? | What happens next | The card shows |
 |---|---|---|---|
 | Review finds a P0/P1 (or the adversary a BROKEN case), fewer than 2 attempts so far | yes | resume the executor with the `FIX:` lines, as above | — |
-| Still blocking after the 2nd attempt, on a bugfix or debug slice whose diagnose is unspent | the planner no, its fix yes | one `mode=diagnose` planner (read-only root cause), then a 3rd attempt that implements it | — |
+| Still blocking after the 2nd attempt, on a bugfix or debug slice whose diagnose is unspent | the planner no, its fix yes | one `work=diagnose` planner (read-only: `ROOT CAUSE:` then `FIX PLAN:`), then a 3rd attempt whose `FIX:` lines are that `FIX PLAN:` | — |
 | Still blocking after the 2nd attempt on any other slice, after the slice's diagnose is spent (whatever its category), or after a failed 3rd | — | stop the slice, branch kept | a `⚑` line |
-| First line `STUCK: <assumption or check>`, on any slice, diagnose unspent | the planner no, its fix yes | never a plain `RESUME:`: send the slice, that line and the executor's body to one `mode=diagnose` planner, then one `mode=fix` dispatch that implements its root cause (this may take any slice to a 3rd attempt) | — |
+| First line `STUCK: <assumption or check>`, on any slice, diagnose unspent | the planner no, its fix yes | never a plain `RESUME:`: send the slice, that line and the executor's body to one `work=diagnose` planner, then one `work=fix` dispatch that implements its root cause (this may take any slice to a 3rd attempt) | — |
 | A second `STUCK:`, or a `STUCK:` after the diagnose is spent | — | stop the slice, branch kept | `⚑ <slice> stuck: <line>` |
-| `CONTEXT …` | no, not by itself (a successor sent `mode=fix` counts like any fix dispatch) | a fresh executor seeded from its checkpoint and slice (`SKILL.md` → "Hard rules") | — |
+| `CONTEXT …` | no, not by itself (a successor sent `work=fix` counts like any fix dispatch) | a fresh executor seeded from its checkpoint and slice (`SKILL.md` → "Hard rules") | — |
 | `BLOCKED: <need>` | no | stop: only the person can give it | `⚑ <slice> blocked: <need>` |
 | `CONTRACT: <what and why>` | no | stop, branch kept: the contract is frozen (`formations.md` → "relay — contract first, then parallel") | `⚑ <slice> contract: <what>` |
-| Early stop, the slice's first ("Early stop — resume once") | no: a resume is `mode=build` and counts toward neither the 2 nor the escalation ladder | resume once with `RESUME:` | — |
+| Early stop, the slice's first ("Early stop — resume once") | no: a resume is `work=build` and counts toward neither the 2 nor the escalation ladder | resume once with `RESUME:` | — |
 | A second early stop | no | stop, branch kept | `⚑ <slice> stopped early twice` |
 | Retries inside one dispatch: the three-miss stop of the executor and of solo | no | the executor answers `STUCK:` (row above); solo names the assumption that may be wrong | — |
 | `INTEGRATE:` once a formation clears ("Integrate") | no, and not a resume either | the kept executor pushes and opens the PR | — |
@@ -61,7 +61,7 @@ The executor already holds the slice in context; a fresh one would re-read the r
 
 An executor stopped early when its handoff has no `VERIFICATION:` block and no stop line, or ends on a question, or its pane went `done` mid-slice. A stop line (`CONTEXT …`, `BLOCKED:`, `STUCK:`, `CONTRACT:`) is not an early stop and is never resumed: the table above routes each one.
 
-Resume once per slice. Its header says `mode=build`, never `mode=fix`:
+Resume once per slice. Its header says `work=build`, never `work=fix`:
 
 - **Subagent executor:** `SendMessage` to the same agent id: "RESUME: finish the slice from your checkpoint and `git log $BASE..HEAD`, keep landed commits, reply in your output format."
 - **Pane executor:** `close_pane`, then `spawn_pane` the same role and cwd (the slice's worktree, `isolated: false`) with the slice, `RESUME:`, the checkpoint path and the answer file path (the same path as a pane fix round).
@@ -96,8 +96,8 @@ Pass the same `branch:` and `base:` on every fix round, resume and post-formatio
 - **auto, `$BASE` is a feature branch:** executors get `integration: local` and `branch: agt/<slug>`, a throwaway branch; the lead merges each into `$BASE` with `git merge --no-ff`, removes its worktree, deletes `agt/<slug>` (never pushed), then pushes `$BASE`.
 - **pr** (default): as auto on main, but stop after the PRs: `⚑ PR #n ready`. On a feature branch: executors get `integration: pr` and `branch: agt/<slug>`, push it and open a PR into `$BASE`; the lead merges nothing. Without `gh`, `pr` behaves as `push` and the card says so.
 - **push:** push each slice branch (`feat/<slug>`, `fix/<slug>`, or `agt/<slug>` off a feature branch), no PR, no merge; the card lists the branches. This is the one definition of `push`; the README and the executor repeat it.
-- **local:** merge each slice into `$BASE` locally, push nothing.
+- **local:** each slice is built on its own branch and merged into the branch you were on with a merge commit; nothing is pushed and no PR is opened (`$BASE` is that branch). This is the one definition of `local`; the README, `docs/settings.md` and `SKILL.md` repeat it.
 - **After a formation held the slice at `integration: local`** (a cleared gauntlet, a duel's winner): the lead re-dispatches the kept executor, never pushes for it. Subagent: `SendMessage` to the same agent id; pane: a fresh `isolated: false` pane executor with `cwd` = the slice's worktree, as in a pane fix round.
-  The message starts with the `[agt … mode=build …]` header, then `INTEGRATE:` with the run's real `integration:` and the same `branch:` and `base:`; the executor pushes and opens the PR as in its step 7 and changes no code. It is neither a fix attempt nor a resume and counts toward neither. When the run's real mode is `local`, there is nothing to send: merge as above.
+  The message starts with the `[agt … work=build …]` header, then `INTEGRATE:` with the run's real `integration:` and the same `branch:` and `base:`; the executor pushes and opens the PR as in its step 7 and changes no code. It is neither a fix attempt nor a resume and counts toward neither. When the run's real mode is `local`, there is nothing to send: merge as above.
 
 Before each merge, check ownership: `git diff --name-only $BASE...<branch>` stays inside the slice's files from the CONTEXT-PACK; a stray file blocks the merge until it is reverted or explained. A later slice that trails `$BASE` merges `$BASE` first and re-verifies. After each slice's outcome, remove its worktree ("Worktree lifecycle").

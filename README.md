@@ -11,7 +11,7 @@ One typed command runs the work. Type `/agt "task"` in Claude Code and that one 
    ```
 2. **Check that the mod loaded:** type `/agt-info`. Its first line reads `display (profile.json → display):`, followed by the display settings in effect and the last run's routing. Every `/agt-*` command comes from the module `hooks/hooks.json` loads, so if Claude Code does not know `/agt-info`, the mod did not load.
    - `/agt` still works without the mod; its recon line then ends in `[agentille v<version>]`, and you get the plain subagent tree instead of the band.
-3. **Smoke test, kept local:** type `/agt --local "fix the typo in the footer"`. `--local` runs that one `/agt` under `integration: "local"`, so it pushes nothing and opens no PR, with no profile file. It prints `recon: low · solo · <reason>`, then Claude makes the fix itself on a new `fix/<slug>` branch, with no agents and no card. The default is `integration: "pr"`, which pushes that branch and opens a PR; `{ "integration": "local" }` in `~/.agentille/profile.json` makes local permanent.
+3. **Smoke test, kept local:** type `/agt --local "fix the typo in the footer"`. `--local` runs that one `/agt` under `integration: "local"`, so it pushes nothing and opens no PR, with no profile file. Under `local` each slice is built on its own branch and merged into the branch you were on with a merge commit; nothing is pushed and no PR is opened. It prints `recon: low · solo · <reason>`, then Claude makes the fix itself on a new `fix/<slug>` branch, with no agents and no card. The default is `integration: "pr"`, which pushes that branch and opens a PR; `{ "integration": "local" }` in `~/.agentille/profile.json` makes local permanent.
 4. **Run a bigger one:** `/agt "add a CSV export endpoint and a download button on the reports page"`. It reads your repo and picks a level: low (it just does it, or one builder), medium (2–3 builders in parallel) or heavy (one Herdr or tmux pane per part). The recon line names the level it picked (`medium · subagent`, say), and the band above your prompt fills with the planner, executors and reviewers. Risky changes (auth, payments, data) get a red-team pass, under `pr` you get one reviewed PR per part to merge (merging on green is opt-in, see "What it touches"), and every pane it opened is closed.
 5. **Read the card** it ends on (solo runs have none). Everything else (plan, findings, each agent's full report) is in that `report.md`. A one-part feature's card under `pr` looks like this:
    ```
@@ -166,6 +166,12 @@ Everything else waits for a typed `/agt`, `/storm` or a session ask. When you do
   - Worker panes close when harvested; at session end the sweep closes only the idle or done worker panes this session opened whose answer is saved.
   - When the proof lapses, and how shells and folder trust work: [docs/guards.md](./docs/guards.md#pane-tools).
 - **Models and cost:** every non-solo run costs more than a plain prompt. Opus runs the judgment roles, Sonnet the executor and the cheaper reviews, Haiku only classifies and scouts, and Fable runs only with `--fable` or with `routing.autoFable: true` (after two plan REVISEs, or for the diagnose planner after two failed fixes). `routing.maxRunUsd` (default $15) moves later Opus roles to Sonnet once a run passes it. Every cell: [Routing](#routing).
+
+## Turn it off, or uninstall
+
+- **Quiet, not gone:** every surface has a switch in the profile's `display` block, `sessions: off` keeps panes shut, and a plain prompt never starts a run ([Settings](#settings)).
+- **Uninstall:** `/plugin` → uninstall agentille (or `claude plugin uninstall agentille`). Nothing in the plugin runs after that.
+- **What it leaves behind, and how to remove it:** `~/.agentille/` (`profile.json`, `config.json`, `state/` with each run's folder and the lead files, `.update-check.json`): delete the folder. In a repo: `.agentille/backlog.md` (gitignored, only if you used `/agt next` or `/storm`), `docs/storm/<date>.md` if you ran `/storm`, and any `agt/*` or `feat/*` slice branch a run left: `git branch` and `git worktree list` show them; `/agt-clean` removes merged `agt/*` worktrees while the plugin is installed, `git worktree remove <path>` after.
 
 ## Routing
 

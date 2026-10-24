@@ -42,7 +42,8 @@ AGENTILLE_RAW_URL=file:///dev/null claude plugin eval . --runs "$RUNS" --ablatio
 The repo owner adds one repository secret, `ANTHROPIC_API_KEY` (Settings → Secrets and variables → Actions). Without it, what the job does depends on what started it:
 
 - a `vX.Y.Z` tag push fails with `::error::no ANTHROPIC_API_KEY secret: release tag … has no eval signal`. A tag is a release, and a release without its eval result should be red, not quietly green;
-- the weekly schedule and a run by hand print `evals skipped: no ANTHROPIC_API_KEY secret` and pass, so forks and a fresh clone of the repo stay green.
+- the weekly schedule fails the same way: it is the repo's own standing signal, and a green week with no eval would mean nothing;
+- a run by hand prints `evals skipped: no ANTHROPIC_API_KEY secret` and passes, so a fork can run the workflow without the secret.
 
 The event decides, not the ref: a run by hand started on a tag still skips. Every eval run is billed to that key.
 

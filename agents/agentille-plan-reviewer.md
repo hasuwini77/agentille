@@ -41,4 +41,4 @@ FIX: <step> <one line>             (one per BLOCKER/HIGH)
 - **APPROVE**: one line on why; execution proceeds.
 - **REVISE**: each gap as `[BLOCKER|HIGH|LOW] <what's wrong> → <the change>`, specific enough to fix without guessing. Name gaps; do not rewrite the plan.
 
-Do not pad or invent issues: a false REVISE costs a whole replanning round. One REVISE round is the norm; if the revision still has a BLOCKER, say so and escalate to the orchestrator instead of looping.
+Do not pad or invent issues: a false REVISE costs a whole replanning round. The lead sends at most three plans; a REVISE on the third stops the run with no build, so on a third plan REVISE only for a gap that would make the build fail or miss the goal.

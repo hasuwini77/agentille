@@ -217,3 +217,48 @@ describe('lazy start', () => {
     expect(lists()).toBeGreaterThan(4)
   })
 })
+
+describe('focus: a typed /agt starts with no flags', () => {
+  const boot = async ($: any, on: any) => {
+    let n = 0
+    on('env.get', async ($: any, e: any) => ({ value: e.name === 'HOME' ? '/h' : undefined }))
+    on('session.cwd', async () => ({ value: '/work/repo' }))
+    on('session.start', async ($: any, e: any) => ({ cwd: e.cwd }))
+    on('command.register', async () => ({ value: undefined }))
+    on('fs.read', async () => ({ deny: 'ENOENT' }))
+    on('fs.write', async () => ({ value: undefined }))
+    on('store.get', async () => ({ value: null }))
+    on('ui.open', async () => ({ value: undefined }))
+    on('ui.toast', async () => ({ value: undefined }))
+    on('ui.render', async () => ({ type: 'engine', ref: 0 }) as never)
+    on('prompt.submit', async ($: any, e: any) => ({ text: e.text }))
+    on('turn.complete', async ($: any, e: any) => ({ text: e.answer }))
+    on('agent.spawn', async ($: any, e: any) => ({ model: e.model ?? 'inherit', agentId: 'w' + n++ }))
+    mock.clock(on, { now: Date.now() })
+    await $.session.start({ cwd: '/work/repo', surface: null, isInteractive: false })
+  }
+  const typed = ($: any, text: string) => $.prompt.submit({ text, origin: { kind: 'composer' } } as never)
+  const focus = async ($: any) => (await $.command.run({ command: 'agt-focus', args: '' })).text as string
+
+  test('a flag one run raised is gone when the next /agt is typed', { timeoutMs: 20_000 }, async ($, on) => {
+    await boot($, on)
+    await typed($, '/agt build the importer')
+    await $.agent.spawn({ prompt: '[agt run=fl1run size=small mode=build]\nbreak the importer', subagentType: 'agentille:agentille-adversary' } as never)
+    // No ✓/✗ card: the run is still open, so only the next typed /agt can clear what it raised.
+    await $.turn.complete({ agentId: 'w0', answer: 'BROKEN: 2\nempty file, BOM header', durationMs: 10, isAborted: false, turnId: 'tw0', reason: 'answer' } as never)
+    expect(await focus($)).toContain('⚑ adversary broke 2 cases')
+    await typed($, '/agt build the exporter')
+    const after = await focus($)
+    expect(after).not.toContain('adversary broke')
+    expect(after).toContain('Nothing to flag right now.')
+  })
+
+  test('a prompt that is not /agt keeps the flag', { timeoutMs: 20_000 }, async ($, on) => {
+    await boot($, on)
+    await typed($, '/agt build the importer')
+    await $.agent.spawn({ prompt: '[agt run=fl2run size=small mode=build]\nbreak the importer', subagentType: 'agentille:agentille-adversary' } as never)
+    await $.turn.complete({ agentId: 'w0', answer: 'BROKEN: 1', durationMs: 10, isAborted: false, turnId: 'tw0', reason: 'answer' } as never)
+    await typed($, 'what broke?')
+    expect(await focus($)).toContain('⚑ adversary broke 1 case')
+  })
+})

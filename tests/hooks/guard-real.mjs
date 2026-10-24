@@ -8,7 +8,7 @@ import os from 'node:os'
 
 const root = process.argv[2]
 const { S } = await import(root + '/hooks/state.js')
-const { bashCall, DENY_PUSH, DENY_INTEGRATION } = await import(root + '/hooks/guard.js')
+const { bashCall, DENY_INTEGRATION } = await import(root + '/hooks/guard.js')
 const { agtTurnStart } = await import(root + '/hooks/proofs.js')
 
 const T = fs.realpathSync(fs.mkdtempSync(os.tmpdir() + '/agt-guard-real-'))
@@ -62,8 +62,10 @@ try {
   {
     const w = world()
     const r = await run('git checkout -q main && git merge -q --ff-only agt/x && git push -q origin HEAD')
-    check('checkout base, ff-merge, push HEAD: denied', r?.deny?.startsWith(DENY_PUSH) && r.deny.includes('switches branches'), JSON.stringify(r))
+    check('checkout base, ff-merge to the base, push HEAD: denied', r?.deny?.startsWith(DENY_INTEGRATION) && r.deny.includes('base branch'), JSON.stringify(r))
     check('... and origin/main did not move', refOf('origin.git', 'main') === w.main)
+    const h = await run('git checkout -q main && git push -q origin HEAD')
+    check('checkout base then push HEAD (no merge): denied, HEAD unreadable', h?.deny?.includes('switches branches'), JSON.stringify(h))
   }
   {
     const w = world()

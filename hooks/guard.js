@@ -25,15 +25,108 @@ import { PROBE, SAFE_RUN, SPAWN_ROLE, splitName, paneKey } from './panes.js'
 import { ROLES } from './routing.js'
 import { moment, inFlight, runHeld } from './proofs.js'
 import { leadPane } from './spawn.js'
+import { reportRun } from './drawing.js'
+import { completeReport } from './dispatch.js'
 
 export const DENY_INTEGRATION = 'integration auto is not set in your profile for this repo; the run stops at the PR.'
 export const DENY_PUSH = 'integration auto is not set in your profile for this repo: a run pushes only its own branch (agt/*, feat/*, fix/* or the one checked out), never the base branch, a tag, a force push, a branch deletion or every branch. Write the branch name and the directory out (no variables) and push again.'
 export const DENY_LOCAL = 'integration is local for this repo: the run pushes nothing and opens no PR.'
 export const denyHidden = (what) => 'integration auto is not set in your profile for this repo, and ' + what + ', where the guard cannot judge a push, merge, tag or release. Run those steps as plain commands, with the branch and directory written out.'
 export const DENY_UNREAD = 'The guard could not read the repo this command targets; retry, or run the command yourself.'
+export const denyProtected = (what) => 'integration auto is not set in your profile for this repo: below auto a run may not write ' + what + ' (the trust root ~/.agentille, the repo config, hooks, info, refs or a push-related git config), which a run could use to lift its own ceiling. Make that change yourself, or raise integration in your profile.'
 export const OWNED_TTL_MS = 14 * 24 * 60 * 60_000
 const MODES = ['local', 'push', 'pr', 'auto'] // least to most autonomy
 const OWN_BRANCH = /^(agt|feat|fix|storm)\//
+
+// The trust root and the repo's own git state: a write to any of these below auto is refused, because a run could
+// use it to lift its own ceiling (rewrite ~/.agentille/profile.json), run code (a git hook) or publish (a ref).
+// `raw` is the path as the line wrote it (so `~`, `$HOME`, a relative `.git/config` are seen); `abs` its resolved
+// form. Returns a short label for the deny message, or null.
+export function protectedPath(raw, abs) {
+  const r = String(raw ?? '')
+  const a = String(abs ?? '')
+  if (/\$\{?GIT_DIR\}?/.test(r)) return '$GIT_DIR'
+  if (/^~\/\.agentille(\/|$)/.test(r)) return '~/.agentille'
+  if (/^(\$HOME|\$\{HOME\})\/\.agentille(\/|$)/.test(r)) return '~/.agentille'
+  if (S.home && (a === S.home + '/.agentille' || a.startsWith(S.home + '/.agentille/'))) return '~/.agentille'
+  const git = (s) =>
+    /(^|\/)\.git\/config$/.test(s) ? '.git/config'
+    : /(^|\/)\.git\/hooks(\/|$)/.test(s) ? '.git/hooks'
+    : /(^|\/)\.git\/info(\/|$)/.test(s) ? '.git/info'
+    : /(^|\/)\.git\/refs(\/|$)/.test(s) ? '.git/refs'
+    : /(^|\/)\.git\/packed-refs$/.test(s) ? '.git/packed-refs'
+    : /(^|\/)\.git$/.test(s) ? 'the worktree .git file'
+    : null
+  return git(a) ?? git(r)
+}
+
+// git config keys a run may not set below auto: aliases (rename a step past the reader), the hooks path (run code),
+// a remote's push URL or refspec, URL rewriting, receive.* — anything that changes where or how a push lands.
+const PROTECT_CFG = /^(alias\.|core\.hookspath$|remote\..*\.(push|pushurl)$|url\..*\.(push)?insteadof$|receive\.)/i
+
+// Whether a `git config …` writes a value (as opposed to reading or unsetting one): a `set` verb, `--add`/
+// `--replace-all`, or a bare `key value`.
+function gitConfigSets(args) {
+  const pos = args.filter((x) => !x.startsWith('-'))
+  if (args.some((x) => /^(--get|--get-all|--get-regexp|--get-urlmatch|--list|-l|--get-color|--get-colorbool|--unset|--unset-all)$/.test(x))) return false
+  if (['get', 'get-all', 'get-regexp', 'get-urlmatch', 'list', 'unset', 'unset-all'].includes(pos[0])) return false
+  if (args.some((x) => x === '--add' || x === '--replace-all')) return true
+  return pos[0] === 'set' ? pos.length >= 3 : pos.length >= 2
+}
+
+// Commands that write a file given as an argument → the paths they write (for the protected-path check). Each
+// resolves against the command's dir in commandSteps.
+function writeTargets(words) {
+  const p = base(words[0])
+  const pos = []
+  const out = []
+  if (p === 'tee') {
+    for (let i = 1; i < words.length; i++) {
+      const w = words[i]
+      if (w.startsWith('-')) { if (w === '--output-error') i++; continue }
+      out.push(w)
+    }
+    return out
+  }
+  if (p === 'dd') {
+    for (const w of words) { const m = /^of=(.+)/.exec(w); if (m) out.push(m[1]) }
+    return out
+  }
+  if (p === 'truncate') {
+    for (let i = 1; i < words.length; i++) {
+      const w = words[i]
+      if (w === '-s' || w === '--size' || w === '-r' || w === '--reference') { i++; continue }
+      if (!w.startsWith('-')) out.push(w)
+    }
+    return out
+  }
+  if (p === 'cp' || p === 'mv' || p === 'install' || p === 'ln') {
+    let t = null
+    for (let i = 1; i < words.length; i++) {
+      const w = words[i]
+      if (w === '-t' || w === '--target-directory') { t = words[++i]; continue }
+      if (/^--target-directory=/.test(w)) { t = w.split('=').slice(1).join('='); continue }
+      if (['-m', '--mode', '-S', '--suffix', '-o', '-g', '-Z', '--context'].includes(w)) { i++; continue }
+      if (!w.startsWith('-')) pos.push(w)
+    }
+    if (t) out.push(t)
+    else if (pos.length >= 2) out.push(pos[pos.length - 1]) // the destination / link name
+    return out
+  }
+  if (p === 'sed' || p === 'perl') {
+    const inPlace = words.some((w, n) => n > 0 && (w === '--in-place' || /^--in-place=/.test(w) || (/^-[a-zA-Z]*i/.test(w) && !w.startsWith('--'))))
+    if (!inPlace) return out
+    const scriptGiven = words.some((w) => ['-e', '-E', '--expression', '-f', '--file'].includes(w) || /^-[a-zA-Z]*[eEf]/.test(w))
+    for (let i = 1; i < words.length; i++) {
+      const w = words[i]
+      if (['-e', '-E', '--expression', '-f', '--file'].includes(w)) { i++; continue }
+      if (!w.startsWith('-')) pos.push(w)
+    }
+    // Without -e/-f the first positional is the script; the rest are the files edited in place.
+    return scriptGiven ? pos : pos.slice(1)
+  }
+  return out
+}
 
 // ── the command line ─────────────────────────────────────────────────────────
 // A shell line → its simple commands in the order they run: { words, stdin }. && || ; | & and newlines
@@ -673,6 +766,8 @@ function riskyCode(code) {
   const s = String(code ?? '')
   return MENTIONS_TOOL.test(s) || MENTIONS_TOOL.test(squish(s)) || SPAWN_CALL.test(s)
 }
+// Interpreter code that names the trust root or the repo's own git state: it may write them directly.
+const PROTECT_IN_CODE = /\.agentille\/|\.git\/config|\.git\/hooks|\.git\/refs|\.git\/info|packed-refs/
 // A script that pushes, merges, tags or releases: per line, git with push/merge/tag/send-pack/update-ref, gh or
 // hub with a merge, release, api or alias, curl or wget at GitHub.
 export const SCRIPT_RISK = /\bgit\b[^\n]*\b(push|merge|tag|send-pack|update-ref)\b|\b(gh|hub)\b[^\n]*\b(merge|release|api|alias)\b|\b(curl|wget)\b[^\n]*github|api\.github\.com/
@@ -705,13 +800,17 @@ function codeStep(w, here, stdin = null, piped = false) {
   const at = (f) => (/[$`]/.test(f) ? null : f.startsWith('~/') ? null : f.startsWith('/') ? joinPath('/', f) : here ? joinPath(here, f) : null)
   const file = (f, what) => ({ kind: 'file', how: 'script', what, path: at(f), dir: here, slug: null })
   const hidden = (what) => ({ kind: 'hidden', what, dir: here, slug: null })
+  const protect = (what) => ({ kind: 'protected', what, dir: here, slug: null })
+  // Interpreter code → a protected-write deny (it names the trust root or git state), a hidden deny (it reaches
+  // a tool or spawns), or null.
+  const judgeCode = (code, label) => (PROTECT_IN_CODE.test(String(code ?? '')) ? protect('the trust root or repo git state (named in ' + p + ' ' + label + ')') : riskyCode(code) ? hidden(p + ' ' + label + ' runs code that reaches git, gh or curl') : null)
   const ik = interpKey(p)
   if (ik) {
     const flags = INTERP[ik]
     const k = w.findIndex((x, n) => n > 0 && (flags.includes(x) || flags.some((f) => f.startsWith('-') && f.length === 2 && x.startsWith(f) && x.length > 2 && !x.startsWith('--'))))
     if (k > 0) {
       const code = flags.includes(w[k]) ? w[k + 1] ?? '' : w[k].slice(2)
-      return riskyCode(code) ? hidden(p + ' ' + (flags.includes(w[k]) ? w[k] : w[k].slice(0, 2)) + ' runs code that reaches git, gh or curl') : null
+      return judgeCode(code, flags.includes(w[k]) ? w[k] : w[k].slice(0, 2))
     }
     // awk's program is its first positional (a `-f` file is read instead).
     if (AWK.has(ik)) {
@@ -721,13 +820,13 @@ function codeStep(w, here, stdin = null, piped = false) {
         return f ? file(f, p + ' -f ' + f) : null
       }
       const prog = w.slice(1).find((x) => !x.startsWith('-'))
-      return prog && riskyCode(prog) ? hidden(p + ' runs a program that reaches git, gh or curl') : null
+      return prog ? judgeCode(prog, 'program') : null
     }
     // No code flag: the first positional is a script file (a pipe into it is data), else it reads code from stdin.
     const pos = w.slice(1).filter((x) => !x.startsWith('-') || x === '-')
     const f = pos.find((x) => x !== '-')
     if (f && !pos.includes('-')) return /(^|\/)node_modules\//.test(f) ? null : file(f, p + ' ' + f)
-    if (stdin != null && !piped) return riskyCode(stdin) ? hidden(p + ' runs code from stdin that reaches git, gh or curl') : null
+    if (stdin != null && !piped) return judgeCode(stdin, 'stdin')
     return hidden(p + ' runs code from stdin that the guard cannot read')
   }
   if (SHELLS.includes(p)) {
@@ -785,9 +884,15 @@ export function commandSteps(line, cwd = null) {
   let edited = false // a step before this one changed a remote or its config: a later push's target is unknown
   let ghEdited = false // … or gh's default repo: a later gh call's target is unknown
   let curBranch = null // the branch a checkout/switch on the line left behind: what a later merge/reset writes
+  const aliases = new Map() // shell aliases defined earlier on the line (alias g=git): the program word is expanded
   for (const c of commands(line)) {
-    const w = c.words
-    const p = base(w[0])
+    let w = c.words
+    let p = base(w[0])
+    if (p === 'alias') {
+      for (const a of w.slice(1)) { const m = /^([^=]+)=(.*)$/s.exec(a); if (m && m[2]) aliases.set(m[1], m[2]) }
+      continue
+    }
+    if (aliases.has(p)) { w = [...aliases.get(p).split(/\s+/).filter(Boolean), ...w.slice(1)]; p = base(w[0]) }
     if (p === 'cd' || p === 'pushd') {
       here = cdTo(here, w.slice(1))
       continue
@@ -797,6 +902,12 @@ export function commandSteps(line, cwd = null) {
       continue
     }
     const at = c.dir ? (/[$`~]/.test(c.dir) ? null : c.dir.startsWith('/') ? joinPath('/', c.dir) : here && joinPath(here, c.dir)) : here
+    // A write into the trust root or the repo's own git state: redirects (`>`/`>>`) and tee/cp/mv/ln/sed -i/… targets.
+    for (const t of [...(c.redirects ?? []), ...writeTargets(w)]) {
+      const abs = t.startsWith('/') ? joinPath('/', t) : !/[$`~]/.test(t) && at ? joinPath(at, t) : null
+      const lbl = protectedPath(t, abs)
+      if (lbl) out.push({ kind: 'protected', what: lbl, dir: at, slug: null })
+    }
     // A tool whose subcommand and arguments xargs appends from stdin cannot be read: fail closed below auto.
     if (c.viaXargs && ['git', 'gh', 'hub', 'curl', 'wget'].includes(p)) {
       out.push({ kind: 'hidden', what: p + ' takes its subcommand or arguments from xargs, which the guard cannot read', dir: at, slug: null })
@@ -830,9 +941,11 @@ export function commandSteps(line, cwd = null) {
       const keys = [...g.cfg, ...envCfg(c.env)]
       const retarget = keys.some((k) => REMOTE_CFG.test(k))
       if (g.sub === 'tag' && !tagListing(g.args)) out.push({ kind: 'step', what: 'git tag', dir, slug: null })
-      // An alias can rename push or tag past this reader: defining one on a run's line is a step of its own.
+      // An alias or a hooks-path/push-config key set for one call changes a step past this reader.
       if (keys.some((k) => k.startsWith('alias.'))) out.push({ kind: 'step', what: 'git -c alias.*', dir, slug: null })
-      if (g.sub === 'config' && g.args.some((x) => /^alias\./i.test(x)) && g.args.filter((x) => !x.startsWith('-')).length > 1) out.push({ kind: 'step', what: 'git config alias.*', dir, slug: null })
+      if (keys.some((k) => PROTECT_CFG.test(k) && !k.startsWith('alias.'))) out.push({ kind: 'protected', what: 'a git config key (core.hooksPath, remote push, URL rewriting or receive.*)', dir, slug: null })
+      // `git config <key> <value>` setting a protected key (the hooks path, a remote's push, URL rewriting, …).
+      if (g.sub === 'config' && gitConfigSets(g.args) && g.args.some((x) => PROTECT_CFG.test(x))) out.push(/^alias\./i.test(g.args.find((x) => PROTECT_CFG.test(x)) ?? '') ? { kind: 'step', what: 'git config alias.*', dir, slug: null } : { kind: 'protected', what: 'a git config key (core.hooksPath, remote push, URL rewriting or receive.*)', dir, slug: null })
       // Plumbing that writes a remote with no `push` in sight.
       if (['send-pack', 'http-push'].includes(g.sub) || (g.sub === 'subtree' && g.args[0] === 'push')) out.push({ kind: 'step', what: 'git ' + g.sub, dir, slug: null })
       const ref = refWrite(g)
@@ -874,6 +987,7 @@ export function judgeLocal(branch, { current = null, bases = new Set(['main', 'm
 export function integrationIn(line, { cwd = null, current = null, pushDst = null, base: b = null, mode = 'pr' } = {}) {
   if (mode === 'auto') return null
   for (const c of commandSteps(line, cwd)) {
+    if (c.kind === 'protected') return c.what
     if (c.kind === 'step') return c.what
     if (c.kind === 'ref') {
       const why = judgeRef(c.ref, { current, bases: new Set(['main', 'master', b].filter(Boolean)) })
@@ -968,7 +1082,15 @@ async function fileRisk($, c) {
   if (!c.path) return c.what + ' runs a script the guard cannot locate (write its path out)'
   const text = await $.fs.read(c.path).catch(() => null)
   if (text === null || text.includes('\u0000')) return null
-  return SCRIPT_RISK.test(text) ? c.what + ' runs a script that calls git push, merge or tag, gh or curl to GitHub' : null
+  // Read the script as the shell would: variables it sets itself are expanded, so a command assembled from
+  // pieces (`G=git; $G ${P}sh`) is seen too.
+  let expanded = ''
+  try {
+    expanded = commands(text).map((x) => x.words.join(' ')).join('\n')
+  } catch {
+    expanded = ''
+  }
+  return SCRIPT_RISK.test(text) || SCRIPT_RISK.test(expanded) ? c.what + ' runs a script that calls git push, merge or tag, gh or curl to GitHub' : null
 }
 
 // ── the repo a command targets, and its mode ─────────────────────────────────
@@ -1098,9 +1220,19 @@ async function repoCaps($, dirs) {
   return caps
 }
 
+// The integration mode for a repo, never above the snapshot taken at the typed /agt: a run can lower its own
+// ceiling (a repo config, a profile the person edits down) but never raise it, so a later profile read that reads
+// higher than the run started with is ignored. The snapshot (S.agtProfile) is set by the typed /agt's turn.
+function capMode(profile, repo, caps) {
+  const live = integrationOf(profile, repo, caps)
+  if (!S.agtProfile) return live
+  const snap = integrationOf(S.agtProfile, repo, caps)
+  return MODES.indexOf(snap) < MODES.indexOf(live) ? snap : live
+}
+
 // The mode for a repo the guard cannot place (a dir or remote a variable names, a target edited earlier on the
 // line): the profile's top-level integration, never a name or path match.
-const topMode = (profile) => integrationOf(profile, { url: null, paths: [], names: [], home: S.home }, [])
+const topMode = (profile) => capMode(profile, { url: null, paths: [], names: [], home: S.home }, [])
 
 // The mode for the repo a candidate targets: its dir's repo, or the repo it names (-R, GH_REPO, repos/o/r) when
 // that is not the dir's own. A dir a variable names cannot be placed: the top-level mode.
@@ -1112,8 +1244,8 @@ async function modeFor($, profile, c, cwd, cache) {
   const named = c.slug ? normSlug(c.slug) : null
   // The dir's own repo is its main remote's (origin, else the first): a fork's upstream is another repo.
   const mine = local && (!named || (!!local.url && sameRepo(normUrl(local.url), named)))
-  if (mine) return integrationOf(profile, { url: local.url, paths: local.dirs, name: local.name, home: S.home }, await repoCaps($, local.dirs))
-  return integrationOf(profile, { url: named, paths: [], name: named ? base(named) : null, home: S.home }, [])
+  if (mine) return capMode(profile, { url: local.url, paths: local.dirs, name: local.name, home: S.home }, await repoCaps($, local.dirs))
+  return capMode(profile, { url: named, paths: [], name: named ? base(named) : null, home: S.home }, [])
 }
 
 // gh with no -R or GH_REPO goes to the remote `gh repo set-default` picked (remote.<name>.gh-resolved), if any.
@@ -1155,7 +1287,7 @@ async function pushMode($, profile, c, cwd, cache) {
   const path = remotePath(url, c.dir)
   const paths = path ? [path.replace(/\/\.git$/, '')] : []
   if (path && !local.url && local.dirs.includes(paths[0])) return modeFor($, profile, { ...c, slug: null }, cwd, cache)
-  return integrationOf(profile, { url: path ? null : url, paths, names: [], home: S.home }, [])
+  return capMode(profile, { url: path ? null : url, paths, names: [], home: S.home }, [])
 }
 
 export async function integrationAllowed($, cwd) {
@@ -1211,6 +1343,7 @@ export async function guardLine($, line, cwd) {
     const slug = c.gh && !c.slug ? envRepo ?? (await ghDefault($, c.dir, cache)) : c.slug
     const mode = c.kind === 'push' ? await pushMode($, profile, c, cwd, cache) : await modeFor($, profile, { ...c, slug }, cwd, cache)
     if (mode === 'auto') continue
+    if (c.kind === 'protected') return denyProtected(c.what)
     if (c.kind === 'step') return DENY_INTEGRATION
     if (c.kind === 'hidden') return denyHidden(c.what)
     if (c.kind === 'file') {
@@ -1497,4 +1630,37 @@ export async function bashCall($, e, next) {
   if (!after && cwd) made = worktreeAdds(line, cwd).filter((w) => w.path && w.branch).map((w) => ({ path: w.path, branch: w.branch, head: null, run, at, src: 'add' }))
   if (made.length) await saveOwned($, made)
   return res
+}
+
+// The profile the run started with: read at the typed /agt so a later read cannot raise the mode mid-run (capMode).
+export async function loadRunProfile($) {
+  S.agtProfile = await readProfile($)
+}
+
+// A non-Bash write (Write, Edit, MultiEdit, NotebookEdit) to the trust root or the repo's own git state, refused
+// below auto exactly as a Bash write is. Returns the deny reason, or null to let it through.
+async function editDeny($, e) {
+  const path = e.file_path ?? e.notebook_path ?? e.path ?? null
+  if (!path || !fromRun(e, await moment($))) return null
+  const cwd = await $.session.cwd().catch(() => null)
+  const abs = path.startsWith('/') ? joinPath('/', path) : !/[$`~]/.test(path) && cwd ? joinPath(cwd, path) : null
+  const lbl = protectedPath(path, abs)
+  if (!lbl) return null
+  const mode = await integrationAllowed($, cwd).catch(() => 'pr')
+  return mode === 'auto' ? null : denyProtected(lbl)
+}
+
+// The Write hook: refuse a protected write; else let it through, then observe a run's report write for the band.
+export async function writeCall($, e, next) {
+  const deny = await editDeny($, e).catch(() => null)
+  if (deny) return { deny }
+  const r = await next(e)
+  if (!e.agentId && reportRun(e.file_path)) await completeReport($, e.file_path).catch(() => {})
+  return r
+}
+
+// The Edit / MultiEdit / NotebookEdit hook: refuse a protected write, else let it through.
+export async function editCall($, e, next) {
+  const deny = await editDeny($, e).catch(() => null)
+  return deny ? { deny } : next(e)
 }

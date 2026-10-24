@@ -5,9 +5,9 @@ import { S, ctx, isLead } from './state.js'
 import { registerAutocomplete } from './autocomplete.js'
 import { toolLabel, runPhases } from './board.js'
 import { cleanText } from './clean.js'
-import { routingView, ledgerView, completeReport, dispatchAgent } from './dispatch.js'
+import { routingView, ledgerView, dispatchAgent } from './dispatch.js'
 import { DECK, applyDisplay, answerPanel, deckCommand, focusCommand, highlightCommand } from './display.js'
-import { canDraw, drawingBlock, reportRun } from './drawing.js'
+import { canDraw, drawingBlock } from './drawing.js'
 import { highlightFor, litFor } from './highlight.js'
 import { parseInfoArgs, routeText, routingSummary, ledgerSummary, squadsSummary, overviewText } from './info.js'
 import { verdictChip } from './links.js'
@@ -15,7 +15,7 @@ import { addUsage, ledger } from './live.js'
 import { HELLO_MS, parseWorker } from './mascot.js'
 import { PROBE, SPAWN_ROLE, transportBlock, paneName, newRunId, paneKey, parseSpawnArgs, herdrPromptArgv } from './panes.js'
 import { installedSkew, loadProfile, loadSquads, squadsView, tipOnce } from './profile.js'
-import { bashCall } from './guard.js'
+import { bashCall, writeCall, editCall } from './guard.js'
 import { pollNow, cleanWorkspace } from './reaper.js'
 import { cardBox, answerBox, switchboard, deck } from './render.js'
 import { registerRows } from './rows.js'
@@ -149,6 +149,11 @@ export function register(on) {
   on('tool.call', { tool: 'mcp__agentille__open_sessions' }, openSessions)
   on('tool.call', { tool: 'mcp__agentille__close_pane' }, closePane)
   on('tool.call', { tool: 'Bash' }, bashCall)  // guard.js: integration guard + worktree ownership
+  // guard.js: a run below auto may not write the trust root or the repo's git state through a non-Bash tool either.
+  on('tool.call', { tool: 'Write' }, writeCall)
+  on('tool.call', { tool: 'Edit' }, editCall)
+  on('tool.call', { tool: 'MultiEdit' }, editCall)
+  on('tool.call', { tool: 'NotebookEdit' }, editCall)
 
   on('command.run', { command: 'agt-clean' }, async ($, e) => {
     if (!isLead()) return { text: 'agt clean runs in the lead session, not in a worker pane.' }
@@ -188,11 +193,7 @@ export function register(on) {
 
   // What each agent is doing right now, for its band row: a subagent's call carries its agentId;
   // a worker pane's own main loop publishes for its lead. Observe only.
-  on('tool.call', { tool: 'Write' }, async ($, e, next) => {
-    const r = await next(e)
-    if (!e.agentId && reportRun(e.file_path)) await completeReport($, e.file_path)
-    return r
-  })
+  // The Write hook (guard.js writeCall) both guards protected writes and observes a run's report write.
 
   on('tool.call', async ($, e, next) => {
     if (e.agentId) {

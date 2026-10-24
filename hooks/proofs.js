@@ -96,6 +96,7 @@ export function endRun() {
   S.agtTyped = false
   S.fableTyped = false
   S.agtRun = null
+  S.agtProfile = null
 }
 
 // The run is over without a card (a question, an error, an interrupt): the proof lapses the same way. The run id

@@ -12,6 +12,7 @@ import { addUsage, finish, ledger } from './live.js'
 import { BYE_MS } from './mascot.js'
 import { cleanWorkspace } from './reaper.js'
 import { typedPrompt, agtTurnStart, endRun, rawDone, sessionsAllowed, moment, runHeld } from './proofs.js'
+import { loadRunProfile } from './guard.js'
 import { verdictOf } from './routing.js'
 import { ensureTools } from './spawn.js'
 import { refreshAgents, ensureTicker } from './ticker.js'
@@ -25,6 +26,8 @@ export async function onPromptSubmit($, e) {
   const { typed, agt } = typedPrompt(e.text, e.origin, await moment($))
   if (!typed) return e
   agtTurnStart(agt)
+  // Snapshot the run's integration ceiling from the profile now, so a later rewrite cannot raise it mid-run.
+  if (agt) await loadRunProfile($)
   if (S.agtTurn) S.flags = []   // a new run starts with a clean slate
   if (S.agtTurn) await ensureTools($, 'panes')
   if (sessionsAllowed()) await ensureTools($, 'sessions')

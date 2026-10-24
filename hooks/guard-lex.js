@@ -49,12 +49,15 @@ export function protectedPath(raw, abs, homes = []) {
     : /(^|\/)\.claude\/settings(\.local)?\.json$/i.test(s) ? 'Claude Code settings (' + /\.claude\/[^/]+$/i.exec(s)[0] + ')'
     : /(^|\/)\.git$/i.test(s) ? 'the worktree .git file'
     : /(^|\/)\.gitattributes$/i.test(s) ? '.gitattributes (it names the filters and diff drivers git runs)'
+    : /(^|\/)\.mcp\.json$/i.test(s) ? '.mcp.json (the MCP servers Claude Code starts)'
     : null
   return git(a) ?? git(r)
 }
 
-// Files under the home folder (relative to it) that a run may not write below auto.
-const HOME_CONFIG = /^(\.gitconfig|\.config\/git\/(config|attributes)|\.config\/gh\/(config|hosts)\.yml)$/i
+// Files under the home folder (relative to it) that a run may not write below auto: git's and gh's config, the shell
+// startup files (every new shell runs them), ssh's config and authorized keys, npm's user config (it can name the
+// shell scripts run in), and Claude Code's user config (it holds the person's MCP servers).
+const HOME_CONFIG = /^(\.gitconfig|\.config\/git\/(config|attributes)|\.config\/gh\/(config|hosts)\.yml|\.(zshrc|zshenv|zprofile|zlogin|bashrc|bash_profile|bash_login|profile)|\.ssh\/(config|authorized_keys2?)|\.npmrc|\.claude\.json)$/i
 
 // A submodule's git dir under the repo's: its config, hooks and refs (`.git/modules/a/modules/b/config` too).
 const MODULE_GIT = /(^|\/)\.git\/modules\/(?:[^/]+\/)+?(config$|hooks(\/|$)|refs(\/|$)|packed-refs$)/i
@@ -787,7 +790,7 @@ function riskyCode(code) {
 }
 
 // Interpreter code that names the trust root or the repo's own git state: it may write them directly.
-const PROTECT_IN_CODE = /\.agentille(?![\w-])|\.gitattributes|\.claude\/settings|\.gitconfig|\.config\/(git|gh)\/|\.git\/HEAD|config\.worktree|\.git\/worktrees\/|\.git\/config|\.git\/hooks|\.git\/refs|\.git\/info|packed-refs|\.git\/modules\/\S*(config|hooks|refs)/i
+const PROTECT_IN_CODE = /\.agentille(?![\w-])|\.gitattributes|\.claude\/settings|\.claude\.json|\.mcp\.json|\.(zshrc|zshenv|zprofile|bashrc|bash_profile)\b|[~/]\.profile\b|\.ssh\/(config|authorized_keys)|\.npmrc|\.gitconfig|\.config\/(git|gh)\/|\.git\/HEAD|config\.worktree|\.git\/worktrees\/|\.git\/config|\.git\/hooks|\.git\/refs|\.git\/info|packed-refs|\.git\/modules\/\S*(config|hooks|refs)/i
 
 // A script that pushes, merges, tags or releases: per line, git with push/merge/tag/send-pack/update-ref, gh or
 // hub with a merge, release, api or alias, curl or wget at GitHub.

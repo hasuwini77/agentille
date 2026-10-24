@@ -563,7 +563,8 @@ async function homes($) {
 // A write target → the protected label of where it lands, or null. The spelling is judged first (protectedPath),
 // then the real path, so `cfg` linked to .git/config on an earlier line, or `.GIT/CONFIG`, is refused. A link that
 // leads nowhere is refused: the guard cannot see what the write would create.
-export async function resolvedProtected($, raw, abs) {
+// `memo` holds what git said about config for one line, so a line with many writes asks once per folder.
+export async function resolvedProtected($, raw, abs, memo = new Map()) {
   const hs = await homes($)
   const spelled = protectedPath(raw, abs, hs)
   if (spelled || !abs) return spelled
@@ -571,7 +572,53 @@ export async function resolvedProtected($, raw, abs) {
   if (real === DANGLING) return 'a link that leads nowhere (' + raw + ')'
   const landed = real && real !== abs ? protectedPath('', real, hs) : null
   if (landed) return landed
-  return (await inHooksDir($, abs, typeof real === 'string' ? real : null)) ? 'the hooks folder git runs (core.hooksPath)' : null
+  const r = typeof real === 'string' ? real : null
+  if (await inHooksDir($, abs, r)) return 'the hooks folder git runs (core.hooksPath)'
+  return configFileOf($, abs, r, memo)
+}
+
+// The nearest folder of `abs` that exists (where git can be asked), or null.
+async function existingDir($, abs) {
+  let d = abs.slice(0, abs.lastIndexOf('/')) || '/'
+  for (let i = 0; i < 16; i++) {
+    if ((await $.fs.stat(d).catch(() => null))?.kind === 'dir') return d
+    if (d === '/') return null
+    d = d.slice(0, d.lastIndexOf('/')) || '/'
+  }
+  return null
+}
+
+// Config git reads that no fixed name gives: the files an include.path or includeIf.*.path pulls in (from the
+// global config, the repo's, or a file they include), and the folder a global core.hooksPath names. Asked of git
+// from the write's folder, with where each value was set, so a relative include is read against the file that set
+// it. Returns the protected label, or null.
+async function configFileOf($, abs, real, memo) {
+  const d = await existingDir($, abs)
+  if (!d) return null
+  if (!memo.has(d)) {
+    const r = await $.process.run(['git', '-C', d, 'config', '--show-origin', '--show-scope', '--get-regexp', '^(include|includeif\\..*)\\.path$|^core\\.hookspath$'], PROBE).catch(() => null)
+    const out = { files: [], hooks: [] }
+    for (const l of r && r.exitCode === 0 ? String(r.stdout ?? '').split('\n') : []) {
+      const m = /^(\S+)\tfile:(.*?)\t(\S+) (.+)$/.exec(l.replace(/\r$/, '')) ?? /^(\S+)\tfile:(.*?)\t(\S+)\t?(.*)$/.exec(l)
+      if (!m) continue
+      const [, scope, origin, key, value] = m
+      const v = value.trim()
+      const home = Profile.home
+      const at = v.startsWith('~/') ? (home ? joinPath('/', home + v.slice(1)) : null) : v.startsWith('/') ? joinPath('/', v) : joinPath(origin.slice(0, origin.lastIndexOf('/')) || '/', v)
+      if (!at) continue
+      if (/hookspath/i.test(key)) {
+        if (scope === 'global' || scope === 'system') out.hooks.push(v.startsWith('~/') || v.startsWith('/') ? at : null)
+      } else out.files.push(at)
+    }
+    memo.set(d, out)
+  }
+  const { files, hooks } = memo.get(d)
+  const lc = (p) => String(p ?? '').toLowerCase().replace(/\/+$/, '')
+  const hits = (p) => !!p && files.some((f) => lc(f) === lc(p))
+  if (hits(abs) || hits(real)) return 'a git config file an include pulls in (include.path)'
+  const under = (p, h) => !!p && !!h && (lc(p) === lc(h) || lc(p).startsWith(lc(h) + '/'))
+  if (hooks.some((h) => h && (under(abs, h) || under(real, h)))) return 'the global hooks folder git runs (core.hooksPath)'
+  return null
 }
 
 // Whether a write lands in the hooks folder git runs for the repo it is in: core.hooksPath when the repo sets one
@@ -1117,7 +1164,7 @@ async function judgeCands($, cands, ctx, depth) {
     const c = aliasMoved && c0.kind === 'push' ? { ...c0, push: { ...c0.push, headMoved: true } } : c0
     if (c.kind === 'write') {
       // An ordinary write target: judged by where it lands, and only a protected landing costs a mode lookup.
-      const lbl = await resolvedProtected($, c.raw, c.path)
+      const lbl = await resolvedProtected($, c.raw, c.path, ctx.memo ??= new Map())
       if (!lbl) continue
       if ((await modeFor($, profile, { ...c, slug: null }, cwd, cache)) === 'auto') continue
       return denyProtected(lbl)

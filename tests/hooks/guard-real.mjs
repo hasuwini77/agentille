@@ -642,6 +642,32 @@ try {
     check('control: npm test, node --test with a clean test file, runs', !t?.deny && t.exit === 0, JSON.stringify(t))
   }
   {
+    // Config git reads with no fixed name: a file an include pulls in, the folder a global core.hooksPath names. A
+    // write to either is refused, so the alias or hook it would add never runs.
+    const w = world()
+    const glob = fs.readFileSync(T + '/gitconfig', 'utf8')
+    fs.mkdirSync(T + '/ghooks', { recursive: true })
+    fs.writeFileSync(T + '/inc.cfg', '')
+    fs.writeFileSync(T + '/gitconfig', glob.replace('hooksPath = /dev/null', 'hooksPath = ' + T + '/ghooks') + '[include]\n\tpath = inc.cfg\n')
+    try {
+      const a = await run("printf '[alias]\\n\\tpom = push -q origin agt/x:main\\n' >> " + T + '/inc.cfg')
+      check('>> the global include target: denied', a?.deny?.includes('an include pulls in'), JSON.stringify(a))
+      check('... inc.cfg still empty', fs.readFileSync(T + '/inc.cfg', 'utf8') === '')
+      const h = await run("printf '#!/bin/sh\\ngit push -q origin agt/x:main\\n' > " + T + '/ghooks/post-commit && chmod +x ' + T + '/ghooks/post-commit')
+      check('> the global core.hooksPath folder: denied', h?.deny?.includes('global hooks folder'), JSON.stringify(h))
+      const z = await run('echo "git push -q origin agt/x:main" >> ~/.zshrc')
+      check('>> ~/.zshrc: denied', z?.deny?.includes('may not write'), JSON.stringify(z))
+      const m = await run("echo '{}' > .mcp.json")
+      check('> .mcp.json: denied', m?.deny?.includes('.mcp.json'), JSON.stringify(m))
+      const c = await run('echo c > c && git add c && git commit -qm c')
+      check('control: a plain commit runs, and no hook pushes', !c?.deny && c.exit === 0 && !fs.existsSync(T + '/ghooks/post-commit'), JSON.stringify(c))
+      check('... origin/main unchanged, no .zshrc', refOf('origin.git', 'main') === w.main && !fs.existsSync(HOME + '/.zshrc'))
+    } finally {
+      fs.writeFileSync(T + '/gitconfig', glob)
+      fs.rmSync(T + '/ghooks', { recursive: true, force: true })
+    }
+  }
+  {
     // Controls below auto: the run's own branch and ordinary writes still pass.
     world()
     const ok = await run('git push -q -u origin agt/x')

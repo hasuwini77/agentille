@@ -435,7 +435,7 @@ describe('guard: worktree adds', () => {
 // A run in a session with no pane transport: the ownership list lives in memory.
 // git: per dir, the branch checked out (`current`), its remote URL and its main checkout (default /work/repo).
 type Repo = { current?: string; remote?: string; common?: string; pushurl?: string; upstream?: string; tracking?: string }
-const setup = (on: any, o: { profile?: unknown; repoConfig?: unknown; env?: Record<string, string>; files?: Record<string, string>; repos?: Record<string, Repo>; feat?: boolean; broken?: boolean; aliases?: Record<string, string>; aliasBroken?: boolean; pyFind?: Record<string, string>; hooksPath?: string; remoteHeads?: string[]; originHead?: string; followTags?: boolean; tags?: string[]; remoteTags?: string[]; localTags?: string[] } = {}) => {
+const setup = (on: any, o: { profile?: unknown; repoConfig?: unknown; env?: Record<string, string>; files?: Record<string, string>; repos?: Record<string, Repo>; feat?: boolean; broken?: boolean; aliases?: Record<string, string>; aliasBroken?: boolean; pyFind?: Record<string, string>; hooksPath?: string; remoteHeads?: string[]; originHead?: string; followTags?: boolean; tags?: string[]; remoteTags?: string[]; localTags?: string[]; gitConfigFiles?: string } = {}) => {
   const seen: string[][] = []
   const ran: string[] = []
   const git = { made: false, committed: false, feat: false }
@@ -514,6 +514,8 @@ const setup = (on: any, o: { profile?: unknown; repoConfig?: unknown; env?: Reco
     // Every branch the remote has, and the remote's default as origin/HEAD records it (none unless the test sets one).
     if (/ls-remote --heads \S+$/.test(a)) return out((o.remoteHeads ?? []).map((h) => 'abc\trefs/heads/' + h + '\n').join(''))
     if (a.endsWith('symbolic-ref --short refs/remotes/origin/HEAD')) return o.originHead ? out('origin/' + o.originHead + '\n') : out('', 1)
+    // The includes and hooks folder git config names, with where each was set (`git config --show-origin --show-scope`).
+    if (a.includes('config --show-origin --show-scope --get-regexp')) return out(o.gitConfigFiles ?? '', o.gitConfigFiles ? 0 : 1)
     // A tag of that name, asked of git as refs/tags/<name>.
     const tg = /rev-parse -q --verify refs\/tags\/(\S+)$/.exec(a)
     if (tg) return (o.localTags ?? []).includes(tg[1]) ? out('abc\n') : out('', 1)
@@ -1882,6 +1884,31 @@ describe('guard: recipes, local bins, test files and Python imports are followed
     expect(await judge(host, 'node --test', '/w/app')).toContain('imports ./helpers/ship.mjs')
     expect(await judge(host, 'npm run one', '/w/app')).toBe(null)
     expect(await judge(host, 'node --test test/ok.test.mjs', '/w/app')).toBe(null)
+  })
+})
+
+describe('guard: shell startup files, ssh, npm and MCP config, include targets and a global hooks folder', () => {
+  test('the home config a new shell, ssh or npm reads, and .mcp.json anywhere, are protected writes', () => {
+    for (const line of ['echo x >> ~/.zshrc', 'echo x >> ~/.zshenv', 'echo x >> $HOME/.bashrc', 'cp a ~/.bash_profile', 'tee -a ~/.zprofile < a', 'echo x >> ~/.profile',
+      'echo x >> ~/.ssh/config', 'cat k >> ~/.ssh/authorized_keys', 'echo x > ~/.npmrc', 'echo {} > .mcp.json', 'cp m.json ~/.mcp.json', 'echo {} > ~/.claude.json',
+      'node -e "require(\'fs\').appendFileSync(process.env.HOME + \'/.zshrc\', \'x\')"', "python3 -c \"open('.mcp.json','w').write('{}')\""]) {
+      expect([line, integrationIn(line, onSlice)]).toEqual([line, expect.any(String)])
+    }
+    for (const line of ['echo x > notes/zshrc.md', 'echo x > profile.txt', 'cat ~/.zshrc', 'echo x > mcp.json']) expect([line, integrationIn(line, onSlice)]).toEqual([line, null])
+  })
+
+  test('a file an include pulls in, and the folder a global core.hooksPath names, are protected for Bash and the Write tool', async ($, on) => {
+    const cfg = ['global\tfile:/h/.gitconfig\tinclude.path ~/.gitconfig.local', 'global\tfile:/h/.gitconfig\tincludeif.gitdir:/work/.path work.cfg', 'global\tfile:/h/.gitconfig\tcore.hookspath ~/.githooks', 'local\tfile:/work/repo/.git/config\tinclude.path ../shared.cfg'].join('\n') + '\n'
+    const { ran } = setup(on, { profile: { integration: 'pr' }, gitConfigFiles: cfg })
+    await boot($)
+    await typed($)
+    expect((await bash($, "printf '[alias]\\n\\tp = push\\n' >> /h/.gitconfig.local")).deny).toContain('an include pulls in')
+    expect((await bash($, 'echo x > /h/work.cfg')).deny).toContain('an include pulls in')
+    expect((await bash($, 'echo x > /work/repo/.git/../shared.cfg')).deny).toContain('an include pulls in')
+    expect((await bash($, 'echo x > /h/.githooks/pre-commit')).deny).toContain('the global hooks folder')
+    expect((await $.tool.call({ tool: 'Write', file_path: '/h/.githooks/post-commit', content: 'x' } as never)).deny).toContain('the global hooks folder')
+    expect((await bash($, 'echo x > /h/notes.cfg')).result).toBe('ok')
+    expect(ran).toEqual(['echo x > /h/notes.cfg'])
   })
 })
 

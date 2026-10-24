@@ -41,15 +41,16 @@ const OWN_BRANCH = /^(agt|feat|fix|storm)\//
 // here-string body becomes the command's stdin (so a PR body is text, never commands); redirections drop.
 function lex(s, at = 0, closer = null, depth = 0) {
   const cmds = []
-  let cmd = { words: [], stdin: null }
+  let cmd = { words: [], stdin: null, redirects: [], piped: false }
   let tok = null
-  let target = null // what the next word is: 'drop' (a redirection's file), 'stdin', 'heredoc' or 'heredoc-'
+  let target = null // what the next word is: 'drop' (an input redirection's file), 'redir' (an output file), 'stdin', 'heredoc' or 'heredoc-'
   const pending = [] // heredocs whose body starts after the next newline
   let parens = 0 // subshells opened inside a $( ): their ) is not the closer
   const word = () => {
     if (tok === null) return
     if (target === 'stdin') cmd.stdin = tok
     else if (target === 'heredoc' || target === 'heredoc-') pending.push({ cmd, delim: tok, strip: target === 'heredoc-' })
+    else if (target === 'redir') cmd.redirects.push(tok)
     else if (target !== 'drop') cmd.words.push(tok)
     target = null
     tok = null
@@ -57,7 +58,7 @@ function lex(s, at = 0, closer = null, depth = 0) {
   const cut = () => {
     word()
     if (cmd.words.length || cmd.stdin !== null) cmds.push(cmd)
-    cmd = { words: [], stdin: null }
+    cmd = { words: [], stdin: null, redirects: [], piped: false }
   }
   const nested = (j, close) => {
     const r = depth < 4 ? lex(s, j, close, depth + 1) : { cmds: [], end: s.length }
@@ -150,13 +151,17 @@ function lex(s, at = 0, closer = null, depth = 0) {
         target = s[i + 2] === '-' ? 'heredoc-' : 'heredoc'
         i += s[i + 2] === '-' ? 2 : 1
       } else {
+        const out = c === '>' || c === '&' // '>' / '>>' / '&>' write a file; '<' is a read
         while ('<>&|'.includes(s[i + 1] ?? '') && s[i + 1] !== undefined) i++
-        target = 'drop'
+        target = out ? 'redir' : 'drop'
       }
     } else if ('\n;&|()'.includes(c)) {
       if (c === '(' && closer) parens++
       else if (c === ')' && parens) parens--
+      const pipe = c === '|' && s[i + 1] !== '|' // `|` / `|&` feed the next command; `||` does not
+      if (c === '|' && (s[i + 1] === '|' || s[i + 1] === '&')) i++
       cut()
+      if (pipe) cmd.piped = true
     } else tok = (tok ?? '') + c
   }
   cut()
@@ -195,6 +200,7 @@ function unwrap(words) {
   let i = 0
   let dir = null
   let inner = null
+  let viaXargs = false
   const env = new Map()
   while (i < words.length) {
     const w = words[i]
@@ -207,6 +213,7 @@ function unwrap(words) {
     }
     const spec = Object.hasOwn(WRAP, p) ? WRAP[p] : null
     if (!spec) break
+    if (p === 'xargs') viaXargs = true // the stripped program reads its own arguments from stdin
     const opts = Array.isArray(spec) ? spec : spec.opts
     i++
     if (p === 'command' && /^-[a-zA-Z]*[vV]/.test(words[i] ?? '')) return { words: [], dir, inner, env } // a lookup, not a run
@@ -237,9 +244,9 @@ function unwrap(words) {
     if (spec.skip) i += spec.skip
     if (spec.c?.includes(words[i])) return { words: [], dir, inner: words[i + 1] ?? '', env } // flock <file> -c '…'
     if (spec.line) return { words: [], dir, inner: words.slice(i).join(' '), env }
-    if (spec.par) return { ...parallelRun(words.slice(i)), dir, env }
+    if (spec.par) return { ...parallelRun(words.slice(i)), dir, env, viaXargs }
   }
-  return { words: words.slice(i), dir, inner, env }
+  return { words: words.slice(i), dir, inner, env, viaXargs }
 }
 
 // GNU parallel's command and its `:::` arguments → the shell lines it runs (one per argument; with no command,
@@ -269,8 +276,10 @@ function innerLine(words, stdin) {
   return null
 }
 
-// The simple commands of a line, wrappers stripped and variables set earlier in it expanded: [{ words, dir, env }],
-// env being what the command sees set on this line (earlier assignments and exports, and its own prefix).
+// The simple commands of a line, wrappers stripped and variables set earlier in it expanded:
+// [{ words, dir, env, stdin, redirects, piped, viaXargs }] — env being what the command sees set on this line
+// (earlier assignments and exports, and its own prefix); redirects the output files it writes (`>`/`>>`/`tee`-like
+// are read from the words); piped whether a `|` feeds it; viaXargs whether xargs appends its arguments from stdin.
 export function commands(line, depth = 0, vars = new Map()) {
   const out = []
   for (const c of lex(String(line ?? '')).cmds) {
@@ -283,15 +292,15 @@ export function commands(line, depth = 0, vars = new Map()) {
       }
       continue
     }
-    take(words, c.stdin)
+    take(words, c.stdin, (c.redirects ?? []).map((w) => expand(w, vars)), !!c.piped)
   }
   // One simple command's words: wrappers stripped, a line it runs read as commands, `find -exec … ;` segments too.
-  function take(words, stdin) {
+  function take(words, stdin, redirects = [], piped = false) {
     const u = unwrap(words)
     const env = new Map([...vars, ...u.env])
     const inner = depth < 3 ? (u.inner ?? innerLine(u.words, stdin)) : null
     if (inner !== null && inner !== undefined) out.push(...commands(inner, depth + 1, base(u.words[0]) === 'eval' ? vars : env))
-    else if (u.words.length) out.push({ words: u.words, dir: u.dir, env })
+    else if (u.words.length) out.push({ words: u.words, dir: u.dir, env, stdin, redirects, piped, viaXargs: u.viaXargs })
     if (base(u.words[0]) === 'find' && depth < 3) {
       for (let k = 1; k < u.words.length; k++) {
         if (!['-exec', '-execdir', '-ok', '-okdir'].includes(u.words[k])) continue

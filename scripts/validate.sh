@@ -2,7 +2,8 @@
 # agentille structural validator — a linter for the failure classes a
 # markdown-prompt plugin actually ships: version drift, a versioned
 # marketplace.json, broken agent-namespace references, dangling doc
-# cross-refs, a missing hook script, agent/routing role drift, a mod that
+# cross-refs, a missing hook script, agent/routing role drift, settings docs
+# whose defaults drift from the code, a mod that
 # fails to import under node, and PII leaks into a public repo.
 #
 # This is NOT a behavioral test framework. Dispatch decisions are scored by
@@ -340,6 +341,78 @@ PY
     case "$line" in PASS*) pass "readme-routing: ${line#PASS }";; FAIL*) fail "readme-routing: ${line#FAIL }";; esac
   done <<< "$rr_out"
   printf '%s\n' "$rr_out" | grep -qE '^(PASS|FAIL)' || fail "readme-routing: comparison produced no result"
+fi
+
+# ── 6b-settings. docs/settings.md defaults match the code ────────────────────
+# The tables in docs/settings.md are the only place a person reads the defaults; the mod reads the code. Every
+# `routing` row must be a key of hooks/routing.js DEFAULTS with its value, every `display` row a key of
+# hooks/settings.js DISPLAY_DEFAULTS with its value (both ways: a key in one and not the other fails), the
+# `sessions` row the value hooks/info.js prints for an unset key, and the `integration` value marked
+# "(default)" what guard-policy.js integrationOf resolves with no profile. The default cell's first `token`
+# is the value. node imports the modules, so the check reads what the mod runs.
+hdr "Settings defaults"
+if ! command -v node >/dev/null 2>&1; then
+  skip_or_fail "settings-defaults: node not found — docs/settings.md defaults check skipped"
+elif [ "$(node -p 'const [a,b]=process.versions.node.split(".").map(Number); a>22||(a===22&&b>=7)?1:0' 2>/dev/null)" != 1 ]; then
+  skip_or_fail "settings-defaults: node < 22.7 — docs/settings.md defaults check skipped"
+else
+  read -r -d '' sd_js <<'NODE' || true
+const fs = require('fs'), path = require('path'), { pathToFileURL } = require('url');
+const load = (f) => import(pathToFileURL(path.resolve(f)).href);
+(async () => {
+  const doc = fs.readFileSync(process.argv[1], 'utf8');
+  const section = (h) => { const i = doc.indexOf('\n' + h + '\n'); return i < 0 ? null : doc.slice(i + h.length + 2).split('\n## ')[0]; };
+  // A table's rows → { key: first `token` of the default cell }; `col` is the default cell's index.
+  const rows = (sec, col) => {
+    const out = {};
+    for (const l of sec.split('\n')) {
+      if (!/^\|\s*`/.test(l)) continue;
+      const cells = l.split('|').slice(1, -1).map((c) => c.trim());
+      const key = (/^`([^`]+)`/.exec(cells[0]) || [])[1];
+      const val = (/`([^`]+)`/.exec(cells[col] || '') || [])[1];
+      if (key) out[key] = { val, cell: cells[0] };
+    }
+    return out;
+  };
+  const { DEFAULTS } = await load('hooks/routing.js');
+  const { DISPLAY_DEFAULTS } = await load('hooks/settings.js');
+  const { integrationOf } = await load('hooks/guard-policy.js');
+  const { sessionsLine } = await load('hooks/info.js');
+  const shown = (v) => (typeof v === 'string' ? v : JSON.stringify(v));
+  const bad = [];
+  const compare = (what, docRows, code) => {
+    for (const k of Object.keys(code)) {
+      if (!(k in docRows)) bad.push(what + ': `' + k + '` (default ' + shown(code[k]) + ') has no row in docs/settings.md');
+      else if (docRows[k].val !== shown(code[k])) bad.push(what + '.' + k + ': docs/settings.md says `' + docRows[k].val + '`, the code says `' + shown(code[k]) + '`');
+    }
+    for (const k of Object.keys(docRows)) if (!(k in code)) bad.push(what + ': docs/settings.md has a `' + k + '` row the code has no default for');
+  };
+  const rsec = section('## `routing`'), dsec = section('## Display switches'), isec = section('## `integration`');
+  if (!rsec) bad.push('docs/settings.md has no "## `routing`" section');
+  else compare('routing', rows(rsec, 1), DEFAULTS);
+  let sessions = null;
+  if (!dsec) bad.push('docs/settings.md has no "## Display switches" section');
+  else {
+    const all = rows(dsec, 2), display = {};
+    for (const [k, r] of Object.entries(all)) if (/top level/.test(r.cell)) sessions = r; else display[k] = r;
+    compare('display', display, DISPLAY_DEFAULTS);
+    const want = (/^sessions: (\S+)/.exec(sessionsLine(null)) || [])[1];
+    if (!sessions) bad.push('docs/settings.md "Display switches" has no top-level `sessions` row');
+    else if (sessions.val !== want) bad.push('sessions: docs/settings.md says `' + sessions.val + '`, hooks/info.js reads an unset key as `' + want + '`');
+  }
+  const idef = isec ? [...isec.matchAll(/`(\w+)` \(default\)/g)].map((m) => m[1]) : [];
+  const iwant = integrationOf(null, {});
+  if (idef.length !== 1) bad.push('integration: docs/settings.md marks ' + (idef.length ? idef.join(', ') : 'no value') + ' as "(default)" (want exactly one)');
+  else if (idef[0] !== iwant) bad.push('integration: docs/settings.md says `' + idef[0] + '` is the default, guard-policy.js resolves `' + iwant + '`');
+  if (bad.length) for (const b of bad) console.log('FAIL ' + b);
+  else console.log('PASS docs/settings.md matches the code: ' + Object.keys(DEFAULTS).length + ' routing keys, ' + Object.keys(DISPLAY_DEFAULTS).length + ' display keys, sessions ' + sessions.val + ', integration ' + iwant);
+})().catch((e) => console.log('FAIL the check could not run: ' + (e && e.message || e)));
+NODE
+  sd_out=$(node -e "$sd_js" docs/settings.md 2>&1)
+  while IFS= read -r line; do
+    case "$line" in PASS*) pass "settings-defaults: ${line#PASS }";; FAIL*) fail "settings-defaults: ${line#FAIL }";; esac
+  done <<< "$sd_out"
+  printf '%s\n' "$sd_out" | grep -qE '^(PASS|FAIL)' || fail "settings-defaults: the check produced no result: $(printf '%s' "$sd_out" | head -1)"
 fi
 
 # ── 6b-fable. Failed-fix count before Fable agrees across the docs ──────────

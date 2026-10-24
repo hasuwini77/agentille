@@ -25,7 +25,7 @@ close_pane { name: "agt-<run-id>-exec-1" }
 
 The mod routes model and effort from `agent` + `header` through the same table as a subagent (`routing.md` → "Default routing") and ignores any `model` you pass. Roles that must stay subagents are denied with the reason; run them as subagents. A failed pane falls back to a subagent.
 
-Layout is the mod's call: the first worker splits right of the lead; later workers stack below the previous worker. On Herdr, a run that will open ≥3 pane workers (slices plus adversaries) passes `layout: "tab"` on every `spawn_pane`: its workers then stack in their own `agt-<run>` tab, the lead's tab stays whole, and the tab closes with its last worker. tmux ignores it. Each worker pane's own band shows a small mascot (hello, working, bye) drawn by the mod at zero model tokens. The lead's band lists every worker as a `▣` row beside its `◇` subagents, with the tool the worker is running and its tokens, and Herdr's sidebar labels each worker by role and model.
+Layout is the mod's call: the first worker splits right of the lead; later workers stack below the previous worker. On Herdr, a run that will open ≥3 pane workers (slices plus adversaries) passes `layout: "tab"` on every `spawn_pane`: its workers then stack in their own `agt-<run>` tab, the lead's tab stays whole, and the tab closes with its last worker. tmux ignores it. The mod draws each pane's band and the lead's worker rows; you do nothing for them.
 
 The mod enforces the `agt-<run>-<role>` name (32 chars max), no duplicate name, an absolute existing `cwd`, no focus change. `close_pane` reaches only `agt-` panes in your own tab or window, never a `/agt-spawn` pane. Worker panes get no tools, so they cannot fan out.
 

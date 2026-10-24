@@ -353,4 +353,20 @@ describe('typed proof', () => {
     expect(asksSessions('fix the bug. Then open a shell')).toBe(true)
     expect(asksSessions('Open a new terminal in ../api and run the tests')).toBe(true)
   })
+
+  test('a session noun followed by another noun names a thing, not a pane', async () => {
+    expect(asksSessions('Start a terminal emulator project in Rust')).toBe(false)
+    expect(asksSessions('give me a session summary of what we did')).toBe(false)
+    expect(asksSessions('Next spawn a shell injection test suite')).toBe(false)
+    expect(asksSessions('open the session manager and raise the timeout')).toBe(false)
+    expect(asksSessions('start a session replay for the bug')).toBe(false)
+    expect(asksSessions('open three Claude sessions')).toBe(true)
+    expect(asksSessions('fire up 2 codex panes for the api')).toBe(true)
+    expect(asksSessions('give me a shell')).toBe(true)
+    expect(asksSessions('open a shell running htop')).toBe(true)
+    expect(asksSessions('open a session that ships it')).toBe(true)
+    expect(asksSessions('open sessions: 2 claude, 1 codex')).toBe(true)
+    expect(asksSessions('open panes 2 claude')).toBe(true) // a count or kind right after the noun
+    expect(asksSessions('open a shell `npm test`')).toBe(true)
+  })
 })

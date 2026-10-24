@@ -18,7 +18,7 @@ First match wins; no model call.
 
 Multipliers: **hasUI** (UI/UX/styling/component/page/screen, or a `.tsx/.css/.scss` file named) adds the design-reviewer, and the ui-prototyper on `design`/`feature`, past the UI threshold below. **hasMulti** ("and", "also", "plus" joining verbs, or ≥3 deliverables) adds the planner.
 
-**UI threshold** (the cheap tier for small UI work). A `feature` or `bugfix` slice that is `size=small` and `risk=none` and changes one screen gets one executor plus the Sonnet code-reviewer: hasUI adds neither the ui-prototyper nor the design-reviewer. They join when the UI work spans more than one screen (a new page, a flow, a shared component used across screens), when the slice is `size=large`, when the run is `medium` or `heavy`, or when the person asks for a design review or a prototype. The `design` category is that ask, so it keeps both at any size, as does a `review` of UI code.
+**UI threshold** (the cheap tier for small UI work). A `feature` or `bugfix` slice that is `size=small` and `risk=none` and changes one screen gets one executor plus the Sonnet code-reviewer: hasUI adds neither the ui-prototyper nor the design-reviewer. They join when the UI work spans more than one screen (a new page, a flow, a shared component used across screens), when the slice is `size=large`, or when the person asks for a design review or a prototype. The test is per slice, so a `medium` run of small one-screen slices stays on this tier. The `design` category is that ask, so it keeps both at any size, as does a `review` of UI code.
 
 ## Risk words
 

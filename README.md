@@ -155,7 +155,7 @@ Each role gets a model and an effort. The mod picks them from the dispatch heade
 | perf-reviewer | sonnet · high | opus · high | — | sonnet · medium |
 | adversary | sonnet · high | sonnet · high | opus · high | sonnet · medium |
 
-- **Small UI work stays cheap:** a one-screen UI feature or fix with `size=small` and `risk=none` gets one executor and the Sonnet code-reviewer. The ui-prototyper and design-reviewer join when the change spans more than one screen, at `size=large`, on a `medium` or `heavy` run, or when you ask for design work (`routing.md` → "Roster").
+- **Small UI work stays cheap:** a one-screen UI feature or fix with `size=small` and `risk=none` gets one executor and the Sonnet code-reviewer. The ui-prototyper and design-reviewer join when the change spans more than one screen, at `size=large`, or when you ask for design work (`routing.md` → "Roster").
 - **Haiku never writes:** it only classifies a task the level table cannot place and runs read-only scouts.
 - **The executor never leaves Sonnet;** only its effort moves (and on fix rounds: attempt 2 → high, attempt 3 and later → max).
 - **Escalation:** a plan REVISE puts the next planner on opus · max. Fable (about twice the cost of Opus) runs only when you type `--fable`, or with `routing.autoFable: true` after two REVISEs, or for the diagnose planner after two failed fixes, within `maxFablePerRun` and `fableWeeklyCeiling`.

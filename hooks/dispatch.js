@@ -323,8 +323,9 @@ export async function dispatchAgent($, e, next) {
     e = { ...e, prompt: demoteHeaderText(e.prompt) }
     demoteToast($, SAFE_RUN.test(hdr.run ?? '') ? hdr.run : my.lastRun)
   }
-  // A workflow script's agent: the engine ignores a rewrite there (and logs a failure line), so
-  // it runs on the model the script chose. Log that model, not the table's, and flag a mismatch.
+  // A workflow script's agent: the engine ignores a model rewrite there (and logs a failure line), so it runs on the
+  // model the script chose, and the lead must name the routed model in the script. Log that model, not the table's,
+  // and flag a mismatch. A deny does hold there, so routing.stopAtCeiling is enforced.
   if (e.workflow) {
     // Its prompt may carry no header: it then joins the run in progress rather than reset it. A header
     // names its run, but the band moves to it only when the current run has nothing working, subagent or pane.
@@ -336,8 +337,12 @@ export async function dispatchAgent($, e, next) {
     const busy = [...my.live.values()].some((a) => a.run === my.lastRun && a.state === 'working') || Panes.panes.some((p) => splitName(p.name)?.run === my.lastRun && p.state === 'working')
     if (named && (my.lastRun === 'adhoc' || !busy)) my.lastRun = named
     agtTurnFromDispatch()
-    // The table pick follows the run in progress (its REVISEs); `run` is only where the log goes.
-    const d = decide({ role, hdr, run: { ...runRec(runId), fixes: ladderFixes(runRec(runId), sliceOf(hdr)) }, depth: Profile.depth, settings: Profile.settings, weeklyPct: Session.weeklyPct })
+    // The table pick and the spend follow the run in progress (its REVISEs, its agents); `fileRun` is only where the
+    // log goes. The spend is counted as on the subagent path, so the ceiling and the stop see the same estimate.
+    const spent = runSpend(runId)
+    const d = decide({ role, hdr, run: { ...runRec(runId), fixes: ladderFixes(runRec(runId), sliceOf(hdr)), usd: spent }, depth: Profile.depth, settings: Profile.settings, weeklyPct: Session.weeklyPct })
+    // The run is stopped: the workflow agent is refused before it reaches the engine, whatever the role.
+    if (d.stop) return { deny: d.stop }
     const res = await next(e)
     if (res.deny) return res
     const off = short(res.model) !== short(d.model)

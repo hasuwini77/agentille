@@ -41,10 +41,10 @@ Minutes run from the pane's start to its end (or now), at most 60 per pane. That
 
 ## At the ceiling
 
-Once the estimate is at or over `maxRunUsd`, one of two things happens to every later dispatch of the run, subagent or pane:
+Once the estimate is at or over `maxRunUsd`, one of two things happens to every later dispatch of the run, subagent, pane or workflow agent:
 
-- **Demotion (the default).** A role the table or the ladder puts on Opus, or a ladder Fable, runs Sonnet at the same effort. That covers the planner, the plan-reviewer, every reviewer (code, design, security, payments, perf, seo), the ui-prototyper and the adversary. The executor keeps its route, since it is on Sonnet already, and so does a typed `--fable`.
-- **Stop.** With `profile.routing.stopAtCeiling: true` (default `false`), the dispatch is denied instead. The stop covers every role, the executor and a typed `--fable` included, and every pane, a Codex one included. The deny is one line that names the ceiling and the estimate, and says to raise `routing.maxRunUsd` in `~/.agentille/profile.json` (or turn `stopAtCeiling` off) to go on.
+- **Demotion (the default).** A role the table or the ladder puts on Opus, or a ladder Fable, runs Sonnet at the same effort. That covers the planner, the plan-reviewer, every reviewer (code, design, security, payments, perf, seo), the ui-prototyper and the adversary. The executor keeps its route, since it is on Sonnet already, and so does a typed `--fable`. A workflow agent cannot be demoted: Claude Code ignores a model rewrite for a workflow script's agents, so it runs the model the script names, and the mod logs it and toasts the mismatch with the demoted pick.
+- **Stop.** With `profile.routing.stopAtCeiling: true` (default `false`), the dispatch is denied instead. The stop covers every role, the executor and a typed `--fable` included, every pane, a Codex one included, and every workflow agent. The deny is one line that names the ceiling and the estimate, and says to raise `routing.maxRunUsd` in `~/.agentille/profile.json` (or turn `stopAtCeiling` off) to go on.
 
 ## Where to see it
 

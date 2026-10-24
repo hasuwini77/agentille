@@ -621,6 +621,39 @@ describe('maxRunUsd: a per-run cost ceiling', () => {
     expect(r.deny).toBe('agt ✗ run ~$1.00 reached its cost ceiling, maxRunUsd $1.00, and routing.stopAtCeiling is on: no more dispatches this run. Raise routing.maxRunUsd in ~/.agentille/profile.json (or set stopAtCeiling to false) to go on.')
     expect(argvs.some((a) => a[1] === 'split-window')).toBe(false)
   })
+
+  const STOP_LINE = 'agt ✗ run ~$1.00 reached its cost ceiling, maxRunUsd $1.00, and routing.stopAtCeiling is on: no more dispatches this run. Raise routing.maxRunUsd in ~/.agentille/profile.json (or set stopAtCeiling to false) to go on.'
+  const wfAgent = ($: any, run: string, role: string, index: number, model: string) => $.agent.spawn({ prompt: '[agt run=' + run + ' size=small mode=build]\nwork', subagentType: 'agentille:agentille-' + role, model, workflow: { runId: 'wf_' + run, agentIndex: index } } as never)
+
+  test('in the mod: a workflow executor under the ceiling runs; past it with stopAtCeiling on it is denied before the engine sees it', async ($, on) => {
+    const { seen, writes, toasts } = boot(on, { maxRunUsd: 1, stopAtCeiling: true })
+    await $.session.start({ cwd: '/w', surface: null, isInteractive: false })
+    await plan($, 'wfs1') // c0 on opus
+    const ok = await wfAgent($, 'wfs1', 'executor', 1, 'sonnet') // under the ceiling: dispatched
+    expect((ok as any).deny).toBe(undefined)
+    expect(seen).toEqual(['opus', 'sonnet'])
+    await spend($, 'c0', 50_000) // $1.00: at the ceiling
+    const x = await wfAgent($, 'wfs1', 'executor', 2, 'sonnet')
+    expect((x as any).deny).toBe(STOP_LINE)
+    const r = await wfAgent($, 'wfs1', 'code-reviewer', 3, 'opus')
+    expect((r as any).deny).toBe(STOP_LINE)
+    expect(seen).toEqual(['opus', 'sonnet']) // neither reached the engine
+    expect(writes['/h/.agentille/state/run-wfs1/routing.jsonl'].trim().split('\n')).toHaveLength(2) // a denied dispatch is not logged
+    expect(toasts.filter((t) => t.includes('workflow'))).toEqual([]) // nor toasted as a drift
+  })
+
+  test('in the mod: past the ceiling with stopAtCeiling off a workflow agent still runs, and the drift names the demoted pick', async ($, on) => {
+    const { seen, toasts } = boot(on, { maxRunUsd: 1 })
+    await $.session.start({ cwd: '/w', surface: null, isInteractive: false })
+    await plan($, 'wfs2')
+    await spend($, 'c0', 50_000)
+    const x = await wfAgent($, 'wfs2', 'executor', 1, 'sonnet')
+    expect((x as any).deny).toBe(undefined)
+    await wfAgent($, 'wfs2', 'security-reviewer', 2, 'opus') // the script names Opus; the table past the ceiling says Sonnet
+    expect(seen).toEqual(['opus', 'sonnet', 'opus']) // the mod cannot rewrite a workflow agent's model
+    expect(toasts).toContain('agt workflow security-reviewer runs opus — table says sonnet · high')
+  })
+
 })
 
 describe('typed proof', () => {

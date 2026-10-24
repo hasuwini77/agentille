@@ -223,8 +223,9 @@ function closeOf(s, j) {
 // here-string body becomes the command's stdin (so a PR body is text, never commands); redirections drop.
 function lex(s, at = 0, closer = null, depth = 0) {
   const cmds = []
-  let cmd = { words: [], stdin: null, redirects: [], piped: false }
+  let cmd = { words: [], bare: [], stdin: null, redirects: [], piped: false }
   let tok = null
+  let bare = false // the token holds an unquoted `$name`: the shell splits its value into words
   let target = null // what the next word is: 'drop' (an input redirection's file), 'redir' (an output file), 'stdin', 'heredoc' or 'heredoc-'
   const pending = [] // heredocs whose body starts after the next newline
   let parens = 0 // subshells opened inside a $( ): their ) is not the closer
@@ -233,14 +234,18 @@ function lex(s, at = 0, closer = null, depth = 0) {
     if (target === 'stdin') cmd.stdin = tok
     else if (target === 'heredoc' || target === 'heredoc-') pending.push({ cmd, delim: tok, strip: target === 'heredoc-' })
     else if (target === 'redir') cmd.redirects.push(tok)
-    else if (target !== 'drop') cmd.words.push(tok)
+    else if (target !== 'drop') {
+      cmd.words.push(tok)
+      cmd.bare.push(bare)
+    }
     target = null
     tok = null
+    bare = false
   }
   const cut = () => {
     word()
     if (cmd.words.length || cmd.stdin !== null) cmds.push(cmd)
-    cmd = { words: [], stdin: null, redirects: [], piped: false }
+    cmd = { words: [], bare: [], stdin: null, redirects: [], piped: false }
   }
   const nested = (j, close) => {
     // Past LEX_DEPTH the inner text is not read: it becomes an unreadable command (the policy refuses it below
@@ -346,7 +351,10 @@ function lex(s, at = 0, closer = null, depth = 0) {
       if (c === '|' && (s[i + 1] === '|' || s[i + 1] === '&')) i++
       cut()
       if (pipe) cmd.piped = true
-    } else tok = (tok ?? '') + c
+    } else {
+      if (c === '$') bare = true
+      tok = (tok ?? '') + c
+    }
   }
   cut()
   return { cmds, end: i }
@@ -356,6 +364,14 @@ function lex(s, at = 0, closer = null, depth = 0) {
 export const ASSIGN = /^([A-Za-z_][A-Za-z0-9_]*)=(.*)$/s
 
 const expand = (w, vars) => w.replace(/\$\{([A-Za-z_][A-Za-z0-9_]*)\}|\$([A-Za-z_][A-Za-z0-9_]*)/g, (m, a, b) => vars.get(a ?? b) ?? m)
+
+// A word as the shell hands it on: an unquoted `$name` the line set is expanded and its value split into words
+// (`c='git push origin x'; $c` runs git), a quoted one stays one word, and an assignment's value is never split.
+function fields(w, vars, bare) {
+  const x = expand(w, vars)
+  if (!bare || x === w || ASSIGN.test(w) || /[$`]/.test(x)) return [x]
+  return x.split(/[ \t\n]+/).filter(Boolean)
+}
 
 
 // Wrappers in front of the real program, and their options that take a value. `timeout` also takes a duration.
@@ -479,7 +495,7 @@ export function commands(line, depth = 0, vars = new Map()) {
       out.push(unreadCmd(c.unreadable))
       continue
     }
-    const words = c.words.map((w) => expand(w, vars))
+    const words = c.words.flatMap((w, k) => fields(w, vars, !!c.bare?.[k]))
     const lead = words[0] === 'export' || words[0] === 'local' || words[0] === 'declare' || words[0] === 'readonly' ? 1 : 0
     if (words.length > lead && words.slice(lead).every((w) => ASSIGN.test(w) || (lead && /^-/.test(w)))) {
       for (const w of words.slice(lead)) {
@@ -919,8 +935,21 @@ const shQuote = (w) => "'" + String(w).replace(/'/g, "'\\''") + "'"
 // The words after an unreadable program that say it may integrate: git's and gh's own.
 const INTEGRATION_WORD = /^(push|merge|tag|release|send-pack|http-push|update-ref|symbolic-ref|subtree|api|pr|alias|workflow)$/
 
+// A program word the line itself names through a variable or a substitution, once $HOME (the session's home) is
+// read: null when it is no such word, else the word as far as it can be read.
+function unreadProgram(w0, homes) {
+  const w = String(w0 ?? '')
+  if (!/[$`]/.test(w)) return null
+  const h = String(homes[0] ?? '').replace(/\/+$/, '')
+  const read = h ? w.replace(/^\$\{?HOME\}?(?=\/|$)/, h) : w
+  return /[$`]/.test(read) ? read : null
+}
+
 // A line → its integration candidates, each with the dir it runs in (cd, pushd, git -C, env -C followed).
-export function commandSteps(line, cwd = null, depth = 0, homes = []) {
+// `strict`: an unresolved program word refuses whatever follows it. The Bash line (depth 0) is read strictly; a
+// script's text (depth 1 and on) refuses one only with a git or gh word after it, as `exec "$@"` and `"$NODE" x.js`
+// are how scripts name their neighbours.
+export function commandSteps(line, cwd = null, depth = 0, homes = [], { strict = depth === 0 } = {}) {
   const out = []
   let here = cwd
   let moved = false // a step before this one switched branches, in any dir
@@ -943,10 +972,19 @@ export function commandSteps(line, cwd = null, depth = 0, homes = []) {
     }
     if (aliases.has(p)) { w = [...aliases.get(p).split(/\s+/).filter(Boolean), ...w.slice(1)]; p = base(w[0]) }
     // A program word built by a substitution or a variable the line does not set (`$c push`, c=$(printf gi)t): which
-    // program runs cannot be read. With an integration word after it, it may be git or gh.
-    if (/[$`]/.test(w[0] ?? '') && w.slice(1).some((x) => INTEGRATION_WORD.test(x))) {
-      out.push({ kind: 'hidden', what: 'a program the guard cannot read (' + w[0] + ') runs ' + w.slice(1).find((x) => INTEGRATION_WORD.test(x)), dir: here, slug: null, unread: true })
-      continue
+    // program runs cannot be read. On the Bash line it refuses (`"$EDITOR" f` too); in a script's text, only with an
+    // integration word after it, where it may be git or gh. A variable the line sets was expanded already.
+    if (/[$`]/.test(w[0] ?? '')) {
+      const hidden = unreadProgram(w[0], homes)
+      const after = w.slice(1).find((x) => INTEGRATION_WORD.test(x))
+      if (hidden !== null && (strict || after)) {
+        out.push({ kind: 'hidden', what: 'a program the guard cannot read (' + w[0] + ')' + (after ? ' runs ' + after : ''), dir: here, slug: null, unread: true })
+        continue
+      }
+      if (hidden === null) {
+        w = [String(w[0]).replace(/^\$\{?HOME\}?(?=\/|$)/, String(homes[0] ?? '').replace(/\/+$/, '')), ...w.slice(1)]
+        p = base(w[0])
+      }
     }
     if (p === 'cd' || p === 'pushd') {
       here = cdTo(here, w.slice(1))
@@ -1005,7 +1043,7 @@ export function commandSteps(line, cwd = null, depth = 0, homes = []) {
       const g = gitCall(w)
       if (!g) continue
       // A subcommand word built by a substitution or an unresolved expansion cannot be read.
-      if (/[$`]/.test(String(g.sub ?? ''))) { out.push({ kind: 'hidden', what: 'git runs a subcommand the guard cannot read (' + g.sub + ')', dir: at, slug: null, unread: true }); continue }
+      if (/[$`\s]/.test(String(g.sub ?? ''))) { out.push({ kind: 'hidden', what: 'git runs a subcommand the guard cannot read (' + g.sub + ')', dir: at, slug: null, unread: true }); continue }
       // GIT_DIR / GIT_WORK_TREE set on the line name the repo as --git-dir does.
       const envDir = c.env?.get('GIT_WORK_TREE') || (c.env?.get('GIT_DIR') ?? '').replace(/\/\.git\/?$/, '') || c.env?.get('GIT_DIR') || null
       const named = g.dir ?? envDir
@@ -1038,7 +1076,7 @@ export function commandSteps(line, cwd = null, depth = 0, homes = []) {
         if (k >= 0 && g.args.slice(0, k).every((x) => x.startsWith('-'))) {
           const rest = g.args.slice(k + 1)
           while (rest.length && /^(--recursive|-q|--quiet)$/.test(rest[0])) rest.shift()
-          if (rest.length && depth < LINE_DEPTH) for (const x of commandSteps(rest.join(' '), null, depth + 1, homes)) out.push({ ...x, what: x.what + ' (in git submodule foreach)' })
+          if (rest.length && depth < LINE_DEPTH) for (const x of commandSteps(rest.join(' '), null, depth + 1, homes, { strict })) out.push({ ...x, what: x.what + ' (in git submodule foreach)' })
           else if (rest.length) out.push({ kind: 'hidden', what: 'git submodule foreach nests deeper than the guard reads', dir, slug: null })
         }
       }

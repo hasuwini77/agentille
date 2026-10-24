@@ -799,15 +799,17 @@ describe('guard: it fails closed', () => {
     }
     // Nothing to judge but the deep part: still refused, never let through unread.
     expect((await bash($, deep + '; echo hi')).deny).toContain('substitution nests deeper than the guard reads')
-    expect((await bash($, 'echo $($($($(x))))')).result).toBe('ok')
+    expect((await bash($, 'echo $(echo $(echo $(echo x)))')).result).toBe('ok')
+    // Within the caps a substitution's output run as a program is still unreadable.
+    expect((await bash($, 'echo $($($($(x))))')).deny).toContain('a program the guard cannot read')
     // Within the caps the normal path still judges the line.
-    expect((await bash($, 'echo $($(x)); gh pr merge 4')).deny).toBe(DENY_INTEGRATION)
+    expect((await bash($, 'echo $(echo $(x)); gh pr merge 4')).deny).toBe(DENY_INTEGRATION)
     expect((await bash($, 'eval eval eval gh pr merge 4')).deny).toBe(DENY_INTEGRATION)
     // The lexer resumes after the deep part's closer: what follows it is read as its own command.
     expect(splitCommands(deep + '; gh pr merge 4').at(-1)).toEqual(['gh', 'pr', 'merge', '4'])
     expect((await bash($, '')).result).toBe('ok')
     expect((await bash($, '# a note')).result).toBe('ok')
-    expect(ran).toEqual(['echo $($($($(x))))', '', '# a note'])
+    expect(ran).toEqual(['echo $(echo $(echo $(echo x)))', '', '# a note'])
   })
 
   test('under auto the depth caps refuse nothing', async ($, on) => {
@@ -1393,11 +1395,42 @@ describe('guard: a script step it cannot read refuses', () => {
     expect((await bash($, 'npm run deep')).deny).toContain('nests deeper than the guard reads')
     expect((await bash($, 'sh s.sh')).deny).toContain('a program the guard cannot read')
     expect((await bash($, '$(printf gi)t push origin agt/x:main')).deny).toContain('a program the guard cannot read')
-    // A variable program with no integration word after it is not judged: `"$@"`, `"$NODE" x.js`, `"$EDITOR" f`.
+    // In a script's text a variable program with no integration word after it is not judged: `"$@"`, `"$NODE" x.js`.
     expect((await bash($, 'npm run build')).result).toBe('ok')
     expect((await bash($, 'sh run.sh npm test')).result).toBe('ok')
-    expect((await bash($, '"$EDITOR" notes.md')).result).toBe('ok')
-    expect(ran).toEqual(['npm run build', 'sh run.sh npm test', '"$EDITOR" notes.md'])
+    // On the Bash line itself an unresolved program word is refused: `"$EDITOR" f` is rare in a run.
+    expect((await bash($, '"$EDITOR" notes.md')).deny).toContain('a program the guard cannot read ($EDITOR)')
+    expect(ran).toEqual(['npm run build', 'sh run.sh npm test'])
+  })
+})
+
+describe('guard: a program word built from a variable', () => {
+  test('a variable the line sets is expanded and split as the shell does, then judged', async ($, on) => {
+    const { ran } = setup(on, { repos: { '/work/repo': { current: 'agt/x' } } })
+    await boot($)
+    await typed($)
+    expect((await bash($, "c='git push -q origin agt/x:main'; $c")).deny).toContain('git push to main')
+    expect((await bash($, "c='git push -q origin agt/x:main' && ${c}")).deny).toContain('git push to main')
+    expect((await bash($, "a='push -q origin agt/x:main'; git $a")).deny).toContain('git push to main')
+    expect((await bash($, "g=gh; $g pr merge 4")).deny).toBe(DENY_INTEGRATION)
+    // Quoted, the value stays one word: git is asked for no such subcommand, and the guard refuses what it cannot read.
+    expect((await bash($, "a='push origin agt/x:main'; git \"$a\"")).deny).toContain('git runs a subcommand the guard cannot read')
+    // Unset, a substitution, or a variable from the session: refused below auto.
+    for (const line of ['$c', '$GIT push origin agt/x', '"$NODE" tools/x.js', '$(which git) push origin agt/x', '`printf git` status']) {
+      expect([line, (await bash($, line)).deny]).toEqual([line, expect.stringContaining('a program the guard cannot read')])
+    }
+    // Resolved to something harmless, it runs; $HOME is the session's home.
+    expect((await bash($, "c='git status --short'; $c")).result).toBe('ok')
+    expect((await bash($, "t=echo; $t hi")).result).toBe('ok')
+    expect((await bash($, '$HOME/bin/tool --help')).result).toBe('ok')
+    expect(ran).toEqual(["c='git status --short'; $c", 't=echo; $t hi', '$HOME/bin/tool --help'])
+  })
+
+  test('commandSteps splits only unquoted expansions, and never an assignment', () => {
+    const steps = commandSteps("D='a b'; cd \"$D\" && x=\"$D\" git push origin \"$D\"", '/w', 0, ['/h'])
+    expect(steps.find((s: any) => s.kind === 'push')?.push.specs).toEqual(['a b'])
+    expect(splitCommands("c='git push origin x'; $c")).toEqual([['git', 'push', 'origin', 'x']])
+    expect(splitCommands("c='git push origin x'; \"$c\"")).toEqual([['git push origin x']])
   })
 })
 

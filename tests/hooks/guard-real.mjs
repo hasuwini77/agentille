@@ -487,6 +487,20 @@ try {
     check('... origin/main unchanged', refOf('origin.git', 'main') === w.main)
   }
   {
+    // A program word built from a variable: one the line sets is expanded and split as the shell does, then judged;
+    // one it cannot read is refused below auto.
+    const w = world()
+    const a = await run("c='git push -q origin agt/x:main'; $c")
+    check("c='git push origin agt/x:main'; $c: denied", a?.deny?.includes('git push to main'), JSON.stringify(a))
+    const b = await run("a='push -q origin agt/x:main'; git $a")
+    check("a='push …'; git $a: denied", b?.deny?.includes('git push to main'), JSON.stringify(b))
+    const c = await run('$(printf git) push -q origin agt/x:main')
+    check('$(printf git) push: denied as unreadable', c?.deny?.includes('a program the guard cannot read'), JSON.stringify(c))
+    const ok = await run("c='git status --short'; $c")
+    check("control: c='git status'; $c runs", !ok?.deny && ok.exit === 0, JSON.stringify(ok))
+    check('... origin/main unchanged', refOf('origin.git', 'main') === w.main)
+  }
+  {
     // Controls below auto: the run's own branch and ordinary writes still pass.
     world()
     const ok = await run('git push -q -u origin agt/x')

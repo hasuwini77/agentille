@@ -4,6 +4,7 @@
 // integration candidate (commandSteps/codeStep). Policy (guard-policy.js) judges those candidates.
 import { Profile } from './state.js'
 import { base, ghStep, httpStep } from './guard-steps.js'
+import { ELSEWHERE, NPM_SCRIPT_ALIASES } from './script-refs.js'
 
 export { base }
 
@@ -676,30 +677,51 @@ const OPAQUE_RUNNER = /^(npx|bunx|mise|docker|docker-compose|podman|podman-compo
 
 
 // A package-manager invocation → { script, what } to read, { deny, what } to refuse, or null when it is not a
-// script-running form (install, a builtin, a bare shorthand): those are left alone.
+// script-running form (install, a builtin): those are left alone. `npm test`/`npm start` (and pnpm's and yarn's)
+// run that script; `pnpm|yarn|bun <name>` runs the script of that name when there is one (`optional`: no such
+// script, or no package.json, means a bin or a command the manager refuses itself). `bun run <file>` runs a file.
+// A script run pointed at another package folder (--prefix, --filter, -w, -r, …) is refused: the guard cannot
+// tell which package.json it reads.
+const PM_BUILTINS = new Set(('add remove rm uninstall un install i ci isntall in update up upgrade upgrade-interactive why outdated list ls ' +
+  'link ln unlink init create publish pack audit config c get set store exec dlx x import rebuild rb prune info view licenses patch ' +
+  'patch-commit patch-remove setup env deploy fetch server root bin cache global help version login logout whoami workspaces ' +
+  'workspace dedupe plugin node policies constraints explain npm pm repl completions build test').split(' '))
+
 function pkgScript(p, args) {
   const pos = args.filter((x) => !x.startsWith('-'))
   const sub = pos[0]
   if (sub === 'exec' || sub === 'dlx' || sub === 'x') return { deny: true, what: p + ' ' + sub + ' runs a package the guard cannot read' }
-  if ((sub === 'run' || sub === 'run-script') && pos[1]) return { script: pos[1], what: p + ' run ' + pos[1] }
-  return null
+  let r = null
+  if ((sub === 'run' || sub === 'run-script') && pos[1]) {
+    if (p === 'bun' && (pos[1].includes('/') || /\.[cm]?[jt]sx?$/.test(pos[1]))) return { file: pos[1], what: 'bun run ' + pos[1] }
+    r = { script: pos[1], what: p + ' run ' + pos[1] }
+  } else if (sub !== undefined && p !== 'bun' && Object.hasOwn(NPM_SCRIPT_ALIASES, sub)) r = { script: NPM_SCRIPT_ALIASES[sub], what: p + ' ' + sub, optional: true }
+  else if (sub !== undefined && p === 'bun' && (sub.includes('/') || /\.[cm]?[jt]sx?$/.test(sub))) return { file: sub, what: 'bun ' + sub }
+  else if (sub !== undefined && p !== 'npm' && !PM_BUILTINS.has(sub)) r = { script: sub, what: p + ' ' + sub, optional: true }
+  if (r && args.some((a) => ELSEWHERE.has(a.split('=')[0]))) return { deny: true, what: p + ' ' + args.join(' ') + ' runs a script in another package folder, which the guard cannot place' }
+  return r
 }
 
 
 // A run of code the reader cannot follow: an interpreter's code string → { kind: 'hidden' } when it reaches a
 // tool or spawns a process; a script file, a sourced file, a package script or a make target → { kind: 'file' }
 // for guardLine to read; an opener it cannot introspect → { kind: 'hidden' }.
-function codeStep(w, here, stdin = null, piped = false) {
+function codeStep(w, here, stdin = null, piped = false, env = null) {
   const p = base(w[0])
   const at = (f) => (/[$`]/.test(f) ? null : f.startsWith('~/') ? null : f.startsWith('/') ? joinPath('/', f) : here ? joinPath(here, f) : null)
-  const file = (f, what) => ({ kind: 'file', how: 'script', what, path: at(f), dir: here, slug: null })
+  // `lang`: how the file is read past its own text (node: its imports; sh: the scripts it runs); null reads the
+  // shebang.
+  const file = (f, what, lang = null) => ({ kind: 'file', how: 'script', what, path: at(f), dir: here, slug: null, lang })
   const hidden = (what) => ({ kind: 'hidden', what, dir: here, slug: null })
   const protect = (what) => ({ kind: 'protected', what, dir: here, slug: null })
   // Interpreter code → a protected-write deny (it names the trust root or git state), a hidden deny (it reaches
   // a tool or spawns), or null.
   const judgeCode = (code, label) => (PROTECT_IN_CODE.test(String(code ?? '')) ? protect('the trust root or repo git state (named in ' + p + ' ' + label + ')') : riskyCode(code) ? hidden(p + ' ' + label + ' runs code that reaches git, gh or curl') : null)
   const ik = interpKey(p)
-  if (ik) {
+  // bun is a package manager as well as a runtime: `bun run x`, `bun test`, `bun <script>` are its package side.
+  const bunFirst = p === 'bun' ? w.slice(1).find((x) => !x.startsWith('-')) : undefined
+  const bunPkg = bunFirst !== undefined && !w.slice(1).some((x) => INTERP.bun.includes(x)) && !bunFirst.includes('/') && !/\.[cm]?[jt]sx?$/.test(bunFirst)
+  if (ik && !bunPkg) {
     const flags = INTERP[ik]
     const k = w.findIndex((x, n) => n > 0 && (flags.includes(x) || flags.some((f) => f.startsWith('-') && f.length === 2 && x.startsWith(f) && x.length > 2 && !x.startsWith('--'))))
     if (k > 0) {
@@ -719,7 +741,8 @@ function codeStep(w, here, stdin = null, piped = false) {
     // No code flag: the first positional is a script file (a pipe into it is data), else it reads code from stdin.
     const pos = w.slice(1).filter((x) => !x.startsWith('-') || x === '-')
     const f = pos.find((x) => x !== '-')
-    if (f && !pos.includes('-')) return /(^|\/)node_modules\//.test(f) ? null : file(f, p + ' ' + f)
+    const lang = ['node', 'nodejs', 'bun'].includes(ik) ? 'node' : /^(python|pypy)/.test(ik) ? 'python' : 'other'
+    if (f && !pos.includes('-')) return /(^|\/)node_modules\//.test(f) ? null : file(f, p + ' ' + f, lang)
     if (stdin != null && !piped) return judgeCode(stdin, 'stdin')
     return hidden(p + ' runs code from stdin that the guard cannot read')
   }
@@ -727,16 +750,17 @@ function codeStep(w, here, stdin = null, piped = false) {
     const hasS = w.some((x, n) => n > 0 && !x.startsWith('--') && /^-[a-z]*s/.test(x))
     for (let i = 1; i < w.length; i++) {
       if (SHELL_VALUE_OPTS.has(w[i])) i++
-      else if (!w[i].startsWith('-') && !w[i].startsWith('+')) return file(w[i], p + ' ' + w[i])
+      else if (!w[i].startsWith('-') && !w[i].startsWith('+')) return file(w[i], p + ' ' + w[i], 'sh')
     }
     return piped || hasS ? hidden(p + ' runs code from stdin that the guard cannot read') : null
   }
-  if ((p === 'source' || w[0] === '.') && w[1]) return file(w[1], w[0] + ' ' + w[1])
+  if ((p === 'source' || w[0] === '.') && w[1]) return file(w[1], w[0] + ' ' + w[1], 'sh')
   if (Object.hasOwn(PKG_FILE, p)) {
     const r = pkgScript(p, w.slice(1))
     if (!r) return null // not a script-running form (install, a builtin): left alone
     if (r.deny) return hidden(r.what)
-    return { kind: 'file', how: 'pkg', what: r.what, script: r.script, path: here ? joinPath(here, PKG_FILE[p]) : null, dir: here, slug: null }
+    if (r.file) return file(r.file, r.what, 'node')
+    return { kind: 'file', how: 'pkg', what: r.what, script: r.script, optional: !!r.optional, path: here ? joinPath(here, PKG_FILE[p]) : null, dir: here, slug: null }
   }
   if (Object.hasOwn(RUNNER_FILE, p)) {
     const t = w.slice(1).filter((x) => !x.startsWith('-'))
@@ -832,7 +856,7 @@ export function commandSteps(line, cwd = null, depth = 0) {
       const k = httpStep(w, at)
       if (k) out.push(k)
     } else if (p !== 'gh' && p !== 'git' && p !== 'hub') {
-      const k = codeStep(w, at, c.stdin, c.piped)
+      const k = codeStep(w, at, c.stdin, c.piped, c.env)
       if (k) out.push(k)
     } else if (p !== 'gh') {
       const g = gitCall(w)

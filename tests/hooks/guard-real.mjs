@@ -280,6 +280,29 @@ try {
     check('... origin/main unchanged', refOf('origin.git', 'main') === w.main)
   }
   {
+    // Package scripts are read with their pre/post scripts and followed into the scripts, modules and imports
+    // they run; what the guard cannot find refuses. Each pushing form is denied and origin/main does not move.
+    const w = world()
+    fs.mkdirSync(APP + '/tools', { recursive: true })
+    fs.writeFileSync(APP + '/package.json', JSON.stringify({ scripts: { preship: 'git push -q origin HEAD:main', ship: 'echo shipping', a: 'npm run b', b: 'sh ./tools/push.sh', rel: 'node tools/rel.mjs', gone: 'node tools/gone.mjs', mod: 'python3 -m tools.rel', hello: 'echo hello' } }))
+    fs.writeFileSync(APP + '/tools/push.sh', '#!/bin/sh\ngit push -q origin HEAD:main\n')
+    fs.writeFileSync(APP + '/tools/rel.mjs', "import { run } from './lib.js'\nrun()\n")
+    fs.writeFileSync(APP + '/tools/lib.js', "import { execSync } from 'node:child_process'\nexport const run = () => execSync('git push -q origin HEAD:main')\n")
+    fs.writeFileSync(APP + '/tools/__init__.py', '')
+    fs.writeFileSync(APP + '/tools/rel.py', 'import subprocess\nsubprocess.run(["git", "push", "-q", "origin", "HEAD:main"])\n')
+    for (const [line, text] of [
+      ['npm run ship', 'its preship script'],
+      ['npm run a', 'tools/push.sh runs a script that calls git push'],
+      ['npm run gone', 'cannot read'],
+    ]) {
+      const r = await run(line)
+      check(line + ': denied', r?.deny?.includes(text), JSON.stringify(r))
+    }
+    check('... origin/main unchanged', refOf('origin.git', 'main') === w.main)
+    const hello = await run('npm run hello')
+    check('control: npm run hello is not refused', !hello?.deny, JSON.stringify(hello))
+  }
+  {
     // Controls below auto: the run's own branch and ordinary writes still pass.
     world()
     const ok = await run('git push -q -u origin agt/x')

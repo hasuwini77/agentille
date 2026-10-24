@@ -5,6 +5,7 @@
 import { Profile, Proofs } from './state.js'
 import { PROBE } from './panes.js'
 import { base, commands, commandSteps, joinPath, lineMovesHead, protectedPath, SCRIPT_RISK, MAKE_RISK } from './guard-lex.js'
+import { scriptChain } from './script-refs.js'
 
 // The gh and curl/wget step readers live in a leaf the lexer shares; the policy keeps carrying their names.
 export { ghStep, httpStep } from './guard-steps.js'
@@ -182,49 +183,129 @@ export function makeRecipe(text, targets) {
 }
 
 
-// A file candidate → why it is refused below auto (its code calls a tool that can push, merge, tag or release),
-// or null. A path the line names through a variable cannot be read: refused. A file that is not there, or not
-// text, is no script to judge: the command runs (and fails on its own).
-async function fileRisk($, c) {
-  if (c.how === 'make') {
-    if (c.paths.some((x) => x === null)) return c.what + ' runs a makefile the guard cannot locate'
-    for (const f of c.paths) {
-      const text = await $.fs.read(f).catch(() => null)
-      if (text === null) continue
-      return MAKE_RISK.test(makeRecipe(text, c.targets)) ? c.what + ' runs a recipe that mentions push, merge, tag or release' : null
-    }
-    return null
+// How many hops the reader follows from the line: a script that runs a script that runs a script, and so on. A
+// chain past it is refused, not passed.
+const READ_DEPTH = 5
+
+const RISK_TAIL = ' that calls git push, merge or tag, gh or curl to GitHub'
+
+// Installed dependencies are programs, not the run's scripts: never read (a limit docs/guards.md names).
+const INSTALLED = /(^|\/)node_modules\//
+
+// The package.json a package manager reads from `dir`: the nearest one up the tree, as npm, pnpm, yarn and bun
+// find it. { path, text, dir } or null.
+async function nearestPkg($, dir) {
+  let d = dir
+  for (let i = 0; i < 64 && d; i++) {
+    const path = (d === '/' ? '' : d) + '/package.json'
+    const text = await $.fs.read(path).catch(() => null)
+    if (text !== null) return { path, text, dir: d }
+    if (d === '/') break
+    d = d.slice(0, d.lastIndexOf('/')) || '/'
   }
-  if (c.how === 'pkg') {
-    // Read the named script from package.json and judge its text; a missing file or script is refused.
-    if (!c.path) return c.what + ' runs a package script the guard cannot locate (write the command out)'
-    let script = null
-    try {
-      script = JSON.parse(await $.fs.read(c.path))?.scripts?.[c.script] ?? null
-    } catch {
-      return c.what + ' runs a package script the guard cannot read'
-    }
-    if (typeof script !== 'string') return c.what + ' names a package script that is not in ' + c.path
-    return SCRIPT_RISK.test(script) ? c.what + ' runs a package script that calls git push, merge or tag, gh or curl to GitHub' : null
-  }
-  if (c.how === 'runner') {
-    if (!c.path) return c.what + ' runs a recipe the guard cannot locate (write the command out)'
-    const text = await $.fs.read(c.path).catch(() => null)
-    if (text === null) return c.what + ' runs a recipe the guard cannot read'
-    return SCRIPT_RISK.test(text) ? c.what + ' runs a recipe that calls git push, merge or tag, gh or curl to GitHub' : null
-  }
-  if (!c.path) return c.what + ' runs a script the guard cannot locate (write its path out)'
-  const text = await $.fs.read(c.path).catch(() => null)
-  if (text === null || text.includes('\u0000')) return null
-  // Read the script as the shell would: variables it sets itself are expanded, so a command assembled from
-  // pieces (`G=git; $G ${P}sh`) is seen too.
+  return null
+}
+
+// Where a file candidate came from decides what an unread file means:
+//   'line'  — the Bash line itself: a script that is not there is no script (the shell fails on its own); a
+//             package script, recipe or path the guard cannot place refuses.
+//   'pkg'   — a package script's own text: fail closed, anything the guard cannot place, read or reach refuses.
+//   'shell' — a shell script's text: what the guard can place and read is followed and judged; a step named
+//             through a variable, after a `cd` it cannot follow, or whose file is not there is skipped, as test
+//             and build scripts name their neighbours that way (`bash "$(dirname "$0")/x.sh"`).
+const lenient = (from) => from === 'shell'
+
+// The text a script runs, judged: a push, merge, tag or GitHub call named in it (as written, and with the
+// variables it sets expanded) refuses; so does a protected write. A shell text is then followed one hop at a
+// time: the scripts, package scripts, modules and recipes it runs are read in turn (fileRisk), READ_DEPTH deep.
+// `label` says which text this is: a package script's steps are judged strictly, a shell file's leniently.
+async function textRisk($, text, dir, what, label, depth, seen, lang = 'sh') {
   let expanded = ''
   try {
     expanded = commands(text).map((x) => x.words.join(' ')).join('\n')
   } catch {
     expanded = ''
   }
-  return SCRIPT_RISK.test(text) || SCRIPT_RISK.test(expanded) ? c.what + ' runs a script that calls git push, merge or tag, gh or curl to GitHub' : null
+  if (SCRIPT_RISK.test(text) || SCRIPT_RISK.test(expanded)) return what + ' runs a ' + label + RISK_TAIL
+  if (lang !== 'sh') return null
+  const from = label === 'package script' ? 'pkg' : 'shell'
+  let steps
+  try {
+    steps = commandSteps(text, dir, 1)
+  } catch {
+    return what + ' runs a ' + label + ' the guard cannot read'
+  }
+  for (const s of steps) {
+    if (s.kind === 'protected') return what + ' runs a ' + label + ' that writes ' + s.what
+    if (s.kind !== 'file') continue
+    if (depth + 1 > READ_DEPTH) {
+      if (lenient(from)) continue
+      return what + ' runs scripts nested deeper than the guard reads (' + s.what + ')'
+    }
+    const why = await fileRisk($, s, depth + 1, seen, from)
+    if (why) return what + ', then ' + why
+  }
+  return null
+}
+
+// What a script file is, past its own text: node (its imports are read), python, or a shell script (the scripts
+// it runs are read). The line said so (node x.js, sh x.sh), else the shebang does; no shebang is a shell script.
+const langOf = (c, text) => c.lang && c.lang !== 'other' ? c.lang : c.lang === 'other' ? 'other' : /^#!.*\b(node|nodejs|bun|deno|tsx|ts-node)\b/.test(text) ? 'node' : /^#!.*\bpython/.test(text) ? 'python' : /^#!/.test(text) && !/^#!.*\b(ba|z|da|k)?sh\b/.test(text) ? 'other' : 'sh'
+
+// A file candidate → why it is refused below auto (its code calls a tool that can push, merge, tag or release,
+// or it runs something the guard cannot read), or null. `from` says where the candidate came from (see lenient):
+// the Bash line, a package script's text or a shell script's text.
+async function fileRisk($, c, depth = 0, seen = new Set(), from = 'line') {
+  const strict = from === 'pkg'
+  const skip = lenient(from)
+  if (c.how === 'make') {
+    if (c.paths.some((x) => x === null)) return skip ? null : c.what + ' runs a makefile the guard cannot locate'
+    for (const f of c.paths) {
+      const text = await $.fs.read(f).catch(() => null)
+      if (text === null) continue
+      return MAKE_RISK.test(makeRecipe(text, c.targets)) ? c.what + ' runs a recipe that mentions push, merge, tag or release' : null
+    }
+    return strict ? c.what + ' runs a makefile the guard cannot read' : null
+  }
+  if (c.how === 'pkg') {
+    // The named script and its pre/post scripts, from the nearest package.json; each is read, then followed.
+    if (!c.path) return skip ? null : c.what + ' runs a package script the guard cannot locate (write the command out)'
+    const found = await nearestPkg($, c.dir)
+    if (!found) return c.optional || skip ? null : c.what + ' runs a package script the guard cannot read'
+    const key = found.path + '#' + c.script
+    if (seen.has(key)) return null
+    seen.add(key)
+    let scripts
+    try {
+      const pkg = JSON.parse(found.text)
+      scripts = pkg?.scripts && typeof pkg.scripts === 'object' ? pkg.scripts : {}
+    } catch {
+      return c.what + ' runs a package script the guard cannot read'
+    }
+    if (typeof scripts[c.script] !== 'string') return c.optional || skip ? null : c.what + ' names a package script that is not in ' + found.path
+    for (const k of scriptChain(c.script)) {
+      if (typeof scripts[k] !== 'string') continue
+      const why = await textRisk($, scripts[k], found.dir, c.what + (k === c.script ? '' : ' (its ' + k + ' script)'), 'package script', depth, seen)
+      if (why) return why
+    }
+    return null
+  }
+  if (c.how === 'runner') {
+    if (!c.path) return skip ? null : c.what + ' runs a recipe the guard cannot locate (write the command out)'
+    const text = await $.fs.read(c.path).catch(() => null)
+    if (text === null) return skip ? null : c.what + ' runs a recipe the guard cannot read'
+    return SCRIPT_RISK.test(text) ? c.what + ' runs a recipe' + RISK_TAIL : null
+  }
+  if (!c.path) return skip ? null : c.what + ' runs a script the guard cannot locate (write its path out)'
+  if (INSTALLED.test(c.path) || seen.has(c.path)) return null
+  seen.add(c.path)
+  const text = await $.fs.read(c.path).catch(() => null)
+  if (text === null || text.includes('\u0000')) return strict ? c.what + ' runs a file the guard cannot read' : null
+  // Read the script as the shell would: variables it sets itself are expanded, so a command assembled from
+  // pieces (`G=git; $G ${P}sh`) is seen too.
+  const lang = langOf(c, text)
+  const why = await textRisk($, text, c.dir, c.what, 'script', depth, seen, lang)
+  return why
 }
 
 

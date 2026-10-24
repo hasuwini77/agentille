@@ -426,7 +426,7 @@ describe('guard: worktree adds', () => {
 // A run in a session with no pane transport: the ownership list lives in memory.
 // git: per dir, the branch checked out (`current`), its remote URL and its main checkout (default /work/repo).
 type Repo = { current?: string; remote?: string; common?: string; pushurl?: string; upstream?: string }
-const setup = (on: any, o: { profile?: unknown; repoConfig?: unknown; env?: Record<string, string>; files?: Record<string, string>; repos?: Record<string, Repo>; feat?: boolean; broken?: boolean; aliases?: Record<string, string>; aliasBroken?: boolean } = {}) => {
+const setup = (on: any, o: { profile?: unknown; repoConfig?: unknown; env?: Record<string, string>; files?: Record<string, string>; repos?: Record<string, Repo>; feat?: boolean; broken?: boolean; aliases?: Record<string, string>; aliasBroken?: boolean; pyFind?: Record<string, string> } = {}) => {
   const seen: string[][] = []
   const ran: string[] = []
   const git = { made: false, committed: false, feat: false }
@@ -477,6 +477,8 @@ const setup = (on: any, o: { profile?: unknown; repoConfig?: unknown; env?: Reco
     const a = e.argv.join(' ')
     if (o.broken && e.argv[0] === 'git' && !a.includes('worktree list')) return { deny: 'git could not be run' }
     const out = (stdout: string, exitCode = 0) => ({ value: { exitCode, stdout, stderr: '' } })
+    // python -I -c <find_spec> <name>: where the module lives outside the folder, '' when nowhere.
+    if (/^python/.test(e.argv[0]) && e.argv.includes('-I')) return out((o.pyFind?.[e.argv[e.argv.length - 1]] ?? '') + '\n')
     // git config --get alias.<word>: the value, exit 1 when there is none, a deny when git cannot be run.
     const am = /config --get alias\.(\S+)$/.exec(a)
     if (am) return o.aliasBroken ? { deny: 'git could not be run' } : o.aliases?.[am[1]] ? out(o.aliases[am[1]] + '\n') : out('', 1)
@@ -770,8 +772,10 @@ describe('guard: it fails closed', () => {
     await typed($)
     expect((await bash($, 'git push -u origin agt/x')).deny).toBe(DENY_UNREAD)
     expect((await bash($, 'gh pr merge 3')).deny).toBe(DENY_UNREAD)
-    expect((await bash($, 'npm test')).result).toBe('ok')
-    expect(ran).toEqual(['npm test'])
+    // npm test runs a package script the guard reads in the repo's mode: unreadable here, so refused too.
+    expect((await bash($, 'npm test')).deny).toBe(DENY_UNREAD)
+    expect((await bash($, 'echo done')).result).toBe('ok')
+    expect(ran).toEqual(['echo done'])
   })
 
   test('below auto no branch is deleted on the remote, an own-prefix one included', async ($, on) => {
@@ -963,6 +967,69 @@ describe('guard: scripts are read before they run', () => {
     expect((await bash($, './ship.sh')).result).toBe('ok')
     expect((await bash($, 'python3 -c "import os; os.system(\'git push origin main\')"')).result).toBe('ok')
     expect(ran).toHaveLength(3)
+  })
+})
+
+describe('guard: package scripts, modules and imports are followed', () => {
+  const pkg = (scripts: Record<string, string>) => JSON.stringify({ scripts })
+  const files = {
+    '/work/repo/package.json': pkg({
+      preship: 'git push origin main', ship: 'echo shipping',
+      build: 'tsc', postbuild: 'npm run tag-it', 'tag-it': 'git tag v1',
+      a: 'npm run b', b: 'echo b && sh ./tools/push.sh',
+      rel: 'node tools/rel.mjs', gone: 'node tools/gone.mjs', mod: 'python3 -m tools.rel',
+      loop: 'npm run loop', d1: 'npm run d2', d2: 'npm run d3', d3: 'npm run d4', d4: 'npm run d5', d5: 'npm run d6', d6: 'npm run d7', d7: 'echo deep',
+      test: 'git push origin HEAD:main', lint: 'eslint .', fine: 'node tools/fine.mjs',
+      vary: 'bash "$D/x.sh"', check: 'sh ./tools/check.sh', wrap: 'sh ./tools/wrap.sh',
+    }),
+    '/work/repo/tools/check.sh': '#!/bin/sh\nD=$(dirname "$0")\nbash "$D/x.sh"\nsh ./tools/absent.sh\nnode ./tools/fine.mjs\n',
+    '/work/repo/tools/wrap.sh': '#!/bin/sh\nset -e\nsh ./tools/push.sh\n',
+    '/work/repo/tools/push.sh': '#!/bin/sh\ngit push origin main\n',
+    '/work/repo/tools/rel.mjs': "import { run } from './lib.js'\nrun()\n",
+    '/work/repo/tools/lib.js': "import { execSync } from 'node:child_process'\nexport const run = () => execSync('git push origin HEAD:main')\n",
+    '/work/repo/tools/fine.mjs': "import { x } from './util'\nimport fs from 'node:fs'\nconsole.log(x)\n",
+    '/work/repo/tools/util.ts': 'export const x = 1\n',
+    '/work/repo/tools/broken.mjs': "import './nowhere.js'\n",
+    '/work/repo/tools/__init__.py': '',
+    '/work/repo/tools/rel.py': 'import subprocess\nsubprocess.run(["git", "push", "origin", "main"])\n',
+    '/work/repo/src/app/__init__.py': '',
+    '/work/repo/src/app/__main__.py': 'import os\nos.system("gh pr merge 1")\n',
+    '/work/repo/pkg/__init__.py': '',
+    '/work/repo/pkg/ok.py': 'print(1)\n',
+  }
+
+  test('pre and post scripts, nested runs, scripts, imports and modules are read', { timeoutMs: 20_000 }, async ($, on) => {
+    const { ran } = setup(on, { files, pyFind: { pytest: '/usr/lib/python3/site-packages/pytest/__init__.py', http: '/usr/lib/python3.12/http/__init__.py' } })
+    await boot($)
+    await typed($)
+    const deny = async (line: string, text: string) => expect([line, (await bash($, line)).deny]).toEqual([line, expect.stringContaining(text)])
+    await deny('npm run ship', 'npm run ship (its preship script) runs a package script that calls git push')
+    await deny('npm run build', 'npm run build (its postbuild script), then npm run tag-it runs a package script')
+    await deny('npm run a', 'tools/push.sh runs a script that calls git push')
+    await deny('yarn run gone', 'node tools/gone.mjs runs a file the guard cannot read')
+    await deny('npm run d1', 'nested deeper than the guard reads')
+    await deny('npm test', 'npm test runs a package script that calls git push')
+    await deny('pnpm test', 'pnpm test runs a package script')
+    await deny('pnpm ship', 'its preship script')
+    await deny('pnpm -r run build', 'another package folder')
+    await deny('npm run lint --workspaces', 'another package folder')
+    // A package script's own steps are judged strictly: a script named through a variable refuses.
+    await deny('npm run vary', 'cannot locate')
+    // A shell file's steps are followed where the guard can place and read them; the rest are skipped.
+    await deny('npm run wrap', 'tools/push.sh runs a script that calls git push')
+    await deny('sh tools/wrap.sh', 'tools/push.sh runs a script that calls git push')
+    const ok = ['npm run loop', 'npm run lint', 'npm run fine', 'node tools/fine.mjs', 'python3 -m pkg.ok', 'python3 -m pytest -q', 'python3 -m http.server', 'pnpm install', 'yarn', 'bun test',
+      'npm run check', 'sh tools/check.sh', 'npm i -g typescript', 'pnpm add -w lodash', 'pnpm -r install', 'npm install --prefix x', 'yarn add left-pad']
+    for (const line of ok) expect([line, (await bash($, line)).result]).toEqual([line, 'ok'])
+    expect(ran).toEqual(ok)
+  })
+
+  test('a run script that is not there, or a package.json that does not parse, is refused', async ($, on) => {
+    setup(on, { files: { '/work/repo/package.json': '{ not json' } })
+    await boot($)
+    await typed($)
+    expect((await bash($, 'npm run build')).deny).toContain('package script the guard cannot read')
+    expect((await bash($, 'npm test')).deny).toContain('package script the guard cannot read')
   })
 })
 

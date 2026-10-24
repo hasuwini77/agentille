@@ -37,6 +37,74 @@ for j in .claude-plugin/plugin.json .claude-plugin/marketplace.json .claude-plug
   if jq -e . "$j" >/dev/null 2>&1; then pass "$j parses"; else fail "$j is not valid JSON"; fi
 done
 
+# ── 1b. Workflow YAML: every .github/workflows file parses and has a trigger ─
+# GitHub drops a workflow it cannot parse without a word on the PR, so a broken one would just never run.
+# node is the bar (CI has it; no YAML library is assumed): a block-scalar-aware reader that refuses tab
+# indentation, unclosed quotes or brackets on a line, duplicate top-level keys, and a file without a
+# top-level `on:` or `jobs:`. Where python3 has PyYAML it also does a full parse (it reads `on` as True).
+hdr "Workflow YAML"
+wf_files=$(find .github/workflows -maxdepth 1 -type f \( -name '*.yml' -o -name '*.yaml' \) 2>/dev/null | sort)
+if [ -z "$wf_files" ]; then
+  warn "workflows: no .github/workflows/*.yml files found"
+elif ! command -v node >/dev/null 2>&1; then
+  skip_or_fail "workflows: node not found — workflow YAML check skipped"
+else
+  # The reader is held in a variable: a heredoc inside $( ) trips bash 3.2 on its quote characters.
+  read -r -d '' wf_js <<'NODE' || true
+const fs = require('fs');
+for (const f of process.argv.slice(1)) {
+  const errs = [], top = new Map();
+  const lines = fs.readFileSync(f, 'utf8').replace(/\r\n/g, '\n').split('\n');
+  let block = -1; // indent of the key that opened a | or > block scalar, -1 when outside one
+  lines.forEach((raw, i) => {
+    const n = i + 1, ind = raw.match(/^[ \t]*/)[0], body = raw.slice(ind.length);
+    if (block >= 0) { if (body === '' || ind.length > block) return; block = -1; }
+    if (body === '' || body.startsWith('#')) return;
+    if (ind.includes('\t')) { errs.push(`line ${n}: tab in indentation`); return; }
+    let q = '', depth = 0, end = body.length;
+    for (let k = 0; k < body.length; k++) {
+      const c = body[k];
+      if (q) { if (c === q) { if (q === "'" && body[k + 1] === "'") k++; else q = ''; } else if (c === '\\' && q === '"') k++; continue; }
+      if (c === '#' && (k === 0 || /\s/.test(body[k - 1]))) { end = k; break; }
+      if ((c === '"' || c === "'") && (k === 0 || /[\s\[{,:-]/.test(body[k - 1]))) q = c;
+      else if (c === '[' || c === '{') depth++;
+      else if (c === ']' || c === '}') depth--;
+    }
+    if (q) errs.push(`line ${n}: unclosed ${q} quote`);
+    if (depth !== 0) errs.push(`line ${n}: unbalanced brackets`);
+    const text = body.slice(0, end).trimEnd();
+    if (/(^|[:\s-])[|>][-+0-9]*$/.test(text) && /(:|^-)\s*[|>][-+0-9]*$/.test(text)) block = ind.length;
+    if (ind.length === 0 && text !== '---') {
+      const m = text.match(/^("([^"]*)"|'([^']*)'|([A-Za-z0-9_-]+)):(\s|$)/);
+      if (!m) { errs.push(`line ${n}: top-level line is not a "key:"`); return; }
+      const key = m[2] ?? m[3] ?? m[4];
+      if (top.has(key)) errs.push(`line ${n}: duplicate top-level key '${key}' (first on line ${top.get(key)})`);
+      else top.set(key, n);
+    }
+  });
+  if (!top.has('on')) errs.push('no top-level on: key (a workflow without a trigger never runs)');
+  if (!top.has('jobs')) errs.push('no top-level jobs: key');
+  if (errs.length) for (const e of errs) console.log(`FAIL ${f}: ${e}`);
+  else console.log(`PASS ${f} parses, with on: and jobs:`);
+}
+NODE
+  # shellcheck disable=SC2086
+  wf_out=$(node -e "$wf_js" -- $wf_files 2>&1)
+  while IFS= read -r line; do
+    case "$line" in PASS*) pass "workflows: ${line#PASS }";; FAIL*) fail "workflows: ${line#FAIL }";; esac
+  done <<< "$wf_out"
+  printf '%s\n' "$wf_out" | grep -qE '^(PASS|FAIL)' || fail "workflows: the YAML check produced no result: $(printf '%s' "$wf_out" | head -1)"
+  if command -v python3 >/dev/null 2>&1 && python3 -c 'import yaml' >/dev/null 2>&1; then
+    for f in $wf_files; do
+      if python3 -c 'import sys, yaml; d = yaml.safe_load(open(sys.argv[1])); sys.exit(0 if isinstance(d, dict) and (True in d or "on" in d) else 1)' "$f" >/dev/null 2>&1; then
+        pass "workflows: $f passes a full PyYAML parse"
+      else
+        fail "workflows: $f fails a full PyYAML parse (or has no on: key)"
+      fi
+    done
+  fi
+fi
+
 # ── 2. Version: plugin semver, marketplace has none, changelog agrees ─────────
 hdr "Versioning"
 PV=$(jq -r '.version // empty' .claude-plugin/plugin.json 2>/dev/null)

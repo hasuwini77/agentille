@@ -78,11 +78,12 @@ export async function sameRepo($, a, b) {
 
 // Whether the mod may accept the folder-trust prompt for `cwd` on the person's behalf. Sharing the lead's git
 // common dir is not enough: a worktree of a contributor's branch can carry its own hooks, MCP servers, agents and
-// commands. Trusted: the lead's own checkout (or a folder in it), or a worktree of the same repo
+// commands, and a folder inside a checkout (a gitignored node_modules/<pkg>) can carry a .claude/ or .mcp.json of
+// its own. Trusted: the lead's own cwd, the root of the lead's checkout, or the root of a worktree of the same repo
 // on an agt/* branch that this lead's runs made, named by its exact path on the lead-<pane>.worktrees list (guard.js:
 // JSON records with path and branch; a plain one-per-line list is read too; a branch name alone is not ownership),
-// whose project config matches the lead checkout's (sameConfig). With no list nothing but the lead's own checkout is
-// accepted.
+// whose project config matches the lead checkout's (sameConfig). A folder below either root is never accepted. With
+// no list nothing but the lead's own cwd and checkout root is accepted.
 const OWN_BRANCH = /^agt\/[A-Za-z0-9._/-]+$/
 const CONFIG_FILES = ['.mcp.json', '.claude/settings.json', '.claude/settings.local.json']
 const CONFIG_DIRS = ['.claude/agents', '.claude/commands']
@@ -172,8 +173,9 @@ async function listsRoot($, listed, top) {
 export async function trustable($, cwd, leadCwd) {
   if (cwd === leadCwd) return true
   if (!(await sameRepo($, cwd, leadCwd))) return false
-  const [top, leadTop] = await Promise.all([gitOut($, cwd, 'rev-parse', '--show-toplevel'), gitOut($, leadCwd, 'rev-parse', '--show-toplevel')])
-  if (!top || !leadTop) return false
+  const [top, leadTop, prefix] = await Promise.all([gitOut($, cwd, 'rev-parse', '--show-toplevel'), gitOut($, leadCwd, 'rev-parse', '--show-toplevel'), gitOut($, cwd, 'rev-parse', '--show-prefix')])
+  // A folder below a checkout's root brings whatever .claude/ or .mcp.json sits in it: never on the person's behalf.
+  if (!top || !leadTop || prefix !== '') return false
   if (top === leadTop) return true
   const branch = await gitOut($, cwd, 'symbolic-ref', '--short', 'HEAD')
   if (!branch || !OWN_BRANCH.test(branch)) return false

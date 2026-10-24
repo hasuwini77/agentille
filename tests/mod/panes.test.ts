@@ -1224,10 +1224,30 @@ describe('pane tools: folder trust', () => {
     expect(accepted(same.seen)).toBe(false)
   })
 
-  test('no list: a folder inside the lead\'s own checkout is trusted', async ($, on) => {
-    const { seen, clock } = setup(on, { branch: 'main', top: '/work/repo' })
+  // Reproduced (read): any folder whose toplevel was the lead's checkout was trusted with no config check, so a
+  // gitignored node_modules/<pkg> carrying its own .claude/ or .mcp.json would have been accepted.
+  test('a folder below the lead\'s own checkout root is not trusted; the root itself is', async ($, on) => {
+    const sub = setup(on, { branch: 'main', top: '/work/repo', prefix: 'node_modules/pkg/' })
+    expect(JSON.stringify(await spawn($, sub.clock))).toContain('needs a one-time trust')
+    expect(accepted(sub.seen)).toBe(false)
+  })
+
+  test('the root of the lead\'s own checkout is trusted with no list', async ($, on) => {
+    const { seen, clock } = setup(on, { branch: 'main', top: '/work/repo', prefix: '' })
     expect((await spawn($, clock)).result).toContain('Opened agt-k7f2ab-exec-1')
     expect(accepted(seen)).toBe(true)
+  })
+
+  test('a folder below a listed agt/* worktree\'s root is not trusted', async ($, on) => {
+    const { seen, clock } = setup(on, { prefix: 'node_modules/pkg/', files: { [LIST]: '/work/wt\n' } })
+    expect(JSON.stringify(await spawn($, clock))).toContain('needs a one-time trust')
+    expect(accepted(seen)).toBe(false)
+  })
+
+  test('git failing to say where the folder sits refuses it', async ($, on) => {
+    const { seen, clock } = setup(on, { files: { [LIST]: '/work/wt\n' }, git: { 'git -C /work/wt rev-parse --show-prefix': { exitCode: 128, stdout: '' } } })
+    expect(JSON.stringify(await spawn($, clock))).toContain('needs a one-time trust')
+    expect(accepted(seen)).toBe(false)
   })
 
   // Reproduced (read): ownedWorktree matched a record on its branch alone, wherever that branch was checked out.

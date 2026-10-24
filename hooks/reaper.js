@@ -10,14 +10,9 @@ import { SAFE_RUN, PROBE, SPAWN_ROLE, splitName, doneFile, paneKey, answerFile, 
 import { closeSession, forgetSession } from './sessions.js'
 import { pruneTabs } from './spawn.js'
 import { wakeDue, wakeMessage } from './wire.js'
-const { runs, live, paneRoutes, restingSince, staged, paneSeen, harvested, wireDone, woken, strandedNow, strandedToasted, firstSeen, openedNames } = S
-
-// A pane that left the list takes its bookkeeping with it, so a reused pane id never inherits a harvest.
-export function forgetGone(listed) {
-  const gone = (id) => !listed.some((p) => p.id === id)
-  for (const id of [...firstSeen.keys()]) if (gone(id)) firstSeen.delete(id)
-  for (const s of [harvested, wireDone, woken, strandedToasted]) for (const id of [...s]) if (gone(id)) s.delete(id)
-}
+import * as P from './panerec.js'
+const { runs, live, paneRoutes, openedNames } = S
+const { restingSince, staged, strandedNow } = P
 
 // Panes that left the stage this poll: end their route and refresh the ledger.
 export async function notePaneExits($) {
@@ -34,7 +29,7 @@ export async function notePaneExits($) {
 export async function freshAnswer($, file, p) {
   if (!file) return false
   try {
-    return isFreshDone(await $.fs.stat(file), firstSeen.get(p.id))
+    return isFreshDone(await $.fs.stat(file), P.get(p.id)?.firstSeen)
   } catch {
     return false // missing or unreadable
   }
@@ -56,9 +51,9 @@ export async function answerOf($, p) {
 }
 
 export async function isHarvested($, p) {
-  if (harvested.has(p.id)) return true
+  if (P.get(p.id)?.harvested) return true
   if (!(await answerOf($, p))) return false
-  harvested.add(p.id)
+  P.rec(p.id).harvested = true
   return true
 }
 
@@ -66,8 +61,8 @@ export async function isHarvested($, p) {
 // the pane and how to read it, so the lead does not wait blind. Once per pane. A blocked pane waits on the person.
 export async function wakeLead($, pool, now, t) {
   if (!S.sessionId) return
-  for (const p of wakeDue(pool.filter((q) => q.role !== SPAWN_ROLE), paneSeen, wireDone, woken, now)) { // a spawn pane has no lead run to wake
-    woken.add(p.id)
+  for (const p of wakeDue(pool.filter((q) => q.role !== SPAWN_ROLE), P.seen, P.wireDone, P.woken, now)) { // a spawn pane has no lead run to wake
+    P.rec(p.id).woken = true
     const text = wakeMessage({ name: p.name, transport: t, id: p.id, answerPath: await answerOf($, p) })
     const r = await $.session.send({ to: { sessionId: S.sessionId }, text }).catch((err) => ({ isDelivered: false, reason: String(err?.message ?? err) }))
     if (!r.isDelivered) $.ui.toast('agt ⚑ ' + p.name + ' ' + p.state + ' with no report. ' + text.slice(text.indexOf('. ') + 2).slice(0, 120))
@@ -79,12 +74,12 @@ export async function wakeLead($, pool, now, t) {
 export async function sweep($, pool, now, t, close) {
   const ok = new Set()
   for (const p of pool) if ((p.state === 'done' || p.state === 'idle') && (await isHarvested($, p))) ok.add(p.id)
-  const plan = reapPlan(pool, paneSeen, now, S.leadTurn, (p) => ok.has(p.id))
+  const plan = reapPlan(pool, P.seen, now, S.leadTurn, (p) => ok.has(p.id))
   strandedNow.clear()
   for (const p of plan.stranded) {
     strandedNow.add(p.name)
-    if (strandedToasted.has(p.id)) continue
-    strandedToasted.add(p.id)
+    if (P.get(p.id)?.strandedToasted) continue
+    P.rec(p.id).strandedToasted = true
     $.ui.toast('agt ⚑ ' + p.name + ' ' + p.state + ', not harvested')
   }
   for (const p of plan.reap) {
@@ -117,8 +112,8 @@ export async function pollHerdr($) {
   const owned = S.selfName ? real : real.filter((p) => openedNames.has(p.name))
   S.panes = quietSpawn(owned) // the band shows a spawn pane as `open`; the reaper below sees its real state
   const now = await $.clock.now()
-  for (const p of S.panes) if (!firstSeen.has(p.id)) firstSeen.set(p.id, now)
-  forgetGone(S.panes)
+  for (const p of S.panes) if (P.get(p.id)?.firstSeen === undefined) P.rec(p.id).firstSeen = now
+  P.forgetGone(S.panes)
   await notePaneExits($)
   if (me && !S.selfName) {
     await pruneTabs($, me.workspace_id)
@@ -154,8 +149,8 @@ export async function pollTmux($) {
   // only if it was written after the pane was first listed.
   const now = await $.clock.now()
   const scoped = me ? scopeRows(rows, selfPane).filter((r) => S.selfName || openedNames.has(r.agt)) : []
-  for (const r of scoped) if (!firstSeen.has(r.id)) firstSeen.set(r.id, now)
-  forgetGone(rows)
+  for (const r of scoped) if (P.get(r.id)?.firstSeen === undefined) P.rec(r.id).firstSeen = now
+  P.forgetGone(rows)
   const done = new Map()
   for (const r of scoped) {
     const n = splitName(r.agt)
@@ -163,7 +158,7 @@ export async function pollTmux($) {
     const file = n && !r.dead && (n.role === SPAWN_ROLE ? answerFile(S.home, n.run, n.role, paneKey(r.id)) : doneFile(S.home, n.run, n.role))
     if (!file) continue
     try {
-      done.set(r.agt, isFreshDone(await $.fs.stat(file), firstSeen.get(r.id)))
+      done.set(r.agt, isFreshDone(await $.fs.stat(file), P.get(r.id)?.firstSeen))
     } catch {
       // missing or unreadable counts as not done
     }

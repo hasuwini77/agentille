@@ -14,7 +14,8 @@ import { skewMessage } from './skew.js'
 import { transportOf, openPane, savePanes } from './spawn.js'
 import { ensurePolling, ensureTicker } from './ticker.js'
 import { shortName, logWire } from './wire.js'
-const { decisions, paneRoutes, openedNames, paneSeen, harvested, wireDone, woken, strandedToasted, firstSeen, ownedTabs, wireLog } = S
+import * as P from './panerec.js'
+const { decisions, paneRoutes, openedNames, ownedTabs, wireLog } = S
 
 // spawn_pane: the /agt heavy level's worker pane, the same openPane as /agt-spawn, with the input validated here.
 export async function spawnPane($, e) {
@@ -82,9 +83,9 @@ export async function spawnPane($, e) {
   // A role can be respawned (a fix, a retry), and the multiplexer can hand the old pane's id out again. Harvest state is
   // keyed by pane id and the list call above may have failed, so wipe whatever the id carries: the new pane starts with
   // nothing harvested and only files written from now on count as its own.
-  firstSeen.set(id, await $.clock.now())
-  for (const s of [harvested, wireDone, woken, strandedToasted]) s.delete(id)
-  paneSeen.delete(id)
+  const now = await $.clock.now()
+  P.forget(id)
+  P.rec(id).firstSeen = now
   if (isFix) {
     run.fixes += 1
     run.fixesByPiece[fixKey] = (run.fixesByPiece[fixKey] ?? 0) + 1
@@ -176,7 +177,7 @@ export async function closePane($, e) {
   if (c.error) return { deny: c.error }
   const r = await $.process.run(t === 'herdr' ? herdrCloseArgv(c.pane.id) : tmuxKillArgv(c.pane.id), PROBE).catch(() => null)
   if (!r || r.exitCode !== 0) return { deny: 'Could not close ' + c.pane.name + '.' }
-  harvested.add(c.pane.id)
+  P.rec(c.pane.id).harvested = true
   await pollNow($, t)
   return { result: 'Closed ' + c.pane.name + '.' }
 }

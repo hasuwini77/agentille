@@ -1,7 +1,8 @@
 // agentille sessions: the person's own Herdr or tmux panes opened through open_sessions. No worker env, no
 // agt- name, no wire; a lead lists its Herdr ones so the SessionEnd sweep can close the idle ones.
 
-import { Profile, Session } from './state.js'
+import { Session } from './session.js'
+import { Profile } from './profile.js'
 import { makeStore } from './store.js'
 import { PROBE, tmuxEvenArgv, tmuxPaneIdOf, tmuxKillArgv, herdrPaneIdOf, herdrTabOf, herdrPromptArgv, herdrCloseArgv, herdrMetaArgv, herdrSessionSplitArgv, herdrSessionTabArgv, herdrSessionStartArgv, herdrRunArgv, herdrPaneGetArgv, herdrTerminalOf, tmuxSessionSplitArgv, tmuxTitleArgvs, tmuxTypeArgvs, sessionsFile } from './panes.js'
 import { runOk, startAgent } from './spawn.js'

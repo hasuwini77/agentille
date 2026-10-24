@@ -1,15 +1,16 @@
 // agentille reaper: what the lead sees of its panes (herdr or tmux poll), which finished worker is harvested,
 // which closes, which is flagged, the wake it sends itself, and the cleaner behind /agt-clean.
 
-import { Profile, Runs, Spawn, Sessions, Session, setSelfName, setSelfPlace } from './state.js'
+import { Session, setSelfName, setSelfPlace, ctxSource } from './session.js'
+import { Profile } from './profile.js'
 import { makeStore } from './store.js'
 import { herdrOrphans, tmuxOrphans, orphanPlan, staleTabs, parseWorktrees, worktreePlan, cleanText, FRESH_MS } from './clean.js'
 import { ownedWorktrees, forgetOwned } from './guard.js'
-import { writeRunFile, endPaneRoute } from './dispatch.js'
+import { Runs, writeRunFile, endPaneRoute } from './dispatch.js'
 import { paneAgents, reapPlan, ledger, panesLeft } from './live.js'
 import { SAFE_RUN, PROBE, SPAWN_ROLE, splitName, doneFile, paneKey, answerFile, parseTmuxList, scopeRows, isFreshDone, quietSpawn, tmuxPaneAgents, rowIsLead, TMUX_LIST_ARGV, reapPool, tmuxKillArgv, herdrCloseArgv, herdrPaneGetArgv, herdrTerminalOf, SESSION_IDLE_MS, sessionSweep } from './panes.js'
-import { closeSession, forgetSession } from './sessions.js'
-import { pruneTabs } from './spawn.js'
+import { Sessions, closeSession, forgetSession } from './sessions.js'
+import { Spawn, pruneTabs } from './spawn.js'
 import { wakeDue, wakeMessage } from './wire.js'
 import * as P from './panerec.js'
 const { restingSince, staged, strandedNow } = P
@@ -20,6 +21,7 @@ const { s: my, view } = makeStore('reaper.js', {
   panes: [],
 })
 export const Panes = view
+ctxSource({ panes: view })
 
 // Panes that left the stage this poll: end their route and refresh the ledger.
 export async function notePaneExits($) {

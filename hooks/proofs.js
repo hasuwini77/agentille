@@ -19,7 +19,10 @@
 //
 // and the gates read them through spawnAllowed, sessionsAllowed, fableProof and runHeld.
 
-import { isLead, Display, Runs, Panes, Session } from './state.js'
+import { isLead, Session } from './session.js'
+import { Display } from './display.js'
+import { Runs } from './dispatch.js'
+import { Panes } from './reaper.js'
 import { makeStore } from './store.js'
 import { SAFE_RUN } from './panes.js'
 import * as P from './panerec.js'

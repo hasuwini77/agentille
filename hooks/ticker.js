@@ -1,18 +1,22 @@
 // agentille timers: the agent list refresh, the 5 s pane poll that runs while panes may exist, and the 300 ms
 // redraw ticker that runs while something works or animates.
 
-import { ctx, Display, Runs, Spawn, Panes, Sessions, Session } from './state.js'
+import { ctx, ctxSource, Session } from './session.js'
+import { Display } from './display.js'
+import { Spawn } from './spawn.js'
+import { Sessions } from './sessions.js'
 import { makeStore } from './store.js'
 import { waving } from './live.js'
 import { moodAt } from './mascot.js'
-import { pollNow } from './reaper.js'
-import { adoptAgents, applyAgentList, quietAgents } from './dispatch.js'
+import { Panes, pollNow } from './reaper.js'
+import { Runs, adoptAgents, applyAgentList, quietAgents } from './dispatch.js'
 import { readWire } from './worker.js'
 
 // The redraw count is read by the drawing (Timers.tick, ctx.tick); the timers and the agent-list throttle are this
 // module's alone.
 const { s: my, view } = makeStore('ticker.js', { tick: 0 })
 export const Timers = view
+ctxSource({ timers: view })
 let pollTimer = null  // pane polling: runs only while panes may exist
 let quietPolls = 0
 let tickTimer = null  // redraw ticker: runs only while something works

@@ -1,11 +1,13 @@
 // agentille guard — worktree ownership. Records every worktree a run made (the one scripts/agt-worktree.sh
 // prints, or a literal `git worktree add`), so the cleaner and the .env sweep touch only those and never
 // another session's fresh checkout.
-import { Profile, Runs, Spawn, Session } from './state.js'
+import { Session } from './session.js'
+import { Profile } from './profile.js'
+import { Runs } from './dispatch.js'
 import { makeStore } from './store.js'
 import { PROBE, SAFE_RUN, splitName, paneKey } from './panes.js'
 import { parseWorktrees } from './clean.js'
-import { leadPane } from './spawn.js'
+import { Spawn, leadPane } from './spawn.js'
 import { gitCall, joinPath, commands, splitCommands, ASSIGN, base } from './guard-lex.js'
 
 export const OWNED_TTL_MS = 14 * 24 * 60 * 60_000

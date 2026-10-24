@@ -1,7 +1,10 @@
 // agentille worker side of the wire: what this pane publishes about itself, the answer it saves under the run,
 // the done message it sends its lead, and (lead side) the status each visible worker last published.
 
-import { Profile, Spawn, Panes, Session } from './state.js'
+import { Session } from './session.js'
+import { Profile } from './profile.js'
+import { Spawn } from './spawn.js'
+import { Panes } from './reaper.js'
 import { makeStore } from './store.js'
 import { writeRunFile } from './dispatch.js'
 import { short, elapsed } from './live.js'

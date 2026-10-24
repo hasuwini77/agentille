@@ -2,7 +2,8 @@
 // repo caps, the snapshot taken at the typed /agt), judges pushes, merges, tags, releases, ref writes and the
 // GitHub REST/GraphQL API, and reads scripts and package/make recipes before they run. The lexer
 // (guard-lex.js) turns a line into the candidates these functions judge.
-import { Profile, Proofs } from './state.js'
+import { Profile } from './profile.js'
+import { Proofs } from './proofs.js'
 import { PROBE } from './panes.js'
 import { base, commands, commandSteps, joinPath, SCRIPT_RISK, MAKE_RISK } from './guard-lex.js'
 

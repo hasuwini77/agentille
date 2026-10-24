@@ -1,7 +1,9 @@
 // agentille run bookkeeping: per-run counters, the routing log and ledger under ~/.agentille/state/run-<id>/,
 // each subagent's raw report, and the Agents section the mod adds to a finished report.md.
 
-import { Profile, Panes, Proofs, Session } from './state.js'
+import { Session, ctxSource } from './session.js'
+import { Profile } from './profile.js'
+import { Panes } from './reaper.js'
 import { makeStore } from './store.js'
 import { reportRun, reportTail } from './drawing.js'
 import { pieceOf, party, taskLine } from './links.js'
@@ -10,7 +12,7 @@ import { SAFE_RUN, splitName } from './panes.js'
 import { formationOf, roleOf, parseHeader, proveHeader, demoteHeaderText, ladderFixes, decide, executorsWorking, executorCapFlag, estimateRunUsd, maxRunUsdOf, usd } from './routing.js'
 import { addFlag } from './display.js'
 import { noteWire } from './worker.js'
-import { agtTurnFromDispatch } from './proofs.js'
+import { Proofs, agtTurnFromDispatch } from './proofs.js'
 import { adopt, applyStatus, quietWorkflows } from './tree.js'
 
 // The run bookkeeping store: the run the band follows, each run's counters and routing log, every agent this session
@@ -23,6 +25,7 @@ const { s: my, view, raw } = makeStore('dispatch.js', {
   paneRoutes: [],  // PaneRoute[], append-only: how each worker this lead opened was routed
 })
 export const Runs = view
+ctxSource({ runs: view })
 const wfToasted = new Set()  // run:role pairs whose drift the person was told once
 const demotedToasted = new Set()  // run ids told once that fable=forced was dropped for want of a typed --fable
 

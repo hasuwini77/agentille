@@ -197,3 +197,49 @@ describe('guard: integration in the mod', () => {
     expect((await bash($, 'gh pr merge 3')).result).toBe('ok')
   })
 })
+
+describe('guard: worktree ownership and the run-end tidy', () => {
+  test('another session\'s fresh worktree is kept; the run\'s own merged one is removed, its .env copies swept first', async ($, on) => {
+    const { seen, git } = setup(on)
+    await boot($)
+    await typed($)
+    await bash($, 'SLUG="x"; git worktree add "../repo-$SLUG" -b "agt/$SLUG" main && cd ../repo-x && cp ../repo/.env* .')
+    // No commits yet: /agt-clean keeps it, and never reads the other session's tree.
+    const early = await $.command.run({ command: 'agt-clean', args: '', origin: { kind: 'composer' } } as never)
+    expect(early.text).toContain('agt/x (no commits of its own)')
+    expect(early.text).toContain('agt/other (not opened by this session)')
+    expect(seen.some((a) => a.join(' ') === 'git -C /work/repo-other status --porcelain')).toBe(false)
+    expect(seen.some((a) => a.includes('clean'))).toBe(false)
+    // The slice commits and merges; the run ends on its card.
+    git.committed = true
+    await card($)
+    const sweep = seen.findIndex((a) => a.join(' ') === 'git -C /work/repo-x clean -fqx -- .env*')
+    const removed = seen.findIndex((a) => a.join(' ') === 'git -C /work/repo worktree remove /work/repo-x')
+    expect(sweep).toBeGreaterThan(-1)
+    expect(removed).toBeGreaterThan(sweep)
+    expect(seen).toContainEqual(['git', '-C', '/work/repo', 'branch', '-d', 'agt/x'])
+    expect(seen.some((a) => a.includes('/work/repo-other') && (a.includes('remove') || a.includes('clean')))).toBe(false)
+    expect(seen).not.toContainEqual(['git', '-C', '/work/repo', 'branch', '-d', 'agt/other'])
+    // The main checkout's own .env is never swept.
+    expect(seen.some((a) => a.join(' ') === 'git -C /work/repo clean -fqx -- .env*')).toBe(false)
+  })
+
+  test('a session that recorded no worktree removes nothing', async ($, on) => {
+    const { seen } = setup(on)
+    await boot($)
+    await typed($)
+    await card($)
+    expect(seen.some((a) => a.includes('worktree') && a.includes('list'))).toBe(true)
+    expect(seen.some((a) => a.includes('remove') || a.includes('-d') || a.includes('clean'))).toBe(false)
+  })
+
+  test('a worktree made outside an /agt run is not recorded', async ($, on) => {
+    const { seen, git } = setup(on)
+    await boot($)
+    await bash($, 'git worktree add ../repo-x -b agt/x main')
+    git.committed = true
+    const r = await $.command.run({ command: 'agt-clean', args: '', origin: { kind: 'composer' } } as never)
+    expect(r.text).toContain('agt/x (not opened by this session)')
+    expect(seen.some((a) => a.includes('remove'))).toBe(false)
+  })
+})

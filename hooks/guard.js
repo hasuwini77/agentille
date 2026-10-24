@@ -11,9 +11,13 @@
 // A session where /agt was never typed is untouched: its Bash runs as the engine runs it.
 //
 // The command is read, not run: quotes, `$( )`, backticks, heredocs, wrappers (env, command, nice, nohup,
-// timeout, xargs, sudo, time, absolute paths) and `bash -c` / `eval` are seen through, and variables set in
-// the same line are expanded. A ref that is still a variable after that is not guessed at: the push is denied
-// and the message asks for the name written out.
+// timeout, xargs, sudo, time, script, watch, flock, caffeinate, stdbuf, arch, ssh, parallel, coproc, find -exec,
+// absolute paths) and `bash -c` / `fish -c` / `eval` are seen through, and variables set in the same line are
+// expanded. A ref that is still a variable after that is not guessed at: the push is denied and the message asks
+// for the name written out; so is a HEAD push after a branch switch earlier on the line. What the reader cannot
+// follow is judged by what it holds, below `auto`: interpreter code (python -c, node -e …) that mentions git, gh
+// or curl is refused, and a script file, a sourced file or a make target is read first and refused when it pushes,
+// merges, tags or releases. Probing that fails denies the command: the guard never lets a line through unread.
 
 import { S } from './state.js'
 import { parseWorktrees } from './clean.js'
@@ -25,6 +29,7 @@ import { leadPane } from './spawn.js'
 export const DENY_INTEGRATION = 'integration auto is not set in your profile for this repo; the run stops at the PR.'
 export const DENY_PUSH = 'integration auto is not set in your profile for this repo: a run pushes only its own branch (agt/*, feat/*, fix/* or the one checked out), never the base branch, a tag, a force push, a branch deletion or every branch. Write the branch name and the directory out (no variables) and push again.'
 export const DENY_LOCAL = 'integration is local for this repo: the run pushes nothing and opens no PR.'
+export const denyHidden = (what) => 'integration auto is not set in your profile for this repo, and ' + what + ', where the guard cannot judge a push, merge, tag or release. Run those steps as plain commands, with the branch and directory written out.'
 export const DENY_UNREAD = 'The guard could not read the repo this command targets; retry, or run the command yourself.'
 export const OWNED_TTL_MS = 14 * 24 * 60 * 60_000
 const MODES = ['local', 'push', 'pr', 'auto'] // least to most autonomy
@@ -163,6 +168,9 @@ const ASSIGN = /^([A-Za-z_][A-Za-z0-9_]*)=(.*)$/s
 const expand = (w, vars) => w.replace(/\$\{([A-Za-z_][A-Za-z0-9_]*)\}|\$([A-Za-z_][A-Za-z0-9_]*)/g, (m, a, b) => vars.get(a ?? b) ?? m)
 
 // Wrappers in front of the real program, and their options that take a value. `timeout` also takes a duration.
+// An object entry says more: `c`, its options whose value is a shell line it runs (flock -c, script -c); `skip`,
+// the positionals before the program (flock's lock file, script's log file, ssh's host); `line`, that it runs the
+// rest as one shell line (watch, ssh). `par`: GNU parallel, whose `:::` arguments complete the command.
 const WRAP = {
   command: [], builtin: [], exec: ['-a'], nohup: [], time: ['-f', '--format', '-o', '--output'],
   sudo: ['-u', '-g', '-h', '-p', '-C', '-D', '-r', '-t', '-U', '-T', '-R', '--user', '--group', '--host', '--prompt', '--chdir', '--role', '--type', '--other-user', '--command-timeout', '--close-from'],
@@ -170,6 +178,14 @@ const WRAP = {
   nice: ['-n', '--adjustment'],
   timeout: ['-s', '--signal', '-k', '--kill-after'],
   xargs: ['-I', '-L', '-l', '-n', '-P', '-s', '-d', '-E', '-e', '-a', '--arg-file', '--delimiter', '--max-args', '--max-procs', '--max-lines', '--max-chars', '--eof', '--replace', '--process-slot-var'],
+  caffeinate: ['-t', '-w'], stdbuf: ['-i', '-o', '-e', '--input', '--output', '--error'], arch: ['-arch', '-d', '-e'],
+  coproc: [], doas: ['-u', '-C'], setsid: [], unbuffer: [], chronic: [], nocorrect: [], noglob: [], xcrun: ['--sdk', '--toolchain'],
+  ionice: ['-c', '-n', '-p', '--class', '--classdata'],
+  script: { opts: ['-t', '-T', '-O', '-I', '-B', '-E', '-o', '--timing', '--log-out', '--log-in', '--log-io', '--log-timing', '--echo', '--output-limit'], c: ['-c', '--command'], skip: 1 },
+  flock: { opts: ['-w', '--wait', '--timeout', '-E', '--conflict-exit-code'], c: ['-c', '--command'], skip: 1 },
+  watch: { opts: ['-n', '--interval', '-q', '--equexit'], line: true },
+  ssh: { opts: ['-b', '-c', '-D', '-E', '-e', '-F', '-I', '-i', '-J', '-L', '-l', '-m', '-O', '-o', '-p', '-Q', '-R', '-S', '-W', '-w', '-B'], skip: 1, line: true },
+  parallel: { opts: ['-j', '--jobs', '-S', '--sshlogin', '--sshloginfile', '-a', '--arg-file', '-d', '--delimiter', '-I', '--replace', '-n', '--max-args', '-N', '--colsep', '-C', '--tmpdir', '--results', '--timeout', '--delay', '--retries', '--joblog', '-E', '--eof'], par: true },
 }
 const KEYWORDS = new Set(['then', 'do', 'else', 'elif', 'if', 'while', 'until', '!', '{', '}'])
 
@@ -189,10 +205,12 @@ function unwrap(words) {
       i++
       continue
     }
-    const opts = Object.hasOwn(WRAP, p) ? WRAP[p] : null
-    if (!opts) break
+    const spec = Object.hasOwn(WRAP, p) ? WRAP[p] : null
+    if (!spec) break
+    const opts = Array.isArray(spec) ? spec : spec.opts
     i++
     if (p === 'command' && /^-[a-zA-Z]*[vV]/.test(words[i] ?? '')) return { words: [], dir, inner, env } // a lookup, not a run
+    if (p === 'coproc' && /^[A-Za-z_]\w*$/.test(words[i] ?? '') && words[i + 1] === '{') i++ // coproc NAME { … }
     while (i < words.length && words[i].startsWith('-') && words[i] !== '-') {
       const o = words[i]
       if (o === '--') {
@@ -206,19 +224,39 @@ function unwrap(words) {
       if ((flag === '-C' || flag === '--chdir') && (p === 'env' || p === 'sudo')) dir = val ?? null
       if (flag === '-D' && p === 'sudo') dir = val ?? null
       if ((flag === '-S' || flag === '--split-string') && p === 'env') inner = val ?? null
+      if (spec.c?.includes(k)) return { words: [], dir, inner: v ?? words[i + 1] ?? '', env }
+      if (/^-[a-zA-Z]{2,}$/.test(o) && spec.c?.some((f) => f.length === 2 && o.endsWith(f[1]))) return { words: [], dir, inner: words[i + 1] ?? '', env } // -qc '…'
       i += takes && v === undefined ? 2 : 1
     }
     if (p === 'timeout' && i < words.length) i++ // the duration
+    if (spec.skip) i += spec.skip
+    if (spec.c?.includes(words[i])) return { words: [], dir, inner: words[i + 1] ?? '', env } // flock <file> -c '…'
+    if (spec.line) return { words: [], dir, inner: words.slice(i).join(' '), env }
+    if (spec.par) return { ...parallelRun(words.slice(i)), dir, env }
   }
   return { words: words.slice(i), dir, inner, env }
 }
 
+// GNU parallel's command and its `:::` arguments → the shell lines it runs (one per argument; with no command,
+// each argument is a line of its own). With no `:::` the command reads its arguments from stdin, as xargs does.
+function parallelRun(words) {
+  const k = words.findIndex((w) => /^:::+\+?$/.test(w))
+  if (k < 0) return { words, inner: null }
+  const cmd = words.slice(0, k).join(' ')
+  const args = words.slice(k + 1).filter((w) => !/^:::+\+?$/.test(w))
+  const lines = args.map((a) => (!cmd ? a : cmd.includes('{}') ? cmd.split('{}').join(a) : cmd + ' ' + a))
+  return { words: [], inner: lines.join('\n') }
+}
+
 // A shell that runs a line it is handed: `bash -c '…'`, `eval …`, or a heredoc/here-string fed to a shell.
+export const SHELLS = ['bash', 'sh', 'zsh', 'dash', 'ksh', 'fish']
 function innerLine(words, stdin) {
   const p = base(words[0])
-  if (['bash', 'sh', 'zsh', 'dash', 'ksh'].includes(p)) {
-    const k = words.findIndex((w, n) => n > 0 && /^-[a-z]*c[a-z]*$/.test(w))
+  if (SHELLS.includes(p)) {
+    const k = words.findIndex((w, n) => n > 0 && (/^-[a-z]*c[a-z]*$/.test(w) || w === '--command'))
     if (k > 0) return words[k + 1] ?? null
+    const long = words.find((w) => w.startsWith('--command='))
+    if (long) return long.slice(10)
     if (stdin !== null && !words.slice(1).some((w) => !w.startsWith('-'))) return stdin
     return null
   }
@@ -240,11 +278,24 @@ export function commands(line, depth = 0, vars = new Map()) {
       }
       continue
     }
+    take(words, c.stdin)
+  }
+  // One simple command's words: wrappers stripped, a line it runs read as commands, `find -exec … ;` segments too.
+  function take(words, stdin) {
     const u = unwrap(words)
     const env = new Map([...vars, ...u.env])
-    const inner = depth < 3 ? (u.inner ?? innerLine(u.words, c.stdin)) : null
+    const inner = depth < 3 ? (u.inner ?? innerLine(u.words, stdin)) : null
     if (inner !== null && inner !== undefined) out.push(...commands(inner, depth + 1, base(u.words[0]) === 'eval' ? vars : env))
     else if (u.words.length) out.push({ words: u.words, dir: u.dir, env })
+    if (base(u.words[0]) === 'find' && depth < 3) {
+      for (let k = 1; k < u.words.length; k++) {
+        if (!['-exec', '-execdir', '-ok', '-okdir'].includes(u.words[k])) continue
+        const end = u.words.findIndex((x, n) => n > k && (x === ';' || x === '+'))
+        const seg = u.words.slice(k + 1, end < 0 ? u.words.length : end)
+        if (seg.length) take(seg, null)
+        k = end < 0 ? u.words.length : end
+      }
+    }
   }
   return out
 }
@@ -530,6 +581,65 @@ function envCfg(env) {
   return keys
 }
 
+// Interpreters and the flags whose value is code they run.
+const INTERP = { python: ['-c'], python3: ['-c'], python2: ['-c'], node: ['-e', '--eval', '-p', '--print'], nodejs: ['-e', '--eval', '-p', '--print'], bun: ['-e', '--eval', '-p', '--print'], deno: ['eval'], perl: ['-e', '-E'], ruby: ['-e'], php: ['-r'], lua: ['-e'], osascript: ['-e'] }
+// Code that mentions a tool which can push, merge, tag or release.
+export const MENTIONS_TOOL = /(^|[^\w.-])(git|gh|hub|curl|wget)([^\w.-]|$)|api\.github\.com|\/api\/v3\//
+// A script that does so: per line, git with push/merge/tag/send-pack/update-ref, gh or hub with a merge, release,
+// api or alias, curl or wget at GitHub.
+export const SCRIPT_RISK = /\bgit\b[^\n]*\b(push|merge|tag|send-pack|update-ref)\b|\b(gh|hub)\b[^\n]*\b(merge|release|api|alias)\b|\b(curl|wget)\b[^\n]*github|api\.github\.com/
+// A make target's recipe that does: push, merge, tag or release named in it.
+export const MAKE_RISK = /\b(push|merge|tag|release)\b/
+// System binaries are programs, not scripts of the run's: never read.
+const SYSTEM_BIN = /^\/(usr|bin|sbin|opt|System|Library|nix)\//
+const SHELL_VALUE_OPTS = new Set(['-o', '-O', '--rcfile', '--init-file', '-C', '--init-command'])
+
+// A run of code the reader cannot follow: an interpreter's code string → { kind: 'hidden' } when it mentions a
+// tool; a script file, a sourced file or a make target → { kind: 'file' } for guardLine to read.
+function codeStep(w, here) {
+  const p = base(w[0])
+  const at = (f) => (/[$`]/.test(f) ? null : f.startsWith('~/') ? null : f.startsWith('/') ? joinPath('/', f) : here ? joinPath(here, f) : null)
+  const file = (f, what) => ({ kind: 'file', how: 'script', what, path: at(f), dir: here, slug: null })
+  if (Object.hasOwn(INTERP, p)) {
+    const flags = INTERP[p]
+    const k = w.findIndex((x, n) => n > 0 && (flags.includes(x) || flags.some((f) => f.startsWith('-') && f.length === 2 && x.startsWith(f) && x.length > 2 && !x.startsWith('--'))))
+    if (k > 0) {
+      const code = flags.includes(w[k]) ? w[k + 1] ?? '' : w[k].slice(2)
+      return MENTIONS_TOOL.test(code) ? { kind: 'hidden', what: p + ' ' + (flags.includes(w[k]) ? w[k] : w[k].slice(0, 2)) + ' runs code that calls git, gh or curl', dir: here, slug: null } : null
+    }
+    const f = w.slice(1).find((x) => !x.startsWith('-'))
+    return f && !/(^|\/)node_modules\//.test(f) ? file(f, p + ' ' + f) : null
+  }
+  if (SHELLS.includes(p)) {
+    for (let i = 1; i < w.length; i++) {
+      if (SHELL_VALUE_OPTS.has(w[i])) i++
+      else if (!w[i].startsWith('-') && !w[i].startsWith('+')) return file(w[i], p + ' ' + w[i])
+    }
+    return null
+  }
+  if ((p === 'source' || w[0] === '.') && w[1]) return file(w[1], w[0] + ' ' + w[1])
+  if (p === 'make' || p === 'gmake') {
+    let dir = here
+    let mf = null
+    const targets = []
+    for (let i = 1; i < w.length; i++) {
+      const a = w[i]
+      const val = () => (a.length > 2 && !a.startsWith('--') ? a.slice(2) : a.includes('=') ? a.slice(a.indexOf('=') + 1) : w[++i] ?? '')
+      if (a === '-C' || a.startsWith('--directory') || /^-C./.test(a)) {
+        const d = val()
+        dir = /[$`~]/.test(d) ? null : d.startsWith('/') ? joinPath('/', d) : dir && joinPath(dir, d)
+      } else if (a === '-f' || a.startsWith('--file') || a.startsWith('--makefile') || /^-f./.test(a)) mf = val()
+      else if (['-I', '-o', '-W', '--include-dir', '--old-file', '--what-if'].includes(a)) i++
+      else if (!a.startsWith('-') && !ASSIGN.test(a)) targets.push(a)
+    }
+    const files = mf ? [mf] : ['GNUmakefile', 'makefile', 'Makefile']
+    const paths = dir ? files.map((f) => (/[$`]/.test(f) ? null : f.startsWith('/') ? joinPath('/', f) : joinPath(dir, f))) : [null]
+    return { kind: 'file', how: 'make', what: 'make' + (targets.length ? ' ' + targets.join(' ') : ''), paths, targets, dir, slug: null }
+  }
+  if (w[0].includes('/') && !SYSTEM_BIN.test(w[0])) return file(w[0], w[0])
+  return null
+}
+
 // A line → its integration candidates, each with the dir it runs in (cd, pushd, git -C, env -C followed).
 export function commandSteps(line, cwd = null) {
   const out = []
@@ -558,6 +668,9 @@ export function commandSteps(line, cwd = null) {
     }
     if (p === 'curl' || p === 'wget') {
       const k = httpStep(w, at)
+      if (k) out.push(k)
+    } else if (p !== 'gh' && p !== 'git' && p !== 'hub') {
+      const k = codeStep(w, at)
       if (k) out.push(k)
     } else if (p !== 'gh') {
       const g = gitCall(w)
@@ -605,6 +718,8 @@ export function integrationIn(line, { cwd = null, current = null, pushDst = null
       if (why) return why
       continue
     }
+    if (c.kind === 'hidden') return c.what
+    if (c.kind === 'file') continue // read in guardLine: a line alone has no files
     if (mode === 'local') return c.what
     if (c.kind === 'push') {
       const why = judgePush(c.push, { current, pushDst, bases: new Set(['main', 'master', b].filter(Boolean)) })
@@ -612,6 +727,63 @@ export function integrationIn(line, { cwd = null, current = null, pushDst = null
     }
   }
   return null
+}
+
+// A make target's recipe and its prerequisites' recipes, read from the makefile's text; the whole text when the
+// target is not a plain rule here (a pattern rule, an include): what the guard reads before it lets make run.
+export function makeRecipe(text, targets) {
+  const rules = new Map()
+  let cur = null
+  let first = null
+  for (const line of String(text ?? '').split('\n')) {
+    if (line.startsWith('\t')) {
+      if (cur) for (const t of cur) rules.get(t).recipe.push(line)
+      continue
+    }
+    const m = /^([^\s:#=][^:=]*?)\s*::?(?!=)\s*([^;#]*)(?:;(.*))?/.exec(line)
+    if (!m || /^\s*(export|override|define|include|-include|ifeq|ifneq|ifdef|ifndef|else|endif)\b/.test(line)) {
+      if (line.trim()) cur = null
+      continue
+    }
+    cur = m[1].trim().split(/\s+/)
+    for (const t of cur) {
+      if (!rules.has(t)) rules.set(t, { deps: [], recipe: [] })
+      rules.get(t).deps.push(...m[2].trim().split(/\s+/).filter(Boolean))
+      if (m[3]) rules.get(t).recipe.push(m[3])
+      if (!first && !t.startsWith('.') && !t.includes('%')) first = t
+    }
+  }
+  const want = targets.length ? targets : first ? [first] : []
+  if (!want.length || want.some((t) => !rules.has(t))) return String(text ?? '')
+  const seen = new Set()
+  const out = []
+  const walk = (t, depth) => {
+    if (seen.has(t) || depth > 6 || !rules.has(t)) return
+    seen.add(t)
+    out.push(...rules.get(t).recipe)
+    for (const d of rules.get(t).deps) walk(d, depth + 1)
+  }
+  for (const t of want) walk(t, 0)
+  return out.join('\n')
+}
+
+// A file candidate → why it is refused below auto (its code calls a tool that can push, merge, tag or release),
+// or null. A path the line names through a variable cannot be read: refused. A file that is not there, or not
+// text, is no script to judge: the command runs (and fails on its own).
+async function fileRisk($, c) {
+  if (c.how === 'make') {
+    if (c.paths.some((x) => x === null)) return c.what + ' runs a makefile the guard cannot locate'
+    for (const f of c.paths) {
+      const text = await $.fs.read(f).catch(() => null)
+      if (text === null) continue
+      return MAKE_RISK.test(makeRecipe(text, c.targets)) ? c.what + ' runs a recipe that mentions push, merge, tag or release' : null
+    }
+    return null
+  }
+  if (!c.path) return c.what + ' runs a script the guard cannot locate (write its path out)'
+  const text = await $.fs.read(c.path).catch(() => null)
+  if (text === null || text.includes('\u0000')) return null
+  return SCRIPT_RISK.test(text) ? c.what + ' runs a script that calls git push, merge or tag, gh or curl to GitHub' : null
 }
 
 // ── the repo a command targets, and its mode ─────────────────────────────────
@@ -846,6 +1018,12 @@ export async function guardLine($, line, cwd) {
     const mode = c.kind === 'push' ? await pushMode($, profile, c, cwd, cache) : await modeFor($, profile, { ...c, slug }, cwd, cache)
     if (mode === 'auto') continue
     if (c.kind === 'step') return DENY_INTEGRATION
+    if (c.kind === 'hidden') return denyHidden(c.what)
+    if (c.kind === 'file') {
+      const why = await fileRisk($, c)
+      if (why) return denyHidden(why)
+      continue
+    }
     if (c.kind === 'ref') {
       const current = c.dir ? (await gitOut($, c.dir, 'symbolic-ref', '--short', '-q', 'HEAD')) || null : null
       const why = judgeRef(c.ref, { current, bases: await basesOf($, c.dir) })

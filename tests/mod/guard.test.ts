@@ -206,6 +206,44 @@ describe('guard: which commands integrate', () => {
     ]) expect([line, integrationIn(line, onSlice)]).toEqual([line, null])
   })
 
+  test('interpreter code, more shells and more wrappers are seen through', async () => {
+    for (const line of [
+      'python3 -c "import subprocess;subprocess.run([\'git\',\'push\',\'origin\',\'main\'])"',
+      'node -e "require(\'child_process\').execSync(\'gh pr merge 12\')"',
+      "perl -e 'system(\"git push origin main\")'",
+      "ruby -e 'system(\"git tag v1\")'",
+      "osascript -e 'do shell script \"gh pr merge 3\"'",
+      'fish -c "git push origin main"',
+      'zsh -fc "git push origin main"',
+      'bash --norc -c "git push origin main"',
+      'script -q /dev/null git push origin main',
+      "script -qc 'git push origin main' /dev/null",
+      'watch -n1 git push origin main',
+      'flock /tmp/l git push origin main',
+      'flock /tmp/l -c "git push origin main"',
+      'caffeinate -i git push origin main',
+      'stdbuf -oL git push origin main',
+      'arch -arm64 git push origin main',
+      'find . -maxdepth 0 -exec git push origin main \\;',
+      'parallel git push origin ::: main',
+      'parallel ::: "git push origin main"',
+      'coproc git push origin main',
+      'coproc P { git push origin main; }',
+      'ssh host git push origin main',
+      "ssh -p 22 host 'cd app && git push origin main'",
+      'xcrun git push origin main',
+    ]) expect([line, integrationIn(line, onSlice)]).toEqual([line, expect.any(String)])
+    for (const line of [
+      'python3 -c "print(1)"',
+      'node -e "console.log(require(\'./package.json\').version)"',
+      'watch -n5 git status',
+      'find . -name "*.ts" -exec grep -l TODO {} +',
+      'ssh host uptime',
+      'parallel echo ::: a b',
+      'caffeinate -i npm test',
+    ]) expect([line, integrationIn(line, onSlice)]).toEqual([line, null])
+  })
+
   test('judgePush on its own: a dry run passes, refs outside heads do not', async () => {
     const p = { remote: 'origin', specs: ['HEAD:refs/for/main'], force: false, del: false, bulk: null, dry: false, mergeOpt: false }
     expect(judgePush(p, { current: 'agt/x' })).toContain('refs/for/main')
@@ -743,5 +781,51 @@ describe('guard: aliases and plumbing in the mod', () => {
     expect((await bash($, 'git -C /work/repo-x update-ref HEAD agt/x~1')).result).toBe('ok')
     expect((await bash($, 'git -c alias.p=push p origin agt/x:main')).deny).toBe(DENY_INTEGRATION)
     expect((await bash($, 'git send-pack origin agt/x:main')).deny).toBe(DENY_INTEGRATION)
+  })
+})
+
+describe('guard: scripts are read before they run', () => {
+  const files = {
+    '/work/repo/ship.sh': '#!/bin/sh\nset -e\ngit push origin main\n',
+    '/work/repo/ship.py': 'import subprocess\nsubprocess.run(["git", "push", "origin", "main"])\n',
+    '/work/repo/test.sh': '#!/bin/sh\nnpm test\n',
+    '/work/repo/Makefile': 'test:\n\tnpm test\n\nrelease: test tag-it\n\nlint:\n\tnpm run lint\n\ntag-it:\n\tgit tag v1 && git push --tags\n\n%.o: %.c\n\tcc $<\n',
+  }
+
+  test('a script that pushes, merges or tags is refused, and the text says why; a plain one runs', async ($, on) => {
+    const { ran } = setup(on, { files })
+    await boot($)
+    await typed($)
+    for (const line of ['./ship.sh', 'sh ship.sh', 'bash ./ship.sh', 'source ship.sh', '. ./ship.sh', 'python3 ship.py', 'cd /work/repo && ./ship.sh --fast']) {
+      const r = await bash($, line)
+      expect([line, r.deny]).toEqual([line, expect.stringContaining('runs a script that calls git push')])
+    }
+    expect((await bash($, 'cd "$X" && ./ship.sh')).deny).toContain('cannot locate')
+    expect((await bash($, './test.sh')).result).toBe('ok')
+    expect((await bash($, './missing.sh')).result).toBe('ok')
+    expect(ran).toEqual(['./test.sh', './missing.sh'])
+  })
+
+  test('make: the target\'s recipe and prerequisites are read, the whole file when the target is not a rule', async ($, on) => {
+    const { ran } = setup(on, { files })
+    await boot($)
+    await typed($)
+    expect((await bash($, 'make release')).deny).toContain('make release runs a recipe that mentions push')
+    expect((await bash($, 'make -C /work/repo release')).deny).toContain('make release')
+    expect((await bash($, 'make deploy')).deny).toContain('make deploy')
+    expect((await bash($, 'make test lint')).result).toBe('ok')
+    expect((await bash($, 'make')).result).toBe('ok')
+    expect((await bash($, 'make -C /work/elsewhere release')).result).toBe('ok')
+    expect(ran).toEqual(['make test lint', 'make', 'make -C /work/elsewhere release'])
+  })
+
+  test('under auto, or outside a run, a script runs unread', async ($, on) => {
+    const { ran } = setup(on, { files, profile: { projects: [{ id: 'repo', integration: 'auto' }] } })
+    await boot($)
+    expect((await bash($, './ship.sh')).result).toBe('ok')
+    await typed($)
+    expect((await bash($, './ship.sh')).result).toBe('ok')
+    expect((await bash($, 'python3 -c "import os; os.system(\'git push origin main\')"')).result).toBe('ok')
+    expect(ran).toHaveLength(3)
   })
 })

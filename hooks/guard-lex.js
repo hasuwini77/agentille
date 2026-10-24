@@ -2,7 +2,7 @@
 // backticks, heredocs/here-strings, wrappers (env, timeout, xargs, sudo, …), `bash -c`/`eval`, and the
 // variables set on the line; then turns a line into the simple commands it runs and each command into an
 // integration candidate (commandSteps/codeStep). Policy (guard-policy.js) judges those candidates.
-import { base, ghStep, httpStep } from './guard-steps.js'
+import { base, ghStep, httpStep, HTTPIE } from './guard-steps.js'
 import { ELSEWHERE, NPM_SCRIPT_ALIASES, VALUE_FLAGS, pythonModule } from './script-refs.js'
 
 export { base }
@@ -971,7 +971,7 @@ export function commandSteps(line, cwd = null, depth = 0, homes = []) {
       if (lbl) out.push({ kind: 'protected', what: lbl + ' (through ' + p + ')', dir: at, slug: null })
     }
     // A tool whose subcommand and arguments xargs appends from stdin cannot be read: fail closed below auto.
-    if (c.viaXargs && ['git', 'gh', 'hub', 'curl', 'wget'].includes(p)) {
+    if (c.viaXargs && ['git', 'gh', 'hub', 'curl', 'wget', ...HTTPIE].includes(p)) {
       out.push({ kind: 'hidden', what: p + ' takes its subcommand or arguments from xargs, which the guard cannot read', dir: at, slug: null })
       continue
     }
@@ -980,12 +980,14 @@ export function commandSteps(line, cwd = null, depth = 0, homes = []) {
       const sub = w.slice(1).filter((x) => !x.startsWith('-')).slice(0, 2)
       if (sub.some((x) => /[$`]/.test(x))) { out.push({ kind: 'hidden', what: p + ' runs a subcommand the guard cannot read', dir: at, slug: null, unread: true }); continue }
       // hub is gh's elder: the same release and api steps, `pull-request` for a PR, and git's own commands.
-      const k = p === 'hub' && w[1] === 'pull-request' ? { kind: 'pr', what: 'hub pull-request', dir: at, slug: null } : ghStep(w, at, c.env)
-      if (k) out.push({ ...k, gh: true, slugUnknown: ghEdited })
+      const k0 = p === 'hub' && w[1] === 'pull-request' ? { kind: 'pr', what: 'hub pull-request', dir: at, slug: null } : ghStep(w, at, c.env)
+      // hub passes git's own words through to git (judged below); only gh reads aliases from its config.
+      const k = k0?.kind === 'ghalias' && p !== 'gh' ? null : k0
+      if (k) out.push({ ...k, gh: true, slugUnknown: ghEdited, ...(k.kind === 'ghalias' ? { env: c.env } : {}) })
       if (w.includes('set-default') && w.includes('repo')) ghEdited = true
       if (w.includes('checkout') && w.includes('pr')) moved = true
     }
-    if (p === 'curl' || p === 'wget') {
+    if (p === 'curl' || p === 'wget' || HTTPIE.has(p)) {
       const k = httpStep(w, at)
       if (k) out.push(k)
     } else if (p !== 'gh' && p !== 'git' && p !== 'hub') {

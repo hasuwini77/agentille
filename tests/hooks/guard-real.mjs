@@ -436,6 +436,20 @@ try {
     check('... origin/main unchanged', refOf('origin.git', 'main') === w.main)
   }
   {
+    // A gh alias from gh's own config is read and judged: a `!` alias that pushes the base is refused.
+    const w = world()
+    fs.mkdirSync(HOME + '/.config/gh', { recursive: true })
+    fs.writeFileSync(HOME + '/.config/gh/config.yml', "aliases:\n    pm: pr merge\n    ship: '!git push -q origin agt/x:main'\n")
+    const a = await run('gh ship')
+    check('gh ship (a ! alias that pushes the base): denied', a?.deny?.includes('git push to main'), JSON.stringify(a))
+    const b = await run('gh pm 4')
+    check('gh pm (an alias for pr merge): denied', b?.deny === DENY_INTEGRATION, JSON.stringify(b))
+    const c = await run('gh pr review --approve 4')
+    check('gh pr review --approve: denied', c?.deny === DENY_INTEGRATION, JSON.stringify(c))
+    check('... origin/main unchanged', refOf('origin.git', 'main') === w.main)
+    fs.rmSync(HOME + '/.config', { recursive: true, force: true })
+  }
+  {
     // Controls below auto: the run's own branch and ordinary writes still pass.
     world()
     const ok = await run('git push -q -u origin agt/x')

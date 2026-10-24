@@ -141,7 +141,7 @@ export function integrationIn(line, { cwd = null, current = null, pushDst = null
       continue
     }
     if (c.kind === 'hidden') return c.what
-    if (c.kind === 'file' || c.kind === 'write' || c.kind === 'alias') continue // read in guardLine: a line alone has no files or config
+    if (c.kind === 'file' || c.kind === 'write' || c.kind === 'alias' || c.kind === 'ghalias') continue // read in guardLine: a line alone has no files or config
     if (mode === 'local') return c.what
     if (c.kind === 'push') {
       const why = judgePush(c.push, { current, pushDst, bases: new Set(['main', 'master', b].filter(Boolean)) })
@@ -732,6 +732,71 @@ async function othersBranch($, c, name, cwd) {
 }
 
 
+// gh's config file, where its aliases live: $GH_CONFIG_DIR, else $XDG_CONFIG_HOME/gh, else ~/.config/gh. The line's
+// own variables count first, then the session's.
+async function ghConfigFile($, env) {
+  const dir = (env?.has?.('GH_CONFIG_DIR') ? env.get('GH_CONFIG_DIR') : await $.env.get('GH_CONFIG_DIR').catch(() => null)) || null
+  if (dir) return /[$`~]/.test(dir) || !dir.startsWith('/') ? null : dir.replace(/\/+$/, '') + '/config.yml'
+  const xdg = (env?.has?.('XDG_CONFIG_HOME') ? env.get('XDG_CONFIG_HOME') : await $.env.get('XDG_CONFIG_HOME').catch(() => null)) || null
+  if (xdg) return /[$`~]/.test(xdg) || !xdg.startsWith('/') ? null : xdg.replace(/\/+$/, '') + '/gh/config.yml'
+  return Profile.home ? Profile.home + '/.config/gh/config.yml' : null
+}
+
+// The `aliases:` map of a gh config.yml → Map(name → expansion), or null when it cannot be read as one.
+export function ghAliases(text) {
+  const lines = String(text ?? '').split(/\r?\n/)
+  const at = lines.findIndex((l) => /^aliases:/.test(l))
+  const out = new Map()
+  if (at < 0) return out
+  const head = lines[at].slice('aliases:'.length).trim()
+  if (head === '{}') return out
+  if (head && !head.startsWith('#')) return null
+  const unq = (v) => {
+    const s = v.trim()
+    if (/^'.*'$/s.test(s)) return s.slice(1, -1).replace(/''/g, "'")
+    if (/^".*"$/s.test(s)) return s.slice(1, -1).replace(/\\(["\\])/g, '$1')
+    return s.replace(/\s+#.*$/, '')
+  }
+  for (let i = at + 1; i < lines.length; i++) {
+    const l = lines[i]
+    if (!l.trim() || /^\s*#/.test(l)) continue
+    if (!/^\s/.test(l)) break
+    const m = /^(\s+)(['"]?)([^'":]+)\2:\s*(.*)$/.exec(l)
+    if (!m) return null
+    let v = m[4]
+    if (/^[|>][-+]?\s*$/.test(v)) {
+      // A block scalar: the more-indented lines after it.
+      const body = []
+      while (i + 1 < lines.length && (!lines[i + 1].trim() || lines[i + 1].match(/^\s*/)[0].length > m[1].length)) body.push(lines[++i].trim())
+      v = body.join(v.startsWith('>') ? ' ' : '\n').trim()
+    } else v = unq(v)
+    out.set(m[3].trim(), v)
+  }
+  return out
+}
+
+// `gh <word>` where the word is none of gh's commands → the line it runs: { line } for an alias (a `!` alias is a
+// shell line), { none } when gh's config has no such alias (an extension, or a word gh refuses), { why } when the
+// config cannot be found or read.
+async function ghAliasLine($, c) {
+  const file = await ghConfigFile($, c.env)
+  if (!file) return { why: c.what + ' may be an alias, in a gh config the guard cannot place' }
+  const text = await $.fs.read(file).catch(() => null)
+  if (text === null) {
+    // No config file at all: gh has no aliases.
+    const there = await $.fs.stat(file).then(() => true, () => false)
+    return there ? { why: c.what + ' may be an alias in ' + file + ', which the guard could not read' } : { none: true }
+  }
+  const map = ghAliases(text)
+  if (!map) return { why: c.what + ' may be an alias in ' + file + ', which the guard could not read' }
+  const value = map.get(c.sub)
+  if (value === undefined) return { none: true }
+  const args = c.args.map(shq).join(' ')
+  if (value.startsWith('!')) return { line: value.slice(1) + (args ? ' ' + args : '') }
+  return { line: 'gh ' + value + (args ? ' ' + args : '') }
+}
+
+
 // How deep an alias may expand into another alias (git itself stops a loop; the guard stops sooner).
 const ALIAS_DEPTH = 5
 
@@ -800,6 +865,17 @@ async function judgeCands($, cands, ctx, depth) {
       const why = await judgeCands($, inner, ctx, depth + 1)
       if (why) return why
       if (lineMovesHead(a.line)) aliasMoved = true
+      continue
+    }
+    if (c.kind === 'ghalias') {
+      // Below auto a gh alias is read from gh's config and its expansion judged like the line; one that cannot be
+      // read refuses.
+      if (depth >= ALIAS_DEPTH) return denyHidden(c.what + ' expands through more aliases than the guard follows')
+      const a = await ghAliasLine($, c)
+      if (a.why) return denyHidden(a.why)
+      if (a.none) continue
+      const why = await judgeCands($, commandSteps(a.line, c.dir ?? cwd, 0, await homes($)), ctx, depth + 1)
+      if (why) return why
       continue
     }
     if (c.kind === 'protected') return denyProtected(c.what)

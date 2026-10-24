@@ -6,6 +6,7 @@ import { setRunProfile } from '../../hooks/proofs.js'
 import { Profile } from '../../hooks/profile.js'
 import { seed } from '../../hooks/store.js'
 import { commandSteps } from '../../hooks/guard-lex.js'
+import { ghAliases } from '../../hooks/guard-policy.js'
 
 // What the repo looks like to a line read alone: the slice branch is checked out, the base is main.
 const onSlice = { current: 'agt/x', cwd: '/w/app' }
@@ -1560,5 +1561,58 @@ describe('guard: the run pushes only branches it made or that are new', () => {
     expect(judgePush({ remote: 'origin', specs: ['agt/x:feat/y'], force: false, del: false, bulk: null, dry: false, mergeOpt: false } as any, { current: 'agt/x', claim: (n: string) => claims.push(n) } as any)).toBe(null)
     expect(judgePush({ remote: 'origin', specs: ['feat/z'], force: false, del: false, bulk: null, dry: false, mergeOpt: false } as any, { current: 'feat/z', claim: (n: string) => claims.push(n) } as any)).toBe(null)
     expect(claims).toEqual(['feat/y'])
+  })
+})
+
+describe('guard: GitHub writes past merges, releases and refs', () => {
+  test('an approval, an auto-merge label, repo sync, a repository dispatch and httpie writes are steps', async () => {
+    for (const line of [
+      'gh pr review --approve 4',
+      'gh pr review -a 4',
+      'gh pr review 4 --approve --body ok',
+      'gh pr edit 4 --add-label automerge',
+      'gh pr edit 4 --add-label bug,auto-merge',
+      'gh pr edit 4 --add-label=Auto-Merge',
+      'gh repo sync',
+      'gh repo sync o/fork -b main',
+      'gh api -X POST repos/o/r/dispatches -f event_type=ship',
+      'curl -X POST -d \'{"event_type":"ship"}\' https://api.github.com/repos/o/r/dispatches',
+      'http PUT api.github.com/repos/o/r/pulls/4/merge',
+      'https PUT https://api.github.com/repos/o/r/pulls/4/merge merge_method=merge',
+      'xh POST https://api.github.com/repos/o/r/releases tag_name=v1',
+      'xhs api.github.com/repos/o/r/git/refs sha=abc ref=refs/heads/main',
+      "http POST api.github.com/graphql query='mutation { mergePullRequest(input: {}) { clientMutationId } }'",
+    ]) expect([line, integrationIn(line, onSlice)]).toEqual([line, expect.any(String)])
+    for (const line of [
+      'gh pr review --comment -b ok 4',
+      'gh pr review --request-changes -b fix 4',
+      'gh pr edit 4 --add-label bug',
+      'http api.github.com/repos/o/r/pulls',
+      'http GET api.github.com/repos/o/r/pulls/4/merge',
+      'xh https://api.github.com/repos/o/r per_page==5',
+      'http POST localhost:3000/api/items name=x',
+    ]) expect([line, integrationIn(line, onSlice)]).toEqual([line, null])
+  })
+
+  test('a gh alias is read from gh\'s config and its expansion judged; an unreadable config refuses', async ($, on) => {
+    const cfg = "version: '1'\naliases:\n    co: pr checkout\n    pm: pr merge\n    ship: '!gh pr merge \"$1\" --squash'\n    lsx: |\n        pr list\ngit_protocol: https\n"
+    const { ran } = setup(on, { profile: { integration: 'pr' }, files: { '/h/.config/gh/config.yml': cfg } })
+    await boot($)
+    await typed($)
+    expect((await bash($, 'gh pm 4')).deny).toBe(DENY_INTEGRATION)
+    expect((await bash($, 'gh ship 4')).deny).toBe(DENY_INTEGRATION)
+    expect((await bash($, 'GH_CONFIG_DIR=cfg gh pm 4')).deny).toContain('cannot place')
+    expect((await bash($, 'gh co 4')).result).toBe('ok')
+    expect((await bash($, 'gh lsx')).result).toBe('ok')
+    expect((await bash($, 'gh dash')).result).toBe('ok')
+    expect(ran).toEqual(['gh co 4', 'gh lsx', 'gh dash'])
+  })
+
+  test('ghAliases reads the aliases map, and refuses a shape it cannot read', () => {
+    expect([...ghAliases("aliases:\n  co: pr checkout\n  'x': \"!gh pr merge\"\nother: 1\n")!]).toEqual([['co', 'pr checkout'], ['x', '!gh pr merge']])
+    expect(ghAliases('git_protocol: https\n')!.size).toBe(0)
+    expect(ghAliases('aliases: {}\n')!.size).toBe(0)
+    expect(ghAliases('aliases: {co: pr checkout}\n')).toBe(null)
+    expect(ghAliases('aliases:\n  - co\n')).toBe(null)
   })
 })

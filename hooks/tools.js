@@ -1,14 +1,15 @@
 // agentille pane tools: the handlers behind spawn_pane, open_sessions and close_pane. Each checks the typed proof
-// the mod holds (S.agtTyped, S.sessionsAsked), the installed version and the transport before it touches a pane;
+// the mod holds (proofs.js: spawnAllowed, sessionsAllowed), the installed version and the transport before it touches a pane;
 // register.js only wires them to tool.call.
 
-import { S } from './state.js'
+import { S, isLead } from './state.js'
 import { demoteToast, runState, writeRunFile } from './dispatch.js'
 import { pieceOf, party, taskLine } from './links.js'
 import { PROBE, newRunId, doneFile, paneKey, answerFile, tmuxKillArgv, placePlan, codexNote, herdrCloseArgv, paneRole, spawnToolInput, closeTarget, sessionName, sessionsToolInput, sessionsNote } from './panes.js'
 import { installedSkew } from './profile.js'
 import { pollNow } from './reaper.js'
-import { formationOf, mentionsCodex, mentionsFable, proveHeader, demoteHeaderText, ladderFixes, decide, runInFlight } from './routing.js'
+import { spawnAllowed, sessionsAllowed, fableProof } from './proofs.js'
+import { formationOf, mentionsCodex, mentionsFable, proveHeader, demoteHeaderText, ladderFixes, decide } from './routing.js'
 import { saveSessions, closeSession, openSession } from './sessions.js'
 import { skewMessage } from './skew.js'
 import { transportOf, openPane, savePanes } from './spawn.js'
@@ -19,7 +20,7 @@ const { decisions, paneRoutes, openedNames, ownedTabs, wireLog } = S
 
 // spawn_pane: the /agt heavy level's worker pane, the same openPane as /agt-spawn, with the input validated here.
 export async function spawnPane($, e) {
-  if (S.selfName || S.worker) return { deny: 'This is a worker pane (' + (S.selfName ?? S.worker.agent) + '); workers do not open panes.' }
+  if (!isLead()) return { deny: 'This is a worker pane (' + (S.selfName ?? S.worker.agent) + '); workers do not open panes.' }
   // An update since this session started leaves it on old code: its workers would never report.
   const skew = await installedSkew($)
   if (skew) {
@@ -29,16 +30,17 @@ export async function spawnPane($, e) {
   }
   const t = await transportOf($)
   if (t === 'none') return { deny: 'No pane transport here: run the slice as a subagent.' }
-  if (!S.agtTyped) return { deny: 'spawn_pane opens worker panes only in a session where /agt was typed.' }
+  if (!S.agtTyped) return { deny: spawnAllowed() }
   await pollNow($, t) // the panes as they are now: one that closed since the last poll no longer keeps the run going
-  if (!runInFlight(S)) return { deny: 'spawn_pane opens worker panes only while the typed /agt run is in flight; the next run needs the next typed /agt.' }
+  const why = spawnAllowed()
+  if (why) return { deny: why }
   const a = spawnToolInput(e, S.panes)
   if (a.error) return { deny: a.error }
   // Codex is the person's pick, never the lead's: their /agt prompt or their newest typed prompt names it.
   const codex = a.vendor === 'codex'
   if (codex && !mentionsCodex(S.agtPrompt) && !mentionsCodex(S.lastTyped)) return { deny: 'vendor "codex" runs only when the person asked for Codex in their prompt, so run this slice as a Claude pane.' }
   if (codex && t !== 'herdr') return { deny: 'Codex panes need Herdr; run this slice as a Claude pane or subagent.' }
-  const proof = proveHeader(a.hdr, { fableTyped: S.fableTyped })
+  const proof = proveHeader(a.hdr, { fableTyped: fableProof() })
   if (proof.demoted) {
     a.hdr = proof.hdr
     a.header = demoteHeaderText(a.header)
@@ -116,7 +118,7 @@ export async function spawnPane($, e) {
 // Codex session is closed when idle: after SESSION_IDLE_MS unfocused (panes.js → sessionSweep), and at session end
 // (agentille-sweep.sh, from the lead's lead-<pane>.sessions list).
 export async function openSessions($, e) {
-  if (S.selfName || S.worker) return { deny: 'This is a worker pane (' + (S.selfName ?? S.worker.agent) + '); workers do not open sessions.' }
+  if (!isLead()) return { deny: 'This is a worker pane (' + (S.selfName ?? S.worker.agent) + '); workers do not open sessions.' }
   const skew = await installedSkew($)
   if (skew) {
     if (!S.skewToasted) $.ui.toast('agt ⚑ ' + skewMessage(skew, S.runningVersion))
@@ -125,7 +127,7 @@ export async function openSessions($, e) {
   }
   const t = await transportOf($)
   if (t === 'none') return { deny: 'No pane transport here: sessions open as panes only inside Herdr or tmux.' }
-  if (!S.sessionsAsked) return { deny: 'open_sessions runs only on a turn where the person typed a request for sessions, panes or terminals.' }
+  if (!sessionsAllowed()) return { deny: 'open_sessions runs only on a turn where the person typed a request for sessions, panes or terminals.' }
   const a = sessionsToolInput(e, { typed: S.lastTyped, fableTyped: mentionsFable(S.lastTyped) })
   if (a.error) return { deny: a.error }
   if (a.kind === 'codex' && t !== 'herdr') return { deny: 'Codex sessions need Herdr.' }
@@ -162,7 +164,7 @@ export async function openSessions($, e) {
 
 // close_pane: one of this lead's own worker panes or sessions, by name.
 export async function closePane($, e) {
-  if (S.selfName || S.worker) return { deny: 'This is a worker pane (' + (S.selfName ?? S.worker.agent) + '); workers do not close panes.' }
+  if (!isLead()) return { deny: 'This is a worker pane (' + (S.selfName ?? S.worker.agent) + '); workers do not close panes.' }
   const t = await transportOf($)
   if (t === 'none') return { deny: 'No pane transport here.' }
   const s = S.sessions.find((x) => x.name === (typeof e.name === 'string' ? e.name.trim() : ''))

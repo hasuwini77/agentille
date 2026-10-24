@@ -50,6 +50,39 @@ describe('guard: which commands integrate', () => {
     ]) expect([line, integrationIn(line, onSlice)]).toEqual([line, expect.any(String)])
   })
 
+  test('branch protection, rulesets, the default branch and workflow runs are steps; reads are not', async () => {
+    for (const line of [
+      'gh api -X DELETE repos/o/r/branches/main/protection',
+      'gh api -X PUT repos/o/r/branches/main/protection --input p.json',
+      'gh api repos/o/r/branches/main/protection/required_status_checks -X PATCH -f strict=false',
+      'gh api -X DELETE repos/o/r/branches/release/1.x/protection',
+      'gh api -X POST repos/o/r/rulesets --input r.json',
+      'gh api -X DELETE repos/o/r/rulesets/7',
+      'gh api -X PATCH repos/o/r -f default_branch=agt/x',
+      'gh api --method PATCH repos/o/r --input repo.json',
+      'gh api repos/o/r/actions/workflows/release.yml/dispatches -f ref=main',
+      'gh api -X PUT repos/o/r/actions/workflows/ci.yml/disable',
+      'gh workflow run release.yml',
+      'gh workflow enable ci.yml',
+      'gh workflow disable ci.yml -R o/r',
+      'gh repo edit --default-branch agt/x',
+      'gh repo edit o/r --default-branch=agt/x',
+      'curl -X DELETE -H "Authorization: token t" https://api.github.com/repos/o/r/branches/main/protection',
+      'curl -X PATCH -d \'{"default_branch":"agt/x"}\' https://api.github.com/repos/o/r',
+      'curl -X PATCH --data-binary @repo.json https://api.github.com/repos/o/r',
+    ]) expect([line, integrationIn(line, onSlice)]).toEqual([line, expect.any(String)])
+    for (const line of [
+      'gh api repos/o/r/branches/main/protection',
+      'gh api repos/o/r',
+      'gh api -X PATCH repos/o/r -f description=docs',
+      'gh workflow list',
+      'gh workflow view ci.yml',
+      'gh run list',
+      'gh repo edit --description docs',
+      'curl https://api.github.com/repos/o/r/branches/main/protection',
+    ]) expect([line, integrationIn(line, onSlice)]).toEqual([line, null])
+  })
+
   test('pushes of the base branch, tags, every branch, a force or a variable are caught', async () => {
     for (const line of [
       'git push origin HEAD:main',
@@ -393,7 +426,7 @@ describe('guard: worktree adds', () => {
 // A run in a session with no pane transport: the ownership list lives in memory.
 // git: per dir, the branch checked out (`current`), its remote URL and its main checkout (default /work/repo).
 type Repo = { current?: string; remote?: string; common?: string; pushurl?: string; upstream?: string }
-const setup = (on: any, o: { profile?: unknown; repoConfig?: unknown; env?: Record<string, string>; files?: Record<string, string>; repos?: Record<string, Repo>; feat?: boolean; broken?: boolean } = {}) => {
+const setup = (on: any, o: { profile?: unknown; repoConfig?: unknown; env?: Record<string, string>; files?: Record<string, string>; repos?: Record<string, Repo>; feat?: boolean; broken?: boolean; aliases?: Record<string, string>; aliasBroken?: boolean; pyFind?: Record<string, string> } = {}) => {
   const seen: string[][] = []
   const ran: string[] = []
   const git = { made: false, committed: false, feat: false }
@@ -444,6 +477,11 @@ const setup = (on: any, o: { profile?: unknown; repoConfig?: unknown; env?: Reco
     const a = e.argv.join(' ')
     if (o.broken && e.argv[0] === 'git' && !a.includes('worktree list')) return { deny: 'git could not be run' }
     const out = (stdout: string, exitCode = 0) => ({ value: { exitCode, stdout, stderr: '' } })
+    // python -I -c <find_spec> <name>: where the module lives outside the folder, '' when nowhere.
+    if (/^python/.test(e.argv[0]) && e.argv.includes('-I')) return out((o.pyFind?.[e.argv[e.argv.length - 1]] ?? '') + '\n')
+    // git config --get alias.<word>: the value, exit 1 when there is none, a deny when git cannot be run.
+    const am = /config --get alias\.(\S+)$/.exec(a)
+    if (am) return o.aliasBroken ? { deny: 'git could not be run' } : o.aliases?.[am[1]] ? out(o.aliases[am[1]] + '\n') : out('', 1)
     if (a === 'git -C /work/repo worktree list --porcelain') {
       return out([
         'worktree /work/repo', 'HEAD ' + (git.committed ? 'm2' : 'm1'), 'branch refs/heads/main', '',
@@ -500,7 +538,7 @@ describe('guard: integration in the mod', () => {
     expect(ran).toEqual(['gh pr create --base main --title x --body y'])
   })
 
-  test('a question typed mid-run keeps the lead and its subagent guarded', async ($, on) => {
+  test('a question typed mid-run keeps the lead and its subagent guarded', { timeoutMs: 20_000 }, async ($, on) => {
     setup(on)
     await boot($)
     await typed($)
@@ -734,8 +772,10 @@ describe('guard: it fails closed', () => {
     await typed($)
     expect((await bash($, 'git push -u origin agt/x')).deny).toBe(DENY_UNREAD)
     expect((await bash($, 'gh pr merge 3')).deny).toBe(DENY_UNREAD)
-    expect((await bash($, 'npm test')).result).toBe('ok')
-    expect(ran).toEqual(['npm test'])
+    // npm test runs a package script the guard reads in the repo's mode: unreadable here, so refused too.
+    expect((await bash($, 'npm test')).deny).toBe(DENY_UNREAD)
+    expect((await bash($, 'echo done')).result).toBe('ok')
+    expect(ran).toEqual(['echo done'])
   })
 
   test('below auto no branch is deleted on the remote, an own-prefix one included', async ($, on) => {
@@ -776,6 +816,25 @@ describe('guard: the lead stays guarded for the whole run', () => {
     await subDone($)
     for (const t of ['a', 'b', 'c', 'd']) await typed($, t)
     expect((await bash($, 'gh pr merge 9 --merge')).deny).toBe(DENY_INTEGRATION)
+  })
+
+  test('a typed /agt-info or /agt-focus starts no run and no hold', async ($, on) => {
+    const { ran } = setup(on, { profile: { integration: 'pr' } })
+    await boot($)
+    for (const t of ['/agt-info', '/agt-focus off']) await typed($, t)
+    expect((await bash($, 'git push origin HEAD:main')).result).toBe('ok')
+    expect(ran).toEqual(['git push origin HEAD:main'])
+  })
+
+  test('a run that never names an id stays guarded past three typed replies, until its card', async ($, on) => {
+    const { ran } = setup(on, { profile: { integration: 'pr' } })
+    await boot($)
+    await typed($)
+    for (const t of ['a', 'b', 'c']) await typed($, t)
+    expect((await bash($, 'git push origin HEAD:main')).deny).toContain('git push to main')
+    await card($)
+    expect((await bash($, 'git push origin HEAD:main')).result).toBe('ok')
+    expect(ran).toEqual(['git push origin HEAD:main'])
   })
 
   test('a dispatch on a later turn names the run when the /agt turn did not', { timeoutMs: 20_000 }, async ($, on) => {
@@ -930,6 +989,138 @@ describe('guard: scripts are read before they run', () => {
   })
 })
 
+describe('guard: package scripts, modules and imports are followed', () => {
+  const pkg = (scripts: Record<string, string>) => JSON.stringify({ scripts })
+  const files = {
+    '/work/repo/package.json': pkg({
+      preship: 'git push origin main', ship: 'echo shipping',
+      build: 'tsc', postbuild: 'npm run tag-it', 'tag-it': 'git tag v1',
+      a: 'npm run b', b: 'echo b && sh ./tools/push.sh',
+      rel: 'node tools/rel.mjs', gone: 'node tools/gone.mjs', mod: 'python3 -m tools.rel',
+      loop: 'npm run loop', d1: 'npm run d2', d2: 'npm run d3', d3: 'npm run d4', d4: 'npm run d5', d5: 'npm run d6', d6: 'npm run d7', d7: 'echo deep',
+      test: 'git push origin HEAD:main', lint: 'eslint .', fine: 'node tools/fine.mjs',
+      vary: 'bash "$D/x.sh"', check: 'sh ./tools/check.sh', wrap: 'sh ./tools/wrap.sh',
+    }),
+    '/work/repo/tools/check.sh': '#!/bin/sh\nD=$(dirname "$0")\nbash "$D/x.sh"\nsh ./tools/absent.sh\nnode ./tools/fine.mjs\n',
+    '/work/repo/tools/wrap.sh': '#!/bin/sh\nset -e\nsh ./tools/push.sh\n',
+    '/work/repo/tools/push.sh': '#!/bin/sh\ngit push origin main\n',
+    '/work/repo/tools/rel.mjs': "import { run } from './lib.js'\nrun()\n",
+    '/work/repo/tools/lib.js': "import { execSync } from 'node:child_process'\nexport const run = () => execSync('git push origin HEAD:main')\n",
+    '/work/repo/tools/fine.mjs': "import { x } from './util'\nimport fs from 'node:fs'\nconsole.log(x)\n",
+    '/work/repo/tools/util.ts': 'export const x = 1\n',
+    '/work/repo/tools/broken.mjs': "import './nowhere.js'\n",
+    '/work/repo/tools/__init__.py': '',
+    '/work/repo/tools/rel.py': 'import subprocess\nsubprocess.run(["git", "push", "origin", "main"])\n',
+    '/work/repo/src/app/__init__.py': '',
+    '/work/repo/src/app/__main__.py': 'import os\nos.system("gh pr merge 1")\n',
+    '/work/repo/pkg/__init__.py': '',
+    '/work/repo/pkg/ok.py': 'print(1)\n',
+  }
+
+  test('pre and post scripts, nested runs, scripts, imports and modules are read', { timeoutMs: 20_000 }, async ($, on) => {
+    const { ran } = setup(on, { files, pyFind: { pytest: '/usr/lib/python3/site-packages/pytest/__init__.py', http: '/usr/lib/python3.12/http/__init__.py' } })
+    await boot($)
+    await typed($)
+    const deny = async (line: string, text: string) => expect([line, (await bash($, line)).deny]).toEqual([line, expect.stringContaining(text)])
+    await deny('npm run ship', 'npm run ship (its preship script) runs a package script that calls git push')
+    await deny('npm run build', 'npm run build (its postbuild script), then npm run tag-it runs a package script')
+    await deny('npm run a', 'tools/push.sh runs a script that calls git push')
+    await deny('pnpm run rel', 'imports ./lib.js, which calls git push')
+    await deny('yarn run gone', 'node tools/gone.mjs runs a file the guard cannot read')
+    await deny('bun run mod', 'python3 -m tools.rel runs a module that calls git push')
+    await deny('npm run d1', 'nested deeper than the guard reads')
+    await deny('npm test', 'npm test runs a package script that calls git push')
+    await deny('pnpm test', 'pnpm test runs a package script')
+    await deny('pnpm ship', 'its preship script')
+    await deny('pnpm -r run build', 'another package folder')
+    await deny('npm run lint --workspaces', 'another package folder')
+    await deny('npm -w app run lint -- -x', 'another package folder')
+    await deny('pnpm --filter app test', 'another package folder')
+    await deny('npm --loglevel silent run ship', 'its preship script')
+    await deny('node tools/rel.mjs', 'imports ./lib.js, which calls git push')
+    await deny('node tools/broken.mjs', 'imports ./nowhere.js, which the guard cannot read')
+    await deny('python3 -m tools.rel', 'runs a module that calls git push')
+    await deny('PYTHONPATH=src python3 -m app', 'python3 -m app runs a module that calls git push')
+    await deny('python3 -m nowhere.mod', 'runs a module the guard cannot find')
+    await deny('PYTHONPATH=$X python3 -m nowhere', 'PYTHONPATH entry the guard cannot read')
+    // A package script's own steps are judged strictly: a script named through a variable refuses.
+    await deny('npm run vary', 'cannot locate')
+    // A shell file's steps are followed where the guard can place and read them; the rest are skipped.
+    await deny('npm run wrap', 'tools/push.sh runs a script that calls git push')
+    await deny('sh tools/wrap.sh', 'tools/push.sh runs a script that calls git push')
+    const ok = ['npm run loop', 'npm run lint', 'npm run fine', 'node tools/fine.mjs', 'python3 -m pkg.ok', 'python3 -m pytest -q', 'python3 -m http.server', 'pnpm install', 'yarn', 'bun test',
+      'npm run check', 'sh tools/check.sh', 'npm i -g typescript', 'pnpm add -w lodash', 'pnpm -r install', 'npm install --prefix x', 'yarn add left-pad',
+      'npm run lint -- -g adds', 'npm run lint -- -w', 'pnpm run lint -- --filter x']
+    for (const line of ok) expect([line, (await bash($, line)).result]).toEqual([line, 'ok'])
+    expect(ran).toEqual(ok)
+  })
+
+  test('a run script that is not there, or a package.json that does not parse, is refused', async ($, on) => {
+    setup(on, { files: { '/work/repo/package.json': '{ not json' } })
+    await boot($)
+    await typed($)
+    expect((await bash($, 'npm run build')).deny).toContain('package script the guard cannot read')
+    expect((await bash($, 'npm test')).deny).toContain('package script the guard cannot read')
+  })
+})
+
+describe('guard: git aliases from config', () => {
+  test('a word that is no git command is looked up as an alias and its expansion judged', async ($, on) => {
+    const { ran, seen } = setup(on, { repos: { '/work/repo': { current: 'agt/x' } }, aliases: { pom: 'push origin HEAD:main', ship: '!git push origin HEAD:main', st: 'status', mine: 'push -u origin agt/x' } })
+    await boot($)
+    await typed($)
+    expect((await bash($, 'git pom')).deny).toContain('git push to main')
+    expect((await bash($, 'git ship')).deny).toContain('git push to main')
+    expect((await bash($, 'git -C /work/repo pom')).deny).toContain('git push to main')
+    expect((await bash($, 'git st')).result).toBe('ok')
+    expect((await bash($, 'git mine')).result).toBe('ok')
+    expect((await bash($, 'git lfs ls-files')).result).toBe('ok')
+    expect((await bash($, 'git status')).result).toBe('ok')
+    expect(ran).toEqual(['git st', 'git mine', 'git lfs ls-files', 'git status'])
+    // git's own commands are never looked up: git ignores an alias that shadows one.
+    expect(seen.some((a) => a.join(' ').includes('alias.status'))).toBe(false)
+    expect(seen.some((a) => a.join(' ') === 'git -C /work/repo config --get alias.pom')).toBe(true)
+  })
+
+  test('an alias a package script or a shell script runs is looked up too', async ($, on) => {
+    const files = {
+      '/work/repo/package.json': JSON.stringify({ scripts: { ship: 'git pom', status: 'git st', sh: 'sh ./ship.sh' } }),
+      '/work/repo/ship.sh': '#!/bin/sh\nset -e\ngit pom\n',
+    }
+    const { ran } = setup(on, { files, repos: { '/work/repo': { current: 'agt/x' } }, aliases: { pom: 'push origin HEAD:main', st: 'status' } })
+    await boot($)
+    await typed($)
+    expect((await bash($, 'npm run ship')).deny).toContain('npm run ship, then git pom runs a package script that calls git push')
+    expect((await bash($, 'sh ship.sh')).deny).toContain('sh ship.sh, then git pom runs a script that calls git push')
+    expect((await bash($, 'npm run sh')).deny).toContain('then git pom')
+    expect((await bash($, 'npm run status')).result).toBe('ok')
+    expect(ran).toEqual(['npm run status'])
+  })
+
+  test('an alias the guard cannot look up is refused in a run; outside a run nothing is looked up', async ($, on) => {
+    const { ran, seen } = setup(on, { aliasBroken: true })
+    await boot($)
+    expect((await bash($, 'git pom')).result).toBe('ok')
+    expect(seen.some((a) => a.join(' ').includes('alias.'))).toBe(false)
+    await typed($)
+    expect((await bash($, 'git pom')).deny).toContain('could not look up')
+    expect((await bash($, 'cd "$X" && git pom')).deny).toContain('cannot place')
+    expect(ran).toEqual(['git pom'])
+  })
+
+  test('git submodule foreach: its line is judged, in a repo the guard cannot place', async () => {
+    expect(integrationIn("git submodule foreach 'git push origin HEAD:main'", onSlice)).toBe('git push to main')
+    expect(integrationIn("git submodule --quiet foreach --recursive 'git tag v1'", onSlice)).toBe('git tag (in git submodule foreach)')
+    expect(integrationIn("git submodule foreach 'echo x >> .git/config'", onSlice)).toBe('.git/config (in git submodule foreach)')
+    expect(integrationIn("git submodule foreach 'git status'", onSlice)).toBeNull()
+  })
+
+  test('an alias set for one call or written to config stays a step of its own', async () => {
+    expect(integrationIn('git -c alias.p=push p origin agt/x:main', onSlice)).toBe('git -c alias.*')
+    expect(integrationIn('git config alias.p push && git p origin HEAD:main', onSlice)).toBe('git config alias.*')
+  })
+})
+
 describe('guard: unreadable words and sources fail closed', () => {
   test('a substitution, a pipe into a shell, xargs, an interpreter spawn, awk, an opaque runner or an inline alias is refused', async () => {
     for (const line of [
@@ -970,11 +1161,43 @@ describe('guard: the trust root and the repo git state are off-limits below auto
       'git config remote.origin.push +refs/heads/*:refs/heads/*',
       'sed -i s/x/y/ .git/config',
     ]) expect([line, integrationIn(line, onSlice)]).toEqual([line, expect.any(String)])
+    // Config that runs code or moves where a push lands, set for one call or written: refused as a config write.
+    for (const line of [
+      'git -c push.default=upstream push',
+      'git -c push.default=matching push origin',
+      'git config push.default matching',
+      'git config --global push.default current',
+      'git -c core.fsmonitor=./watch.sh status',
+      'git config core.fsmonitor ./watch.sh',
+      'git -c core.sshCommand="sh ./x.sh" fetch',
+      'git --config-env=core.sshCommand=CMD fetch',
+      'GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=push.default GIT_CONFIG_VALUE_0=matching git push',
+    ]) expect([line, integrationIn(line, onSlice)]).toEqual([line, expect.stringContaining('git config key')])
+    // Any case (APFS and NTFS open .GIT/CONFIG as .git/config), a submodule's git dir, and a link to or a move of
+    // a protected path.
+    for (const line of [
+      'echo x >> .GIT/CONFIG',
+      'echo x >> .Git/Hooks/pre-push',
+      'printf x > ~/.Agentille/profile.json',
+      'echo x >> /work/repo/.git/modules/sub/config',
+      'cp hook .git/modules/sub/hooks/pre-push',
+      'echo x >> .git/modules/a/modules/b/config',
+      'echo abc > .git/modules/sub/refs/heads/main',
+      'ln -s .git g',
+      'ln -s .git/config cfg',
+      'ln -sf ../.git/hooks h',
+      'mv .git/config /tmp/c',
+    ]) expect([line, integrationIn(line, onSlice)]).toEqual([line, expect.any(String)])
     for (const line of [
       'echo x > notes.md',
       'cp a b',
       'git config user.name me',
       'git config --get remote.origin.url',
+      'git config --get push.default',
+      'ln -s ../shared/config.json config.json',
+      'mv notes.md docs/notes.md',
+      'cat .git/modules/sub/config',
+      'ls 2>&1 > /dev/null',
     ]) expect([line, integrationIn(line, onSlice)]).toEqual([line, null])
   })
 })
@@ -989,6 +1212,22 @@ describe('guard: protected writes and package scripts in the mod', () => {
     expect((await $.tool.call({ tool: 'Write', file_path: '/h/.agentille/profile.json', content: 'x' } as never)).deny).toContain('may not write')
     expect((await $.tool.call({ tool: 'Edit', file_path: '/work/repo/.git/config', old_string: 'a', new_string: 'b' } as never)).deny).toContain('may not write')
     expect((await $.tool.call({ tool: 'Write', file_path: '/work/repo/notes.md', content: 'x' } as never))?.deny).toBeUndefined()
+    expect((await $.tool.call({ tool: 'Edit', file_path: '/work/repo/.GIT/Config', old_string: 'a', new_string: 'b' } as never)).deny).toContain('may not write')
+    expect((await $.tool.call({ tool: 'Write', file_path: '/H/.AGENTILLE/profile.json', content: 'x' } as never)).deny).toContain('may not write')
+    expect((await $.tool.call({ tool: 'Write', file_path: '/work/repo/.git/modules/sub/hooks/pre-push', content: 'x' } as never)).deny).toContain('may not write')
+  })
+
+  test('inside a run a Write/Edit the guard cannot judge is refused; outside a run it goes through', async ($, on) => {
+    const { ran } = setup(on)
+    await boot($)
+    // A path that is no string makes the judgement throw.
+    expect((await $.tool.call({ tool: 'Write', file_path: 42, content: 'x' } as never))?.deny).toBeUndefined()
+    expect((await $.tool.call({ tool: 'Edit', file_path: 42, old_string: 'a', new_string: 'b' } as never))?.deny).toBeUndefined()
+    await typed($)
+    expect((await $.tool.call({ tool: 'Write', file_path: 42, content: 'x' } as never)).deny).toBe('The guard could not judge this write to 42, so it refused it. Retry, or make the change yourself.')
+    expect((await $.tool.call({ tool: 'Edit', file_path: 42, old_string: 'a', new_string: 'b' } as never)).deny).toContain('could not judge this write to 42')
+    expect((await $.tool.call({ tool: 'NotebookEdit', notebook_path: 42, new_source: 'x' } as never)).deny).toContain('could not judge')
+    expect(ran).toHaveLength(2)
   })
 
   test('under auto the profile and config are writable again', async ($, on) => {

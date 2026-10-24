@@ -2,10 +2,12 @@
 // lead (split or run tab), the startup dialogs it clears, the run tabs a lead records, and the pane tools'
 // registration on the typed prompt that unlocks them.
 
-import { isLead, Profile, Session } from './state.js'
+import { isLead, Session } from './session.js'
+import { Profile } from './profile.js'
 import { makeStore } from './store.js'
 import { PROBE, HERDR_START_TIMEOUT, pickTransport, splitName, paneKey, answerFile, advisorEnv, tmuxSplitArgv, tmuxEvenArgv, tmuxTagArgvs, tmuxTitleLockArgv, tmuxPaneIdOf, tmuxKillArgv, herdrSplitArgv, herdrPaneIdOf, herdrTabArgv, herdrTabOf, herdrTabListArgv, herdrTabIds, tabsFile, panesFile, startupDialog, dialogKeys, herdrReadArgv, herdrKeysArgv, agentStatusOf, herdrGetArgv, screenLine, codexTask, herdrStartArgv, herdrPromptArgv, herdrCloseArgv, herdrMetaArgv, SPAWN_TOOL, CLOSE_TOOL, OPEN_SESSIONS_TOOL } from './panes.js'
 import { wireEnv, shortName } from './wire.js'
+import { tmuxInit } from './tmux-env.js'
 import { sameConfig } from './trust.js'
 export { sameConfig, commandPaths } from './trust.js'
 
@@ -35,7 +37,7 @@ export function ownName(name) {
 
 export async function probeOk($, argv) {
   try {
-    return (await $.process.run(argv, PROBE)).exitCode === 0
+    return (await $.process.run(argv, tmuxInit(argv, PROBE))).exitCode === 0
   } catch {
     return false
   }
@@ -199,8 +201,13 @@ export async function clearDialogs($, name, cwd) {
   throw new Error('startup dialogs did not clear after 3 tries')
 }
 
+// One tmux call with the probe timeout and the UTF-8 locale (tmux-env.js); the result as $.process.run gives it.
+export function runTmux($, argv) {
+  return $.process.run(argv, tmuxInit(argv, PROBE))
+}
+
 export async function runOk($, argv, init) {
-  const r = await $.process.run(argv, init)
+  const r = await $.process.run(argv, tmuxInit(argv, init))
   if (r.exitCode !== 0) throw new Error(argv.slice(0, 3).join(' ') + ' exited ' + r.exitCode + (r.stderr ? ': ' + String(r.stderr).trim().slice(0, 120) : ''))
   return r
 }
@@ -230,13 +237,13 @@ export async function openPane($, t, o) {
     if (!id) throw new Error('tmux gave no pane id')
     try {
       for (const argv of tmuxTagArgvs(id, o.name)) await runOk($, argv, PROBE)
-      await $.process.run(tmuxTitleLockArgv(id), PROBE).catch(() => {})  // tmux < 3.3 has no allow-set-title; the pane still opens
+      await runTmux($, tmuxTitleLockArgv(id)).catch(() => {})  // tmux < 3.3 has no allow-set-title; the pane still opens
     } catch (err) {
-      await $.process.run(tmuxKillArgv(id), PROBE).catch(() => {})
+      await runTmux($, tmuxKillArgv(id)).catch(() => {})
       throw err
     }
     // Even out the stack; a cosmetic failure never loses the worker.
-    if (o.split && o.split.target !== lead) await $.process.run(tmuxEvenArgv(id), PROBE).catch(() => {})
+    if (o.split && o.split.target !== lead) await runTmux($, tmuxEvenArgv(id)).catch(() => {})
     return { id, tab: null }
   }
   const lead = await $.env.get('HERDR_PANE_ID')

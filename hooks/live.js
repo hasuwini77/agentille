@@ -77,9 +77,12 @@ export function effortBar(effort) {
   return EFFORT_BAR[effort] ?? ' '
 }
 
+// The run's ledger: tokens and time per role, minutes per pane role, and per slice the newest state of each role
+// that works on it (`slices`: slug → role → working | done). The compaction hook reads `slices` back.
 export function ledger(agents, run, routes = []) {
   const roles = {}
   const panes = {}
+  const slices = {}
   const total = { agents: 0, input: 0, output: 0, cacheRead: 0, ms: 0 }
   for (const a of agents.values()) {
     if ((a.fileRun ?? a.run) !== run) continue // a headerless workflow agent counts under its file run (ad hoc), not the band's
@@ -88,14 +91,16 @@ export function ledger(agents, run, routes = []) {
     for (const t of [r, total]) {
       t.agents += 1; t.input += a.input; t.output += a.output; t.cacheRead += a.cacheRead; t.ms += ms
     }
+    if (a.slice) (slices[a.slice] ??= {})[a.role] = a.state
   }
   for (const r of routes) {
     if (r.run !== run) continue
     const t = (panes[r.agent ?? r.role] ??= { agents: 0, ms: 0 })
     t.agents += 1
     t.ms += (r.end ?? r.start) - r.start
+    if (r.slice) (slices[r.slice] ??= {})[r.agent ?? r.role] = r.end == null ? 'working' : 'done'
   }
-  return { run, roles, total, panes }
+  return { run, roles, total, panes, slices }
 }
 
 export function ledgerText(l) {
@@ -134,7 +139,7 @@ function newestRoute(routes, name, open = false) {
 
 export function withRoute(pane, routes = []) {
   const r = newestRoute(routes, pane.name)
-  return { ...pane, agent: r?.agent ?? null, model: r?.model ?? null, effort: r?.effort ?? null, reason: r?.reason ?? null, start: r?.start ?? null, piece: r?.piece ?? null, verdict: r?.verdict ?? null }
+  return { ...pane, agent: r?.agent ?? null, model: r?.model ?? null, effort: r?.effort ?? null, reason: r?.reason ?? null, start: r?.start ?? null, slice: r?.slice ?? null, verdict: r?.verdict ?? null }
 }
 
 export function endRoute(routes, name, now) {

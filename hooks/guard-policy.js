@@ -2,9 +2,14 @@
 // repo caps, the snapshot taken at the typed /agt), judges pushes, merges, tags, releases, ref writes and the
 // GitHub REST/GraphQL API, and reads scripts and package/make recipes before they run. The lexer
 // (guard-lex.js) turns a line into the candidates these functions judge.
-import { Profile, Proofs } from './state.js'
+import { Profile } from './profile.js'
+import { Proofs } from './proofs.js'
 import { PROBE } from './panes.js'
-import { base, commands, commandSteps, joinPath, SCRIPT_RISK, MAKE_RISK } from './guard-lex.js'
+import { base, commands, commandSteps, joinPath, lineMovesHead, protectedPath, SCRIPT_RISK, MAKE_RISK } from './guard-lex.js'
+import { PLAIN_MODULE, jsCandidates, jsImports, moduleFiles, scriptChain } from './script-refs.js'
+
+// The gh and curl/wget step readers live in a leaf the lexer shares; the policy keeps carrying their names.
+export { ghStep, httpStep } from './guard-steps.js'
 
 export const DENY_INTEGRATION = 'integration auto is not set in your profile for this repo; the run stops at the PR.'
 
@@ -88,127 +93,6 @@ export function judgePush(p, { current = null, pushDst = null, bases = new Set([
 }
 
 
-// ── which commands integrate ─────────────────────────────────────────────────
-// Each candidate: { kind: 'step' (merge, tag, release: auto only) | 'push' (judged) | 'pr' (refused under
-// local), what, dir (where it runs; null when a variable names it), slug (a repo it names: owner/repo or a URL) }.
-const API_WRITES = new Set(['merge', 'merges', 'merge-upstream', 'releases'])
-
-const API_WRITE_PATH = /^repos\/[^/]+\/[^/]+\/(git\/refs|git\/tags|contents)(\/|$)/
-
-const MUTATION = /\b(mergePullRequest|enablePullRequestAutoMerge|enqueuePullRequest|createRelease|updateRelease|deleteRelease|createRef|updateRef|updateRefs|deleteRef|mergeBranch|createCommitOnBranch)\b/
-
-// A GraphQL body that writes a merge, a ref or a release; or one the guard cannot read (a file, a variable).
-const GQL_WRITE = /\bmutation\b[\s\S]*(merge|ref|release|tag|commitonbranch)/i
-
-const gqlWrites = (body) => MUTATION.test(body) || GQL_WRITE.test(body)
-
-const gqlUnread = (field) => /^query=(@|\$)/.test(field)
-
-const apiSlug = (path) => {
-  const m = /^repos\/([^/]+)\/([^/]+)/.exec(path)
-  return m && !m[1].startsWith('{') && !m[2].startsWith('{') ? m[1] + '/' + m[2] : null
-}
-
-const sensitive = (path) => path.split('/').some((s) => API_WRITES.has(s)) || API_WRITE_PATH.test(path)
-
-
-// `env`: what the line set in front of gh; GH_REPO (or GITHUB_REPOSITORY) names its repo as -R does.
-export function ghStep(w, dir, env = new Map()) {
-  const args = w.slice(1)
-  let slug = env.get('GH_REPO') || env.get('GITHUB_REPOSITORY') || null
-  const pos = []
-  for (let i = 0; i < args.length; i++) {
-    const a = args[i]
-    if (a === '-R' || a === '--repo') slug = args[++i] ?? null
-    else if (a.startsWith('--repo=')) slug = a.slice(7)
-    else if (/^-R./.test(a)) slug = a.slice(2)
-    else pos.push(a)
-  }
-  const [a0, a1] = pos.filter((x) => !x.startsWith('-'))
-  if (a0 === 'pr' && a1 === 'merge') return { kind: 'step', what: 'gh pr merge', dir, slug }
-  if (a0 === 'release' && a1 && !['list', 'ls', 'view', 'download', 'verify', 'verify-asset'].includes(a1)) return { kind: 'step', what: 'gh release ' + a1, dir, slug }
-  if (a0 === 'pr' && a1 === 'create') return { kind: 'pr', what: 'gh pr create', dir, slug }
-  // An alias can name any of the above under a new word: making one is a step of its own.
-  if (a0 === 'alias' && !['list', 'ls'].includes(a1)) return { kind: 'step', what: 'gh alias ' + (a1 ?? ''), dir, slug }
-  if (a0 !== 'api') return null
-  let method = null
-  let body = false
-  let input = false
-  let endpoint = null
-  const fields = []
-  for (let i = pos.indexOf('api') + 1; i < pos.length; i++) {
-    const a = pos[i]
-    if (a === '-X' || a === '--method') method = pos[++i] ?? null
-    else if (/^-X./.test(a)) method = a.slice(2)
-    else if (a.startsWith('--method=')) method = a.slice(9)
-    else if (['-f', '-F', '--field', '--raw-field'].includes(a)) { body = true; fields.push(pos[++i] ?? '') }
-    else if (/^-[fF]./.test(a) || a.startsWith('--field=') || a.startsWith('--raw-field=')) { body = true; fields.push(a.replace(/^(-[fF]|--(raw-)?field=)/, '')) }
-    else if (a === '--input' || a.startsWith('--input=')) { body = true; input = true; if (a === '--input') i++ }
-    else if (['-H', '--header', '-q', '--jq', '-t', '--template', '--hostname', '--cache', '-p', '--preview'].includes(a)) i++
-    else if (a.startsWith('-')) continue
-    else if (endpoint === null) endpoint = a
-  }
-  const m = String(method ?? (body ? 'POST' : 'GET')).toUpperCase()
-  const path = String(endpoint ?? '').replace(/^\//, '').split('?')[0]
-  if (m === 'GET') return null
-  if (path === 'graphql') return fields.some((f) => gqlWrites(f) || gqlUnread(f)) || input ? { kind: 'step', what: 'gh api graphql mutation', dir, slug } : null
-  return sensitive(path) ? { kind: 'step', what: 'gh api ' + m + ' ' + path, dir, slug: apiSlug(path) ?? slug } : null
-}
-
-
-// curl's one-letter options that take a value.
-const CURL_SHORT_VALUE = 'AbcCdDeEFHKmoPQrtTuUwxXyYz'
-
-
-// curl / wget straight at the GitHub API (api.github.com, uploads.github.com, a GHE …/api/v3/).
-export function httpStep(w, dir) {
-  const p = base(w[0])
-  let method = null
-  let body = false
-  let get = false
-  const data = []
-  const urls = []
-  const VAL = p === 'curl'
-    ? ['-H', '--header', '-o', '--output', '-u', '--user', '-A', '--user-agent', '-e', '--referer', '-b', '--cookie', '-c', '--cookie-jar', '-w', '--write-out', '-m', '--max-time', '--connect-timeout', '-x', '--proxy', '--retry', '-K', '--config', '--cacert', '--cert', '--key', '-E']
-    : ['-O', '--output-document', '-o', '--output-file', '--header', '-U', '--user-agent', '--user', '--password', '-t', '--tries', '-T', '--timeout', '-P', '--directory-prefix']
-  for (let i = 1; i < w.length; i++) {
-    const a = w[i]
-    const eq = a.startsWith('--') ? a.indexOf('=') : -1
-    const k = eq > 0 ? a.slice(0, eq) : a
-    const v = () => (eq > 0 ? a.slice(eq + 1) : w[++i] ?? '')
-    if (p === 'curl' && /^-[^-]/.test(a)) {
-      // A cluster of short flags (-sSfX PUT, -sXPUT, -sd@body): a letter that takes a value ends it.
-      for (let j = 1; j < a.length; j++) {
-        const ch = a[j]
-        if (ch === 'G' || ch === 'I') get = true
-        if (!CURL_SHORT_VALUE.includes(ch)) continue
-        const val = j + 1 < a.length ? a.slice(j + 1) : w[++i] ?? ''
-        if (ch === 'X') method = val
-        else if ('dFT'.includes(ch)) { body = true; data.push(val) }
-        break
-      }
-    } else if (p === 'curl' && k === '--request') method = v()
-    else if (p === 'curl' && k === '--get') get = true
-    else if (p === 'curl' && (/^--data/.test(k) || ['--json', '--form', '--form-string', '--upload-file'].includes(k))) { body = true; data.push(v()) }
-    else if (p !== 'curl' && k === '--method') method = v()
-    else if (p !== 'curl' && ['--post-data', '--post-file', '--body-data', '--body-file'].includes(k)) { body = true; data.push(v()) }
-    else if (VAL.includes(k)) { if (eq < 0) i++ }
-    else if (!a.startsWith('-')) urls.push(a)
-  }
-  const m = get ? 'GET' : String(method ?? (body ? 'POST' : 'GET')).toUpperCase()
-  if (m === 'GET') return null
-  for (const u of urls) {
-    const s = u.replace(/^[a-z]+:\/\//i, '').split(/[?#]/)[0]
-    const host = s.split('/')[0].toLowerCase()
-    const rest = s.slice(host.length + 1)
-    const path = host === 'api.github.com' || host === 'uploads.github.com' ? rest : rest.includes('api/v3/') ? rest.slice(rest.indexOf('api/v3/') + 7) : rest.startsWith('api/graphql') ? 'graphql' : null
-    if (path === null) continue
-    if (path.replace(/\/$/, '') === 'graphql') {
-      if (data.some((d) => gqlWrites(d) || d.startsWith('@') || /^\$/.test(d))) return { kind: 'step', what: p + ' graphql mutation', dir, slug: null }
-    } else if (sensitive(path) || host === 'uploads.github.com') return { kind: 'step', what: p + ' ' + m + ' ' + path, dir, slug: apiSlug(path) }
-  }
-  return null
-}
 
 
 // A local ref write below auto: a tag (as `git tag` is), the base branch, HEAD while the base is checked out (or
@@ -250,7 +134,7 @@ export function integrationIn(line, { cwd = null, current = null, pushDst = null
       continue
     }
     if (c.kind === 'hidden') return c.what
-    if (c.kind === 'file') continue // read in guardLine: a line alone has no files
+    if (c.kind === 'file' || c.kind === 'write' || c.kind === 'alias') continue // read in guardLine: a line alone has no files or config
     if (mode === 'local') return c.what
     if (c.kind === 'push') {
       const why = judgePush(c.push, { current, pushDst, bases: new Set(['main', 'master', b].filter(Boolean)) })
@@ -300,49 +184,249 @@ export function makeRecipe(text, targets) {
 }
 
 
-// A file candidate → why it is refused below auto (its code calls a tool that can push, merge, tag or release),
-// or null. A path the line names through a variable cannot be read: refused. A file that is not there, or not
-// text, is no script to judge: the command runs (and fails on its own).
-async function fileRisk($, c) {
-  if (c.how === 'make') {
-    if (c.paths.some((x) => x === null)) return c.what + ' runs a makefile the guard cannot locate'
-    for (const f of c.paths) {
-      const text = await $.fs.read(f).catch(() => null)
-      if (text === null) continue
-      return MAKE_RISK.test(makeRecipe(text, c.targets)) ? c.what + ' runs a recipe that mentions push, merge, tag or release' : null
-    }
-    return null
+// How many hops the reader follows from the line: a script that runs a script that runs a script, and so on. A
+// chain past it is refused, not passed.
+const READ_DEPTH = 5
+
+const RISK_TAIL = ' that calls git push, merge or tag, gh or curl to GitHub'
+
+// Installed dependencies are programs, not the run's scripts: never read (a limit docs/guards.md names).
+const INSTALLED = /(^|\/)node_modules\//
+
+// The package.json a package manager reads from `dir`: the nearest one up the tree, as npm, pnpm, yarn and bun
+// find it. { path, text, dir } or null.
+async function nearestPkg($, dir) {
+  let d = dir
+  for (let i = 0; i < 64 && d; i++) {
+    const path = (d === '/' ? '' : d) + '/package.json'
+    const text = await $.fs.read(path).catch(() => null)
+    if (text !== null) return { path, text, dir: d }
+    if (d === '/') break
+    d = d.slice(0, d.lastIndexOf('/')) || '/'
   }
-  if (c.how === 'pkg') {
-    // Read the named script from package.json and judge its text; a missing file or script is refused.
-    if (!c.path) return c.what + ' runs a package script the guard cannot locate (write the command out)'
-    let script = null
-    try {
-      script = JSON.parse(await $.fs.read(c.path))?.scripts?.[c.script] ?? null
-    } catch {
-      return c.what + ' runs a package script the guard cannot read'
-    }
-    if (typeof script !== 'string') return c.what + ' names a package script that is not in ' + c.path
-    return SCRIPT_RISK.test(script) ? c.what + ' runs a package script that calls git push, merge or tag, gh or curl to GitHub' : null
-  }
-  if (c.how === 'runner') {
-    if (!c.path) return c.what + ' runs a recipe the guard cannot locate (write the command out)'
-    const text = await $.fs.read(c.path).catch(() => null)
-    if (text === null) return c.what + ' runs a recipe the guard cannot read'
-    return SCRIPT_RISK.test(text) ? c.what + ' runs a recipe that calls git push, merge or tag, gh or curl to GitHub' : null
-  }
-  if (!c.path) return c.what + ' runs a script the guard cannot locate (write its path out)'
-  const text = await $.fs.read(c.path).catch(() => null)
-  if (text === null || text.includes('\u0000')) return null
-  // Read the script as the shell would: variables it sets itself are expanded, so a command assembled from
-  // pieces (`G=git; $G ${P}sh`) is seen too.
+  return null
+}
+
+// Where a file candidate came from decides what an unread file means:
+//   'line'  — the Bash line itself: a script that is not there is no script (the shell fails on its own); a
+//             package script, recipe or path the guard cannot place refuses.
+//   'pkg'   — a package script's own text: fail closed, anything the guard cannot place, read or reach refuses.
+//   'shell' — a shell script's text: what the guard can place and read is followed and judged; a step named
+//             through a variable, after a `cd` it cannot follow, or whose file is not there is skipped, as test
+//             and build scripts name their neighbours that way (`bash "$(dirname "$0")/x.sh"`).
+const lenient = (from) => from === 'shell'
+
+// The text a script runs, judged: a push, merge, tag or GitHub call named in it (as written, and with the
+// variables it sets expanded) refuses; so does a protected write. A shell text is then followed one hop at a
+// time: the scripts, package scripts, modules and recipes it runs are read in turn (fileRisk), READ_DEPTH deep.
+// `label` says which text this is: a package script's steps are judged strictly, a shell file's leniently.
+async function textRisk($, text, dir, what, label, depth, seen, lang = 'sh') {
   let expanded = ''
   try {
     expanded = commands(text).map((x) => x.words.join(' ')).join('\n')
   } catch {
     expanded = ''
   }
-  return SCRIPT_RISK.test(text) || SCRIPT_RISK.test(expanded) ? c.what + ' runs a script that calls git push, merge or tag, gh or curl to GitHub' : null
+  if (SCRIPT_RISK.test(text) || SCRIPT_RISK.test(expanded)) return what + ' runs a ' + label + RISK_TAIL
+  if (lang !== 'sh') return null
+  const from = label === 'package script' ? 'pkg' : 'shell'
+  let steps
+  try {
+    steps = commandSteps(text, dir, 1)
+  } catch {
+    return what + ' runs a ' + label + ' the guard cannot read'
+  }
+  for (const s of steps) {
+    if (s.kind === 'protected') return what + ' runs a ' + label + ' that writes ' + s.what
+    if (s.kind === 'alias') {
+      // A git alias the script runs (`git pom`): its expansion is read as the script's own text, one hop on.
+      if (depth + 1 > READ_DEPTH) {
+        if (lenient(from)) continue
+        return what + ' runs scripts nested deeper than the guard reads (' + s.what + ')'
+      }
+      const a = await aliasLine($, s)
+      if (a.why) {
+        if (lenient(from)) continue
+        return what + ', then ' + a.why
+      }
+      if (a.none) continue
+      const why = await textRisk($, a.line, s.at ?? dir, what + ', then git ' + s.sub, label, depth + 1, seen)
+      if (why) return why
+      continue
+    }
+    if (s.kind !== 'file') continue
+    if (depth + 1 > READ_DEPTH) {
+      if (lenient(from)) continue
+      return what + ' runs scripts nested deeper than the guard reads (' + s.what + ')'
+    }
+    const why = await fileRisk($, s, depth + 1, seen, from)
+    if (why) return what + ', then ' + why
+  }
+  return null
+}
+
+// What a script file is, past its own text: node (its imports are read), python, or a shell script (the scripts
+// it runs are read). The line said so (node x.js, sh x.sh), else the shebang does; no shebang is a shell script.
+const langOf = (c, text) => c.lang && c.lang !== 'other' ? c.lang : c.lang === 'other' ? 'other' : /^#!.*\b(node|nodejs|bun|deno|tsx|ts-node)\b/.test(text) ? 'node' : /^#!.*\bpython/.test(text) ? 'python' : /^#!/.test(text) && !/^#!.*\b(ba|z|da|k)?sh\b/.test(text) ? 'other' : 'sh'
+
+// A node file's relative imports, one level deep: each must be found and read (unless the file was reached from a
+// shell script, `from` 'shell'), and none may call a tool that can push, merge, tag or release.
+async function importRisk($, c, text, from) {
+  const dir = c.path.slice(0, c.path.lastIndexOf('/')) || '/'
+  for (const spec of jsImports(text)) {
+    let found = null
+    for (const cand of jsCandidates(spec)) {
+      const p = joinPath(dir, cand)
+      const t = await $.fs.read(p).catch(() => null)
+      if (t !== null) {
+        found = { p, t }
+        break
+      }
+    }
+    if (!found) {
+      if (lenient(from)) continue
+      return c.what + ' imports ' + spec + ', which the guard cannot read'
+    }
+    if (INSTALLED.test(found.p)) continue
+    if (SCRIPT_RISK.test(found.t)) return c.what + ' imports ' + spec + RISK_TAIL.replace(' that', ', which')
+  }
+  return null
+}
+
+// python -m pkg.mod: the module is looked for where python looks first, the command's folder, then each PYTHONPATH
+// entry; its parent packages' __init__.py and its own file are read. Not there, the interpreter the line names (a
+// virtualenv's python in the repo included) is asked where the module lives, by its top-level name, with -I so the
+// folder and PYTHONPATH are not on its path (site stays on, or pytest would be found nowhere): a module inside
+// the folder (an editable install) is read from there, one installed elsewhere (the standard library, a
+// site-packages tool such as pytest) is a program, not read. A module found nowhere, or a PYTHONPATH entry the guard
+// cannot read before it is found, refuses (from a shell script: skipped).
+async function moduleRisk($, c, from) {
+  const miss = (why) => (lenient(from) ? null : c.what + why)
+  if (!PLAIN_MODULE.test(c.module)) return miss(' names a module the guard cannot read')
+  if (!c.dir) return miss(' runs a module the guard cannot locate (write the directory out)')
+  const pp = c.pyPath ?? (await $.env.get('PYTHONPATH').catch(() => null)) ?? ''
+  const roots = [c.dir, ...String(pp).split(':').filter(Boolean).map((x) => (/[$`~]/.test(x) ? null : x.startsWith('/') ? joinPath('/', x) : joinPath(c.dir, x)))]
+  const { parents, own } = moduleFiles(c.module)
+  const top = c.module.split('.')[0]
+  const readAt = async (root) => {
+    const got = []
+    for (const f of [...parents, ...own]) {
+      const t = await $.fs.read(root + '/' + f).catch(() => null)
+      if (t !== null) got.push({ f, t })
+    }
+    return got.some((x) => own.includes(x.f)) ? got : null
+  }
+  let got = null
+  for (const root of roots) {
+    if (root === null) return miss(' runs a module from a PYTHONPATH entry the guard cannot read')
+    got = await readAt(root)
+    if (got) break
+  }
+  if (!got) {
+    const py = /[$`]/.test(String(c.interp)) ? null : c.interp
+    const code = 'import importlib.util,sys\ns=importlib.util.find_spec(sys.argv[1])\nprint(s.origin if s and s.origin else "")'
+    const r = py ? await $.process.run([py, '-I', '-c', code, top], { ...PROBE, cwd: c.dir }).catch(() => null) : null
+    const origin = r && r.exitCode === 0 ? String(r.stdout ?? '').trim() : ''
+    if (!origin.startsWith('/')) return origin ? null : miss(' runs a module the guard cannot find')
+    if (!(origin === c.dir || origin.startsWith(c.dir.replace(/\/+$/, '') + '/'))) return null
+    const root = origin.replace(new RegExp('/' + top + '(/__init__)?\\.py$'), '')
+    got = root !== origin ? await readAt(root) : null
+    if (!got) return miss(' runs a module the guard cannot find')
+  }
+  for (const { t } of got) if (SCRIPT_RISK.test(t)) return c.what + ' runs a module' + RISK_TAIL
+  return null
+}
+
+// A file candidate → why it is refused below auto (its code calls a tool that can push, merge, tag or release,
+// or it runs something the guard cannot read), or null. `from` says where the candidate came from (see lenient):
+// the Bash line, a package script's text or a shell script's text.
+async function fileRisk($, c, depth = 0, seen = new Set(), from = 'line') {
+  const strict = from === 'pkg'
+  const skip = lenient(from)
+  if (c.how === 'make') {
+    if (c.paths.some((x) => x === null)) return skip ? null : c.what + ' runs a makefile the guard cannot locate'
+    for (const f of c.paths) {
+      const text = await $.fs.read(f).catch(() => null)
+      if (text === null) continue
+      return MAKE_RISK.test(makeRecipe(text, c.targets)) ? c.what + ' runs a recipe that mentions push, merge, tag or release' : null
+    }
+    return strict ? c.what + ' runs a makefile the guard cannot read' : null
+  }
+  if (c.how === 'pkg') {
+    // The named script and its pre/post scripts, from the nearest package.json; each is read, then followed.
+    if (!c.path) return skip ? null : c.what + ' runs a package script the guard cannot locate (write the command out)'
+    const found = await nearestPkg($, c.dir)
+    if (!found) return c.optional || skip ? null : c.what + ' runs a package script the guard cannot read'
+    const key = found.path + '#' + c.script
+    if (seen.has(key)) return null
+    seen.add(key)
+    let scripts
+    try {
+      const pkg = JSON.parse(found.text)
+      scripts = pkg?.scripts && typeof pkg.scripts === 'object' ? pkg.scripts : {}
+    } catch {
+      return c.what + ' runs a package script the guard cannot read'
+    }
+    if (typeof scripts[c.script] !== 'string') return c.optional || skip ? null : c.what + ' names a package script that is not in ' + found.path
+    for (const k of scriptChain(c.script)) {
+      if (typeof scripts[k] !== 'string') continue
+      const why = await textRisk($, scripts[k], found.dir, c.what + (k === c.script ? '' : ' (its ' + k + ' script)'), 'package script', depth, seen)
+      if (why) return why
+    }
+    return null
+  }
+  if (c.how === 'runner') {
+    if (!c.path) return skip ? null : c.what + ' runs a recipe the guard cannot locate (write the command out)'
+    const text = await $.fs.read(c.path).catch(() => null)
+    if (text === null) return skip ? null : c.what + ' runs a recipe the guard cannot read'
+    return SCRIPT_RISK.test(text) ? c.what + ' runs a recipe' + RISK_TAIL : null
+  }
+  if (c.how === 'module') return moduleRisk($, c, from)
+  if (!c.path) return skip ? null : c.what + ' runs a script the guard cannot locate (write its path out)'
+  if (INSTALLED.test(c.path) || seen.has(c.path)) return null
+  seen.add(c.path)
+  const text = await $.fs.read(c.path).catch(() => null)
+  if (text === null || text.includes('\u0000')) return strict ? c.what + ' runs a file the guard cannot read' : null
+  // Read the script as the shell would: variables it sets itself are expanded, so a command assembled from
+  // pieces (`G=git; $G ${P}sh`) is seen too.
+  const lang = langOf(c, text)
+  const why = await textRisk($, text, c.dir, c.what, 'script', depth, seen, lang)
+  if (why || lang !== 'node') return why
+  return importRisk($, c, text, from)
+}
+
+
+// Where a path lands once every link is followed: the file's own real path, else (a file not there yet) its
+// folder's plus the name. null when neither stats; DANGLING when the path is a link that leads nowhere, since a
+// write through it creates whatever it names.
+const DANGLING = Symbol('dangling')
+
+async function landing($, abs) {
+  const own = await $.fs.stat(abs, { resolve: true }).catch(() => null)
+  if (own) return own.realPath ?? (own.isLink ? DANGLING : null)
+  const cut = abs.lastIndexOf('/')
+  const dir = await $.fs.stat(abs.slice(0, cut) || '/', { resolve: true }).catch(() => null)
+  return dir?.realPath ? dir.realPath.replace(/\/+$/, '') + '/' + abs.slice(cut + 1) : null
+}
+
+// The home folder as the guard compares it: as spelled and where it lands (a linked home, /var → /private/var).
+let homeReal = { home: null, real: null }
+async function homes($) {
+  if (!Profile.home) return []
+  if (homeReal.home !== Profile.home) homeReal = { home: Profile.home, real: (await $.fs.stat(Profile.home, { resolve: true }).catch(() => null))?.realPath ?? null }
+  return [Profile.home, homeReal.real].filter(Boolean)
+}
+
+// A write target → the protected label of where it lands, or null. The spelling is judged first (protectedPath),
+// then the real path, so `cfg` linked to .git/config on an earlier line, or `.GIT/CONFIG`, is refused. A link that
+// leads nowhere is refused: the guard cannot see what the write would create.
+export async function resolvedProtected($, raw, abs) {
+  const hs = await homes($)
+  const spelled = protectedPath(raw, abs, hs)
+  if (spelled || !abs) return spelled
+  const real = await landing($, abs)
+  if (real === DANGLING) return 'a link that leads nowhere (' + raw + ')'
+  return real && real !== abs ? protectedPath('', real, hs) : null
 }
 
 
@@ -600,6 +684,27 @@ async function pushInfo($, c, cwd, cache) {
 }
 
 
+// How deep an alias may expand into another alias (git itself stops a loop; the guard stops sooner).
+const ALIAS_DEPTH = 5
+
+const shq = (w) => "'" + String(w).replace(/'/g, "'\\''") + "'"
+
+// `git <word>` where the word is no git command → the line it runs, read from git config in the repo the call
+// targets: { line } for an alias (a `!` alias is a shell line, git appends the arguments), { none } when git config
+// has no such alias (git runs an external git-<word> or refuses the word itself), or { why } when it cannot be read.
+async function aliasLine($, c) {
+  if (c.unknown || (!c.at && !c.loc.some((x, i) => i % 2 === 1 && x.startsWith('/')))) return { why: 'git ' + c.sub + ' may be an alias, in a repo the guard cannot place' }
+  const argv = ['git', ...(c.at ? ['-C', c.at] : []), ...c.loc, 'config', '--get', 'alias.' + c.sub]
+  const r = await $.process.run(argv, Object.keys(c.genv ?? {}).length ? { ...PROBE, env: c.genv } : PROBE).catch(() => null)
+  if (!r || typeof r.exitCode !== 'number') return { why: 'git ' + c.sub + ' may be an alias the guard could not look up' }
+  const value = String(r.stdout ?? '').trim()
+  if (r.exitCode === 1 || (r.exitCode === 0 && !value)) return { none: true }
+  if (r.exitCode !== 0) return { why: 'git ' + c.sub + ' may be an alias the guard could not look up' }
+  const args = c.args.map(shq).join(' ')
+  if (value.startsWith('!')) return { line: value.slice(1) + (args ? ' ' + args : '') }
+  return { line: ['git', ...c.loc.map(shq), value, args].filter(Boolean).join(' ') }
+}
+
 // A line → the deny text, or null. A line the reader cannot parse falls back to the plain words.
 export async function guardLine($, line, cwd) {
   let cands
@@ -610,13 +715,39 @@ export async function guardLine($, line, cwd) {
   }
   if (!cands.length) return null
   const profile = await readProfile($)
-  const cache = new Map()
+  return judgeCands($, cands, { profile, cwd, cache: new Map(), envRepo: undefined }, 0)
+}
+
+// The candidates of one line (or of an alias's expansion), judged in order: the first refusal, or null.
+async function judgeCands($, cands, ctx, depth) {
+  const { profile, cwd, cache } = ctx
   // GH_REPO in the session's own environment names gh's repo as one set on the line does.
-  const envRepo = cands.some((c) => c.gh && !c.slug) ? (await $.env.get('GH_REPO').catch(() => null)) || null : null
-  for (const c of cands) {
-    const slug = c.gh && !c.slug ? envRepo ?? (await ghDefault($, c.dir, cache)) : c.slug
+  if (ctx.envRepo === undefined && cands.some((c) => c.gh && !c.slug)) ctx.envRepo = (await $.env.get('GH_REPO').catch(() => null)) || null
+  let aliasMoved = false // an alias earlier on the line moved HEAD: a later push cannot read it
+  for (const c0 of cands) {
+    const c = aliasMoved && c0.kind === 'push' ? { ...c0, push: { ...c0.push, headMoved: true } } : c0
+    if (c.kind === 'write') {
+      // An ordinary write target: judged by where it lands, and only a protected landing costs a mode lookup.
+      const lbl = await resolvedProtected($, c.raw, c.path)
+      if (!lbl) continue
+      if ((await modeFor($, profile, { ...c, slug: null }, cwd, cache)) === 'auto') continue
+      return denyProtected(lbl)
+    }
+    const slug = c.gh && !c.slug ? ctx.envRepo ?? (await ghDefault($, c.dir, cache)) : c.slug
     const mode = c.kind === 'push' ? await pushMode($, profile, c, cwd, cache) : await modeFor($, profile, { ...c, slug }, cwd, cache)
     if (mode === 'auto') continue
+    if (c.kind === 'alias') {
+      // Below auto a git alias is read and its expansion judged like the line itself; one that cannot be read refuses.
+      if (depth >= ALIAS_DEPTH) return denyHidden('git ' + c.sub + ' expands through more aliases than the guard follows')
+      const a = await aliasLine($, c)
+      if (a.why) return denyHidden(a.why)
+      if (a.none) continue
+      const inner = commandSteps(a.line, c.at).map((x) => (x.kind === 'push' ? { ...x, push: { ...x.push, headMoved: x.push.headMoved || c.headMoved || aliasMoved, remoteEdited: x.push.remoteEdited || c.remoteEdited } } : x))
+      const why = await judgeCands($, inner, ctx, depth + 1)
+      if (why) return why
+      if (lineMovesHead(a.line)) aliasMoved = true
+      continue
+    }
     if (c.kind === 'protected') return denyProtected(c.what)
     if (c.kind === 'step') return DENY_INTEGRATION
     if (c.kind === 'hidden') return denyHidden(c.what)

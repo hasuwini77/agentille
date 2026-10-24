@@ -36,8 +36,9 @@ export function formationOf(hdr) {
 
 // autoFable is opt-in: Fable costs about twice Opus, so the ladder may only reach it when profile.routing.autoFable is true.
 // maxRunUsd is the run's cost ceiling in US dollars (see runCeiling below): 15 by default, about two heavy runs' worth
-// of Opus review at list prices; the person's `null` (or anything but a positive number) turns it off.
-export const DEFAULTS = { autoFable: false, maxFablePerRun: 1, fableWeeklyCeiling: 60, advisorOnOpus: true, maxRunUsd: 15 }
+// of Opus review at list prices; the person's `null` (or anything but a positive number) turns it off. stopAtCeiling
+// true turns the ceiling from a demotion into a stop: every later dispatch of the run is denied (runStop below).
+export const DEFAULTS = { autoFable: false, maxFablePerRun: 1, fableWeeklyCeiling: 60, advisorOnOpus: true, maxRunUsd: 15, stopAtCeiling: false }
 
 // US dollars per million tokens, by model family, at the current generation's first-party API list price (Fable 5.1,
 // Opus 5.5, Sonnet 5.5, Haiku 5.5 up to 100K-token prompts). An estimate, not a bill: a plan subscription is not billed
@@ -72,11 +73,19 @@ export function paneUsd(route, now = Date.now()) {
   return priced(route.model, rate) * (ms / 60_000)
 }
 
+// The lead session's own spend on a run: the tokens its main-loop steps used while the run was in progress
+// (dispatch.js addLeadUsage), priced at the lead's model. `lead` maps run id → { input, output, cacheRead, model }.
+export function leadUsd(lead, run) {
+  const t = lead?.get(run)
+  return t ? priced(t.model, t) : 0
+}
+
 // The run's estimated spend so far: the live agents' token counts (live.js: `input` holds uncached input plus cache
-// writes, `cacheRead` the cache reads), filed the way the ledger files them, plus each of the run's pane workers by
-// paneUsd. `routes` is the lead's pane routes; `now` is Date.now(), the clock a route's start is read on.
-export function estimateRunUsd(agents, run, routes = [], now = Date.now()) {
-  let usd = 0
+// writes, `cacheRead` the cache reads), filed the way the ledger files them, each of the run's pane workers by
+// paneUsd, and the lead's own tokens on the run by leadUsd. `routes` is the lead's pane routes; `now` is Date.now(),
+// the clock a route's start is read on.
+export function estimateRunUsd(agents, run, routes = [], now = Date.now(), lead = null) {
+  let usd = leadUsd(lead, run)
   for (const a of agents?.values() ?? []) if ((a.fileRun ?? a.run) === run) usd += priced(a.model, a)
   for (const r of routes ?? []) if (r.run === run) usd += paneUsd(r, now)
   return usd
@@ -116,8 +125,8 @@ export function parseHeader(prompt) {
     const i = pair.indexOf('=')
     if (i > 0) h[pair.slice(0, i)] = pair.slice(i + 1)
   }
-  // `slice=<slug>` is the docs' name for `piece=`: both parse, and `piece=` wins when a header carries the two.
-  if (h.slice !== undefined && h.piece === undefined) h.piece = h.slice
+  // `slice=<slug>` names the slice. The older `piece=` still parses as its alias, and wins when a header carries the two.
+  if (h.piece !== undefined) h.slice = h.piece
   return h
 }
 
@@ -267,12 +276,12 @@ function base(role, hdr, depth) {
   return row.base
 }
 
-// Fix rounds count per piece (factory.md → "Fix rounds": at most 2 per piece), so two pieces in fix rounds never push each
-// other up the ladder. `run.fixesByPiece` maps piece → rounds ('' = no piece). Without a piece (a diagnose planner, a
-// single-piece run) the ladder sees the worst piece.
-export function ladderFixes(run, piece) {
-  const by = run?.fixesByPiece ?? {}
-  if (piece) return by[piece] ?? 0
+// Fix rounds count per slice (factory.md → "Fix rounds": at most 2 per slice), so two slices in fix rounds never push each
+// other up the ladder. `run.fixesBySlice` maps slice → rounds ('' = no slice). Without a slice (a diagnose planner, a
+// single-slice run) the ladder sees the worst slice.
+export function ladderFixes(run, slice) {
+  const by = run?.fixesBySlice ?? {}
+  if (slice) return by[slice] ?? 0
   const all = Object.values(by)
   return all.length ? Math.max(...all) : 0
 }
@@ -280,8 +289,19 @@ export function ladderFixes(run, piece) {
 // run: { revise, fixes, fable, usd? } observed so far (usd: estimateRunUsd, for the maxRunUsd ceiling) · settings:
 // profile.routing merged over DEFAULTS · weeklyPct: seven_day percent used, or null when unknown. A typed --fable is
 // the person's choice and passes the ceiling; every other pick goes through runCeiling last.
+// With `stopAtCeiling: true`, a run at or past maxRunUsd dispatches nothing more: every role (the executor and a
+// typed --fable included) gets `stop`, the line the dispatch is denied with. Off (the default), runCeiling demotes.
+export function runStop(run, settings) {
+  const max = maxRunUsdOf(settings)
+  if (max == null || settings?.stopAtCeiling !== true) return null
+  if (!(typeof run?.usd === 'number' && run.usd >= max)) return null
+  return 'agt ✗ run ~' + usd(run.usd) + ' reached its cost ceiling, maxRunUsd ' + usd(max) + ', and routing.stopAtCeiling is on: no more dispatches this run. Raise routing.maxRunUsd in ~/.agentille/profile.json (or set stopAtCeiling to false) to go on.'
+}
+
 export function decide(o) {
   const { forced, ...d } = pick(o)
+  const stop = runStop(o.run ?? {}, o.settings ?? DEFAULTS)
+  if (stop) return { ...d, fable: false, stop }
   return forced ? d : runCeiling(d, o.role, o.run ?? {}, o.settings ?? DEFAULTS)
 }
 

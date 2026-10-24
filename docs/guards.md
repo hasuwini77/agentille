@@ -6,27 +6,70 @@ The README's Settings and "What it touches" sections give the short version. Thi
 
 `integration` sets the most a run may do (`auto` → `pr` → `push` → `local`; the README's Settings section says how your profile and the repo decide it). The mode is snapshotted at the typed `/agt`, so a profile a run edits mid-run can lower the ceiling but never raise it.
 
+### When it is on
+
+- A session where you never typed `/agt` is not judged at all.
+- An agentille subagent and a worker pane are judged for their whole life. A pane you open with `/agt-spawn` is your own task and is not judged.
+- The lead is judged from your typed `/agt` until that run's ✓ or ✗ card. This holds whether or not the run names an id, so a solo or inline run counts too. No clock and no number of typed replies ends it.
+
 ### What the guard reads
 
-It reads each **Bash** line the way the shell would — words, quotes, `$( )`, backticks, heredocs and here-strings, redirections, the wrappers in front of a command (`env`, `timeout`, `xargs`, `sudo`, `nice`, `script`, `flock`, `caffeinate`, `stdbuf`, `arch`, `coproc`, `ssh`, `parallel`, `find -exec`), `bash -c`/`fish -c`/`eval`, a shell alias defined earlier on the same line, and the variables the line sets. Where it can, it also reads an interpreter's inline code (`python -c`, `node -e`, `perl -e`, …), a script file (with the variables that file sets expanded), a sourced file, a make target, and an `npm`/`pnpm`/`yarn`/`bun run` package script. It never runs the command.
+It reads each **Bash** line the way the shell would: words, quotes, `$( )`, backticks, heredocs and here-strings, redirections, the wrappers in front of a command (`env`, `timeout`, `xargs`, `sudo`, `nice`, `script`, `flock`, `caffeinate`, `stdbuf`, `arch`, `coproc`, `ssh`, `parallel`, `find -exec`), `bash -c`, `fish -c`, `eval`, a shell alias defined earlier on the same line, and the variables the line sets. It also reads:
+
+- an interpreter's inline code (`python -c`, `node -e`, `perl -e`, and the like);
+- a script file, with the variables that file sets expanded, and a sourced file;
+- a make target's recipe, and a `just`, `task` or `rake` recipe file;
+- a package script: `npm`, `pnpm`, `yarn` or `bun run x`, the `prex` and `postx` scripts beside it, `npm test` and `npm start` (and the same for pnpm and yarn), and `pnpm`, `yarn` or `bun <name>` when the word is not one of the manager's own commands and a script of that name exists, all from the nearest `package.json`;
+- a `python -m pkg.mod` module, looked for in the command's folder and then each `PYTHONPATH` entry, with its parent packages' `__init__.py`;
+- a `node` (or `bun`) file and the files it imports with a relative static import, one level deep;
+- a git alias from your git config, for any word after `git` that is not one of git's own commands, looked up in the repo the command targets;
+- the line `git submodule foreach` runs.
+
+It follows what a script runs one hop at a time, five hops deep: a package script that runs `npm run y`, `sh tools/x.sh`, `node tools/x.mjs` or `python -m tools.x` has that step read in turn, and so on.
+
+The guard never runs the command it judges. To place a command it asks git about the repo (its remotes, branches and config, `git config --get alias.<word>` included), reads files through the mod, and, for a `python -m` module it cannot find in the folder or on `PYTHONPATH`, asks the interpreter named on the line where that module lives. That runs the interpreter the line names, a virtualenv's `python` inside the repo included, with `-I`, so the folder and `PYTHONPATH` are not on its path.
 
 ### What it refuses below `auto`, from a run
 
-- A merge, tag, release or GitHub API merge — `gh`, `hub`, `git`, `gh api`/`curl`/`wget` (REST or GraphQL), and git/gh aliases, `send-pack`, `http-push`, `subtree push`, or `update-ref`/`symbolic-ref` on a tag or the base branch.
+- A merge, tag, release or GitHub API merge: `gh`, `hub`, `git`, `gh api`, `curl` or `wget` (REST or GraphQL), git and gh aliases, `send-pack`, `http-push`, `subtree push`, or `update-ref` and `symbolic-ref` on a tag or the base branch.
+- A change to what guards the base on GitHub: a write to branch protection or rulesets, a repo write that sets `default_branch` (or whose body it cannot read), `gh repo edit --default-branch`, and a workflow run, enable or disable (`gh workflow`, or the API's `dispatches`, `enable` and `disable`).
 - A local `git merge`, `reset --hard`, `rebase` or `branch -f`/`-M` onto the base branch.
-- A push of anything but the run's own branch (`agt/*`, `feat/*`, `fix/*`, `storm/*` or the one checked out): never the base branch, a tag, a force push, a remote branch deletion, every branch, or a bare push whose configured `remote.<name>.push` refspec (or `push.default = matching`) reaches the base or a tag. A `checkout`, `switch`, `branch -m/-M/-f`, `reset` or `gh pr checkout` earlier on the same line makes HEAD unreadable, so `git checkout main && git push origin HEAD` is refused.
-- A write to the trust root (`~/.agentille`, also via `$HOME` or `$GIT_DIR`), `.git/config`, `.git/hooks`, `.git/info`, `.git/refs`, `.git/packed-refs` or the worktree's `.git` file — by a redirect, a `tee`/`cp`/`mv`/`ln`/`sed -i`/`truncate`/`dd` target, interpreter code that names the path, or a `git config` of `alias.*`, `core.hooksPath`, a remote's push URL or refspec, URL rewriting or `receive.*`. The same paths are refused through the **Write, Edit, MultiEdit and NotebookEdit** tools, not just Bash.
+- A push of anything but the run's own branch (`agt/*`, `feat/*`, `fix/*`, `storm/*` or the one checked out): never the base branch, a tag, a force push, a remote branch deletion, every branch, or a bare push whose configured `remote.<name>.push` refspec (or `push.default = matching`) reaches the base or a tag. A `checkout`, `switch`, `branch -m/-M/-f`, `reset`, `gh pr checkout`, or an alias that does one of these, earlier on the same line makes HEAD unreadable. So `git checkout main && git push origin HEAD` is refused.
+- A write to the trust root (`~/.agentille`, also via `$HOME` or `$GIT_DIR`), `.git/config`, `.git/hooks`, `.git/info`, `.git/refs`, `.git/packed-refs`, the worktree's `.git` file, or a submodule's `.git/modules/<name>/` config, hooks and refs at any depth. That covers a redirect, a `tee`, `cp`, `mv`, `ln`, `sed -i`, `truncate` or `dd` target, interpreter code that names the path, and a `ln` or `mv` whose source is one of these paths. Each target is judged as written and again after every link is followed, so a link made on an earlier line still lands on the protected path. Case does not matter, so `.GIT/CONFIG` counts. A write through a link that leads nowhere is refused. The same paths are refused through the **Write, Edit, MultiEdit and NotebookEdit** tools, judged the same way.
+- A git config write, with `git config`, `-c`, `--config-env` or `GIT_CONFIG_KEY_<n>`, of `alias.*`, `core.hooksPath`, `core.fsmonitor`, `core.sshCommand`, `push.default`, a remote's push URL or refspec, URL rewriting or `receive.*`.
+- A Write or Edit the guard cannot judge (the judgement itself fails): refused, naming the path.
 
-It judges each line by the repo the write lands in (`cd`, `git -C`, `gh -R`, `GH_REPO`/`GITHUB_REPOSITORY`, `gh repo set-default`, and for a push the URL git would push to — pushurl, insteadOf, a URL or a path), not the directory the session started in. A profile entry with only a name never grants `auto` to a repo that has a remote.
+It judges each line by the repo the write lands in (`cd`, `git -C`, `--git-dir`, `--work-tree`, `GIT_DIR`, `gh -R`, `GH_REPO`/`GITHUB_REPOSITORY`, `gh repo set-default`, and for a push the URL git would push to: pushurl, insteadOf, a URL or a path), not the directory the session started in. An alias is looked up in that same repo. A profile entry with only a name never grants `auto` to a repo that has a remote.
 
-When it cannot read a word (a subcommand from `$( )` or an unexpandable variable), a source (code piped into a shell, `sh -s`/`python3 -`, a tool fed by `xargs`, or an opener it cannot introspect such as `npx`, `pnpm dlx` or `docker`), or the repo at all, it fails closed and refuses. The lead stays guarded from the moment its run names an id until the run's ✓/✗ card, with no time or typed-reply cutoff.
+### When it cannot read something
+
+It fails closed and refuses. That covers:
+
+- a word it cannot read: a subcommand from `$( )` or an unexpandable variable;
+- a source it cannot read: code piped into a shell, `sh -s` or `python3 -`, a tool fed by `xargs`, or an opener it cannot look into such as `npx`, `pnpm dlx` or `docker`;
+- a package script run pointed at another package folder (`--prefix`, `--filter`, `-w`, `-r`, `--workspaces`), since it cannot tell which `package.json` is read;
+- a `package.json` that does not parse, or a `run x` with no script `x`;
+- inside a package script's own text, a step it cannot place, find or read, or a chain more than five hops deep;
+- a relative import of a `node` file that it cannot find (in a file a shell script runs, it is skipped);
+- a `python -m` module found nowhere, or a `PYTHONPATH` entry it cannot read before the module is found;
+- a git alias it cannot look up, or one in a repo it cannot place;
+- the repo itself, when git cannot be asked.
 
 - **Under `local`** it refuses pushes and PRs too.
 - **Under every setting** the lead is asked to stop a diff that touches auth, payments, deploy, migrations, dependencies or a business assumption at the PR, with `⚑ escalated` on the card. This rests on the lead model following the factory checklist; no code inspects the diff.
 
 ### What the guard is, and is not
 
-The guard is a seatbelt against a cooperative model's honest mistakes, not a sandbox against a model that sets out to evade it. It judges the **Bash** tool and the **Write/Edit/MultiEdit/NotebookEdit** tools; any other tool — a GitHub MCP server's merge, say — is not seen. A Codex worker pane runs on your own Codex config, outside the mod, so the guard does not reach it. What constrains a model that is actually trying to get around the guard is your Claude Code permission rules, your remote's branch protection and Codex's own sandbox.
+The guard is a seatbelt against a cooperative model's honest mistakes, not a sandbox against a model that sets out to evade it. It judges the **Bash** tool and the **Write/Edit/MultiEdit/NotebookEdit** tools; any other tool, such as a GitHub MCP server's merge, is not seen. A Codex worker pane runs on your own Codex config, outside the mod, so the guard does not reach it. What constrains a model that is actually trying to get around the guard is your Claude Code permission rules, your remote's branch protection and Codex's own sandbox.
+
+What it reads has limits, and these are the known ones:
+
+- Inside a shell script file it follows each step it can place and read, and skips a step named through a variable, one after a `cd` it cannot follow, or one whose file is not there. A script file the Bash line names that is not there, or is not text, is not judged: the shell fails on it.
+- It checks a script's text for a push, merge, tag or GitHub call by pattern. A make recipe is checked the same way. It does not refuse an opener such as `npx` inside a script.
+- It does not read installed code: anything under `node_modules`, a bare package import, or a module in the standard library or site-packages.
+- It reads a node file's relative static imports one level deep. An import built at run time is not followed, and neither are a Python file's imports.
+- A git word that is an external `git-<name>` program on your PATH runs that program, which the guard does not read. gh aliases from gh's own config are not looked up.
+- `git submodule foreach` runs its line in a repo the guard cannot place, so a push of HEAD there is refused and only a push with the branch written out can pass.
 
 ## Pane tools
 

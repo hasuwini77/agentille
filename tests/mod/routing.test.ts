@@ -1,6 +1,8 @@
 import { describe, expect, mock, test } from 'claude-code/testing'
-import { AGENT_SILENT_MS, AGT_GRACE_TYPED, AGT_INFLIGHT_MAX_MS, PANE_REST_MS, PANE_EST_MAX_MS, PANE_TOKENS_PER_MIN, CEILING_ROLES, ROLES, paneUsd, DEFAULTS, MAX_EXECUTORS_AT_ONCE, PRICES, asksSessions, decide, estimateRunUsd, executorCapFlag, executorsWorking, ordinal, demoteHeaderText, formationOf, ladderFixes, mentionsCodex, mentionsFable, parseHeader, proveHeader, roleOf, runInFlight, typedFable, verdictOf } from '../../hooks/routing.js'
-import { pieceOf } from '../../hooks/links.js'
+import { AGENT_SILENT_MS, AGT_GRACE_TYPED, AGT_INFLIGHT_MAX_MS, PANE_REST_MS, PANE_EST_MAX_MS, PANE_TOKENS_PER_MIN, CEILING_ROLES, ROLES, paneUsd, DEFAULTS, MAX_EXECUTORS_AT_ONCE, PRICES, asksSessions, decide, estimateRunUsd, executorCapFlag, executorsWorking, ordinal, demoteHeaderText, formationOf, ladderFixes, mentionsCodex, mentionsFable, parseHeader, proveHeader, roleOf, runInFlight, typedFable, verdictOf, leadUsd } from '../../hooks/routing.js'
+import { sliceOf } from '../../hooks/links.js'
+import { addLeadUsage } from '../../hooks/dispatch.js'
+import { Runs } from '../../hooks/state.js'
 
 const fresh = () => ({ revise: 0, fixes: 0, fable: 0 })
 const S = { autoFable: true, maxFablePerRun: 1, fableWeeklyCeiling: 60 }
@@ -11,13 +13,13 @@ describe('policy', () => {
     expect(parseHeader('Build it')).toBe(null)
   })
 
-  test('slice=<slug> is an alias of piece=: both name the slice, piece= wins when a header has both', async () => {
-    expect(parseHeader('[agt run=a1 mode=build slice=api]')).toMatchObject({ piece: 'api', slice: 'api' })
-    expect(parseHeader('[agt run=a1 mode=build piece=api]')).toMatchObject({ piece: 'api' })
-    expect(parseHeader('[agt run=a1 piece=api slice=ui]')!.piece).toBe('api')
-    expect(pieceOf(parseHeader('[agt run=a1 slice=search-ui]'))).toBe('search-ui')
-    expect(pieceOf(parseHeader('[agt run=a1 piece=search-ui]'))).toBe('search-ui')
-    expect(pieceOf(parseHeader('[agt run=a1 mode=build]'))).toBe(null)
+  test('slice=<slug> names the slice; the older piece= is its alias and wins when a header has both', async () => {
+    expect(parseHeader('[agt run=a1 mode=build slice=api]')).toMatchObject({ slice: 'api' })
+    expect(parseHeader('[agt run=a1 mode=build piece=api]')).toMatchObject({ slice: 'api' })
+    expect(parseHeader('[agt run=a1 piece=api slice=ui]')!.slice).toBe('api')
+    expect(sliceOf(parseHeader('[agt run=a1 slice=search-ui]'))).toBe('search-ui')
+    expect(sliceOf(parseHeader('[agt run=a1 piece=search-ui]'))).toBe('search-ui')
+    expect(sliceOf(parseHeader('[agt run=a1 mode=build]'))).toBe(null)
   })
 
   test('only agentille roles are routed', async () => {
@@ -80,14 +82,14 @@ describe('Fable is rare', () => {
     expect(decide({ role: 'planner', hdr: {}, run: { ...fresh(), revise: 2 }, settings: S })).toMatchObject({ model: 'fable', fable: true })
   })
 
-  test('fix rounds count per piece: one piece in fix rounds never escalates another', async () => {
-    const run = { ...fresh(), fixes: 3, fixesByPiece: { learn: 2, resolve: 1 } }
+  test('fix rounds count per slice: one slice in fix rounds never escalates another', async () => {
+    const run = { ...fresh(), fixes: 3, fixesBySlice: { learn: 2, resolve: 1 } }
     expect(ladderFixes(run, 'resolve')).toBe(1)
     expect(ladderFixes(run, 'learn')).toBe(2)
     expect(ladderFixes(run, 'fit')).toBe(0)
-    expect(ladderFixes(run, null)).toBe(2) // no piece: the worst piece
+    expect(ladderFixes(run, null)).toBe(2) // no slice: the worst slice
     expect(ladderFixes(fresh(), null)).toBe(0)
-    // resolve's first fix round (1 + this dispatch = 2 overall, but 1 on its piece) stays at table effort
+    // resolve's first fix round (1 + this dispatch = 2 overall, but 1 on its slice) stays at table effort
     expect(decide({ role: 'executor', hdr: { mode: 'fix', size: 'large' }, run: { ...run, fixes: ladderFixes(run, 'resolve') }, settings: S }).reason).toBe('table')
   })
 
@@ -243,6 +245,21 @@ describe('workflow agents: runs, toast, deny', () => {
     expect(await shownRun(ui, 'runG')).toBe(true)
     expect(await shownRun(ui, 'runH')).toBe(false)
     await ui.unmount()
+  })
+
+  test('a lead names its run in session-<id>.run, and the ledger lists each slice from its first dispatch', async ($, on) => {
+    const { writes } = setup(on)
+    on('session.id', async () => ({ value: 'lead-sid' }))
+    await $.session.start({ cwd: '/w', surface: null, isInteractive: false })
+    await $.agent.spawn({ prompt: '[agt run=runS1 size=small mode=build slice=api]\nbuild the api', subagentType: 'agentille:agentille-executor' } as never) // w0
+    expect(writes['/h/.agentille/state/session-lead-sid.run']).toBe('runS1\n')
+    const slices = () => JSON.parse(writes['/h/.agentille/state/run-runS1/ledger.json']).slices
+    expect(slices()).toEqual({ api: { executor: 'working' } })
+    await $.agent.spawn({ prompt: '[agt run=runS1 size=small mode=review slice=api]\nreview the api diff', subagentType: 'agentille:agentille-code-reviewer' } as never) // w1
+    await finish($, 'w0')
+    expect(slices()).toEqual({ api: { executor: 'done', 'code-reviewer': 'working' } })
+    await $.agent.spawn({ prompt: 'no header', subagentType: 'Explore' } as never) // an ad hoc agent names no run
+    expect(writes['/h/.agentille/state/session-lead-sid.run']).toBe('runS1\n')
   })
 
   test('a headerless workflow agent files its routing line and tokens under adhoc, not the band run', async ($, on) => {
@@ -486,6 +503,124 @@ describe('maxRunUsd: a per-run cost ceiling', () => {
     expect(ceilingToasts(toasts)).toEqual([])
     expect((await $.command.run({ command: 'agt-info', args: 'ledger' })).text).not.toContain('estimate')
   })
+
+  test('the lead\'s own tokens on the run are priced at the lead\'s model and counted', async () => {
+    const lead = new Map(Object.entries({
+      r1: { model: 'claude-opus-5-5', input: 1_000_000, output: 100_000, cacheRead: 1_000_000 }, // 4 + 2 + 0.2
+      r2: { model: 'claude-sonnet-5-5', input: 1_000_000, output: 0, cacheRead: 0 }, // another run
+    }))
+    expect(Math.round(leadUsd(lead, 'r1') * 1e6) / 1e6).toBe(6.2)
+    expect(leadUsd(lead, 'r9')).toBe(0)
+    expect(leadUsd(null, 'r1')).toBe(0)
+    const agents = new Map(Object.entries({ x: { run: 'r1', model: 'sonnet', input: 500_000, output: 0, cacheRead: 0 } })) // 1
+    expect(Math.round(estimateRunUsd(agents, 'r1', [], Date.now(), lead) * 1e6) / 1e6).toBe(7.2)
+    expect(Math.round(estimateRunUsd(agents, 'r1') * 1e6) / 1e6).toBe(1) // no lead map: subagents only
+  })
+
+  test('lead usage files under the run its /agt named; steps before the name wait, steps outside a run never count', async () => {
+    const step = (input: number, output: number) => ({ input_tokens: input, output_tokens: output, cache_read_input_tokens: 10, cache_creation_input_tokens: 5 })
+    addLeadUsage(step(100, 10), 'claude-opus-5-5', { agtTurn: false, agtRun: null, agtTypedAt: 1 })
+    expect(Runs.leadPending).toBe(null)
+    // The typed /agt reads its procedure before it names a run: pending.
+    addLeadUsage(step(1000, 100), 'claude-opus-5-5', { agtTurn: true, agtRun: null, agtTypedAt: 7 })
+    expect(Runs.leadPending).toMatchObject({ at: 7, input: 1005, output: 100, cacheRead: 10 })
+    // The run has an id: the pending steps and this one file under it.
+    addLeadUsage(step(500, 50), 'claude-opus-5-5', { agtTurn: true, agtRun: 'lead1', agtTypedAt: 7 })
+    expect(Runs.lead.get('lead1')).toEqual({ input: 1510, output: 150, cacheRead: 20, model: 'claude-opus-5-5' })
+    expect(Runs.leadPending).toBe(null)
+    // A newer typed /agt drops what an older one left pending.
+    addLeadUsage(step(1, 1), 'claude-opus-5-5', { agtTurn: true, agtRun: null, agtTypedAt: 8 })
+    addLeadUsage(step(2, 2), 'claude-opus-5-5', { agtTurn: true, agtRun: null, agtTypedAt: 9 })
+    expect(Runs.leadPending).toMatchObject({ at: 9, input: 7, output: 2 })
+    addLeadUsage(step(0, 0), 'claude-opus-5-5', { agtTurn: true, agtRun: 'lead2', agtTypedAt: 9 })
+    expect(Runs.lead.get('lead2')).toMatchObject({ input: 12, output: 2 })
+    expect(Runs.lead.get('lead1')).toMatchObject({ input: 1510 }) // untouched
+  })
+
+  test('stopAtCeiling: off by default, so the ceiling only demotes; on, every role at the ceiling gets a stop', async () => {
+    expect(DEFAULTS.stopAtCeiling).toBe(false)
+    expect(decide({ role: 'code-reviewer', hdr: { size: 'large' }, run: over, settings: C }).stop).toBe(undefined)
+    expect(decide({ role: 'executor', hdr: {}, run: over, settings: C }).stop).toBe(undefined)
+    const S = { ...C, stopAtCeiling: true }
+    for (const role of ROLES) {
+      expect(decide({ role, hdr: {}, run: under, settings: S }).stop).toBe(undefined)
+      expect(decide({ role, hdr: {}, run: over, settings: S }).stop).toBe('agt ✗ run ~$5.00 reached its cost ceiling, maxRunUsd $5.00, and routing.stopAtCeiling is on: no more dispatches this run. Raise routing.maxRunUsd in ~/.agentille/profile.json (or set stopAtCeiling to false) to go on.')
+    }
+    expect(decide({ role: 'executor', hdr: { size: 'large' }, run: { ...fresh(), usd: 6 }, settings: S }).stop).toContain('~$6.00')
+    // A typed --fable is stopped too, and nothing is counted as a Fable spawn.
+    expect(decide({ role: 'planner', hdr: { fable: 'forced' }, run: over, settings: S })).toMatchObject({ fable: false, stop: expect.any(String) })
+    // A ceiling turned off never stops, whatever stopAtCeiling says.
+    expect(decide({ role: 'executor', hdr: {}, run: { ...fresh(), usd: 1e6 }, settings: { ...S, maxRunUsd: null } as never }).stop).toBe(undefined)
+  })
+
+  const build = ($: any, run: string) => $.agent.spawn({ prompt: '[agt run=' + run + ' size=small mode=build]\nbuild', subagentType: 'agentille:agentille-executor', model: 'sonnet' })
+
+  test('in the mod: stopAtCeiling false keeps the demotion and lets the executor through', async ($, on) => {
+    const { seen } = boot(on, { maxRunUsd: 1, stopAtCeiling: false })
+    await $.session.start({ cwd: '/w', surface: null, isInteractive: false })
+    await plan($, 'stop1')
+    await spend($, 'c0', 50_000) // $1.00
+    const r = await review($, 'stop1')
+    expect((r as any).deny).toBe(undefined)
+    const x = await build($, 'stop1')
+    expect((x as any).deny).toBe(undefined)
+    expect(seen).toEqual(['opus', 'sonnet', 'sonnet'])
+    expect((await $.command.run({ command: 'agt-info', args: 'ledger' })).text).toContain('of maxRunUsd $1.00, lead ~$0.00 of it')
+  })
+
+  test('in the mod: stopAtCeiling true denies the executor at the ceiling with one line naming it, the estimate and how to raise it', async ($, on) => {
+    const { seen, writes } = boot(on, { maxRunUsd: 1, stopAtCeiling: true })
+    await $.session.start({ cwd: '/w', surface: null, isInteractive: false })
+    await plan($, 'stop2')
+    await build($, 'stop2') // under the ceiling: dispatched
+    expect(seen).toEqual(['opus', 'sonnet'])
+    await spend($, 'c0', 50_000) // $1.00: at the ceiling
+    const x = await build($, 'stop2')
+    expect((x as any).deny).toBe('agt ✗ run ~$1.00 reached its cost ceiling, maxRunUsd $1.00, and routing.stopAtCeiling is on: no more dispatches this run. Raise routing.maxRunUsd in ~/.agentille/profile.json (or set stopAtCeiling to false) to go on.')
+    expect((x as any).deny.split('\n')).toHaveLength(1)
+    const r = await review($, 'stop2')
+    expect((r as any).deny).toContain('maxRunUsd $1.00')
+    expect(seen).toEqual(['opus', 'sonnet']) // nothing more reached the engine
+    expect(writes['/h/.agentille/state/run-stop2/routing.jsonl'].trim().split('\n')).toHaveLength(2) // a denied dispatch is not logged
+    await build($, 'stop3') // another run starts at $0
+    expect(seen).toEqual(['opus', 'sonnet', 'sonnet'])
+  })
+
+  test('in the mod: stopAtCeiling true denies a spawn_pane executor at the ceiling and opens no pane', { timeoutMs: 20_000 }, async ($, on) => {
+    const argvs: string[][] = []
+    let n = 0
+    const vars: Record<string, string> = { TMUX: '/tmp/tmux-1/default,1,0', TMUX_PANE: '%1', SHELL: '/bin/zsh', HOME: '/h' }
+    on('env.get', async ($: any, e: any) => ({ value: vars[e.name] }))
+    on('session.cwd', async () => ({ value: '/work/repo' }))
+    on('session.start', async ($: any, e: any) => ({ cwd: e.cwd }))
+    on('command.register', async () => ({ value: undefined }))
+    on('tool.register', async ($: any, e: any) => ({ value: { tool: 'mcp__agentille__' + e.name } }))
+    on('fs.read', async ($: any, e: any) => e.path === '/h/.agentille/profile.json' ? { value: JSON.stringify({ routing: { maxRunUsd: 1, stopAtCeiling: true } }) } : { deny: 'ENOENT' })
+    on('fs.write', async () => ({ value: undefined }))
+    on('fs.list', async () => ({ value: [] }))
+    on('fs.exists', async () => ({ value: false }))
+    on('fs.stat', async () => ({ deny: 'ENOENT' }))
+    on('store.get', async () => ({ value: undefined }))
+    on('store.set', async () => ({ value: undefined }))
+    on('ui.panes', async () => ({ value: [] }))
+    on('ui.toast', async () => ({ value: undefined }))
+    on('ui.render', async () => ({ type: 'engine', ref: 0 }) as never)
+    on('prompt.submit', async ($: any, e: any) => ({ text: e.text }))
+    on('turn.complete', async ($: any, e: any) => ({ text: e.answer }))
+    on('agent.spawn', async ($: any, e: any) => ({ model: e.model ?? 'sonnet', agentId: 'p' + n++ }))
+    on('process.run', async ($: any, e: any) => {
+      argvs.push(e.argv)
+      return { value: { exitCode: 0, stdout: e.argv[1] === 'split-window' ? '%9\n' : e.argv[1] === 'list-panes' ? ['%1', '', 'claude', '0', '@1'].join('\t') + '\n' : '', stderr: '' } }
+    })
+    mock.clock(on, { now: 1_000_000 })
+    await $.session.start({ cwd: '/work/repo', surface: null, isInteractive: false })
+    await $.prompt.submit({ text: '/agt heavy ship it', origin: { kind: 'composer' } } as never)
+    await plan($, 'pstop1')
+    await spend($, 'p0', 50_000) // $1.00 of Opus output: at the ceiling
+    const r = await $.tool.call({ tool: 'mcp__agentille__spawn_pane', run: 'pstop1', role: 'exec-1', task: 'build one', agent: 'executor', header: '[agt run=pstop1 size=small mode=build]' }) as any
+    expect(r.deny).toBe('agt ✗ run ~$1.00 reached its cost ceiling, maxRunUsd $1.00, and routing.stopAtCeiling is on: no more dispatches this run. Raise routing.maxRunUsd in ~/.agentille/profile.json (or set stopAtCeiling to false) to go on.')
+    expect(argvs.some((a) => a[1] === 'split-window')).toBe(false)
+  })
 })
 
 describe('typed proof', () => {
@@ -525,7 +660,7 @@ describe('typed proof', () => {
 
   test('rewrites fable=forced on the prompt first line only', async () => {
     expect(demoteHeaderText('[agt run=a1 fable=forced]\nBuild fable=forced now')).toBe('[agt run=a1 fable=forced]\nBuild fable=forced now'.replace('fable=forced]', 'fable=auto]'))
-    expect(demoteHeaderText('[agt run=a1 fable=forced piece=x]')).toBe('[agt run=a1 fable=auto piece=x]')
+    expect(demoteHeaderText('[agt run=a1 fable=forced slice=x]')).toBe('[agt run=a1 fable=auto slice=x]')
     expect(demoteHeaderText('no header\nfable=forced')).toBe('no header\nfable=forced')
     expect(demoteHeaderText(undefined)).toBe('')
   })

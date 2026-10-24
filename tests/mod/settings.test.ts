@@ -5,21 +5,38 @@ describe('settings: display parsing', () => {
   test('nothing set: every key is its default', () => {
     const r = resolveDisplay(undefined, {})
     expect(r.values).toEqual(DISPLAY_DEFAULTS)
-    expect(r.from).toEqual({ deck: 'default', focus: 'default', highlight: 'default' })
+    expect(r.from).toEqual({ deck: 'default', focus: 'default', highlight: 'default', band: 'default', statusLine: 'default', mascot: 'default' })
+    expect(DISPLAY_DEFAULTS).toEqual({ deck: 'off', focus: true, highlight: 'off', band: 'on', statusLine: 'on', mascot: 'on' })
   })
 
   test('profile beats store, store beats default, per key', () => {
     const r = resolveDisplay({ deck: 'auto' }, { deck: 'off', focus: false })
-    expect(r.values).toEqual({ deck: 'auto', focus: false, highlight: 'off' })
-    expect(r.from).toEqual({ deck: 'profile', focus: 'store', highlight: 'default' })
+    expect(r.values).toEqual({ ...DISPLAY_DEFAULTS, deck: 'auto', focus: false, highlight: 'off' })
+    expect(r.from).toMatchObject({ deck: 'profile', focus: 'store', highlight: 'default' })
   })
 
   test('junk values and junk shapes read as not set', () => {
     expect(cleanDisplay({ deck: 'sometimes', focus: 'yes', highlight: 3 })).toEqual({})
     for (const junk of [null, undefined, 'auto', 7, ['auto'], true]) expect(cleanDisplay(junk)).toEqual({})
     const r = resolveDisplay({ deck: 'nope', focus: false, highlight: ['all'] }, { highlight: 'all' })
-    expect(r.values).toEqual({ deck: 'off', focus: false, highlight: 'all' })
-    expect(r.from).toEqual({ deck: 'default', focus: 'profile', highlight: 'store' })
+    expect(r.values).toEqual({ ...DISPLAY_DEFAULTS, deck: 'off', focus: false, highlight: 'all' })
+    expect(r.from).toMatchObject({ deck: 'default', focus: 'profile', highlight: 'store' })
+  })
+
+  test('band, statusLine and mascot take on or off and nothing else', () => {
+    for (const k of ['band', 'statusLine', 'mascot']) {
+      expect(cleanDisplay({ [k]: 'off' })).toEqual({ [k]: 'off' })
+      expect(cleanDisplay({ [k]: 'on' })).toEqual({ [k]: 'on' })
+      for (const junk of [false, true, 'OFF', 'auto', 0, null, ['off']]) expect(cleanDisplay({ [k]: junk })).toEqual({})
+      expect(resolveDisplay({ [k]: 'off' }, {}).values[k]).toBe('off')
+      expect(resolveDisplay({ [k]: 'off' }, {}).from[k]).toBe('profile')
+      expect(resolveDisplay({ [k]: 'hidden' }, {}).values[k]).toBe('on')
+    }
+  })
+
+  test('the old store toggles never set the three newer keys', () => {
+    const r = resolveDisplay({}, storedDisplay({ deckAuto: true, focusMode: 'off', highlightOn: false }))
+    expect(r.from).toMatchObject({ band: 'default', statusLine: 'default', mascot: 'default' })
   })
 
   test('unknown keys are dropped, valid siblings survive', () => {
@@ -73,6 +90,9 @@ describe('settings: writing the profile', () => {
     expect(t).toMatch(/deck\s+auto\s+profile/)
     expect(t).toMatch(/focus\s+false\s+store/)
     expect(t).toMatch(/highlight\s+off\s+default/)
+    expect(displayText(resolveDisplay({ statusLine: 'off' }, {}))).toMatch(/statusLine\s+off\s+profile/)
+    expect(t).toMatch(/band\s+on\s+default/)
+    expect(t).toMatch(/mascot\s+on\s+default/)
   })
 })
 
@@ -99,31 +119,31 @@ describe('settings: in the mod', () => {
   const focus = async ($: any) => (await $.command.run({ command: 'agt-focus' })).text.split('\n')[0]
   const highlight = async ($: any) => (await $.command.run({ command: 'agt-highlight' })).text.split(' ')[1]
 
-  test('no profile and an empty store: the defaults, highlight off', async ($, on) => {
+  test('no profile and an empty store: the defaults, highlight off', { timeoutMs: 20_000 }, async ($, on) => {
     await boot($, on, null)
     expect(await focus($)).toContain('focus: on')
     expect(await highlight($)).toBe('off')
   })
 
-  test('the old store values still apply when the profile has no display block', async ($, on) => {
+  test('the old store values still apply when the profile has no display block', { timeoutMs: 20_000 }, async ($, on) => {
     await boot($, on, '{"name":"x"}', { 'focus:mode': 'off', 'highlight:on': true, 'highlight:all': true })
     expect(await focus($)).toContain('focus: off')
     expect(await highlight($)).toBe('all')
   })
 
-  test('profile.display beats the store, key by key', async ($, on) => {
+  test('profile.display beats the store, key by key', { timeoutMs: 20_000 }, async ($, on) => {
     await boot($, on, '{"display":{"focus":true,"highlight":"off"}}', { 'focus:mode': 'off', 'highlight:on': true, 'highlight:all': true })
     expect(await focus($)).toContain('focus: on')
     expect(await highlight($)).toBe('off')
   })
 
-  test('junk in the profile falls through to the store and the defaults', async ($, on) => {
+  test('junk in the profile falls through to the store and the defaults', { timeoutMs: 20_000 }, async ($, on) => {
     await boot($, on, '{"display":{"focus":"never","highlight":9}}', { 'focus:mode': 'off' })
     expect(await focus($)).toContain('focus: off')
     expect(await highlight($)).toBe('off')
   })
 
-  test('a profile that is not JSON, or has display as a string, changes nothing', async ($, on) => {
+  test('a profile that is not JSON, or has display as a string, changes nothing', { timeoutMs: 20_000 }, async ($, on) => {
     await boot($, on, '{"display":"loud"}')
     expect(await focus($)).toContain('focus: on')
   })

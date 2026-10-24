@@ -1,7 +1,8 @@
-// agentille display: the three display settings (deck, focus, highlight) read from profile.json or the mod
-// store and written back, the agent flags above the prompt, and the memo of which message closed an answer.
+// agentille display: the display settings (deck, focus, highlight, band, statusLine, mascot) read from
+// profile.json or the mod store and written back, the agent flags above the prompt, and the memo of which message closed an answer.
 
-import { Profile, Panes } from './state.js'
+import { Profile } from './profile.js'
+import { Panes } from './reaper.js'
 import { makeStore } from './store.js'
 import { mergeFlags, paneFlags, parseFocusArgs, focusText } from './focus.js'
 import { isAnswerBlock, panel, parseHighlightArgs, highlightText } from './highlight.js'
@@ -21,6 +22,9 @@ const { s: my, view } = makeStore('display.js', {
   focusOn: true,  // agent flags show above the prompt
   highlightOn: false,  // /agt replies get an essentials card and lit tokens (display.highlight: on | all)
   highlightAll: false,  // …and so does every other long reply (/agt-highlight all)
+  bandOn: true,  // display.band: the switchboard above the prompt draws
+  statusOn: true,  // display.statusLine: the agt status line under the prompt is pinned
+  mascotOn: true,  // display.mascot: the mascot figure draws in a worker's band and the deck's cast
   flags: [],  // [{ text, key, at }] from agent results this run
   lastAnswer: null,  // { text, ms, id, shaped, raw } of the newest main-turn answer; its closing block draws as the panel
   panelMemo: new Map(),  // message id → { text, panel() result }: the blocks that closed a main turn's answer
@@ -71,7 +75,7 @@ export const DECK = 'agt-deck'
 
 export const FLAG_TTL_MS = 30 * 60_000
 
-// profile.display → old store value → default, applied to the three live switches.
+// profile.display → old store value → default, applied to the live switches.
 export function applyDisplay() {
   my.display = resolveDisplay(my.profileDisplay, storedDisplay(my.storedRaw))
   my.deckAuto = my.display.values.deck === 'auto'
@@ -79,6 +83,9 @@ export function applyDisplay() {
   const h = highlightFlags(my.display.values.highlight)
   my.highlightOn = h.on
   my.highlightAll = h.all
+  my.bandOn = my.display.values.band !== 'off'
+  my.statusOn = my.display.values.statusLine !== 'off'
+  my.mascotOn = my.display.values.mascot !== 'off'
 }
 
 export const PROFILE_FILE = '/.agentille/profile.json'

@@ -5,13 +5,13 @@ import { ctx, isLead, Profile, Display, Runs, Spawn, Panes, Proofs, Session, set
 import { registerAutocomplete } from './autocomplete.js'
 import { toolLabel, runPhases } from './board.js'
 import { cleanText } from './clean.js'
-import { routingView, ledgerView, dispatchAgent } from './dispatch.js'
+import { routingView, ledgerView, dispatchAgent, setRouteVerdict, noteAgentTool, enterAgentCall, leaveAgentCall, noteAgentStep, addLeadUsage } from './dispatch.js'
 import { DECK, applyDisplay, answerPanel, deckCommand, focusCommand, highlightCommand, setStoredRaw, setLastAnswer, mascotHello, mascotWorking } from './display.js'
 import { canDraw, drawingBlock } from './drawing.js'
 import { highlightFor, litFor } from './highlight.js'
 import { parseInfoArgs, routeText, routingSummary, ledgerSummary, squadsSummary, overviewText } from './info.js'
 import { verdictChip } from './links.js'
-import { addUsage, ledger } from './live.js'
+import { ledger } from './live.js'
 import { parseWorker } from './mascot.js'
 import { PROBE, SPAWN_ROLE, transportBlock, paneName, newRunId, paneKey, parseSpawnArgs, herdrPromptArgv } from './panes.js'
 import { installedSkew, loadProfile, loadSquads, squadsView, tipOnce } from './profile.js'
@@ -184,9 +184,9 @@ export function register(on) {
       const from = shortName(w.from)
       // Only the pane whose key the message names: a stale list or a respawned role must not harvest the older pane.
       const hit = w.kind === 'done' && w.key ? Panes.panes.find((p) => paneKey(p.id) === w.key && p.name === w.from) : null
-      if (hit) { const r = P.rec(hit.id); r.harvested = true; r.wireDone = true }
+      if (hit) P.harvest(hit.id, { wire: true })
       const route = w.kind === 'done' ? Runs.paneRoutes.findLast((r) => r.name === w.from) : null
-      if (route) route.verdict = verdictChip(route.agent, w.summary)
+      if (route) setRouteVerdict(w.from, verdictChip(route.agent, w.summary))
       noteWire({ from, to: Session.wireName ? shortName(Session.wireName) : 'lead', kind: w.kind, summary: w.summary, at: Date.now() })
       $.ui.toast('⇄ ' + from + ' ' + w.kind)
       $.ui.invalidate('ui.render')
@@ -200,20 +200,15 @@ export function register(on) {
 
   on('tool.call', async ($, e, next) => {
     if (e.agentId) {
-      const a = Runs.live.get(e.agentId)
-      if (a) {
-        a.tool = toolLabel(e.tool, e)
-        a.heard = Date.now()
-      }
+      noteAgentTool(e.agentId, toolLabel(e.tool, e))
       // A workflow agent inside one long call (a full test suite) is alive: tree.js quietWorkflows
       // skips it until the call returns, and the return counts as heard.
-      if (a?.workflow) {
-        a.calls = (a.calls ?? 0) + 1
+      if (Runs.live.get(e.agentId)?.workflow) {
+        enterAgentCall(e.agentId)
         try {
           return await next(e)
         } finally {
-          a.calls -= 1
-          a.heard = Date.now()
+          leaveAgentCall(e.agentId)
         }
       }
     } else if (Session.wireName) {
@@ -241,17 +236,12 @@ export function register(on) {
     const a = e.agentId ? Runs.live.get(e.agentId) : undefined
     if (!e.agentId) setLeadModel(e.model)
     const result = yield* next(a && a.routed ? { ...e, effort: a.effort } : e)
+    if (!e.agentId && result?.usage) addLeadUsage(result.usage, e.model)
     if (!e.agentId && Session.wireName && result?.usage) {
       pubStep(result.usage, e.model)
       await publish($)
     }
-    if (a) {
-      a.heard = Date.now()
-      if (!a.effort && e.effort) a.effort = String(e.effort)
-      if (!a.model && e.model) a.model = e.model
-      addUsage(a, result?.usage)
-      $.ui.invalidate('ui.render')
-    }
+    if (a && noteAgentStep(e.agentId, { effort: e.effort, model: e.model, usage: result?.usage })) $.ui.invalidate('ui.render')
     return result
   })
 

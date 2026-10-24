@@ -7,7 +7,7 @@ Presentation only: nothing here changes dispatch. If a line cannot be produced, 
 The skill text then ends with a `## Drawing (agentille mod)` block. With it, the mod already shows these, so skip them:
 
 - the `[agentille v<version>]` suffix on the recon line (the band header shows the version)
-- the TodoWrite progress spine (the swarm line shows the phases)
+- the TodoWrite progress spine (the band shows the phases)
 - the profile tip (the mod toasts it once)
 - report.md's `## Agents` and `## Raw reports` sections (the mod appends them)
 

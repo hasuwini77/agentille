@@ -1,6 +1,25 @@
-# Settings: highlight and older commands
+# Settings: display switches, highlight and older commands
 
-The README's Settings section covers every `~/.agentille/profile.json` key. This page holds the detail of `display.highlight` and the commands that used to set these keys.
+The README's Settings section covers every `~/.agentille/profile.json` key. This page holds the detail of the `display` block: one switch per surface, `display.highlight`, and the commands that used to set these keys.
+
+## Display switches
+
+Each surface the mod draws has its own key in the `display` block. An invalid value is ignored and the key takes its default. `/agt-info` prints the value in effect and where it came from. Turning a surface off changes nothing about `/agt` itself: runs are routed, counted and reported the same, and `/agt-info` still shows them.
+
+| key | values | default | `off` (or the other value) does |
+|---|---|---|---|
+| `band` | `on`, `off` | `on` | Draws nothing above the prompt: the run's tree, the wire line, the `⚑` flags and a worker pane's own band all live there and go with it. |
+| `statusLine` | `on`, `off` | `on` | Pins no status line under the prompt, and clears one an earlier reload left pinned. |
+| `mascot` | `on`, `off` | `on` | Drops the figure from a worker pane's band and from the deck's cast. A worker keeps its one-line caption (role, model, effort, elapsed); the deck keeps each agent's role and model. |
+| `deck` | `auto`, `off` | `off` | `auto` opens the deck on every typed `/agt`; `off` opens it only when you type `/agt-deck`. |
+| `focus` | `true`, `false` | `true` | `false` hides the `⚑` flags in the band. |
+| `highlight` | `on`, `all`, `off` | `off` | See below. |
+
+```json
+{ "display": { "band": "off", "statusLine": "on", "mascot": "off" } }
+```
+
+The daily version check is not a display key: set `AGENTILLE_UPDATE_CHECK=0` in your environment to turn it off.
 
 ## `display.highlight`
 
@@ -14,4 +33,13 @@ Default `off`. `on` lights `/agt` replies, `all` every reply, `off` none. The mo
 
 ## Older commands
 
-`/agt-routing`, `/agt-ledger` and `/agt-squads` were removed in v3.14.0: use `/agt-info routing|ledger|squads`. `/agt-focus` and `/agt-highlight` still work and write the `display` block, but both are deprecated and go away in v4: set `display.focus` and `display.highlight` in your profile instead.
+`/agt-routing`, `/agt-ledger` and `/agt-squads` were removed in v3.14.0: use `/agt-info routing|ledger|squads`.
+
+Two commands still work and write the `display` block, but both are deprecated and go away in v4:
+
+| You type | You get | Instead |
+|---|---|---|
+| `/agt-focus [on\|off]` | Agent flags in the band on or off, saved as `display.focus` | set `display.focus` in your profile |
+| `/agt-highlight [on\|all\|off]` | Which replies get lit, saved as `display.highlight` | set `display.highlight` in your profile |
+
+When the profile cannot be written, both fall back to the mod's own store on this machine and say so. A value in `profile.json` wins over the store from the next session on.

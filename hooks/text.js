@@ -1,5 +1,5 @@
 // agentille text: the long strings the mod hands the model (pane tool descriptions, the /agt prompt's pane block,
-// the sessions notes), wrapped here so they read as prose. Each joins its pieces with one space, so the text the
+// the sessions notes), wrapped here so they read as prose. Each joins its parts with one space, so the text the
 // model sees is one line, as before. A leaf: it imports nothing, so panes.js can build its tools from it at load.
 
 const line = (...parts) => parts.join(' ')
@@ -17,7 +17,7 @@ export const CLOSE_TOOL_TEXT = line(
   'by a typed /agt-spawn (the reaper closes those) and panes of other sessions are refused.',
 )
 
-// `idleMin`: how long a resting Herdr session waits before it is closed (panes.js SESSION_IDLE_MS, in minutes).
+// `idleMin`: how long a resting Herdr session waits before it is closed (panes-base.js SESSION_IDLE_MS, in minutes).
 export const sessionsToolText = (idleMin) => line(
   'Open interactive sessions beside this one as Herdr or tmux panes, never focused: Claude by default, or Codex or a',
   'plain shell. Use it whenever the person asks to open or start sessions, panes, terminals, Claudes or Codexes',

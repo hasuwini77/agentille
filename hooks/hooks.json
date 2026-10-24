@@ -19,6 +19,11 @@
         "hooks": [
           {
             "type": "command",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/agentille-compact.sh\"",
+            "timeout": 8
+          },
+          {
+            "type": "command",
             "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/agentille-update-check.sh\"",
             "timeout": 8
           }

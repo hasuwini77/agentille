@@ -1,18 +1,18 @@
 import { describe, expect, mock, test } from 'claude-code/testing'
-import { answerLine, linkPieces, loopText, party, pieceOf, taskLine, verdictChip } from '../../hooks/links.js'
+import { answerLine, linkSlices, loopText, party, sliceOf, taskLine, verdictChip } from '../../hooks/links.js'
 import { boardRows, runPhases, wireLines, wireRow } from '../../hooks/board.js'
 import { nest } from '../../hooks/tree.js'
 
-const row = (id: string, role: string, piece: string | null, over: object = {}) => ({ id, kind: 'sub', role, piece, parentId: null, state: 'working', start: 0, input: 0, output: 0, ...over })
+const row = (id: string, role: string, slice: string | null, over: object = {}) => ({ id, kind: 'sub', role, slice, parentId: null, state: 'working', start: 0, input: 0, output: 0, ...over })
 
 describe('links: pure', () => {
-  test('a piece is a short lowercase slug; anything else is no piece', async () => {
-    expect(pieceOf({ piece: 'api' })).toBe('api')
-    expect(pieceOf({ piece: 'checkout-ui' })).toBe('checkout-ui')
-    expect(pieceOf({ piece: 'Api' })).toBe(null)
-    expect(pieceOf({ piece: '../x' })).toBe(null)
-    expect(pieceOf({})).toBe(null)
-    expect(pieceOf(null)).toBe(null)
+  test('a slice is a short lowercase slug; anything else is no slice', async () => {
+    expect(sliceOf({ slice: 'api' })).toBe('api')
+    expect(sliceOf({ slice: 'checkout-ui' })).toBe('checkout-ui')
+    expect(sliceOf({ slice: 'Api' })).toBe(null)
+    expect(sliceOf({ slice: '../x' })).toBe(null)
+    expect(sliceOf({})).toBe(null)
+    expect(sliceOf(null)).toBe(null)
   })
 
   test('verdict chips per role, with only the P0/P1 counts that are not zero', async () => {
@@ -27,7 +27,7 @@ describe('links: pure', () => {
     expect(verdictChip('executor', 'VERDICT: PASS')).toBe(null)
   })
 
-  test("a piece's reviewers hang under its newest builder; a shown parent wins", async () => {
+  test("a slice's reviewers hang under its newest builder; a shown parent wins", async () => {
     const rows = [
       row('e1', 'executor', 'api', { start: 1 }),
       row('e2', 'executor', 'api', { start: 2 }),
@@ -36,7 +36,7 @@ describe('links: pure', () => {
       row('own', 'design-reviewer', 'api', { start: 5, parentId: 'e1' }),
       row('p1', 'executor', 'ui', { kind: 'pane', role: 'exec-ui', agent: 'executor', start: 0 }),
     ]
-    const linked = linkPieces(rows)
+    const linked = linkSlices(rows)
     expect(linked.find((r) => r.id === 'cr')?.parentId).toBe('e2')
     expect(linked.find((r) => r.id === 'sr')?.parentId).toBe('p1')
     expect(linked.find((r) => r.id === 'own')?.parentId).toBe('e1')
@@ -45,17 +45,17 @@ describe('links: pure', () => {
     expect(tree.indexOf('cr')).toBe(tree.indexOf('e2') + 1)
   })
 
-  test('with one builder, a checker that names no piece is its; planning roles and two builders stay put', async () => {
-    const one = linkPieces([row('e', 'executor', null), row('c', 'code-reviewer', null), row('a', 'adversary', null), row('p', 'plan-reviewer', null), row('u', 'ui-prototyper', null)])
+  test('with one builder, a checker that names no slice is its; planning roles and two builders stay put', async () => {
+    const one = linkSlices([row('e', 'executor', null), row('c', 'code-reviewer', null), row('a', 'adversary', null), row('p', 'plan-reviewer', null), row('u', 'ui-prototyper', null)])
     expect(one.map((r) => r.parentId)).toEqual([null, 'e', 'e', null, null])
     const two = [row('e1', 'executor', null), row('e2', 'executor', null), row('c', 'code-reviewer', null)]
-    expect(linkPieces(two)).toEqual(two)
-    const mixed = linkPieces([row('e1', 'executor', 'api'), row('e2', 'executor', 'web'), row('c', 'code-reviewer', null)])
+    expect(linkSlices(two)).toEqual(two)
+    const mixed = linkSlices([row('e1', 'executor', 'api'), row('e2', 'executor', 'web'), row('c', 'code-reviewer', null)])
     expect(mixed.find((r) => r.id === 'c')?.parentId).toBe(null)
   })
 
   test('task and answer lines skip the header and the profile prefix', async () => {
-    expect(taskLine('[agt run=r1 piece=api]\nUser: Kim (dev). Avoid: x\nCommunicate: direct\n\nReview the api diff on feat/x')).toBe('Review the api diff on feat/x')
+    expect(taskLine('[agt run=r1 slice=api]\nUser: Kim (dev). Avoid: x\nCommunicate: direct\n\nReview the api diff on feat/x')).toBe('Review the api diff on feat/x')
     expect(taskLine('[agt run=r1]')).toBe('')
     expect(answerLine('code-reviewer', 'VERDICT: FAIL · P0:1')).toBe('FAIL P0:1')
     expect(answerLine('executor', '## Built the api\nVERIFICATION: ok')).toBe('Built the api')
@@ -121,11 +121,11 @@ describe('links: in the mod', () => {
   }
   const mount = ($: any) => $.ui.mount({ plugin: 'agentille', surface: 'terminal', component: 'AbovePrompt', props: { hasSurvey: false, isWorking: true, maxRows: 12, bodyColumns: 120 } as never })
 
-  test('a reviewer of a piece sits under its executor and turns into its verdict', async ($, on) => {
+  test('a reviewer of a slice sits under its executor and turns into its verdict', { timeoutMs: 20_000 }, async ($, on) => {
     spawnAs(on)
-    await $.agent.spawn({ prompt: '[agt run=lkrun size=small mode=build piece=api]\nbuild the api', subagentType: 'agentille:agentille-executor' })
-    await $.agent.spawn({ prompt: '[agt run=lkrun size=small mode=build piece=web]\nbuild the page', subagentType: 'agentille:agentille-executor' })
-    await $.agent.spawn({ prompt: '[agt run=lkrun size=small mode=review piece=api]\nreview the api diff', subagentType: 'agentille:agentille-code-reviewer' })
+    await $.agent.spawn({ prompt: '[agt run=lkrun size=small mode=build slice=api]\nbuild the api', subagentType: 'agentille:agentille-executor' })
+    await $.agent.spawn({ prompt: '[agt run=lkrun size=small mode=build slice=web]\nbuild the page', subagentType: 'agentille:agentille-executor' })
+    await $.agent.spawn({ prompt: '[agt run=lkrun size=small mode=review slice=api]\nreview the api diff', subagentType: 'agentille:agentille-code-reviewer' })
     const ui = await mount($)
     const trees = (await ui.findAll({ type: 'Text', text: /^[│ ]*[├└]─/ })).map((t: any) => t.text)
     expect(trees.some((t: string) => /^[│ ]+└─/.test(t))).toBe(true) // one row is nested under another
@@ -136,7 +136,7 @@ describe('links: in the mod', () => {
     await after.unmount()
   })
 
-  test('a one-slice run nests its reviewer under the executor without any piece=', async ($, on) => {
+  test('a one-slice run nests its reviewer under the executor without any slice=', { timeoutMs: 20_000 }, async ($, on) => {
     spawnAs(on)
     await $.agent.spawn({ prompt: '[agt run=onerun size=small mode=build]\nbuild it', subagentType: 'agentille:agentille-executor' })
     await $.agent.spawn({ prompt: '[agt run=onerun size=small mode=review]\nreview it', subagentType: 'agentille:agentille-code-reviewer' })

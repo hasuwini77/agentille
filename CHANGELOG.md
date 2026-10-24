@@ -7,7 +7,111 @@ All notable changes to agentille are documented here.
 Fixes and clean-up on top of 3.23.0, no version bump (fixes batch into the
 next minor, `docs/releasing.md`).
 
+### Added
+
+- **Per-surface display switches.** `display.band`, `display.statusLine`
+  and `display.mascot` (`"on"` or `"off"`, default `"on"`) in
+  `~/.agentille/profile.json` turn the switchboard band, the pinned
+  status line and the worker mascot off one at a time while `/agt` keeps
+  working. `docs/settings.md` → "Display switches" lists every switch.
+- **The compaction hook prints where the run stands.** After a
+  compaction, `hooks/agentille-compact.sh` prints the session's run id,
+  its transport, one line per slice with each role's state from
+  `ledger.json`, and which files to re-read before the next dispatch. It
+  prints nothing when no run is in flight. The lead names its run in
+  `~/.agentille/state/session-<session id>.run`, and `ledger.json` now
+  carries a `slices` map from the first dispatch on.
+- **`routing.stopAtCeiling`** (default `false`): `true` refuses every
+  dispatch, subagent or pane and whatever the role, once the run's
+  estimate reaches `routing.maxRunUsd`, instead of only moving later
+  Opus roles to Sonnet. `/agt-info route` shows the stop.
+- **Issue and pull request templates**, and a CONTRIBUTING page that
+  says how the repo is laid out, how to run the three verification
+  layers, what a module may write and what a good PR looks like.
+- **`docs/glossary.md`**: the words the README uses, one meaning each.
+  "Mode" means the integration mode; the level is the level and the pane
+  transport is the transport.
+
+### Changed
+
+- **The cost estimate counts the lead.** `estimateRunUsd` now prices the
+  lead session's own tokens on the run (input, output and cache reads,
+  at the lead's model) next to the agents' tokens and pane minutes, and
+  `/agt-info ledger` shows the lead's share. Heavy runs reach the default
+  $15 ceiling sooner than before, so later Opus roles demote more often;
+  raise `routing.maxRunUsd` or set it to `null` to keep the old
+  behaviour.
+- **Stores enforce ownership at every depth.** A read view is deep: a
+  nested record, array, Map or Set read through another module's view
+  throws on any write and names the owner. Every write `register.js`,
+  `tools.js`, `turns.js`, `reaper.js` and `ticker.js` used to make into
+  another module's records goes through a named transition
+  (`setRouteVerdict`, `noteAgentTool`, `agentDone`, `countFix`,
+  `logDecision`, `harvest`, `opened`, …).
+- **`hooks/session.js` is a leaf and `hooks/state.js` a pure index.**
+  `session.js` owns the `Session` store, `isLead()` and `ctx` and imports
+  only `store.js`; owners import it and one another directly, and
+  `scripts/validate.sh` fails when any module `state.js` imports reaches
+  `state.js` again. `hooks/panes.js` keeps the layout plan and the reaper
+  pool and re-exports the rest from `panes-base.js`, `panes-tmux.js`,
+  `panes-herdr.js`, `panes-asks.js` and `panes-schema.js`.
+- **The executor carries the run facts it needs.** Its definition states
+  the worktree's life, what a fix attempt is and the cap of two, the gate,
+  what it may push and each stop line, instead of pointing at a skill file
+  a subagent cannot open. The planner's pointer went the same way.
+- **The lead's prompts use plain words.** `skills/agt/SKILL.md` opens
+  with a "Words" section (lead, slice, mod, band, wire, card, formation,
+  squad), packed rules are split one per sentence across SKILL,
+  routing, factory and panes-mode, and the pane layout and reaper timings
+  moved to `docs/display.md`. The internal `piece` is `slice` everywhere;
+  the `piece=` header key still parses as an alias.
+- **README opens with a quick start** that says what the smoke test does
+  to the repo (a solo run lands on a `fix/<slug>` branch and opens a PR
+  under the default `integration: "pr"`; set `"local"` first to keep it
+  local), lists the per-surface switches, and moves the glossary, the
+  deprecated commands and the routing detail below the fold. The
+  autocomplete line now says what completes (`--fable`), and
+  `routing.advisorOnOpus` is in the settings list.
+
 ### Fixed
+
+- **The guard reads the indirection it used to pass.** Below `auto`, a
+  package script's `pre`/`post` scripts and the `npm run`, `sh`, `node`
+  and `python` steps inside it are read in turn, five hops deep;
+  `python -m pkg.mod` is resolved to a file in the command's folder and
+  `PYTHONPATH` (found nowhere: refused, where it used to pass); a `node`
+  or `bun` file's relative imports are read one level deep; any word after
+  `git` that is not one of git's commands is looked up with
+  `git config --get alias.<word>` in the repo the command targets, so a
+  `pom = push origin HEAD:main` alias is judged as the push it runs;
+  `push.default`, `core.fsmonitor` and `core.sshCommand` join the
+  protected config keys (`-c`, `--config-env`, `GIT_CONFIG_KEY_n` and
+  `git config` alike); write targets are matched case-insensitively and
+  after following links, so `.git/CONFIG` and a symlink made on an earlier
+  line land where they land; a submodule's config, hooks and refs under
+  `.git/modules/` are protected; writes to branch protection, rulesets,
+  `default_branch`, `gh workflow run|enable|disable` and
+  `gh repo edit --default-branch` are refused; the line
+  `git submodule foreach` runs is judged. What the guard cannot read, it
+  refuses. `docs/guards.md` lists exactly what is read, what is refused
+  and what is left out. `tests/hooks/test-guard-real.sh` grows from 36 to
+  84 checks on a real repo and bare origin.
+- **A Write or Edit the guard cannot judge is refused inside a run.** The
+  Write/Edit path used to let a write through when the judgement threw.
+- **The lead stays guarded until the card when its run names no id.** A
+  solo or inline run used to drop the guard after three typed replies.
+- **Imports run one way in the guard.** `guard.js` → `guard-policy.js` →
+  `guard-lex.js` → `guard-steps.js` (the gh and curl step readers), never
+  back; `script-refs.js` is a leaf shared with `trust.js` for the scripts
+  `run x` runs, the files `python -m` runs and a JavaScript file's
+  relative imports.
+
+- **tmux listings parse in any locale.** Every tmux call the mod makes
+  runs with `LC_ALL=C.UTF-8` (`hooks/tmux-env.js`): without a UTF-8
+  locale tmux printed `_` for the tab that separates `list-panes -F`
+  fields, the parser saw no panes, and spawn and close checks failed.
+  `tests/hooks/test-tmux-real.sh` runs its checks a second time under
+  `env -i`, so CI covers the C locale.
 
 - **The pre-push hook's git environment stays out of the test suites.**
   `scripts/validate.sh` and `tests/hooks/test-agt-worktree.sh` unset

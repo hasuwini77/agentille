@@ -1718,7 +1718,7 @@ describe('sessions: helpers', () => {
     // What the reaper and the SessionEnd sweep really do, not "no reaper".
     expect(OPEN_SESSIONS_TOOL.description).not.toContain('no reaper')
     expect(OPEN_SESSIONS_TOOL.description).toContain('closed after 10 minutes idle and unfocused, and at session end when idle')
-    expect(sessionsNote('herdr', 'claude')).toContain('closed after 10 minutes idle and unfocused')
+    expect(sessionsNote('herdr', 'claude')).toContain('closed after 10 minutes idle and unfocused, and at session end when idle')
     expect(OPEN_SESSIONS_TOOL.description).toContain('open or start sessions')
     expect(OPEN_SESSIONS_TOOL.description).toContain('never answer it with subagents')
     expect(OPEN_SESSIONS_TOOL.inputSchema.properties.model.enum).not.toContain('fable')

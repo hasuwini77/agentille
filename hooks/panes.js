@@ -627,6 +627,6 @@ export function sessionsFile(home, leadPane) {
 
 // What the lead may do next with the sessions it opened, without any tool of ours.
 export function sessionsNote(transport, kind) {
-  if (transport === 'herdr' && kind !== 'shell') return ' Each is closed after ' + SESSION_IDLE_MS / 60_000 + ' minutes idle and unfocused, and when this session ends if it is idle then. To send one a prompt: herdr agent prompt <name> "…". To read it: herdr agent read <name> --source recent-unwrapped --lines 120. close_pane <name> closes one now when the person asks.'
+  if (transport === 'herdr' && kind !== 'shell') return ' Each is closed after ' + SESSION_IDLE_MS / 60_000 + ' minutes idle and unfocused, and at session end when idle. To send one a prompt: herdr agent prompt <name> "…". To read it: herdr agent read <name> --source recent-unwrapped --lines 120. close_pane <name> closes one now when the person asks.'
   return ' They close only on request: close_pane <name> when the person asks.'
 }

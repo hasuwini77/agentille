@@ -10,7 +10,7 @@ The README's Settings and "What it touches" sections give the short version, and
 
 - A session where you never typed `/agt` is not judged at all.
 - An agentille subagent and a worker pane are judged for their whole life. A pane you open with `/agt-spawn` is your own task and is not judged.
-- The lead is judged from your typed `/agt` until that run's ✓ or ✗ card. This holds whether or not the run names an id, so a solo or inline run counts too. No clock and no number of typed replies ends it.
+- The lead is judged from your typed `/agt` until that run's ✓ or ✗ card. This holds whether or not the run names an id, so an inline run counts too. A solo run prints no card: its hold ends when the turn that printed its `recon: low · solo · …` line ends, so a solo run that stops to ask you a question ends its hold there. No clock and no number of typed replies ends any other run's hold.
 
 ### What the guard reads
 

@@ -9,7 +9,7 @@ import { reportRun, reportTail } from './drawing.js'
 import { sliceOf, party, taskLine } from './links.js'
 import { newAgent, short, ledger, ledgerText, addUsage, finish, endRoute } from './live.js'
 import { SAFE_RUN, splitName } from './panes.js'
-import { formationOf, roleOf, parseHeader, proveHeader, demoteHeaderText, ladderFixes, decide, executorsWorking, executorCapFlag, estimateRunUsd, leadUsd, maxRunUsdOf, usd } from './routing.js'
+import { formationOf, roleOf, parseHeader, proveHeader, demoteHeaderText, ladderFixes, decide, executorsWorking, executorCapFlag, executorCapDeny, estimateRunUsd, leadUsd, maxRunUsdOf, usd } from './routing.js'
 import { addFlag } from './display.js'
 import { noteWire } from './worker.js'
 import { Proofs, agtTurnFromDispatch } from './proofs.js'
@@ -31,6 +31,7 @@ export const Runs = view
 ctxSource({ runs: view })
 const wfToasted = new Set()  // run:role pairs whose drift the person was told once
 const demotedToasted = new Set()  // run ids told once that fable=forced was dropped for want of a typed --fable
+const execPending = new Map()  // run id → executor dispatches past the cap check and not yet in the live map
 
 // The band follows this run (a pane opened for it, or a routed dispatch named it).
 export function setLastRun(id) {
@@ -313,6 +314,11 @@ export async function completeReport($, path) {
   }
 }
 
+// The one line a workflow agent is refused with when its script names another model than the routed pick.
+export function workflowModelDeny(role, asked, d) {
+  return 'agt ✗ workflow ' + role + ' asks ' + asked + ', routed ' + d.model + ' · ' + d.effort + ': the mod cannot rewrite a workflow agent\'s model, so it is refused. Set model "' + d.model + '" on this ' + role + ' in the workflow script and run it again.'
+}
+
 // Every Agent dispatch of an agentille role: the header is proved, the model rewritten by the table and the
 // ladder, the run's counters moved, the routing logged. A foreign subagent is only watched: for the band, its
 // transcript row (display.rows) and the spinner's count (display.spinner).
@@ -334,8 +340,9 @@ export async function dispatchAgent($, e, next) {
     demoteToast($, SAFE_RUN.test(hdr.run ?? '') ? hdr.run : my.lastRun)
   }
   // A workflow script's agent: the engine ignores a model rewrite there (and logs a failure line), so it runs on the
-  // model the script chose, and the lead must name the routed model in the script. Log that model, not the table's,
-  // and flag a mismatch. A deny does hold there, so the run's stop (stopAtCeiling, stopAtWeeklyPct) is enforced.
+  // model the script chose, and the lead must name the routed model in the script. A deny does hold there, so the
+  // run's stop (stopAtCeiling, stopAtWeeklyPct) is enforced and a script naming another model than the routed pick is
+  // refused. One that names none runs the engine's default; log the model it ran, not the table's, and flag a drift.
   if (e.workflow) {
     // Its prompt may carry no header: it then joins the run in progress rather than reset it. A header
     // names its run, but the band moves to it only when the current run has nothing working, subagent or pane.
@@ -353,10 +360,14 @@ export async function dispatchAgent($, e, next) {
     const d = decide({ role, hdr, run: { ...runRec(runId), fixes: ladderFixes(runRec(runId), sliceOf(hdr)), usd: spent }, depth: Profile.depth, settings: Profile.settings, weeklyPct: Session.weeklyPct })
     // The run is stopped: the workflow agent is refused before it reaches the engine, whatever the role.
     if (d.stop) return { deny: d.stop }
+    // A model the script names (`inherit` is the lead's) must be the routed one: refused before the engine runs it.
+    const asked = e.model === 'inherit' ? e.parentModel : e.model
+    if (asked && short(asked) !== short(d.model)) return { deny: workflowModelDeny(role, e.model === 'inherit' ? 'inherit (' + short(asked) + ')' : e.model, d) }
     const res = await next(e)
     if (res.deny) return res
     const off = short(res.model) !== short(d.model)
-    const drift = off ? 'workflow, table says ' + d.model + ' · ' + d.effort : 'workflow'
+    const unnamed = asked ? '' : ', no model named: engine default ' + short(res.model)
+    const drift = 'workflow' + unnamed + (off ? ', table says ' + d.model + ' · ' + d.effort : '')
     if (res.agentId) {
       const a = heard(newAgent({ id: res.agentId, role, routed: false, model: res.model, effort: null, reason: off ? drift : null, run: runId, now: Date.now(), parentId: e.parentAgentId ?? null }), e)
       a.fileRun = fileRun
@@ -377,31 +388,54 @@ export async function dispatchAgent($, e, next) {
   agtTurnFromDispatch()
   my.lastRun = runId
   const run = runRec(runId)
-  noteFormation(runId, hdr)
-  if (role === 'executor' && hdr.mode === 'fix') countFix(runId, sliceOf(hdr))
-  await syncFable($, runId)
+  // At most 3 executors at once: counted before this one joins, subagents, the run's executor panes and the
+  // dispatches still on their way to the engine alike (parallel Agent calls all reach this point before any joins).
+  // The one past the cap is refused before it counts a fix round, and flagged on the band.
+  const capped = role === 'executor' && runId !== 'adhoc'
+  if (capped) {
+    const count = executorsWorking(my.live, my.paneRoutes, runId) + (execPending.get(runId) ?? 0) + 1
+    const cap = executorCapFlag(runId, count)
+    if (cap) {
+      addFlag($, 'cap|' + runId, cap) // the band's ⚑ line and one toast
+      return { deny: executorCapDeny(runId, count) }
+    }
+    execPending.set(runId, (execPending.get(runId) ?? 0) + 1)
+  }
+  let pending = capped
+  const settle = () => {
+    if (!pending) return
+    pending = false
+    const left = (execPending.get(runId) ?? 1) - 1
+    if (left > 0) execPending.set(runId, left)
+    else execPending.delete(runId)
+  }
+  try {
+    noteFormation(runId, hdr)
+    if (role === 'executor' && hdr.mode === 'fix') countFix(runId, sliceOf(hdr))
+    await syncFable($, runId)
 
-  // The run's spend so far, estimated from its agents' tokens and its panes' minutes, only when a ceiling is set.
-  const spent = runSpend(runId)
-  const d = decide({ role, hdr, run: { ...run, fixes: ladderFixes(run, sliceOf(hdr)), usd: spent }, depth: Profile.depth, settings: Profile.settings, weeklyPct: Session.weeklyPct })
-  // routing.stopAtCeiling or stopAtWeeklyPct: the run is stopped, so nothing more is dispatched, whatever the role.
-  if (d.stop) return { deny: d.stop }
-  const res = await next({ ...e, model: d.model })
-  if (res.deny) return res
+    // The run's spend so far, estimated from its agents' tokens and its panes' minutes, only when a ceiling is set.
+    const spent = runSpend(runId)
+    const d = decide({ role, hdr, run: { ...run, fixes: ladderFixes(run, sliceOf(hdr)), usd: spent }, depth: Profile.depth, settings: Profile.settings, weeklyPct: Session.weeklyPct })
+    // routing.stopAtCeiling or stopAtWeeklyPct: the run is stopped, so nothing more is dispatched, whatever the role.
+    if (d.stop) return { deny: d.stop }
+    const res = await next({ ...e, model: d.model })
+    if (res.deny) return res
 
-  if (d.fable) await countFable($, runId)
-  const slice = sliceOf(hdr)
-  // At most 3 executors at once: counted before this one joins, subagents and the run's executor panes alike.
-  const cap = role === 'executor' && runId !== 'adhoc' && res.agentId ? executorCapFlag(runId, executorsWorking(my.live, my.paneRoutes, runId) + 1) : null
-  if (res.agentId) my.live.set(res.agentId, { ...newAgent({ id: res.agentId, role, routed: true, model: res.model, effort: d.effort, reason: d.reason, run: runId, now: Date.now(), parentId: e.parentAgentId ?? null }), slice })
-  if (runId !== 'adhoc') noteWire({ from: 'lead', to: party(role, slice), kind: 'task', summary: taskLine(e.prompt) || role, at: Date.now(), via: 'sub' })
-  const rec = { at: new Date().toISOString(), role, model: res.model, effort: d.effort, reason: d.reason, asked: e.model ?? null, agentId: res.agentId ?? null, ...(cap && { cap }), ...(d.capped && { capped: true }), ...(d.pastCeiling && { pastCeiling: true }) }
-  await logDecision($, runId, rec)
-  await markRun($, runId)
-  if (cap) addFlag($, 'cap|' + runId, cap) // the band's ⚑ line and one toast; the dispatch itself goes ahead
-  // A demotion or a typed --fable past the ceiling is told once per run; a later typed --fable toasts like any pick.
-  const told = d.capped || d.pastCeiling ? ceilingOnce($, runId, spent, role, d) : false
-  if (!told && !d.capped && d.reason !== 'table') $.ui.toast('agt ↑ ' + role + ' → ' + short(res.model) + ' · ' + d.effort + ' — ' + d.reason)
-  $.ui.invalidate('ui.render')
-  return res
+    if (d.fable) await countFable($, runId)
+    const slice = sliceOf(hdr)
+    settle() // from here the live map counts it
+    if (res.agentId) my.live.set(res.agentId, { ...newAgent({ id: res.agentId, role, routed: true, model: res.model, effort: d.effort, reason: d.reason, run: runId, now: Date.now(), parentId: e.parentAgentId ?? null }), slice })
+    if (runId !== 'adhoc') noteWire({ from: 'lead', to: party(role, slice), kind: 'task', summary: taskLine(e.prompt) || role, at: Date.now(), via: 'sub' })
+    const rec = { at: new Date().toISOString(), role, model: res.model, effort: d.effort, reason: d.reason, asked: e.model ?? null, agentId: res.agentId ?? null, ...(d.capped && { capped: true }), ...(d.pastCeiling && { pastCeiling: true }) }
+    await logDecision($, runId, rec)
+    await markRun($, runId)
+    // A demotion or a typed --fable past the ceiling is told once per run; a later typed --fable toasts like any pick.
+    const told = d.capped || d.pastCeiling ? ceilingOnce($, runId, spent, role, d) : false
+    if (!told && !d.capped && d.reason !== 'table') $.ui.toast('agt ↑ ' + role + ' → ' + short(res.model) + ' · ' + d.effort + ' — ' + d.reason)
+    $.ui.invalidate('ui.render')
+    return res
+  } finally {
+    settle()
+  }
 }

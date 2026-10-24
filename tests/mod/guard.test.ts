@@ -939,6 +939,90 @@ describe('guard: the lead stays guarded for the whole run', () => {
   })
 })
 
+// A solo run prints no card: its recon line marks it, and the end of the turn that printed it ends the hold.
+describe('guard: a solo run ends its hold when its answer ends', () => {
+  const user = (text: string) => ({ role: 'user', text, toolUses: [] })
+  const said = (text: string) => ({ role: 'assistant', text, toolUses: [{ id: 'u1', name: 'Bash', input: {} }] })
+  const results = () => ({ role: 'user', text: '', toolUses: [], toolResults: [{ tool_use_id: 'u1', text: 'ok', isError: false }] })
+  const answer = async ($: any, text: string) => {
+    await $.turn.start({ text: 'go', turnId: 't2' })
+    await $.turn.complete({ answer: text, durationMs: 1, isAborted: false, turnId: 't2', reason: 'answer' })
+    await new Promise((r) => setTimeout(r, 30))
+  }
+
+  test('solo recon, then the turn ends: a later typed merge in the lead is allowed', async ($, on) => {
+    const { ran } = setup(on)
+    const rows: any[] = []
+    on('session.messages', async () => ({ value: rows }))
+    await boot($)
+    await typed($, '/agt fix the typo in the footer')
+    rows.push(user('/agt fix the typo in the footer'), said('recon: low · solo · one-line copy fix · advisor'), results())
+    expect((await bash($, 'gh pr merge 12 --merge')).deny).toBe(DENY_INTEGRATION) // the solo's own steps are judged
+    rows.push(said('Fixed the typo; PR #12 is open.'))
+    await answer($, 'Fixed the typo; PR #12 is open.')
+    await typed($, 'merge it')
+    expect((await bash($, 'gh pr merge 12 --merge')).result).toBe('ok')
+    expect(ran).toEqual(['gh pr merge 12 --merge'])
+  })
+
+  test('a solo answer that carries its own recon line ends the hold too', async ($, on) => {
+    setup(on)
+    on('session.messages', async () => ({ deny: 'no transcript' }))
+    await boot($)
+    await typed($, '/agt what does the footer say')
+    await answer($, 'recon: low · solo · a question about one file\n\nIt says hello.')
+    await typed($, 'merge it')
+    expect((await bash($, 'gh pr merge 12')).result).toBe('ok')
+  })
+
+  for (const line of ['recon: low · subagent · one slice', 'recon: medium · subagent · two small slices']) {
+    test('"' + line + '" keeps holding past its turn, until the card', async ($, on) => {
+      setup(on)
+      const rows: any[] = [user('/agt ship it'), said(line), results(), said('Dispatched the executor.')]
+      on('session.messages', async () => ({ value: rows }))
+      await boot($)
+      await typed($)
+      await answer($, 'Dispatched the executor.')
+      await typed($, 'merge it')
+      expect((await bash($, 'gh pr merge 12')).deny).toBe(DENY_INTEGRATION)
+      await card($)
+      expect((await bash($, 'gh pr merge 12')).result).toBe('ok')
+    })
+  }
+
+  test('a solo recon from an earlier turn does not end a later run', async ($, on) => {
+    setup(on)
+    const rows: any[] = [user('/agt fix the typo'), said('recon: low · solo · one-line fix'), results(), said('Fixed.'), user('/agt ship the search page'), said('recon: medium · subagent · two small slices'), results(), said('Dispatched both executors.')]
+    on('session.messages', async () => ({ value: rows }))
+    await boot($)
+    await typed($, '/agt ship the search page')
+    await answer($, 'Dispatched both executors.')
+    await typed($, 'merge it')
+    expect((await bash($, 'gh pr merge 12')).deny).toBe(DENY_INTEGRATION)
+  })
+
+  test('an unreadable transcript keeps the hold', async ($, on) => {
+    setup(on)
+    on('session.messages', async () => { throw new Error('no transcript') })
+    await boot($)
+    await typed($, '/agt fix the typo')
+    await answer($, 'Fixed the typo.')
+    await typed($, 'merge it')
+    expect((await bash($, 'gh pr merge 12')).deny).toBe(DENY_INTEGRATION)
+  })
+
+  test('an interrupted solo turn keeps the hold', async ($, on) => {
+    setup(on)
+    on('session.messages', async () => ({ value: [user('/agt fix the typo'), said('recon: low · solo · one-line fix')] }))
+    await boot($)
+    await typed($, '/agt fix the typo')
+    await $.turn.start({ text: 'go', turnId: 't3' })
+    await $.turn.complete({ answer: '', durationMs: 1, isAborted: true, turnId: 't3', reason: 'aborted' })
+    await typed($, 'merge it')
+    expect((await bash($, 'gh pr merge 12')).deny).toBe(DENY_INTEGRATION)
+  })
+})
+
 // The repo a write lands in decides, not the folder the session sits in.
 describe('guard: the target repo is read from the write', () => {
   const sandbox = { profile: { integration: 'pr', projects: [{ path: '/work/repo', integration: 'auto' }] }, repos: { '/work/repo': { current: 'agt/x', remote: 'git@github.com:me/sandbox.git' } } }

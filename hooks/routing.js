@@ -199,8 +199,8 @@ export function runInFlight(st, now = Date.now(), restMs = () => null, clockNow 
   return (st.agtTypedSince ?? 0) < AGT_GRACE_TYPED
 }
 
-// The roster runs at most this many executors at once (SKILL.md → "Hard rules"). The mod never refuses a dispatch:
-// the one past the cap is flagged. `agents` is the live map (subagents: working and heard from within AGENT_SILENT_MS,
+// The roster runs at most this many executors at once (SKILL.md → "Hard rules"). The mod refuses the subagent
+// dispatch past the cap and flags it. `agents` is the live map (subagents: working and heard from within AGENT_SILENT_MS,
 // since a cancelled one raises no turn.complete), `routes` the pane routes (an executor pane counts until it leaves the
 // stage). `run` is the run id; `now` is Date.now().
 export const MAX_EXECUTORS_AT_ONCE = 3
@@ -219,6 +219,11 @@ export function ordinal(n) {
 // The flag for an executor dispatch that makes `count` executors at once in `run`, or null within the cap.
 export function executorCapFlag(run, count) {
   return count > MAX_EXECUTORS_AT_ONCE ? 'run ' + run + ': ' + ordinal(count) + ' executor at once; the roster says ' + MAX_EXECUTORS_AT_ONCE : null
+}
+
+// The one line that dispatch is refused with, or null within the cap.
+export function executorCapDeny(run, count) {
+  return count > MAX_EXECUTORS_AT_ONCE ? 'agt ✗ run ' + run + ': a ' + ordinal(count) + ' executor at once is refused; the roster runs at most ' + MAX_EXECUTORS_AT_ONCE + '. Dispatch it again once one of them is done, and batch the rest in waves.' : null
 }
 
 // The person named Codex in a typed prompt ("codex builds the API slice", "use Codex"): the only proof a worker pane

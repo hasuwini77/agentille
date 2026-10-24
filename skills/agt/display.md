@@ -1,6 +1,6 @@
 # Display — what /agt prints
 
-Presentation only: nothing here changes dispatch. If a line cannot be produced, drop it; never block the result. Solo prints only its recon line.
+Presentation only: nothing here changes dispatch. If a line cannot be produced, drop it; never block the result. Solo prints only its recon line, exactly as below: the mod ends the run's guard when that turn ends.
 
 ## When the mod draws
 

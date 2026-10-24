@@ -1,5 +1,5 @@
 import { describe, expect, mock, test } from 'claude-code/testing'
-import { AGENT_SILENT_MS, AGT_GRACE_TYPED, AGT_INFLIGHT_MAX_MS, PANE_REST_MS, PANE_EST_MAX_MS, PANE_TOKENS_PER_MIN, CEILING_ROLES, ROLES, paneUsd, DEFAULTS, MAX_EXECUTORS_AT_ONCE, PRICES, asksSessions, decide, estimateRunUsd, executorCapFlag, executorsWorking, ordinal, demoteHeaderText, formationOf, ladderFixes, mentionsCodex, mentionsFable, parseHeader, proveHeader, roleOf, runInFlight, typedFable, typedLocal, verdictOf, leadUsd, runStop } from '../../hooks/routing.js'
+import { AGENT_SILENT_MS, AGT_GRACE_TYPED, AGT_INFLIGHT_MAX_MS, PANE_REST_MS, PANE_EST_MAX_MS, PANE_TOKENS_PER_MIN, CEILING_ROLES, ROLES, paneUsd, DEFAULTS, MAX_EXECUTORS_AT_ONCE, PRICES, asksSessions, decide, estimateRunUsd, executorCapDeny, executorCapFlag, executorsWorking, ordinal, demoteHeaderText, formationOf, ladderFixes, mentionsCodex, mentionsFable, parseHeader, proveHeader, roleOf, runInFlight, typedFable, typedLocal, verdictOf, leadUsd, runStop } from '../../hooks/routing.js'
 import { sliceOf } from '../../hooks/links.js'
 import { addLeadUsage } from '../../hooks/dispatch.js'
 import { Runs } from '../../hooks/state.js'
@@ -310,6 +310,65 @@ describe('workflow agents: runs, toast, deny', () => {
   })
 })
 
+// The engine ignores a model rewrite for a workflow agent, so the mod refuses one whose script names another model
+// than the routed pick; one that names none runs the engine's default, logged as such.
+describe('workflow agents: the model the script names', () => {
+  const setup = (on: any, engineModel = 'claude-sonnet-5') => {
+    const toasts: string[] = []
+    const writes: Record<string, string> = {}
+    const seen: (string | undefined)[] = []
+    let n = 0
+    on('env.get', async ($: any, e: any) => ({ value: ({ HOME: '/h' } as any)[e.name] }))
+    on('session.start', async ($: any, e: any) => ({ cwd: e.cwd }))
+    on('command.register', async () => ({ value: undefined }))
+    on('fs.read', async () => ({ deny: 'no profile' }))
+    on('fs.write', async ($: any, e: any) => { writes[e.path] = e.text; return { value: undefined } })
+    on('store.get', async () => ({ value: null }))
+    on('ui.render', async () => ({ type: 'engine', ref: 0 }) as never)
+    on('ui.toast', async ($: any, e: any) => { toasts.push(e.text); return { value: undefined } })
+    on('agent.spawn', async ($: any, e: any) => { seen.push(e.model); return { model: e.model ?? engineModel, agentId: 'm' + n++ } })
+    mock.clock(on, { now: Date.now() })
+    return { toasts, writes, seen }
+  }
+  const wf = (run: string, role: string, model?: string, extra: object = {}) => ({ prompt: '[agt run=' + run + ' size=small mode=review]\nreview', subagentType: 'agentille:agentille-' + role, ...(model && { model }), workflow: { runId: 'wf_' + run, agentIndex: 1 }, ...extra }) as never
+  const log = (writes: Record<string, string>, run: string) => (writes['/h/.agentille/state/run-' + run + '/routing.jsonl'] ?? '').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l))
+
+  test('a script naming the routed model runs, by alias or full id, with no toast', async ($, on) => {
+    const { toasts, writes, seen } = setup(on)
+    await $.session.start({ cwd: '/w', surface: null, isInteractive: false })
+    expect(((await $.agent.spawn(wf('wm1', 'code-reviewer', 'sonnet'))) as any).deny).toBe(undefined)
+    expect(((await $.agent.spawn(wf('wm1', 'code-reviewer', 'claude-sonnet-5'))) as any).deny).toBe(undefined)
+    expect(seen).toEqual(['sonnet', 'claude-sonnet-5'])
+    expect(log(writes, 'wm1').map((r) => r.reason)).toEqual(['workflow', 'workflow'])
+    expect(toasts.filter((t) => t.includes('agt workflow'))).toEqual([])
+  })
+
+  test('a script naming another model is refused before the engine runs it, and the line names role, asked and routed', async ($, on) => {
+    const { toasts, writes, seen } = setup(on)
+    await $.session.start({ cwd: '/w', surface: null, isInteractive: false })
+    const r = await $.agent.spawn(wf('wm2', 'code-reviewer', 'opus')) as any
+    expect(r.deny).toBe('agt ✗ workflow code-reviewer asks opus, routed sonnet · medium: the mod cannot rewrite a workflow agent\'s model, so it is refused. Set model "sonnet" on this code-reviewer in the workflow script and run it again.')
+    expect(r.deny.split('\n')).toHaveLength(1)
+    const i = await $.agent.spawn(wf('wm2', 'executor', 'inherit', { parentModel: 'claude-opus-5' })) as any // the lead's model
+    expect(i.deny).toContain('agt ✗ workflow executor asks inherit (opus), routed sonnet · ')
+    expect(seen).toEqual([])
+    expect(log(writes, 'wm2')).toEqual([])
+    expect(toasts).toEqual([])
+  })
+
+  test('a script naming no model runs the engine default: the log says so, and a drift from the table still toasts', async ($, on) => {
+    const { toasts, writes, seen } = setup(on)
+    await $.session.start({ cwd: '/w', surface: null, isInteractive: false })
+    expect(((await $.agent.spawn(wf('wm3', 'code-reviewer'))) as any).deny).toBe(undefined)
+    expect(((await $.agent.spawn(wf('wm3', 'security-reviewer'))) as any).deny).toBe(undefined) // the table says Opus
+    expect(seen).toEqual([undefined, undefined])
+    const reasons = log(writes, 'wm3').map((r) => r.reason)
+    expect(reasons[0]).toBe('workflow, no model named: engine default sonnet')
+    expect(reasons[1]).toMatch(/^workflow, no model named: engine default sonnet, table says opus · /)
+    expect(toasts.filter((t) => t.includes('agt workflow'))).toEqual([expect.stringMatching(/^agt workflow security-reviewer runs sonnet — table says opus · /)])
+  })
+})
+
 describe('executor cap: at most 3 at once', () => {
   test('counts working executors of one run, subagents heard from lately and open executor panes', async () => {
     const now = 5_000_000
@@ -331,10 +390,13 @@ describe('executor cap: at most 3 at once', () => {
     expect(executorCapFlag('r1', 3)).toBe(null)
     expect(executorCapFlag('r1', 4)).toBe('run r1: 4th executor at once; the roster says 3')
     expect(executorCapFlag('r1', 5)).toContain('5th executor')
+    expect(executorCapDeny('r1', 3)).toBe(null)
+    expect(executorCapDeny('r1', 4)).toBe('agt ✗ run r1: a 4th executor at once is refused; the roster runs at most 3. Dispatch it again once one of them is done, and batch the rest in waves.')
     expect([1, 2, 3, 4, 11, 12, 13, 21, 22, 23].map(ordinal)).toEqual(['1st', '2nd', '3rd', '4th', '11th', '12th', '13th', '21st', '22nd', '23rd'])
   })
 
-  const boot = (on: any) => {
+  // `deny`: a lower hook that refuses the dispatches it matches.
+  const boot = (on: any, deny: (e: any) => string | null = () => null) => {
     const toasts: string[] = []
     const writes: Record<string, string> = {}
     let n = 0
@@ -348,7 +410,7 @@ describe('executor cap: at most 3 at once', () => {
     on('ui.render', async () => ({ type: 'engine', ref: 0 }) as never)
     on('ui.toast', async ($: any, e: any) => { toasts.push(e.text); return { value: undefined } })
     on('turn.complete', async ($: any, e: any) => ({ text: e.answer }))
-    on('agent.spawn', async ($: any, e: any) => ({ model: e.model ?? 'sonnet', agentId: 'e' + n++ }))
+    on('agent.spawn', async ($: any, e: any) => deny(e) ? { deny: deny(e) } : { model: e.model ?? 'sonnet', agentId: 'e' + n++ })
     mock.clock(on, { now: Date.now() })
     return { toasts, writes }
   }
@@ -356,19 +418,54 @@ describe('executor cap: at most 3 at once', () => {
   const band = ($: any) => $.ui.mount({ plugin: 'agentille', surface: 'terminal', component: 'AbovePrompt', props: { hasSurvey: false, isWorking: true, maxRows: 10, bodyColumns: 120 } as never })
   const capToasts = (t: string[]) => t.filter((x) => x.includes('executor at once'))
 
-  test('a 4th executor of one run is dispatched as asked, with a toast, a band flag and a cap line in the routing log', async ($, on) => {
+  const CAP_DENY = 'agt ✗ run cap1: a 4th executor at once is refused; the roster runs at most 3. Dispatch it again once one of them is done, and batch the rest in waves.'
+
+  test('a 4th executor of one run is refused in one line, with a toast and a band flag, and never reaches the engine or the log', async ($, on) => {
     const { toasts, writes } = boot(on)
     await $.session.start({ cwd: '/w', surface: null, isInteractive: false })
     for (const s of ['a', 'b', 'c']) expect((await exec($, 'cap1', s)).model).toBe('sonnet')
     expect(capToasts(toasts)).toEqual([])
-    const res = await exec($, 'cap1', 'd')
-    expect(res.agentId).toBe('e3') // never refused
+    const res = await exec($, 'cap1', 'd') as any
+    expect(res.deny).toBe(CAP_DENY)
+    expect(res.agentId).toBe(undefined)
     expect(capToasts(toasts)).toEqual(['agt ⚑ run cap1: 4th executor at once; the roster says 3'])
     const log = writes['/h/.agentille/state/run-cap1/routing.jsonl'].trim().split('\n').map((l) => JSON.parse(l))
-    expect(log.map((r) => r.cap ?? null)).toEqual([null, null, null, 'run cap1: 4th executor at once; the roster says 3'])
+    expect(log).toHaveLength(3)
+    expect(log.map((r) => r.cap ?? null)).toEqual([null, null, null])
     const ui = await band($)
     expect(await ui.find({ type: 'Text', text: /⚑ run cap1: 4th executor at once/ })).toBeDefined()
     await ui.unmount()
+  })
+
+  test('four executors sent at once in parallel: exactly one is refused', async ($, on) => {
+    const { toasts } = boot(on)
+    await $.session.start({ cwd: '/w', surface: null, isInteractive: false })
+    const res = await Promise.all(['a', 'b', 'c', 'd'].map((s) => exec($, 'cap1', s))) as any[]
+    expect(res.filter((r) => r.deny)).toEqual([{ deny: CAP_DENY }])
+    expect(res.filter((r) => r.agentId)).toHaveLength(3)
+    expect(capToasts(toasts)).toHaveLength(1)
+  })
+
+  test('a refused fix round counts no fix attempt; a reviewer is never capped', async ($, on) => {
+    const { writes } = boot(on)
+    await $.session.start({ cwd: '/w', surface: null, isInteractive: false })
+    for (const s of ['a', 'b', 'c']) await exec($, 'cap4', s)
+    const fix = () => $.agent.spawn({ prompt: '[agt run=cap4 size=small mode=fix slice=a]\nfix', subagentType: 'agentille:agentille-executor', model: 'sonnet' }) as any
+    for (let i = 0; i < 3; i++) expect((await fix()).deny).toContain('4th executor at once is refused')
+    expect(((await $.agent.spawn({ prompt: '[agt run=cap4 size=small mode=review slice=a]\nreview', subagentType: 'agentille:agentille-code-reviewer' })) as any).deny).toBe(undefined)
+    await $.turn.complete({ agentId: 'e0', answer: 'done', durationMs: 10, isAborted: false, turnId: 'te0', reason: 'answer' } as never)
+    expect((await fix()).deny).toBe(undefined) // a place freed: the first fix attempt, at the table's effort
+    const log = writes['/h/.agentille/state/run-cap4/routing.jsonl'].trim().split('\n').map((l) => JSON.parse(l))
+    expect(log.at(-1)).toMatchObject({ role: 'executor', reason: 'table' })
+  })
+
+  test('a dispatch a lower hook denies frees its place', async ($, on) => {
+    const { toasts } = boot(on, (e) => e.prompt.includes('slice=z') ? 'not now' : null)
+    await $.session.start({ cwd: '/w', surface: null, isInteractive: false })
+    for (const s of ['a', 'b']) await exec($, 'cap5', s)
+    expect(((await exec($, 'cap5', 'z')) as any).deny).toBe('not now')
+    expect(((await exec($, 'cap5', 'c')) as any).deny).toBe(undefined) // the denied one holds no place
+    expect(capToasts(toasts)).toEqual([])
   })
 
   test('a finished executor frees its place, and another run\'s executors never count', async ($, on) => {
@@ -669,16 +766,20 @@ describe('maxRunUsd: a per-run cost ceiling', () => {
     expect(toasts.filter((t) => t.includes('workflow'))).toEqual([]) // nor toasted as a drift
   })
 
-  test('in the mod: past the ceiling with stopAtCeiling off a workflow agent still runs, and the drift names the demoted pick', async ($, on) => {
+  test('in the mod: past the ceiling with stopAtCeiling off a workflow agent naming the demoted pick runs; one naming Opus is refused', async ($, on) => {
     const { seen, toasts } = boot(on, { maxRunUsd: 1 })
     await $.session.start({ cwd: '/w', surface: null, isInteractive: false })
     await plan($, 'wfs2')
     await spend($, 'c0', 50_000)
     const x = await wfAgent($, 'wfs2', 'executor', 1, 'sonnet')
     expect((x as any).deny).toBe(undefined)
-    await wfAgent($, 'wfs2', 'security-reviewer', 2, 'opus') // the script names Opus; the table past the ceiling says Sonnet
-    expect(seen).toEqual(['opus', 'sonnet', 'opus']) // the mod cannot rewrite a workflow agent's model
-    expect(toasts).toContain('agt workflow security-reviewer runs opus — table says sonnet · high')
+    const r = await wfAgent($, 'wfs2', 'security-reviewer', 2, 'opus') // the script names Opus; the table past the ceiling says Sonnet
+    expect((r as any).deny).toBe('agt ✗ workflow security-reviewer asks opus, routed sonnet · high: the mod cannot rewrite a workflow agent\'s model, so it is refused. Set model "sonnet" on this security-reviewer in the workflow script and run it again.')
+    expect(seen).toEqual(['opus', 'sonnet']) // the refused one never reached the engine
+    const ok = await wfAgent($, 'wfs2', 'security-reviewer', 3, 'sonnet') // the rewritten script names the demoted pick
+    expect((ok as any).deny).toBe(undefined)
+    expect(seen).toEqual(['opus', 'sonnet', 'sonnet'])
+    expect(toasts.filter((t) => t.includes('agt workflow'))).toEqual([])
   })
 
   test('stopAtWeeklyPct: off by default; 1–100 stops every role once the seven-day percent reaches it; unknown never stops', async () => {

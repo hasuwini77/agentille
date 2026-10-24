@@ -34,6 +34,25 @@ export async function onPromptSubmit($, e) {
   return e
 }
 
+// The recon line a solo run prints first (SKILL.md → "Levels": `recon: low · solo · <reason>`). Anchored on a line
+// start, so a quoted one inside a sentence does not count; the ` · advisor` and version suffixes do not matter.
+export const SOLO_RECON = /^[ \t]*recon:[ \t]*low[ \t]*·[ \t]*solo[ \t]*·/m
+
+// Whether the main turn that just ended printed a solo recon line: its final answer, or any assistant message since
+// the newest prompt (a user row with no tool results), since the line comes before the tool calls. An unreadable
+// transcript reads as no, so the hold stays.
+export async function soloTurn($, answer) {
+  if (SOLO_RECON.test(String(answer ?? ''))) return true
+  const rows = await Promise.resolve().then(() => $.session.messages()).catch(() => null)
+  if (!Array.isArray(rows)) return false
+  for (let i = rows.length - 1; i >= 0; i--) {
+    const r = rows[i]
+    if (r?.role === 'user' && !(r.toolResults?.length)) return false
+    if (r?.role === 'assistant' && SOLO_RECON.test(String(r.text ?? ''))) return true
+  }
+  return false
+}
+
 // A turn ended: a main-loop answer (raw copy, run-end tidy, the worker's band and report) or a subagent's.
 export async function onTurnComplete($, e) {
   const a = e.agentId ? Runs.live.get(e.agentId) : undefined
@@ -56,7 +75,8 @@ export async function onTurnComplete($, e) {
       endRun()
       void cleanWorkspace($, { auto: true }).catch(() => {})
     } else if (card && runHeld()) endRun() // a card after the person typed in between still ends the run's guard
-
+    // A solo run prints no card: its recon line marks it, and the end of the turn that printed it ends the run.
+    else if (!card && isLead() && runHeld() && await soloTurn($, e.answer)) endRun()
   }
   if (!e.agentId && Session.worker && Display.mascot.working) {
     const now = await $.clock.now()

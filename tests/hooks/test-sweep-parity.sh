@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# hooks/agentille-sweep.sh re-implements two things hooks/panes.js defines: the pane key (pane_key vs paneKey)
+# hooks/agentille-sweep.sh re-implements two things hooks/panes-base.js defines: the pane key (pane_key vs paneKey)
 # and where a worker's answer lands (answer_saved vs answerFile/doneFile, plus the lead's own state files). If
 # the two drift, the session-end sweep looks for an answer the worker never wrote, or misses one it did, and a
 # finished pane stays open or a lead's ownership list is never found. This runs both sides over the same
 # fixtures and compares them: the shell functions are extracted from the sweep script (sourcing it would run
-# the hook), the JS side is one node call importing hooks/panes.js. Known divergences are pinned with each
+# the hook), the JS side is one node call importing hooks/panes-base.js. Known divergences are pinned with each
 # side's exact current output, so a change on either side shows up here. Exit 0 = all checks pass.
 set -u
 cd "$(dirname "$0")/../.." || exit 2
@@ -82,7 +82,7 @@ printf '%s\t%s\t%s\n' \
   > "$T/known"
 
 # ── the JS side: one node call for every fixture ─────────────────────────────
-PANES_URL=$(node -p 'require("node:url").pathToFileURL(process.argv[1]).href' "$PWD/hooks/panes.js")
+PANES_URL=$(node -p 'require("node:url").pathToFileURL(process.argv[1]).href' "$PWD/hooks/panes-base.js")
 export FIX="$T" PANES_URL FAKE_HOME="$T/home"
 node --input-type=module -e '
   const fs = await import("node:fs")

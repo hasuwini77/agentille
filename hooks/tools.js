@@ -117,7 +117,7 @@ export async function spawnPane($, e) {
 // no wire, so the band and the worker reaper leave them alone; each one is a lead of its own. On Herdr a Claude or
 // Codex session is closed when idle: after SESSION_IDLE_MS unfocused (panes.js → sessionSweep), and at session end
 // (agentille-sweep.sh, from the lead's lead-<pane>.sessions list). A first prompt the person did not type is dropped
-// (panes.js sessionsToolInput): the session opens without it and the result says so.
+// (panes-schema.js sessionsToolInput): the session opens without it and the result says so.
 export async function openSessions($, e) {
   if (!isLead()) return { deny: 'This is a worker pane (' + (Session.selfName ?? Session.worker.agent) + '); workers do not open sessions.' }
   const skew = await installedSkew($)

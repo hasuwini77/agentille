@@ -7,6 +7,15 @@ All notable changes to agentille are documented here.
 Fixes and clean-up on top of 3.23.0, no version bump (fixes batch into the
 next minor, `docs/releasing.md`).
 
+### Fixed
+
+- **The pre-push hook's git environment stays out of the test suites.**
+  `scripts/validate.sh` and `tests/hooks/test-agt-worktree.sh` unset
+  `GIT_DIR`, `GIT_WORK_TREE` and friends first; under a hook those pointed
+  the throwaway-repo tests at the real repository. A failing
+  `claude plugin test` run now prints its failing lines instead of only
+  the exit code.
+
 ### Changed (behaviour)
 
 - **A run tidies only the worktrees and branches it made, and makes them

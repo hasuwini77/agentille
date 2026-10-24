@@ -4,6 +4,9 @@
 # tests/hooks/tidy-real.mjs drives the mod's own guard and reaper over the same repo under node (skipped, and
 # said so, where node is missing or older than 22.7). Exit 0 = all checks pass.
 set -u
+# A git hook (pre-push runs this suite) exports GIT_DIR and friends; they would point every git call at the
+# real repo instead of the throwaway one.
+unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_COMMON_DIR GIT_PREFIX
 cd "$(dirname "$0")/../.." || exit 2
 SCRIPT="$PWD/scripts/agt-worktree.sh"
 DRIVER="$PWD/tests/hooks/tidy-real.mjs"

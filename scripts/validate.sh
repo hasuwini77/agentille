@@ -14,6 +14,9 @@
 #         WARNs never fail the build; they are advisory.
 
 set -uo pipefail
+# This script is also the pre-push hook. A hook exports GIT_DIR and friends; left in the environment they
+# point every git call the real-git test suites make (throwaway repos under mktemp) at the real repository.
+unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_COMMON_DIR GIT_PREFIX
 cd "$(dirname "$0")/.." || exit 2
 
 FAILS=0
@@ -387,7 +390,7 @@ else
   tpass=$(printf '%s\n' "$tout" | grep -oE '[0-9]+ pass' | tail -1 | grep -oE '[0-9]+')
   tfail=$(printf '%s\n' "$tout" | grep -oE '[0-9]+ fail' | tail -1 | grep -oE '[0-9]+')
   if [ "$trc" != 0 ]; then
-    fail "claude plugin test failed (exit $trc)"
+    fail "claude plugin test failed (exit $trc):"; printf '%s\n' "$tout" | grep -E '✗|✘|FAIL|fail|rror' | head -15 | sed 's/^/    /'
   elif [ -z "$tpass" ]; then
     fail "claude plugin test printed no 'N pass' count — cannot tell it ran"
   elif [ "$tpass" -lt 600 ]; then

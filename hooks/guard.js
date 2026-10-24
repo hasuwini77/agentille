@@ -373,7 +373,11 @@ export function judgePush(p, { current = null, pushDst = null, bases = new Set([
 // local), what, dir (where it runs; null when a variable names it), slug (a repo it names: owner/repo or a URL) }.
 const API_WRITES = new Set(['merge', 'merges', 'merge-upstream', 'releases'])
 const API_WRITE_PATH = /^repos\/[^/]+\/[^/]+\/(git\/refs|git\/tags|contents)(\/|$)/
-const MUTATION = /\b(mergePullRequest|enablePullRequestAutoMerge|createRelease|updateRelease|createRef|updateRef|updateRefs|mergeBranch|createCommitOnBranch)\b/
+const MUTATION = /\b(mergePullRequest|enablePullRequestAutoMerge|enqueuePullRequest|createRelease|updateRelease|deleteRelease|createRef|updateRef|updateRefs|deleteRef|mergeBranch|createCommitOnBranch)\b/
+// A GraphQL body that writes a merge, a ref or a release; or one the guard cannot read (a file, a variable).
+const GQL_WRITE = /\bmutation\b[\s\S]*(merge|ref|release|tag|commitonbranch)/i
+const gqlWrites = (body) => MUTATION.test(body) || GQL_WRITE.test(body)
+const gqlUnread = (field) => /^query=(@|\$)/.test(field)
 const apiSlug = (path) => {
   const m = /^repos\/([^/]+)\/([^/]+)/.exec(path)
   return m && !m[1].startsWith('{') && !m[2].startsWith('{') ? m[1] + '/' + m[2] : null
@@ -396,6 +400,8 @@ function ghStep(w, dir, env = new Map()) {
   if (a0 === 'pr' && a1 === 'merge') return { kind: 'step', what: 'gh pr merge', dir, slug }
   if (a0 === 'release' && a1 && !['list', 'ls', 'view', 'download', 'verify', 'verify-asset'].includes(a1)) return { kind: 'step', what: 'gh release ' + a1, dir, slug }
   if (a0 === 'pr' && a1 === 'create') return { kind: 'pr', what: 'gh pr create', dir, slug }
+  // An alias can name any of the above under a new word: making one is a step of its own.
+  if (a0 === 'alias' && !['list', 'ls'].includes(a1)) return { kind: 'step', what: 'gh alias ' + (a1 ?? ''), dir, slug }
   if (a0 !== 'api') return null
   let method = null
   let body = false
@@ -417,9 +423,12 @@ function ghStep(w, dir, env = new Map()) {
   const m = String(method ?? (body ? 'POST' : 'GET')).toUpperCase()
   const path = String(endpoint ?? '').replace(/^\//, '').split('?')[0]
   if (m === 'GET') return null
-  if (path === 'graphql') return fields.some((f) => MUTATION.test(f)) || input ? { kind: 'step', what: 'gh api graphql mutation', dir, slug } : null
+  if (path === 'graphql') return fields.some((f) => gqlWrites(f) || gqlUnread(f)) || input ? { kind: 'step', what: 'gh api graphql mutation', dir, slug } : null
   return sensitive(path) ? { kind: 'step', what: 'gh api ' + m + ' ' + path, dir, slug: apiSlug(path) ?? slug } : null
 }
+
+// curl's one-letter options that take a value.
+const CURL_SHORT_VALUE = 'AbcCdDeEFHKmoPQrtTuUwxXyYz'
 
 // curl / wget straight at the GitHub API (api.github.com, uploads.github.com, a GHE …/api/v3/).
 function httpStep(w, dir) {
@@ -437,11 +446,20 @@ function httpStep(w, dir) {
     const eq = a.startsWith('--') ? a.indexOf('=') : -1
     const k = eq > 0 ? a.slice(0, eq) : a
     const v = () => (eq > 0 ? a.slice(eq + 1) : w[++i] ?? '')
-    if (p === 'curl' && (k === '-X' || k === '--request')) method = v()
-    else if (p === 'curl' && /^-X./.test(a)) method = a.slice(2)
-    else if (p === 'curl' && (k === '-G' || k === '--get')) get = true
-    else if (p === 'curl' && (/^--data/.test(k) || ['-d', '--json', '-F', '--form', '--form-string', '-T', '--upload-file'].includes(k))) { body = true; data.push(v()) }
-    else if (p === 'curl' && /^-d./.test(a)) { body = true; data.push(a.slice(2)) }
+    if (p === 'curl' && /^-[^-]/.test(a)) {
+      // A cluster of short flags (-sSfX PUT, -sXPUT, -sd@body): a letter that takes a value ends it.
+      for (let j = 1; j < a.length; j++) {
+        const ch = a[j]
+        if (ch === 'G' || ch === 'I') get = true
+        if (!CURL_SHORT_VALUE.includes(ch)) continue
+        const val = j + 1 < a.length ? a.slice(j + 1) : w[++i] ?? ''
+        if (ch === 'X') method = val
+        else if ('dFT'.includes(ch)) { body = true; data.push(val) }
+        break
+      }
+    } else if (p === 'curl' && k === '--request') method = v()
+    else if (p === 'curl' && k === '--get') get = true
+    else if (p === 'curl' && (/^--data/.test(k) || ['--json', '--form', '--form-string', '--upload-file'].includes(k))) { body = true; data.push(v()) }
     else if (p !== 'curl' && k === '--method') method = v()
     else if (p !== 'curl' && ['--post-data', '--post-file', '--body-data', '--body-file'].includes(k)) { body = true; data.push(v()) }
     else if (VAL.includes(k)) { if (eq < 0) i++ }
@@ -456,7 +474,7 @@ function httpStep(w, dir) {
     const path = host === 'api.github.com' || host === 'uploads.github.com' ? rest : rest.includes('api/v3/') ? rest.slice(rest.indexOf('api/v3/') + 7) : rest.startsWith('api/graphql') ? 'graphql' : null
     if (path === null) continue
     if (path.replace(/\/$/, '') === 'graphql') {
-      if (data.some((d) => MUTATION.test(d) || d.startsWith('@'))) return { kind: 'step', what: p + ' graphql mutation', dir, slug: null }
+      if (data.some((d) => gqlWrites(d) || d.startsWith('@') || /^\$/.test(d))) return { kind: 'step', what: p + ' graphql mutation', dir, slug: null }
     } else if (sensitive(path) || host === 'uploads.github.com') return { kind: 'step', what: p + ' ' + m + ' ' + path, dir, slug: apiSlug(path) }
   }
   return null
@@ -483,7 +501,23 @@ function movesHead(g) {
   return false
 }
 
-// A line → its integration candidates, each with the dir it runs in (cd, pushd, git -C, env -C followed).
+// `git update-ref <ref> <value>` / `git symbolic-ref <ref> <target>`: the ref it writes (or deletes), when that is a
+// tag, a branch, HEAD or unreadable (--stdin); null for a read or another ref. guardLine judges a branch against
+// the repo's bases.
+function refWrite(g) {
+  if (g.sub !== 'update-ref' && g.sub !== 'symbolic-ref') return null
+  if (g.sub === 'update-ref' && g.args.includes('--stdin')) return '--stdin'
+  const pos = []
+  for (let i = 0; i < g.args.length; i++) {
+    if (g.args[i] === '-m') i++
+    else if (!g.args[i].startsWith('-')) pos.push(g.args[i])
+  }
+  const del = g.args.some((x) => x === '-d' || x === '--delete')
+  if (!pos.length || (pos.length < 2 && !del)) return null
+  const refs = g.sub === 'symbolic-ref' ? pos.slice(0, 2) : [pos[0]]
+  return refs.find((r) => /^refs\/(tags|heads)\//.test(r) || r === 'HEAD' || /[$`]/.test(r)) ?? null
+}
+
 // Config keys that change where a push goes: a remote's URL, its rewriting, a branch's push remote, an include.
 const REMOTE_CFG = /^(remote|url|branch|include|includeif)\./i
 // GIT_CONFIG_KEY_<n> and GIT_CONFIG_PARAMETERS set config for one call, as -c does.
@@ -496,6 +530,7 @@ function envCfg(env) {
   return keys
 }
 
+// A line → its integration candidates, each with the dir it runs in (cd, pushd, git -C, env -C followed).
 export function commandSteps(line, cwd = null) {
   const out = []
   let here = cwd
@@ -514,15 +549,17 @@ export function commandSteps(line, cwd = null) {
       continue
     }
     const at = c.dir ? (/[$`~]/.test(c.dir) ? null : c.dir.startsWith('/') ? joinPath('/', c.dir) : here && joinPath(here, c.dir)) : here
-    if (p === 'gh') {
-      const k = ghStep(w, at, c.env)
+    if (p === 'gh' || p === 'hub') {
+      // hub is gh's elder: the same release and api steps, `pull-request` for a PR, and git's own commands.
+      const k = p === 'hub' && w[1] === 'pull-request' ? { kind: 'pr', what: 'hub pull-request', dir: at, slug: null } : ghStep(w, at, c.env)
       if (k) out.push({ ...k, gh: true, slugUnknown: ghEdited })
       if (w.includes('set-default') && w.includes('repo')) ghEdited = true
       if (w.includes('checkout') && w.includes('pr')) moved = true
-    } else if (p === 'curl' || p === 'wget') {
+    }
+    if (p === 'curl' || p === 'wget') {
       const k = httpStep(w, at)
       if (k) out.push(k)
-    } else {
+    } else if (p !== 'gh') {
       const g = gitCall(w)
       if (!g) continue
       // GIT_DIR / GIT_WORK_TREE set on the line name the repo as --git-dir does.
@@ -532,6 +569,13 @@ export function commandSteps(line, cwd = null) {
       const keys = [...g.cfg, ...envCfg(c.env)]
       const retarget = keys.some((k) => REMOTE_CFG.test(k))
       if (g.sub === 'tag' && !tagListing(g.args)) out.push({ kind: 'step', what: 'git tag', dir, slug: null })
+      // An alias can rename push or tag past this reader: defining one on a run's line is a step of its own.
+      if (keys.some((k) => k.startsWith('alias.'))) out.push({ kind: 'step', what: 'git -c alias.*', dir, slug: null })
+      if (g.sub === 'config' && g.args.some((x) => /^alias\./i.test(x)) && g.args.filter((x) => !x.startsWith('-')).length > 1) out.push({ kind: 'step', what: 'git config alias.*', dir, slug: null })
+      // Plumbing that writes a remote with no `push` in sight.
+      if (['send-pack', 'http-push'].includes(g.sub) || (g.sub === 'subtree' && g.args[0] === 'push')) out.push({ kind: 'step', what: 'git ' + g.sub, dir, slug: null })
+      const ref = refWrite(g)
+      if (ref) out.push({ kind: 'ref', what: 'git ' + g.sub + ' ' + ref, dir, slug: null, ref })
       if (g.sub === 'push') out.push({ kind: 'push', what: 'git push', dir, slug: null, push: { ...parsePush(g.args), headMoved: moved, remoteEdited: edited || retarget } })
       if (movesHead(g)) moved = true
       if ((g.sub === 'remote' && ['add', 'set-url', 'rename', 'remove', 'rm'].includes(g.args[0])) || (g.sub === 'config' && g.args.some((x) => REMOTE_CFG.test(x)))) edited = true
@@ -540,13 +584,28 @@ export function commandSteps(line, cwd = null) {
   return out
 }
 
+// A local ref write below auto: a tag (as `git tag` is), the base branch, HEAD while the base is checked out (or
+// unread), or a ref the guard cannot read. Returns why it is refused, or null.
+export function judgeRef(ref, { current = null, bases = new Set(['main', 'master']) } = {}) {
+  if (ref === '--stdin' || /[$`]/.test(ref)) return 'git update-ref of a ref that cannot be read here'
+  if (ref.startsWith('refs/tags/')) return 'a tag written with ' + ref
+  const name = ref === 'HEAD' ? current : ref.replace(/^refs\/heads\//, '')
+  if (!name) return 'a write to HEAD while the branch checked out cannot be read'
+  return bases.has(name) ? 'a write to the base branch ' + name : null
+}
+
 // The first refusal a line earns, with what is known of its repo given (tests, and a line read alone):
 // current branch, base, mode. Merges and tags need `auto`; pushes are judged; `local` refuses pushes and PRs.
 export function integrationIn(line, { cwd = null, current = null, pushDst = null, base: b = null, mode = 'pr' } = {}) {
   if (mode === 'auto') return null
   for (const c of commandSteps(line, cwd)) {
     if (c.kind === 'step') return c.what
-    if (mode === 'local' && c.kind !== 'step') return c.what
+    if (c.kind === 'ref') {
+      const why = judgeRef(c.ref, { current, bases: new Set(['main', 'master', b].filter(Boolean)) })
+      if (why) return why
+      continue
+    }
+    if (mode === 'local') return c.what
     if (c.kind === 'push') {
       const why = judgePush(c.push, { current, pushDst, bases: new Set(['main', 'master', b].filter(Boolean)) })
       if (why) return why
@@ -744,14 +803,20 @@ export async function integrationAllowed($, cwd) {
   return modeFor($, await readProfile($), { dir: cwd, slug: null }, cwd, new Map())
 }
 
+// The bases of the repo at `at`: main, master and the remote's default branch.
+async function basesOf($, at, remote = 'origin') {
+  const bases = new Set(['main', 'master'])
+  const head = at ? await gitOut($, at, 'symbolic-ref', '--short', 'refs/remotes/' + remote + '/HEAD') : ''
+  if (head) bases.add(head.startsWith(remote + '/') ? head.slice(remote.length + 1) : head.slice(head.indexOf('/') + 1))
+  return bases
+}
+
 // What a push is judged against: the branch checked out in its dir, where a bare `git push` goes, the bases.
 async function pushInfo($, c, cwd, cache) {
   const dir = c.dir
   const at = dir ?? cwd
   const remote = c.push.remote && /^[\w.-]+$/.test(c.push.remote) ? c.push.remote : 'origin'
-  const bases = new Set(['main', 'master'])
-  const head = at ? await gitOut($, at, 'symbolic-ref', '--short', 'refs/remotes/' + remote + '/HEAD') : ''
-  if (head) bases.add(head.startsWith(remote + '/') ? head.slice(remote.length + 1) : head.slice(head.indexOf('/') + 1))
+  const bases = await basesOf($, at, remote)
   const current = dir ? (await gitOut($, dir, 'symbolic-ref', '--short', '-q', 'HEAD')) || null : null
   let pushDst = null
   if (current && !c.push.specs.length) {
@@ -781,6 +846,12 @@ export async function guardLine($, line, cwd) {
     const mode = c.kind === 'push' ? await pushMode($, profile, c, cwd, cache) : await modeFor($, profile, { ...c, slug }, cwd, cache)
     if (mode === 'auto') continue
     if (c.kind === 'step') return DENY_INTEGRATION
+    if (c.kind === 'ref') {
+      const current = c.dir ? (await gitOut($, c.dir, 'symbolic-ref', '--short', '-q', 'HEAD')) || null : null
+      const why = judgeRef(c.ref, { current, bases: await basesOf($, c.dir) })
+      if (why) return DENY_INTEGRATION + ' Refused: ' + why + '.'
+      continue
+    }
     if (mode === 'local') return DENY_LOCAL
     if (c.kind === 'push') {
       const why = judgePush(c.push, await pushInfo($, c, cwd, cache))

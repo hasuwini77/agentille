@@ -162,6 +162,50 @@ describe('guard: which commands integrate', () => {
     expect(integrationIn('gh pr create --title x', { mode: 'push' })).toBeNull()
   })
 
+  test('aliases, plumbing, file-fed GraphQL, curl flag clusters and hub are caught', async () => {
+    for (const line of [
+      'git -c alias.p=push p origin agt/x:main',
+      'git -c alias.t=tag t v9',
+      'git --config-env=alias.p=P p origin agt/x:main',
+      'GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=alias.p GIT_CONFIG_VALUE_0=push git p origin agt/x:main',
+      'git config alias.sh push && git sh origin HEAD:main',
+      'git config --global alias.p push',
+      'git config set alias.p push',
+      'git send-pack ../origin.git agt/x:main',
+      'git subtree push --prefix=x origin agt/x',
+      'git update-ref refs/tags/v1 HEAD',
+      'git update-ref -d refs/tags/v1',
+      'git update-ref refs/heads/main agt/x',
+      'git update-ref --stdin < refs.txt',
+      'git symbolic-ref refs/heads/main refs/heads/agt/x',
+      'gh alias set mm "pr merge" && gh mm 12',
+      'gh alias import aliases.yml',
+      'gh api graphql -F query=@m.graphql',
+      'gh api graphql -f query=@m.graphql',
+      'gh api graphql --input body.json',
+      "gh api graphql -f query='mutation { deleteRef(input: {refId: \"x\"}) { clientMutationId } }'",
+      "gh api graphql -f query='mutation($id: ID!) { mergePullRequest(input: {pullRequestId: $id}) { clientMutationId } }' -F id=1",
+      'curl -sXPUT https://api.github.com/repos/o/r/pulls/1/merge',
+      'curl -sfX PUT https://api.github.com/repos/o/r/pulls/1/merge',
+      'curl -sSd @body.json https://api.github.com/graphql',
+      'curl -sd \'{"tag_name":"v1"}\' https://api.github.com/repos/o/r/releases',
+      'hub release create v1',
+      'hub api -X PUT repos/o/r/pulls/1/merge',
+      'hub push origin main',
+    ]) expect([line, integrationIn(line, onSlice)]).toEqual([line, expect.any(String)])
+    for (const line of [
+      'git config --get alias.p',
+      'git -c core.pager=cat log --oneline',
+      'gh alias list',
+      "gh api graphql -f query='{ repository(owner: \"o\", name: \"r\") { pullRequest(number: 1) { mergeable } } }'",
+      'curl -sS https://api.github.com/repos/o/r/pulls/1',
+      'curl -sI https://api.github.com/repos/o/r/pulls/1/merge',
+      'git update-ref refs/heads/agt/y HEAD',
+      'git symbolic-ref --short HEAD',
+      'hub pull-request -m "agt: filter"',
+    ]) expect([line, integrationIn(line, onSlice)]).toEqual([line, null])
+  })
+
   test('judgePush on its own: a dry run passes, refs outside heads do not', async () => {
     const p = { remote: 'origin', specs: ['HEAD:refs/for/main'], force: false, del: false, bulk: null, dry: false, mergeOpt: false }
     expect(judgePush(p, { current: 'agt/x' })).toContain('refs/for/main')
@@ -686,5 +730,18 @@ describe('guard: the target repo is read from the write', () => {
     await boot($)
     await typed($)
     expect((await bash($, 'gh pr merge 3 -R stranger/api --merge')).deny).toBe(DENY_INTEGRATION)
+  })
+})
+
+describe('guard: aliases and plumbing in the mod', () => {
+  test('a ref write is judged against the repo\'s own base, a tag as git tag is', async ($, on) => {
+    setup(on)
+    await boot($)
+    await typed($)
+    expect((await bash($, 'git update-ref refs/tags/v1 HEAD')).deny).toContain(DENY_INTEGRATION)
+    expect((await bash($, 'git update-ref HEAD agt/x')).deny).toContain('base branch main')
+    expect((await bash($, 'git -C /work/repo-x update-ref HEAD agt/x~1')).result).toBe('ok')
+    expect((await bash($, 'git -c alias.p=push p origin agt/x:main')).deny).toBe(DENY_INTEGRATION)
+    expect((await bash($, 'git send-pack origin agt/x:main')).deny).toBe(DENY_INTEGRATION)
   })
 })

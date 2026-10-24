@@ -99,7 +99,10 @@ Evidence is observed by the mod, not claimed by the lead.
 
 ### Cost ceiling
 
-`profile.routing.maxRunUsd` (default `null`, off; any positive number turns it on) caps a run's estimated spend in US dollars. The mod estimates it from the run's agent tokens at API list prices per million tokens (input / output / cache read): Fable 10 / 50 / 0.25, Opus 4 / 20 / 0.20, Sonnet 2 / 10 / 0.20, Haiku 0.10 / 0.50 / 0.01, and a model it cannot name at Opus. It is an estimate, not a bill: a plan subscription is not billed per token, cache writes count as plain input, and pane workers report no tokens to the lead. Once the estimate reaches the ceiling, every later dispatch of the planner, plan-reviewer and code-, security-, payments-, SEO- and perf-reviewer that the table or the ladder puts on Opus (or a ladder Fable) runs Sonnet at the same effort. Its `routing.jsonl` line carries `"capped": true`, and the mod shows one toast and one band `⚑` per run. The executor, design-reviewer, ui-prototyper and adversary keep the table, and a typed `--fable` holds. When the run's log has a `capped` line, the card's `⚑` line says `maxRunUsd reached: later reviews ran Sonnet`.
+`profile.routing.maxRunUsd` (default `null`, off; any positive number turns it on) caps a run's estimated spend in US dollars. The mod sums each agent's input, output and cache-read tokens times that model's API list price per million tokens. The price table and what the estimate leaves out: `docs/routing-cost.md` at the plugin root.
+
+- **Past the ceiling,** every later dispatch of the planner, plan-reviewer and code-, security-, payments-, SEO- and perf-reviewer that the table or the ladder puts on Opus (or a ladder Fable) runs Sonnet at the same effort. The executor, design-reviewer, ui-prototyper and adversary keep the table, and a typed `--fable` holds.
+- **The card:** that dispatch's `routing.jsonl` line carries `"capped": true`, and the mod shows one toast and one band `⚑` per run. When the run's log has a `capped` line, the card's `⚑` line says `maxRunUsd reached: later reviews ran Sonnet`.
 
 ### Advisor
 

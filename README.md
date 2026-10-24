@@ -2,24 +2,36 @@
 
 One typed command runs the work. Type `/agt "task"` in Claude Code and that one prompt becomes a planned, built and reviewed change, each step on the model that fits it and, if you want, in your own voice (`/agentille-init`, optional, 1 minute). A few `/agt-*` commands read or tidy what a run left (`/agt-info`, `/agt-clean`).
 
-Small tasks stay cheap: a one-sentence task with no risk words (the typo, the rename) runs solo, with no agents and no card. A plain prompt never starts `/agt`: the skill runs only when you type it. Powered by [Systown AI Lab](https://systown.ai).
+## Quick start
 
-1. **Install** (about 30 seconds, no profile or config needed):
+1. Install (no profile or config needed):
    ```
    /plugin marketplace add hasuwini77/agentille
    /plugin install agentille@hasuwini77-agentille
    ```
+2. Start a new Claude Code session. Nothing prints on load. Type `/agt-info`: its first line reads `display (profile.json → display):`. If Claude Code does not know `/agt-info`, the mod did not load.
+3. Smoke test: `/agt "fix the typo in the footer"` prints `recon: low · solo · <reason>`, then Claude makes the fix itself, with no agents and no card. The fix lands on a new `fix/<slug>` branch, and under the default `integration: "pr"` that branch is pushed and a PR is opened. To keep it local, put `{"integration": "local"}` in `~/.agentille/profile.json` before you run it.
+4. Settings live in `~/.agentille/profile.json`. Every key is optional ([Settings](#settings)).
 
-2. **Type a task** in any repo:
-   ```
-   /agt "add a dark mode toggle to settings, persisted per user, with tests"
-   ```
+Small tasks stay cheap: a one-sentence task with no risk words (the typo, the rename) runs solo, with no agents and no card. A plain prompt never starts `/agt`: the skill runs only when you type it. Powered by [Systown AI Lab](https://systown.ai).
 
-   It reads your repo and picks a level: low (it just does it, or one builder), medium (2–3 builders in parallel) or heavy (one Herdr or tmux pane per part). It hardens risky changes (auth, payments, data) with a red-team pass, leaves one reviewed PR per part for you to merge (merging on green is opt-in, see "What it touches") and closes every pane it opened.
+Also in the box, each covered below: `/storm` researches what to build next and hands the picks to `/agt heavy`; "open two sessions" opens real Claude, Codex or shell panes beside yours; `/agentille-project` writes a repo's CLAUDE.md and `/agentille-claude-md` trims one (your global `~/.claude/CLAUDE.md` unless you give it a path). The band, the deck and the wire belong to the mod. The words this README uses (level, slice, band, transport, mode): [docs/glossary.md](./docs/glossary.md).
 
-   **Verify it works:** a one-sentence task with no risk words (`/agt "fix the typo in the footer"`) prints one line, `recon: low · solo · <one-clause reason>` (plus `[agentille v<version>]` when the mod is not drawing), then Claude does it: no agents, no card.
+## Contents
 
-3. **Read the card** it ends on. Everything else (plan, findings, each agent's full report) is in that `report.md`:
+- [Quick start](#quick-start) · [First 15 minutes](#first-15-minutes) · [When to use it](#when-to-use-it) · [Options](#options) · [Settings](#settings)
+- [Storm](#storm) · [Sessions](#sessions) · [How it decides](#how-it-decides)
+- [When something goes wrong](#when-something-goes-wrong) · [Requirements](#requirements) · [Releases](#releases) · [What it touches](#what-it-touches) · [Routing](#routing)
+- Reference pages: [glossary](./docs/glossary.md) · [guards](./docs/guards.md) · [sessions](./docs/sessions.md) · [what you see](./docs/display.md) · [settings detail](./docs/settings.md) · [routing cost](./docs/routing-cost.md) · [releasing](./docs/releasing.md)
+
+## First 15 minutes
+
+1. **Install** with the two lines above, then start a new Claude Code session so the plugin and its mod load.
+2. **Check that the mod loaded:** type `/agt-info`. It prints the display settings in effect and the last run's routing. Every `/agt-*` command comes from the module `hooks/hooks.json` loads, so if Claude Code does not know `/agt-info`, the mod did not load.
+   - `/agt` still works without the mod; its recon line then ends in `[agentille v<version>]`, and you get the plain subagent tree instead of the band.
+3. **Run a small task:** `/agt "fix the typo in the footer"` prints `recon: low · solo · <reason>`, then Claude does it on a new `fix/<slug>` branch: no agents, no card. Under the default `integration: "pr"` it opens a PR; under `local` it pushes nothing.
+4. **Run a bigger one:** `/agt "add a CSV export endpoint and a download button on the reports page"`. It reads your repo and picks a level: low (it just does it, or one builder), medium (2–3 builders in parallel) or heavy (one Herdr or tmux pane per part). The recon line names the level it picked (`medium · subagent`, say), and the band above your prompt fills with the planner, executors and reviewers. Risky changes (auth, payments, data) get a red-team pass, you get one reviewed PR per part to merge (merging on green is opt-in, see "What it touches"), and every pane it opened is closed.
+5. **Read the card** it ends on. Everything else (plan, findings, each agent's full report) is in that `report.md`. A one-part feature's card looks like this:
    ```
    ✓ dark mode toggle on /settings  ·  low  ·  4 files  ·  feat/dark-mode-toggle  ·  6m
    verify: npm test → 48 passed
@@ -28,31 +40,15 @@ Small tasks stay cheap: a one-sentence task with no risk words (the typo, the re
    Open: ~/.agentille/state/run-a1b2/report.md
    Next: gh pr merge 12 --merge
    ```
-
-Also in the box, each covered below: `/storm` researches what to build next and hands the picks to `/agt heavy`; "open two sessions" opens real Claude, Codex or shell panes beside yours; `/agentille-project` writes a repo's CLAUDE.md and `/agentille-claude-md` trims one (your global `~/.claude/CLAUDE.md` unless you give it a path). The band, the deck and the wire belong to the mod (see Glossary).
-
-## Contents
-
-- [First 15 minutes](#first-15-minutes) · [When to use it](#when-to-use-it) · [Glossary](#glossary) · [Options](#options) · [Settings](#settings)
-- [Storm](#storm) · [Sessions](#sessions) · [How it decides](#how-it-decides) · [Routing](#routing)
-- [When something goes wrong](#when-something-goes-wrong) · [Requirements](#requirements) · [Releases](#releases) · [What it touches](#what-it-touches)
-- Reference pages: [guards](./docs/guards.md) · [sessions](./docs/sessions.md) · [what you see](./docs/display.md) · [settings detail](./docs/settings.md) · [routing cost](./docs/routing-cost.md) · [releasing](./docs/releasing.md)
-
-## First 15 minutes
-
-1. **Install** with the two lines above, then start a new Claude Code session so the plugin and its mod load.
-2. **Check that the mod loaded:** type `/agt-info`. It prints the display settings in effect and the last run's routing. Every `/agt-*` command comes from the module `hooks/hooks.json` loads, so if Claude Code does not know `/agt-info`, the mod did not load.
-   - `/agt` still works without the mod; its recon line then ends in `[agentille v<version>]`, and you get the plain subagent tree instead of the band.
-3. **Run a small task:** `/agt "fix the typo in the footer"` prints `recon: low · solo · <reason>`, then Claude does it: no agents, no card.
-4. **Run a bigger one:** `/agt "add a CSV export endpoint and a download button on the reports page"`. The recon line names the level it picked (`medium · subagent`, say), the band above your prompt fills with the planner, executors and reviewers, and the run ends on a card like the one above.
-5. **Find your settings** in `~/.agentille/profile.json`. Every key is optional ([Settings](#settings)). `/agentille-init` adds your voice; `/agentille-project` adds a repo's entry.
-6. **Turn a surface off:**
-   - the deck: `display.deck: "off"` (the default);
-   - the flags above the prompt: `display.focus: false`;
+6. **Find your settings** in `~/.agentille/profile.json`. Every key is optional ([Settings](#settings)). `/agentille-init` adds your voice; `/agentille-project` adds a repo's entry.
+7. **Turn a surface off** in the profile's `display` block, or the version check in your environment:
+   - the band above the prompt (the run's tree, its flags, a worker's own band): `display.band: "off"`;
+   - the status line pinned under the prompt: `display.statusLine: "off"`;
+   - the mascot figure in worker panes and the deck: `display.mascot: "off"`;
+   - the deck side pane on every `/agt`: `display.deck: "off"` (the default);
+   - the `⚑` flags in the band: `display.focus: false`;
    - reply highlighting: `display.highlight: "off"` (the default);
-   - the daily version check: `AGENTILLE_UPDATE_CHECK=0` in your environment;
-   - pushes and PRs: `integration: "local"`, so runs merge locally and push nothing;
-   - the band, the status line and the pane mascot have no switch of their own: `claude plugin disable agentille@hasuwini77-agentille` turns the whole plugin off, `/agt` included, and `claude plugin enable agentille@hasuwini77-agentille` brings it back.
+   - the daily version check: `AGENTILLE_UPDATE_CHECK=0`.
 
 ## When to use it
 
@@ -72,20 +68,6 @@ What you get over a plain prompt: a separate reviewer checks the work instead of
 
 Skip it for one-file edits, typos, renames and questions: a plain prompt is cheaper. Any run that is not solo costs more tokens than a plain prompt. What you buy is fewer wrong or unreviewed changes, not a lower bill.
 
-## Glossary
-
-- **Level:** how big the crew is. low (solo or one builder), medium (parallel subagents), heavy (panes).
-- **Slice:** one file-disjoint part of the task, built by one executor on its own branch. The dispatch header carries its slug as `slice=` (`piece=` is still read for one release).
-- **Executor, planner, reviewers, adversary:** the agent roles in `agents/`. Reviewers read and run tests; they never edit. The adversary writes tests that try to break a slice.
-- **Pane / worker:** a real Claude (or Codex) session in a Herdr or tmux pane, named `agt-<run>-<role>`, doing one slice. **Session:** a pane that is yours, opened with "open two sessions".
-- **The mod:** the JavaScript in `hooks/` that Claude Code loads beside the skill. It draws the band, routes models, carries the wire, opens and closes panes. The skill works without it.
-- **The band / switchboard:** the live dispatch tree above your prompt. **Deck:** the fuller side pane (`/agt-deck`). **Focus flags:** the `⚑` lines above the prompt (a REVISE, a FAIL, a blocked pane); they clear when the run's card prints.
-- **The wire:** how pane workers report back to your session when they finish.
-- **Run card:** the ≤8-line summary that ends every non-solo run. **Run dir:** `~/.agentille/state/run-<id>/`.
-- **Squad:** extra reviewers (payments, SEO, perf) a repo type adds. **Formation:** a run shape (duel, gauntlet, relay) that reshapes the workers.
-- **Mode:** `mode=` in the dispatch header is the work type (`build`, `fix`, `diagnose`, `review`, `research`), `--mode` is a deprecated flag for the level, and the merge policy is `integration`, never called a mode. `panes-mode.md` and `workflow-mode.md` are the docs for those two transports.
-- **Recon line:** the first line of a run, `recon: <level> · <transport> · <reason>`.
-
 ## Options
 
 | You type | You get |
@@ -100,9 +82,9 @@ Skip it for one-file edits, typos, renames and questions: a plain prompt is chea
 | `/agt-tell <worker> <message>` | Message a worker pane over the wire |
 | `/storm [quick] [N] ["focus"] [--ask\|--no-build\|--next]` | Decide what to build next: 11 research agents on your repo and its market, 10–15 scored candidates, the best 2–5 picked and specced in `docs/storm/<date>.md`, then a fresh session beside you that types `/agt heavy` |
 | `/agt-deck [auto\|off]` | A side pane with the run's cast, routing timeline, wire log and token bars · open it on every `/agt` · stop |
-| `/agt-focus [on\|off]` | Agent flags above the prompt on or off, saved as `display.focus`. Deprecated: it goes away in v4; set `display.focus` in your profile instead |
-| `/agt-highlight [on\|all\|off]` | Which replies get lit, saved as `display.highlight`. Deprecated: it goes away in v4; set `display.highlight` in your profile instead |
 | `/agentille-project` · `/agentille-claude-md [path]` | Seed a repo's CLAUDE.md · tune a CLAUDE.md: your global `~/.claude/CLAUDE.md`, or the file at `path` (a repo's own `./CLAUDE.md`, say) |
+
+Two older commands still work but are deprecated and go away in v4: `/agt-focus` and `/agt-highlight` ([docs/settings.md](./docs/settings.md#older-commands)).
 
 ### Settings
 
@@ -117,8 +99,8 @@ Everything lives in `~/.agentille/profile.json`. Every key is optional, and a mi
   "integration": "pr",
   "thinkingDepth": "complex-only",
   "projects": [{ "url": "https://github.com/you/my-app", "integration": "auto" }],
-  "routing": { "autoFable": false, "maxFablePerRun": 1, "fableWeeklyCeiling": 60, "maxRunUsd": 15 },
-  "display": { "deck": "off", "focus": true, "highlight": "off" }
+  "routing": { "autoFable": false, "maxFablePerRun": 1, "fableWeeklyCeiling": 60, "advisorOnOpus": true, "maxRunUsd": 15 },
+  "display": { "deck": "off", "focus": true, "highlight": "off", "band": "on", "statusLine": "on", "mascot": "on" }
 }
 ```
 
@@ -130,7 +112,7 @@ Everything lives in `~/.agentille/profile.json`. Every key is optional, and a mi
     - `local` merges locally and pushes nothing.
     - Without `gh`, `pr` behaves as `push`.
   - **Your profile decides:** that repo's `projects[].integration` entry (matched by `url`, the `origin` remote, or `path`; `/agentille-project` writes both), then the top-level `integration`, then `pr`.
-    - An entry with only an `id` matches a repo with no remote and can only lower the mode, so a clone of someone else's repo with the same folder name never inherits `auto`.
+    - An entry with only an `id` matches a repo with no remote and can only lower the integration mode, so a clone of someone else's repo with the same folder name never inherits `auto`.
   - **A repo can only lower it** (auto → pr → push → local): its `.agentille/config.json` `{"integration": …}` (`/agentille-project` writes it), a CLAUDE.md or AGENTS.md saying `no-mistakes` (at most `pr`) or `local-only` (`local`).
   - **Guards:** below `auto` the mod refuses merges, tags, releases and API merges from a run, and lets through only a push of the run's own branch. Under `local` it refuses pushes and PRs too. How it reads a command: [docs/guards.md](./docs/guards.md).
   - **Risky diffs stop at the PR** under every setting: a diff that touches auth, payments, deploy, migrations, dependencies or a business assumption, and the card says `⚑ escalated`.
@@ -139,13 +121,15 @@ Everything lives in `~/.agentille/profile.json`. Every key is optional, and a mi
   The design-reviewer keeps opus · high under `complex-only` and `always`, and the executor stays on Sonnet either way.
 - `routing.autoFable`: `true` lets the escalation ladder reach Fable (about twice the cost of Opus) after two plan REVISEs, or for the diagnose planner after two failed fixes, at most `maxFablePerRun` times and only under `fableWeeklyCeiling` percent of your weekly plan. Default `false`: Fable only when you type `--fable`.
   The mod holds the model to that: a dispatch header claiming `fable=forced` in a session where you did not type `--fable` is rewritten to `fable=auto`, with a toast.
-- `routing.maxRunUsd` (default `15`; `null` turns it off): a per-run cost ceiling in US dollars.
-  - **The estimate:** the mod prices subagents from their tokens at API list prices, and Herdr or tmux pane workers, which report no tokens, from their role, routed model and minutes open. It is an estimate: a subscription is not billed per token. Prices and the formula: [docs/routing-cost.md](./docs/routing-cost.md).
-  - **Past the ceiling,** every later planner, plan-reviewer, reviewer (design-reviewer included), ui-prototyper or adversary, subagent or pane, that would run Opus (or a ladder Fable) runs Sonnet at the same effort. Only the executor and a typed `--fable` keep their routes.
-  - **You see it:** one toast and a band flag per run naming what was demoted. `/agt-info ledger` shows the estimate, and `/agt-info route` shows the pick past the ceiling.
-- `deck`: `auto` opens the deck on every `/agt`, `off` only when you type `/agt-deck`.
-- `focus`: agent flags (a REVISE, a FAIL, a blocked pane) above the prompt.
-- `highlight` (default `off`): `on` lights `/agt` replies, `all` every reply, `off` none. The mod adds text to a prompt only under `all` and for text to paste; the answer frame, the answer-shape note, plain-text answers and the older commands that write this block: [docs/settings.md](./docs/settings.md).
+- `routing.advisorOnOpus` (default `true`): `false` starts Opus and Fable pane workers without Claude Code's advisor tool; Sonnet workers keep it.
+- `routing.maxRunUsd` (default `15`; `null` turns it off): a per-run cost ceiling in US dollars, estimated from tokens and pane minutes. Past it, every later role but the executor that would run Opus runs Sonnet, with one toast and a band flag. How the estimate works and what it demotes: [docs/routing-cost.md](./docs/routing-cost.md) and [Routing](#routing).
+- `display.band` (default `on`): `off` draws nothing above the prompt, the run's tree, its `⚑` flags and a worker's own band included.
+- `display.statusLine` (default `on`): `off` pins no status line under the prompt.
+- `display.mascot` (default `on`): `off` drops the figure from worker panes and the deck; a worker keeps its one-line caption.
+- `display.deck`: `auto` opens the deck on every `/agt`, `off` only when you type `/agt-deck`.
+- `display.focus`: agent flags (a REVISE, a FAIL, a blocked pane) in the band.
+- `display.highlight` (default `off`): `on` lights `/agt` replies, `all` every reply, `off` none. The mod adds text to a prompt only under `all` and for text to paste; the answer frame, the answer-shape note, plain-text answers and the older commands that write this block: [docs/settings.md](./docs/settings.md).
+- Every switch off leaves `/agt` working the same: it only stops drawing.
 
 ## Storm
 
@@ -179,36 +163,10 @@ Kinds, follow-ups, which ones close on their own and how to get one back: [docs/
 - **Fewer stuck runs**: shared files (lockfiles, schema, shared types, registries) land first in one contract step before slices split; a builder that stops early is resumed once; cheap Haiku scouts map unfamiliar code before the planner.
 - **Review is a gate**: P0/P1 findings get fixed before the card says ✓.
 - **Squads**: in a saas, ecommerce, content or immersive repo, payments, SEO and performance specialists join the review when the diff touches their area.
-- **Type less**: `/agt --` completes its flags and their values.
-- **What you see:** the switchboard (a live dispatch tree above your prompt), a live row per `Agent` call in the transcript, a pinned status line under the prompt, and a small mascot in each worker pane, all drawn by the mod for zero model tokens: [docs/display.md](./docs/display.md).
+- **Type less**: the first word after `/agt` completes to a level (`low`, `medium`, `heavy`, `next`), and a dash completes to `--fable`.
+- **What you see:** the switchboard (a live dispatch tree above your prompt), a live row per `Agent` call in the transcript, a pinned status line under the prompt, and a small mascot in each worker pane, all drawn by the mod for zero model tokens: [docs/display.md](./docs/display.md). Each has its own switch in Settings.
 - **Pane workers report back over the wire**, and a pane is closed only once its answer is saved or read.
 - **Best with Herdr:** workers are labeled in its sidebar and a run with 3+ pane workers gets its own tab; ask for Codex in the task ("codex builds the API slice") and that slice runs as a Codex pane. tmux works with the same band; without a multiplexer you get the subagent tree.
-
-## Routing
-
-Each role gets a model and an effort. The mod picks them from the dispatch header's `size` and `risk` and the profile's `thinkingDepth` (`hooks/routing.js`); without the mod the lead passes the same models as a fallback. The first column that applies wins, in this order: `thinkingDepth=quick`, then `risk` auth or money, then `size=large`, then the default.
-A `—` means that column changes nothing for the role, and `risk=data` changes no route. This table is a copy of `skills/agt/routing.md` → "Default routing":
-
-| role | default | size=large | risk auth/money | thinkingDepth=quick |
-|---|---|---|---|---|
-| planner | opus · high | opus · xhigh | — | sonnet · medium |
-| plan-reviewer | sonnet · medium | opus · high | — | sonnet · medium |
-| ui-prototyper | opus · high | opus · high | — | sonnet · medium |
-| executor | sonnet · medium | sonnet · high | sonnet · high | sonnet · medium |
-| code-reviewer | sonnet · medium | opus · high | opus · high | sonnet · medium |
-| design-reviewer | opus · high | opus · high | opus · high | sonnet · high |
-| security-reviewer | opus · high | opus · high | opus · max | sonnet · high |
-| payments-reviewer | opus · high | opus · high | opus · max | sonnet · high |
-| seo-reviewer | sonnet · medium | sonnet · high | — | sonnet · low |
-| perf-reviewer | sonnet · high | opus · high | — | sonnet · medium |
-| adversary | sonnet · high | sonnet · high | opus · high | sonnet · medium |
-
-- **Small UI work stays cheap:** a one-screen UI feature or fix with `size=small` and `risk=none` gets one executor and the Sonnet code-reviewer. The ui-prototyper and design-reviewer join when the change spans more than one screen, at `size=large`, or when you ask for design work (`routing.md` → "Roster").
-- **The plan-reviewer under `quick`:** the lead skips it (see Settings); its `quick` cell is the route one still gets if it is dispatched, and what `/agt-info route plan-reviewer depth=quick` prints.
-- **Haiku never writes:** it only classifies a task the level table cannot place and runs read-only scouts.
-- **The executor never leaves Sonnet;** only its effort moves (and on fix rounds: attempt 2 → high, attempt 3 and later → max).
-- **Escalation:** a plan REVISE puts the next planner on opus · max. Fable (about twice the cost of Opus) runs only when you type `--fable`, or with `routing.autoFable: true` after two REVISEs, or for the diagnose planner after two failed fixes, within `maxFablePerRun` and `fableWeeklyCeiling`.
-- **Check a route:** `/agt-info route <role> [size=…] [risk=…] [depth=…]` prints what a role would get, escalation rungs included.
 
 ## When something goes wrong
 
@@ -243,7 +201,7 @@ One tag a day at most and fixes batched into the next minor. From v3.23.0 (2026-
 
 Before you type anything the mod does four small things:
 
-- it draws its band above the prompt and, under `display.highlight: on` or `all`, lights replies;
+- it draws its band above the prompt (unless `display.band` is `off`) and, under `display.highlight: on` or `all`, lights replies;
 - at session start and after a compaction its hook runs the version check, which fetches at most once a day (see Network);
 - at session start it closes finished `agt-*` panes a dead lead left behind;
 - and it registers its pane tools only on a turn where you typed for them (see Panes).
@@ -266,11 +224,33 @@ Everything else waits for a typed `/agt`, `/storm` or a session ask. When you do
   - The mod registers them only on a turn where you typed `/agt` or asked for sessions, panes or terminals, and each tool checks that proof again when called.
   - Worker panes close when harvested; at session end the sweep closes only the idle or done worker panes this session opened whose answer is saved.
   - When the proof lapses, and how shells and folder trust work: [docs/guards.md](./docs/guards.md#pane-tools).
-- **Models and cost:** every non-solo run costs more than a plain prompt.
-  - By default Opus runs the planner, the ui-prototyper and the design, security and payments reviewers; Sonnet runs the executor, the adversary and the plan-, code-, SEO- and perf-reviewers.
-  - A large slice moves the plan-, code- and perf-reviewers to Opus; auth or money risk moves the code-reviewer and the adversary to Opus.
-  - The executor never leaves Sonnet; the design-reviewer stays on Opus except under `thinkingDepth: quick`, which moves every reviewer and the planner to Sonnet and skips the plan-reviewer. `routing.maxRunUsd` (default $15) demotes every later Opus role but the executor to Sonnet once a run's estimated spend, pane workers included, passes it.
-  - Haiku only classifies and scouts. Fable never, unless `--fable` or `routing.autoFable: true`. Every cell: Routing.
+- **Models and cost:** every non-solo run costs more than a plain prompt. Opus runs the judgment roles, Sonnet the executor and the cheaper reviews, Haiku only classifies and scouts, and Fable runs only with `--fable` or `routing.autoFable: true`. `routing.maxRunUsd` (default $15) moves later Opus roles to Sonnet once a run passes it. Every cell: [Routing](#routing).
+
+## Routing
+
+Each role gets a model and an effort. The mod picks them from the dispatch header's `size` and `risk` and the profile's `thinkingDepth` (`hooks/routing.js`); without the mod the lead passes the same models as a fallback. The first column that applies wins, in this order: `thinkingDepth=quick`, then `risk` auth or money, then `size=large`, then the default.
+A `—` means that column changes nothing for the role, and `risk=data` changes no route. This table is a copy of `skills/agt/routing.md` → "Default routing":
+
+| role | default | size=large | risk auth/money | thinkingDepth=quick |
+|---|---|---|---|---|
+| planner | opus · high | opus · xhigh | — | sonnet · medium |
+| plan-reviewer | sonnet · medium | opus · high | — | sonnet · medium |
+| ui-prototyper | opus · high | opus · high | — | sonnet · medium |
+| executor | sonnet · medium | sonnet · high | sonnet · high | sonnet · medium |
+| code-reviewer | sonnet · medium | opus · high | opus · high | sonnet · medium |
+| design-reviewer | opus · high | opus · high | opus · high | sonnet · high |
+| security-reviewer | opus · high | opus · high | opus · max | sonnet · high |
+| payments-reviewer | opus · high | opus · high | opus · max | sonnet · high |
+| seo-reviewer | sonnet · medium | sonnet · high | — | sonnet · low |
+| perf-reviewer | sonnet · high | opus · high | — | sonnet · medium |
+| adversary | sonnet · high | sonnet · high | opus · high | sonnet · medium |
+
+- **Small UI work stays cheap:** a one-screen UI feature or fix with `size=small` and `risk=none` gets one executor and the Sonnet code-reviewer. The ui-prototyper and design-reviewer join when the change spans more than one screen, at `size=large`, or when you ask for design work (`routing.md` → "Roster").
+- **The plan-reviewer under `quick`:** the lead skips it (see Settings); its `quick` cell is the route one still gets if it is dispatched, and what `/agt-info route plan-reviewer depth=quick` prints.
+- **Haiku never writes:** it only classifies a task the level table cannot place and runs read-only scouts.
+- **The executor never leaves Sonnet;** only its effort moves (and on fix rounds: attempt 2 → high, attempt 3 and later → max).
+- **Escalation:** a plan REVISE puts the next planner on opus · max. Fable (about twice the cost of Opus) runs only when you type `--fable`, or with `routing.autoFable: true` after two REVISEs, or for the diagnose planner after two failed fixes, within `maxFablePerRun` and `fableWeeklyCeiling`.
+- **Check a route:** `/agt-info route <role> [size=…] [risk=…] [depth=…]` prints what a role would get, escalation rungs included.
 
 ## Contributing
 

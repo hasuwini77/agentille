@@ -127,7 +127,7 @@ Peers never message each other; everything routes through the lead.
 
 - The lead closes each pane right after harvesting it (`close_pane`), not at a run-end sweep.
 - The mod's reaper closes any harvested `agt-` pane ~10 s after it reads `done` (60 s after `idle` while the lead is not mid-turn), `/agt-spawn` panes included.
-- When the lead session ends, the mod's SessionEnd sweep closes every `idle` or `done` `agt-` pane in the lead's tab and its run tabs; `working`, `blocked` and `unknown` panes are left alone.
+- When the lead session ends, the mod's SessionEnd sweep closes only the `agt-` panes this lead opened (recorded in `~/.agentille/state/lead-<pane>.panes`), and of those only the `idle` or `done` ones whose answer is saved (an answer file or done marker exists). `working`, `blocked` and `unknown` panes and any pane with no saved answer are left alone. `/clear` never triggers it, and a session that opened no panes sweeps nothing.
 
 ## Failure → degrade
 

@@ -23,6 +23,9 @@ pass() { printf '%s[PASS]%s %s\n' "$G" "$X" "$1"; }
 fail() { printf '%s[FAIL]%s %s\n' "$R" "$X" "$1"; FAILS=$((FAILS+1)); }
 warn() { printf '%s[WARN]%s %s\n' "$Y" "$X" "$1"; WARNS=$((WARNS+1)); }
 hdr()  { printf '\n%s== %s ==%s\n' "$B" "$1" "$X"; }
+# A check that cannot run because its tool is missing: a FAIL in CI (a skipped hard check must
+# never read as green on the runner), a WARN on a developer machine.
+skip_or_fail() { if [ "${CI:-}" = "true" ]; then fail "$1 (CI=true: the runner must provide it)"; else warn "$1"; fi; }
 
 # ── 1. JSON validity ─────────────────────────────────────────────────────────
 hdr "JSON validity"
@@ -180,7 +183,7 @@ done < <(grep -rhoE '`[A-Za-z0-9._-]+\.md`[^"]*→[[:space:]]*"[^"]+"' skills ag
 # A doc cell of "—" means no override (null in code); "skipped" is not compared.
 hdr "Routing mirror invariant"
 if ! command -v python3 >/dev/null 2>&1; then
-  warn "mirror: python3 not found — routing table comparison skipped"
+  skip_or_fail "mirror: python3 not found — routing table comparison skipped"
 else
   mirror_out=$(python3 - <<'PY'
 import re, sys
@@ -222,13 +225,59 @@ PY
   printf '%s\n' "$mirror_out" | grep -qE '^(PASS|FAIL)' || fail "mirror: comparison produced no result (is skills/agt/routing.md → \"Default routing\" intact?)"
 fi
 
+# ── 6b-readme. README routing table mirrors routing.md ───────────────────────
+# README.md "## Routing" carries a verbatim copy of the routing.md "## Default routing" table.
+hdr "README routing table"
+if ! command -v python3 >/dev/null 2>&1; then
+  skip_or_fail "readme-routing: python3 not found — README routing table comparison skipped"
+else
+  rr_out=$(python3 - <<'PY'
+import difflib, os
+def table(path, heading):
+    try:
+        text = open(path).read()
+    except OSError:
+        return None
+    lines = text.splitlines()
+    for i, l in enumerate(lines):
+        if l.strip() == heading:
+            rows = []
+            for l2 in lines[i + 1:]:
+                if l2.startswith('#'):
+                    break
+                if l2.lstrip().startswith('|'):
+                    rows.append(l2.rstrip())
+                elif rows:
+                    break
+            return rows or None
+    return None
+doc = table('skills/agt/routing.md', '## Default routing')
+rd = table(os.environ.get('AGENTILLE_VALIDATE_README', 'README.md'), '## Routing')
+if doc is None:
+    print('FAIL skills/agt/routing.md has no "## Default routing" table')
+elif rd is None:
+    print('FAIL README.md has no "## Routing" heading followed by a table')
+elif doc != rd:
+    print('FAIL README.md routing table differs from routing.md "Default routing":')
+    for d in difflib.unified_diff(doc, rd, 'routing.md', 'README.md', lineterm='', n=0):
+        print('FAIL   ' + d)
+else:
+    print('PASS README routing table matches routing.md (%d rows)' % len(doc))
+PY
+)
+  while IFS= read -r line; do
+    case "$line" in PASS*) pass "readme-routing: ${line#PASS }";; FAIL*) fail "readme-routing: ${line#FAIL }";; esac
+  done <<< "$rr_out"
+  printf '%s\n' "$rr_out" | grep -qE '^(PASS|FAIL)' || fail "readme-routing: comparison produced no result"
+fi
+
 # ── 6b'. Role parity (agents/ ↔ routing.js TABLE ↔ routing.md ↔ hooks.json) ───
 # A role added in one place and forgotten in another fails at runtime (an
 # unrouted agent, a doc row the mod ignores). The mirror check above compares
 # cells; this compares the role sets, plus the modules hooks.json loads.
 hdr "Role parity"
 if ! command -v python3 >/dev/null 2>&1; then
-  warn "parity: python3 not found — role parity skipped"
+  skip_or_fail "parity: python3 not found — role parity skipped"
 else
   parity_out=$(python3 - <<'PY'
 import glob, json, os, re
@@ -269,14 +318,14 @@ fi
 # only shows up when Claude Code loads it. A clean import is the CI bar.
 hdr "Mod import (node)"
 if ! command -v node >/dev/null 2>&1; then
-  warn "node not found — mod import check skipped"
+  skip_or_fail "node not found — mod import check skipped"
 else
   # No package.json marks hooks/ as ESM, so the import leans on module-type detection: on by default from 22.7.
   nmajor=$(node -p 'process.versions.node' 2>/dev/null)
   if [ "$(node -p 'const [a,b]=process.versions.node.split(".").map(Number); a>22||(a===22&&b>=7)?1:0' 2>/dev/null)" != 1 ]; then
-    warn "node ${nmajor:-?} < 22.7 — mod import check skipped"
+    skip_or_fail "node ${nmajor:-?} < 22.7 — mod import check skipped"
   else
-    imp=$(node -e "import('./hooks/register.js').then(()=>{},e=>{console.error(e&&e.message||e);process.exit(1)})" 2>&1); irc=$?
+    imp=$(node -e "import(process.argv[1]).then(()=>{},e=>{console.error(e&&e.message||e);process.exit(1)})" "${AGENTILLE_VALIDATE_MOD_ENTRY:-./hooks/register.js}" 2>&1); irc=$?
     if [ "$irc" = 0 ]; then
       pass "hooks/register.js imports cleanly (node $nmajor)"
     else
@@ -303,7 +352,21 @@ else
     pass "claude plugin validate passes"
   fi
   tout=$(claude plugin test . 2>&1); trc=$?
-  if [ "$trc" = 0 ]; then pass "claude plugin test: $(printf '%s\n' "$tout" | grep -oE '[0-9]+ pass' | tail -1)"; else fail "claude plugin test failed"; fi
+  # Exit 0 is not enough: an empty or truncated run must not read as green. Need a pass count
+  # at or above the floor (there are ~527 tests) and no failures.
+  tpass=$(printf '%s\n' "$tout" | grep -oE '[0-9]+ pass' | tail -1 | grep -oE '[0-9]+')
+  tfail=$(printf '%s\n' "$tout" | grep -oE '[0-9]+ fail' | tail -1 | grep -oE '[0-9]+')
+  if [ "$trc" != 0 ]; then
+    fail "claude plugin test failed (exit $trc)"
+  elif [ -z "$tpass" ]; then
+    fail "claude plugin test printed no 'N pass' count — cannot tell it ran"
+  elif [ "$tpass" -lt 400 ]; then
+    fail "claude plugin test: only $tpass pass (expected at least 400)"
+  elif [ -n "$tfail" ] && [ "$tfail" != 0 ]; then
+    fail "claude plugin test: $tfail fail"
+  else
+    pass "claude plugin test: $tpass pass"
+  fi
 fi
 
 # ── 6d. Hook scripts: deterministic shell tests (fake HOME, file:// fixtures) ─

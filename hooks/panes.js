@@ -257,6 +257,12 @@ export function tabsFile(home, leadPane) {
   const key = paneKey(leadPane)
   return home && key ? home + '/.agentille/state/lead-' + key + '.tabs' : null
 }
+// The worker pane names this lead opened, one per line: the SessionEnd sweep and a restarted lead read them, so
+// neither touches a pane some other session opened in the same tab.
+export function panesFile(home, leadPane) {
+  const key = paneKey(leadPane)
+  return home && key ? home + '/.agentille/state/lead-' + key + '.panes' : null
+}
 
 // One tab id per line; anything that is not a tab id is dropped.
 export const tabIdsOf = (text) => String(text ?? '').split('\n').map((l) => l.trim()).filter((l) => TAB_ID.test(l))

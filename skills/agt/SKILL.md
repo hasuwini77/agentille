@@ -60,11 +60,12 @@ Every `agentille:agentille-*` dispatch prompt starts with one line:
 
 With the mod loaded it routes model + effort from this line. Still pass `model:` every time: the skill must work with mods off.
 
-Profile prefix (skip it when every value is a default and `neverDo` is empty):
+Profile prefix (skip it when every value is a default and `neverDo` is empty; add the third line only when `preTaskQuestioning` or `thinkingDepth` is not its default, with both values):
 
 ```
 User: <name> (<role>). Avoid: <neverDo, verbatim>.
 Communicate: <deliveryStyle>, <tone>.
+Ask: <preTaskQuestioning>. Depth: <thinkingDepth>.
 ```
 
 ## Hard rules

@@ -138,7 +138,7 @@ describe('focus: in the mod', () => {
 
   test('a long /agt answer costs no model call', async ($, on) => {
     const { asked, clock } = setup(on)
-    await $.prompt.submit({ text: '/agt ship it', wait: false })
+    await $.prompt.submit({ text: '/agt ship it', wait: false, origin: { kind: 'composer' } } as never)
     await complete($, LONG)
     await clock.advance(10_000)
     expect(asked.length).toBe(0)
@@ -177,7 +177,8 @@ describe('lazy start', () => {
     on('session.start', async ($: any, e: any) => ({ cwd: e.cwd }))
     on('command.register', async () => ({ value: undefined }))
     on('tool.register', async () => ({ value: { tool: 'x' } }))
-    on('fs.read', async () => ({ deny: 'no profile' }))
+    // The agt- panes listed at start are this lead's own: a previous session of it recorded them.
+    on('fs.read', async ($: any, e: any) => (e.path === '/h/.agentille/state/lead-1.panes' ? { value: rows.map((r) => r[1]).filter((n) => n.startsWith('agt-')).join('\n') + '\n' } : { deny: 'no profile' }))
     on('fs.exists', async () => ({ value: false }))
     on('fs.stat', async () => ({ deny: 'ENOENT' }))
     on('store.get', async () => ({ value: undefined }))

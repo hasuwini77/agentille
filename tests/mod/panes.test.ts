@@ -298,7 +298,9 @@ describe('tmux band', () => {
     on('env.get', async ($: any, e: any) => ({ value: ({ TMUX: '/tmp/tmux-1/default,1,0', TMUX_PANE: o.self ?? '%1', HOME: '/h' } as any)[e.name] }))
     on('session.start', async ($: any, e: any) => ({ cwd: e.cwd }))
     on('command.register', async () => ({ value: undefined }))
-    on('fs.read', async () => ({ deny: 'no profile' }))
+    // The window's agt- panes are this lead's own, recorded by its previous session (lead-<pane>.panes).
+    const ownFile = '/h/.agentille/state/lead-' + (o.self ?? '%1').replace(/[^A-Za-z0-9_-]/g, '') + '.panes'
+    on('fs.read', async ($: any, e: any) => (e.path === ownFile ? { value: rows.map((r) => r.split(T)[1]).filter((n) => n.startsWith('agt-')).join('\n') + '\n' } : { deny: 'no profile' }))
     on('fs.exists', async () => ({ value: false }))
     on('fs.stat', async ($: any, e: any) => {
       statted.push(e.path)
@@ -696,7 +698,7 @@ describe('pane tools: input', () => {
 
 describe('pane tools: in the mod', () => {
   const T = '\t'
-  const setup = (on: any, vars: Record<string, string>, table: Record<string, any> = {}) => {
+  const setup = (on: any, vars: Record<string, string>, table: Record<string, any> = {}, owned: string[] = []) => {
     const seen: string[][] = []
     const tools: string[] = []
     on('env.get', async ($: any, e: any) => ({ value: vars[e.name] }))
@@ -704,7 +706,8 @@ describe('pane tools: in the mod', () => {
     on('session.start', async ($: any, e: any) => ({ cwd: e.cwd }))
     on('command.register', async () => ({ value: undefined }))
     on('tool.register', async ($: any, e: any) => { tools.push(e.name); return { value: { tool: 'mcp__agentille__' + e.name } } })
-    on('fs.read', async () => ({ deny: 'no profile' }))
+    // `owned`: pane names a previous session of this lead recorded in its lead-<pane>.panes file.
+    on('fs.read', async ($: any, e: any) => (owned.length && /\/lead-[\w-]+\.panes$/.test(e.path) ? { value: owned.join('\n') + '\n' } : { deny: 'no profile' }))
     on('fs.exists', async () => ({ value: false }))
     on('fs.stat', async ($: any, e: any) => (e.path.startsWith('/work/') ? { value: { kind: 'dir', size: 0, mtimeMs: 0, isLink: false } } : { deny: 'ENOENT' }))
     on('store.get', async () => ({ value: undefined }))
@@ -952,7 +955,8 @@ describe('pane tools: in the mod', () => {
 
   test('close: kills an owned worker, refuses a typed spawn pane and strangers', async ($, on) => {
     const rows = [['%1', '', 'claude', '0', '@1'], ['%5', 'agt-k7f2ab-exec-1', 'claude', '0', '@1'], ['%6', 'agt-k7f2ab-spawn', 'claude', '0', '@1'], ['%7', 'agt-k7f2ab-exec-2', 'claude', '0', '@2']]
-    const { seen } = setup(on, TMUX, { 'tmux list-panes': () => ({ stdout: rows.map((r) => r.join(T)).join('\n') + '\n' }) })
+    const { seen } = setup(on, TMUX, { 'tmux list-panes': () => ({ stdout: rows.map((r) => r.join(T)).join('\n') + '\n' }) }, ['agt-k7f2ab-exec-1']) // exec-2 sits in another window and was never this lead's
+    await $.session.start({ cwd: '/work/repo', surface: null, isInteractive: false }) // loads the lead's own pane names
     expect((await close($, 'agt-k7f2ab-exec-1')).result).toBe('Closed agt-k7f2ab-exec-1.')
     expect(seen.some((a) => a.join(' ') === 'tmux kill-pane -t %5')).toBe(true)
     expect((await close($, 'agt-k7f2ab-spawn')).deny).toContain('typed /agt-spawn')
@@ -972,10 +976,11 @@ describe('herdr reaper', () => {
   // session.start polls once and starts the 5 s poll; `closed` collects `herdr pane close` ids, `files` maps a path to its
   // mtime (the files named up front are written in the far future, so always fresh), `agents` is what `herdr agent list`
   // shows (a test flips a pane's agent_status), `toasts` every toast, `sent` every session.send.
-  const lead = async ($: any, on: any, state: string, files: string[] = [ANSWER], twin = false) => {
+  const lead = async ($: any, on: any, state: string, files: string[] = [ANSWER], twin = false, owned = true) => {
     const closed: string[] = []
     const toasts: string[] = []
     const sent: any[] = []
+    const writes: Record<string, string> = {}
     const mtimes = new Map(files.map((f) => [f, FRESH]))
     const agents = [pane('agt-r9-executor', 'w1:p2', state)]
     if (twin) agents.push(pane('agt-r9-executor', 'w1:p3', state)) // a second pane of the same role, listed from the first poll
@@ -990,8 +995,10 @@ describe('herdr reaper', () => {
     on('tool.register', async () => ({ value: undefined }))
     on('prompt.submit', async ($: any, e: any) => ({ text: e.text }))
     on('ui.toast', async ($: any, e: any) => { toasts.push(e.text); return { value: undefined } })
-    on('fs.read', async () => ({ deny: 'no profile' }))
+    // The pane listed at start is this lead's own: its previous session recorded it in lead-w1-p1.panes.
+    on('fs.read', async ($: any, e: any) => (owned && e.path === '/h/.agentille/state/lead-w1-p1.panes' ? { value: 'agt-r9-executor\n' } : { deny: 'no profile' }))
     on('fs.exists', async () => ({ value: false }))
+    on('fs.write', async ($: any, e: any) => { writes[e.path] = e.text ?? e.content ?? e.data; return { value: undefined } })
     on('fs.stat', async ($: any, e: any) => (mtimes.has(e.path) ? { value: { kind: 'file', size: 0, mtimeMs: mtimes.get(e.path), isLink: false } } : { deny: 'ENOENT' }))
     on('store.get', async () => ({ value: undefined }))
     on('session.send', async ($: any, e: any) => { sent.push(e); return { isDelivered: true } })
@@ -1018,7 +1025,7 @@ describe('herdr reaper', () => {
     })
     const clock = mock.clock(on, { now: 1_000_000 })
     await $.session.start({ cwd: '/w', surface: null, isInteractive: false })
-    return { closed, clock, toasts, sent, files: mtimes, agents, reuseId: (id: string) => { reuse = id }, blind: (b: boolean) => { blind = b } }
+    return { closed, clock, toasts, sent, writes, files: mtimes, agents, reuseId: (id: string) => { reuse = id }, blind: (b: boolean) => { blind = b } }
   }
   const begin = ($: any) => $.turn.start({ text: 'go', turnId: 't1' })
   const end = ($: any) => $.turn.complete({ answer: 'ok', durationMs: 10, isAborted: false, turnId: 't1', reason: 'answer' })
@@ -1029,6 +1036,34 @@ describe('herdr reaper', () => {
   }
   const finish = (l: any, id: string) => { l.agents.find((a: any) => a.pane_id === id).agent_status = 'done' }
   const flagged = (l: any) => l.toasts.filter((t: string) => t.includes('agt-r9-executor done, not harvested')).length
+
+  test('another session\'s pane in the same tab is not adopted: no close, no flag, no wake, and the poll stops', async ($, on) => {
+    const other = await lead($, on, 'done', [ANSWER], false, false)
+    await begin($)
+    await end($)
+    await other.clock.advance(120_000)
+    expect(other.closed).toEqual([])
+    expect(other.toasts.filter((t) => t.includes('agt-r9-executor'))).toEqual([])
+    expect(other.sent).toEqual([])
+    const lists = other.agents.length // the fixture is untouched: nothing was closed by hand either
+    expect(lists).toBe(1)
+  })
+
+  test('a spawned pane is recorded under the lead\'s own key, where the SessionEnd sweep and a restart read it', async ($, on) => {
+    const l = await lead($, on, 'working', [], false, false)
+    await respawn($)
+    expect(l.writes['/h/.agentille/state/lead-w1-p1.panes']).toBe('agt-r9-executor\n')
+  })
+
+  test('the card ends the typed proof: the next spawn_pane waits for the next typed /agt', async ($, on) => {
+    const l = await lead($, on, 'working', [], false, false) // the listed pane is a stranger's, so the name is free
+    expect((await respawn($)).result).toContain('Opened agt-r9-executor')
+    await begin($)
+    await $.turn.complete({ answer: '✓ shipped · 1 slice', durationMs: 10, isAborted: false, turnId: 't1', reason: 'answer' })
+    const r = await $.tool.call({ tool: 'mcp__agentille__spawn_pane', run: 'r9', role: 'executor', task: 'one more', agent: 'executor', header: '[agt run=r9 size=small mode=build]' })
+    expect(r.deny).toContain('/agt was typed')
+    expect(l.closed).toEqual([])
+  })
 
   test('idle reaps only between lead turns, done reaps at 10 s (answer harvested)', async ($, on) => {
     const idle = await lead($, on, 'idle')
@@ -1572,7 +1607,7 @@ describe('sessions: helpers', () => {
 import { paneAgents as paneAgentsOf } from '../../hooks/live.js'
 
 describe('sessions: in the mod', () => {
-  const setup = (on: any, vars: Record<string, string>, table: Record<string, any> = {}) => {
+  const setup = (on: any, vars: Record<string, string>, table: Record<string, any> = {}, owned: string[] = []) => {
     const seen: string[][] = []
     const tools: string[] = []
     on('env.get', async ($: any, e: any) => ({ value: vars[e.name] }))
@@ -1580,7 +1615,8 @@ describe('sessions: in the mod', () => {
     on('session.start', async ($: any, e: any) => ({ cwd: e.cwd }))
     on('command.register', async () => ({ value: undefined }))
     on('tool.register', async ($: any, e: any) => { tools.push(e.name); return { value: { tool: 'mcp__agentille__' + e.name } } })
-    on('fs.read', async () => ({ deny: 'no profile' }))
+    // `owned`: pane names a previous session of this lead recorded in its lead-<pane>.panes file.
+    on('fs.read', async ($: any, e: any) => (owned.length && /\/lead-[\w-]+\.panes$/.test(e.path) ? { value: owned.join('\n') + '\n' } : { deny: 'no profile' }))
     on('fs.exists', async () => ({ value: false }))
     on('fs.stat', async ($: any, e: any) => (e.path.startsWith('/work/') ? { value: { kind: 'dir', size: 0, mtimeMs: 0, isLink: false } } : { deny: 'ENOENT' }))
     on('store.get', async () => ({ value: undefined }))
@@ -1862,7 +1898,7 @@ describe('/agt-clean: old run folders', () => {
     on('session.start', async ($: any, e: any) => ({ cwd: e.cwd }))
     on('command.register', async () => ({ value: undefined }))
     on('tool.register', async ($: any, e: any) => ({ value: { tool: 'mcp__agentille__' + e.name } }))
-    on('fs.read', async () => ({ deny: 'ENOENT' }))
+    on('fs.read', async ($: any, e: any) => (e.path === '/h/.agentille/state/lead-w1-p1.panes' ? { value: 'agt-k7f2ab-exec-1\n' } : { deny: 'ENOENT' }))
     on('fs.list', async ($: any, e: any) => ({ value: e.path === '/h/.agentille/state' ? Object.keys(dirs).map((n) => ({ name: n, kind: n.startsWith('run-') ? 'dir' : 'file' })) : [] }))
     on('fs.stat', async ($: any, e: any) => { const n = e.path.split('/').pop()!; return n in dirs ? { value: { kind: 'dir', size: 0, mtimeMs: dirs[n], isLink: false } } : { deny: 'ENOENT' } })
     on('store.get', async () => ({ value: undefined }))

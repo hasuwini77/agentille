@@ -40,6 +40,33 @@ describe('typed proof: in the mod', () => {
     expect(toasts.some((t) => t.includes('fable=forced dropped'))).toBe(false)
   })
 
+  test('the run-end tidy-up (worktrees, orphan panes) runs only after a typed /agt, never for an agent some other prompt dispatched', async ($, on) => {
+    const { spawned } = setup(on)
+    const git: string[] = []
+    on('session.cwd', async () => ({ value: '/work/repo' }))
+    on('turn.start', async ($: any, e: any) => ({ turnId: e.turnId }))
+    on('turn.complete', async ($: any, e: any) => ({ text: e.answer }))
+    on('process.run', async ($: any, e: any) => { git.push(e.argv.join(' ')); return { value: { exitCode: 1, stdout: '', stderr: '' } } })
+    const card = async () => { await $.turn.start({ text: 'go', turnId: 't1' }); await $.turn.complete({ answer: '✓ shipped', durationMs: 1, isAborted: false, turnId: 't1', reason: 'answer' }); await new Promise((r) => setTimeout(r, 20)) }
+    await $.prompt.submit({ text: '/agt ship it' } as never) // unstamped: not the person's
+    await plan($)
+    await card()
+    expect(spawned).toHaveLength(1)
+    expect(git.some((c) => c.includes('worktree list'))).toBe(false)
+    await $.prompt.submit({ text: '/agt ship it', origin: { kind: 'composer' } } as never)
+    await plan($)
+    await card()
+    expect(git.some((c) => c.includes('worktree list'))).toBe(true)
+  })
+
+  test('a prompt the host did not stamp as the person\'s is not typed: fable=forced is dropped', async ($, on) => {
+    const { spawned } = setup(on)
+    await $.prompt.submit({ text: '/agt --fable ship it' } as never)
+    await plan($)
+    expect(spawned[0].model).toBe('opus')
+    expect(spawned[0].prompt.split('\n')[0]).toBe('[agt run=pf1 size=large mode=build fable=auto]')
+  })
+
   test('the proof is per typed /agt: the next one without --fable drops it again', async ($, on) => {
     const { spawned } = setup(on)
     await $.prompt.submit({ text: '/agt --fable ship it', origin: { kind: 'composer' } } as never)

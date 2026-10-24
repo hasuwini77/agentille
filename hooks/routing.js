@@ -56,7 +56,27 @@ export function parseHeader(prompt) {
 
 // Proof that the person typed `--fable` on the /agt line. The dispatch header is written by the
 // model, so `fable=forced` on its own proves nothing; the mod keeps what the typed prompt said.
+// The flag counts in the flag region right after `/agt` (with the level) or as the line's last word:
+// "/agt heavy fix the --fable flag parser" names a flag inside the task and proves nothing.
+const LEVELS = new Set(['low', 'medium', 'heavy', 'next'])
 export function typedFable(text) {
+  const first = String(text ?? '').split('\n', 1)[0].trim()
+  const words = first.split(/\s+/)
+  if (!/^\/(agentille:)?agt$/.test(words[0] ?? '')) return false
+  if (words.length > 1 && words[words.length - 1] === '--fable') return true
+  let value = false // the word after --mode or --formation is that flag's value
+  for (const w of words.slice(1)) {
+    if (w === '--fable') return true
+    if (value) { value = false; continue }
+    if (w === '--mode' || w === '--formation') value = true
+    else if (!LEVELS.has(w) && !w.startsWith('--')) return false
+  }
+  return false
+}
+
+// `--fable` anywhere in a typed ask for sessions ("open a session with --fable and ship it"): the flag then rides
+// into the session's first prompt. Not a proof for a dispatch header; typedFable above is.
+export function mentionsFable(text) {
   return /(^|\s)--fable(?=\s|$)/.test(String(text ?? ''))
 }
 
@@ -78,11 +98,15 @@ export function demoteHeaderText(text) {
 
 // A typed prompt that asks for sessions of the person's own ("open three sessions", "start 2 codex
 // panes", "give me a shell"), or a typed /storm (its hand-off opens one): the only turns in which
-// open_sessions may run. The noun must stand alone: "open the sessions file", "start the shell
-// script" and "spawn the pane handler" name a thing to edit, not a pane to open.
+// open_sessions may run. The ask starts the prompt or a sentence (after "please", "can you", "then" …),
+// takes at most a count and a kind before the noun, and the noun must stand alone: "why does my app
+// start two shells", "give me a summary of the sessions middleware", "open the sessions file" and
+// "spawn the pane handler" talk about a thing, not a pane to open.
 const SESSION_NOUN = '(sessions?|panes?|terminals?|claudes?|codex(?:es)?|shells?)'
-const NOT_A_PANE = '(?!\\s+(?:file|script|config|cookie|build|table|folder|handler|store|id|token|state|list)s?\\b|\\.\\w)'
-const SESSION_ASK = new RegExp('\\b(open|start|spawn|launch|fire up|give me|get me|bring up)\\b[^.\\n]{0,40}?\\b' + SESSION_NOUN + '\\b' + NOT_A_PANE, 'i')
+const NOT_A_PANE = '(?!\\s+(?:file|script|config|cookie|build|table|folder|handler|store|id|token|state|list|middleware|module|log)s?\\b|\\.\\w)'
+const LEAD_IN = '(?:^|[.!?;:\\n]\\s*)(?:(?:please|pls|now|then|also|and|next|first|ok|okay)[,\\s]+)*(?:(?:can|could|would|will)\\s+you\\s+(?:please\\s+)?|i\\s+(?:want|need|\\u0027d\\s+like)\\s+(?:you\\s+to\\s+)?|let\\u0027?s\\s+)?'
+const COUNT = '(?:(?:me\\s+)?(?:a|an|another|one|two|three|four|five|six|seven|eight|nine|ten|\\d+|some|a\\s+few|a\\s+couple\\s+of)\\s+)?(?:(?:new|fresh|more|extra|other|separate|parallel|plain|interactive|claude|codex|shell|tmux|herdr)\\s+)*'
+const SESSION_ASK = new RegExp(LEAD_IN + '(open|start|spawn|launch|fire\\s+up|give\\s+me|get\\s+me|bring\\s+up)\\s+(?:up\\s+)?' + COUNT + SESSION_NOUN + '\\b' + NOT_A_PANE, 'i')
 const STORM_TYPED = /^\s*\/(agentille:)?storm\b/
 export function asksSessions(text) {
   const t = String(text ?? '')
@@ -105,7 +129,7 @@ function base(role, hdr, depth) {
   return row.base
 }
 
-// Fix rounds count per piece (factory.md: at most 2 fix rounds per piece), so two pieces in fix rounds never push each
+// Fix rounds count per piece (factory.md → "Fix rounds": at most 2 per piece), so two pieces in fix rounds never push each
 // other up the ladder. `run.fixesByPiece` maps piece → rounds ('' = no piece). Without a piece (a diagnose planner, a
 // single-piece run) the ladder sees the worst piece.
 export function ladderFixes(run, piece) {
@@ -136,7 +160,7 @@ export function decide({ role, hdr = {}, run = { revise: 0, fixes: 0, fable: 0 }
   // Ladder rung 3: Fable, only after two observed failures at Opus max.
   const candidate =
     (role === 'planner' && run.revise >= 2 && hdr.mode !== 'diagnose') ? 'plan REVISE ×2' :
-    (role === 'planner' && hdr.mode === 'diagnose' && run.fixes >= 3) ? run.fixes + ' failed fixes' :
+    (role === 'planner' && hdr.mode === 'diagnose' && run.fixes >= 2) ? run.fixes + ' failed fixes' :
     null
   if (!candidate) return { model, effort, reason: reasons.join(', ') || 'table', fable: false }
 

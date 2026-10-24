@@ -5,24 +5,24 @@ import { S, ctx } from './state.js'
 import { registerAutocomplete } from './autocomplete.js'
 import { toolLabel, runPhases } from './board.js'
 import { cleanText } from './clean.js'
-import { demoteToast, runState, routingView, ledgerView, writeRunFile, writeReport, fileRunOf, completeReport, dispatchAgent } from './dispatch.js'
+import { runState, routingView, ledgerView, writeRunFile, writeReport, fileRunOf, completeReport, dispatchAgent } from './dispatch.js'
 import { DECK, applyDisplay, addFlag, answerPanel, deckCommand, focusCommand, highlightCommand } from './display.js'
 import { canDraw, drawingBlock, reportRun } from './drawing.js'
 import { flagOf, flagKey } from './focus.js'
 import { highlightFor, litFor, ANSWER_STYLE, isRawPrompt, RAW_STYLE } from './highlight.js'
 import { parseInfoArgs, routeText, routingSummary, ledgerSummary, squadsSummary, overviewText } from './info.js'
-import { pieceOf, verdictChip, party, taskLine, answerLine } from './links.js'
+import { verdictChip, party, answerLine } from './links.js'
 import { addUsage, finish, ledger, isAgtPrompt } from './live.js'
 import { HELLO_MS, BYE_MS, parseWorker } from './mascot.js'
-import { PROBE, SPAWN_ROLE, transportBlock, paneName, newRunId, doneFile, paneKey, answerFile, parseSpawnArgs, tmuxKillArgv, placePlan, codexNote, herdrPromptArgv, herdrCloseArgv, paneRole, spawnToolInput, closeTarget, sessionName, sessionsToolInput, sessionsNote } from './panes.js'
+import { PROBE, SPAWN_ROLE, transportBlock, paneName, newRunId, paneKey, parseSpawnArgs, herdrPromptArgv } from './panes.js'
 import { installedSkew, loadProfile, loadSquads, squadsView, tipOnce } from './profile.js'
 import { pollNow, cleanWorkspace } from './reaper.js'
 import { cardBox, answerBox, switchboard, deck } from './render.js'
-import { formationOf, parseHeader, typedFable, proveHeader, demoteHeaderText, asksSessions, verdictOf, ladderFixes, decide } from './routing.js'
+import { parseHeader, typedFable, asksSessions, verdictOf } from './routing.js'
 import { registerRows } from './rows.js'
-import { saveSessions, closeSession, openSession } from './sessions.js'
 import { hostMessage, hostTooOld, hostVersionOf, skewMessage } from './skew.js'
-import { detectTransport, transportOf, openPane, ensureTools } from './spawn.js'
+import { detectTransport, transportOf, openPane, ensureTools, loadOwned, savePanes } from './spawn.js'
+import { spawnPane, openSessions, closePane } from './tools.js'
 import { registerStatus } from './status.js'
 import { refreshAgents, working, ensurePolling, ensureTicker } from './ticker.js'
 import { statusKey, freshStatus, validLead, parseWire, shortName, logWire, parseTellArgs } from './wire.js'
@@ -70,8 +70,10 @@ export function register(on) {
     await $.command.register({ name: 'agt-clean', description: 'Tidy up now: close finished agt panes, remove merged agt/* worktrees and branches, drop run folders untouched for 14 days. Anything still working or unmerged stays', immediate: true })
     await $.command.register({ name: 'agt-focus', description: 'Agent flags above the prompt (a REVISE, a FAIL, a blocked pane): on · off. Saved as display.focus in profile.json; goes away in v4', argumentHint: '[on|off]', immediate: true })
     if (S.transport !== 'none') {
-      // One look now: a lead restarted mid-run sees its leftover panes. It reaps only those whose answer
-      // was written after this look; an older one is flagged "not harvested" and left to the person.
+      // One look now: a lead restarted mid-run takes back the panes it opened (lead-<pane>.panes) and no other
+      // session's. It reaps only those whose answer was written after this look; an older one is flagged
+      // "not harvested" and left to the person. A session that opened none polls nothing.
+      await loadOwned($)
       await pollNow($, S.transport)
       if (S.panes.length) ensurePolling($)
       // A lead that died skipped its SessionEnd sweep: close its finished workers now.
@@ -134,176 +136,26 @@ export function register(on) {
     } catch (err) {
       return { text: 'Could not open a ' + t + ' pane: ' + String(err?.message ?? err).slice(0, 160) }
     }
+    openedNames.add(name)
+    await savePanes($)
     ensurePolling($)
     return { text: 'Opened ' + name + ' · ' + a.model + ' · ' + t + ' pane.' }
   })
 
-  // /agt heavy level: the same openPane as /agt-spawn, with the input validated here.
-  on('tool.call', { tool: 'mcp__agentille__spawn_pane' }, async ($, e) => {
-    if (S.selfName || S.worker) return { deny: 'This is a worker pane (' + (S.selfName ?? S.worker.agent) + '); workers do not open panes.' }
-    // An update since this session started leaves it on old code: its workers would never report.
-    const skew = await installedSkew($)
-    if (skew) {
-      if (!S.skewToasted) $.ui.toast('agt ⚑ ' + skewMessage(skew, S.runningVersion))
-      S.skewToasted = true
-      return { deny: skewMessage(skew, S.runningVersion) }
-    }
-    const t = await transportOf($)
-    if (t === 'none') return { deny: 'No pane transport here: run the slice as a subagent.' }
-    if (!S.agtTyped) return { deny: 'spawn_pane opens worker panes only in a session where /agt was typed.' }
-    const a = spawnToolInput(e, S.panes)
-    if (a.error) return { deny: a.error }
-    const proof = proveHeader(a.hdr, { fableTyped: S.fableTyped })
-    if (proof.demoted) {
-      a.hdr = proof.hdr
-      a.header = demoteHeaderText(a.header)
-      a.task = demoteHeaderText(a.task)
-      demoteToast($, a.run)
-    }
-    const cwd = a.cwd ?? (await $.session.cwd())
-    if (a.cwd) {
-      const s = await $.fs.stat(cwd).catch(() => null)
-      if (s?.kind !== 'dir') return { deny: cwd + ' is not a directory.' }
-    }
-    S.agtTurn = true
-    S.lastRun = a.run
-    const run = runState(a.run)
-    run.formation = formationOf(a.hdr) ?? run.formation
-    // Counted only once the pane opens: a failed split is not a fix attempt. The ladder sees this piece's rounds only.
-    const isFix = a.agent === 'executor' && a.hdr.mode === 'fix'
-    const fixKey = pieceOf(a.hdr) ?? ''
-    const fixes = ladderFixes(run, pieceOf(a.hdr)) + (isFix ? 1 : 0)
-    run.fable = Math.max(run.fable, Number((await $.store.get('fable:' + a.run)) ?? 0))
-    const codex = a.vendor === 'codex'
-    if (codex && t !== 'herdr') return { deny: 'Codex panes need Herdr; run this slice as a Claude pane or subagent.' }
-    // Codex runs on the person's own config: no routed model or effort, no Fable count.
-    const d = codex ? { model: 'codex', effort: '', reason: 'table', fable: false } : decide({ role: a.agent, hdr: a.hdr, run: { ...run, fixes }, depth: S.depth, settings: S.settings, weeklyPct: S.weeklyPct })
-    const r = paneRole(a.agent)
-    if (!r.pane) return { deny: r.why }
-    await pollNow($, t)
-    S.opened = S.opened.filter((o) => S.panes.some((p) => p.id === o.id))
-    const lead = t === 'tmux' ? await $.env.get('TMUX_PANE') : await $.env.get('HERDR_PANE_ID')
-    const plan = placePlan({ transport: t, layout: a.layout, run: a.run, lead, opened: S.opened, live: S.panes })
-    // A respawned role (a fix round, a retry) must not inherit the earlier pane's done file: the SessionEnd sweep
-    // and the tmux poll would read the new worker as finished and close it mid-slice.
-    const stale = doneFile(S.home, a.run, a.role)
-    if (stale) await $.process.run(['rm', '-f', stale], PROBE).catch(() => {})
-    let id
-    let tab
-    try {
-      const made = await openPane($, t, { run: a.run, name: a.name, agent: a.agent, vendor: a.vendor, model: d.model, effort: d.effort, task: a.task, cwd, newTab: !!plan.newTab, split: plan.newTab ? null : { target: plan.target, direction: plan.direction, tab: plan.tab } })
-      id = made.id
-      tab = made.tab
-    } catch (err) {
-      return { deny: 'Could not open a ' + t + ' pane: ' + String(err?.message ?? err).slice(0, 160) }
-    }
-    // A role can be respawned (a fix, a retry), and the multiplexer can hand the old pane's id out again. Harvest state is
-    // keyed by pane id and the list call above may have failed, so wipe whatever the id carries: the new pane starts with
-    // nothing harvested and only files written from now on count as its own.
-    firstSeen.set(id, await $.clock.now())
-    for (const s of [harvested, wireDone, woken, strandedToasted]) s.delete(id)
-    paneSeen.delete(id)
-    if (isFix) {
-      run.fixes += 1
-      run.fixesByPiece[fixKey] = (run.fixesByPiece[fixKey] ?? 0) + 1
-    }
-    if (d.fable) {
-      run.fable += 1
-      await $.store.set('fable:' + a.run, run.fable)
-    }
-    S.opened.push({ id, name: a.name, run: a.run, tab })
-    openedNames.add(a.name)
-    const piece = pieceOf(a.hdr)
-    paneRoutes.push({ name: a.name, run: a.run, role: a.role, agent: a.agent, model: d.model, effort: d.effort, reason: d.reason, start: Date.now(), end: null, piece, verdict: null })
-    logWire(wireLog, { from: 'lead', to: party(shortName(a.name), piece), kind: 'task', summary: taskLine(a.task) || a.agent, at: Date.now() })
-    const rec = { at: new Date().toISOString(), role: a.agent, model: d.model, effort: d.effort, reason: d.reason, asked: a.asked, agentId: null, kind: 'pane', pane: a.name }
-    decisions.push(rec)
-    run.log.push(JSON.stringify(rec))
-    await writeRunFile($, a.run, 'routing.jsonl', run.log.join('\n') + '\n')
-    await pollNow($, t)
-    ensurePolling($)
-    ensureTicker($)
-    if (d.reason !== 'table') $.ui.toast('agt ↑ ' + a.agent + ' → ' + d.model + ' · ' + d.effort + ' — ' + d.reason)
-    return { result: 'Opened ' + a.name + ' · ' + d.model + (codex ? '' : ' · ' + d.effort) + ' · ' + t + ' pane.' + (d.reason === 'table' ? '' : ' (' + d.reason + ')') + (codex ? codexNote(a.name, answerFile(S.home, a.run, a.role, paneKey(id))) : '') }
-  })
-
-  // Sessions the person asked for: their own panes, like ones opened by hand. No worker env, no agt- name and no
-  // wire, so the band, the reaper and the sweeps leave them alone; each one is a lead of its own.
-  on('tool.call', { tool: 'mcp__agentille__open_sessions' }, async ($, e) => {
-    if (S.selfName || S.worker) return { deny: 'This is a worker pane (' + (S.selfName ?? S.worker.agent) + '); workers do not open sessions.' }
-    const skew = await installedSkew($)
-    if (skew) {
-      if (!S.skewToasted) $.ui.toast('agt ⚑ ' + skewMessage(skew, S.runningVersion))
-      S.skewToasted = true
-      return { deny: skewMessage(skew, S.runningVersion) }
-    }
-    const t = await transportOf($)
-    if (t === 'none') return { deny: 'No pane transport here: sessions open as panes only inside Herdr or tmux.' }
-    if (!S.sessionsAsked) return { deny: 'open_sessions runs only on a turn where the person typed a request for sessions, panes or terminals.' }
-    const a = sessionsToolInput(e, { typed: S.lastTyped, fableTyped: typedFable(S.lastTyped) })
-    if (a.error) return { deny: a.error }
-    if (a.kind === 'codex' && t !== 'herdr') return { deny: 'Codex sessions need Herdr.' }
-    const cwd = a.cwd ?? (await $.session.cwd())
-    if (a.cwd) {
-      const s = await $.fs.stat(cwd).catch(() => null)
-      if (s?.kind !== 'dir') return { deny: cwd + ' is not a directory.' }
-    }
-    const run = newRunId()
-    const tab = t === 'herdr' && a.layout === 'tab'
-    const names = []
-    let prev = null
-    let failed = null
-    for (let n = 0; n < a.count; n++) {
-      const name = sessionName(run, n + 1)
-      // Each session goes under the one before it; a stacked call starts under the newest stacked session.
-      const after = prev ?? (tab ? null : S.sessions.filter((x) => !x.tab).at(-1) ?? null)
-      try {
-        prev = await openSession($, t, { name, kind: a.kind, model: a.model, task: a.tasks[n], cwd, after, newTab: tab && !prev })
-      } catch (err) {
-        failed = String(err?.message ?? err).slice(0, 160)
-        break
-      }
-      S.sessions.push(prev)
-      names.push(name)
-    }
-    if (!names.length) return { deny: 'Could not open a ' + t + ' pane: ' + failed }
-    if (t === 'herdr') await saveSessions($)
-    ensurePolling($)
-    const what = a.kind === 'claude' ? 'Claude' + (a.model ? ' · ' + a.model : '') : a.kind === 'codex' ? 'Codex' : 'shell'
-    const stop = failed ? ' Session ' + (names.length + 1) + ' failed: ' + failed : ''
-    return { result: 'Opened ' + names.join(', ') + ' · ' + what + ' · ' + t + (names.length > 1 ? ' panes.' : ' pane.') + stop + sessionsNote(t, a.kind) }
-  })
-
-  on('tool.call', { tool: 'mcp__agentille__close_pane' }, async ($, e) => {
-    if (S.selfName || S.worker) return { deny: 'This is a worker pane (' + (S.selfName ?? S.worker.agent) + '); workers do not close panes.' }
-    const t = await transportOf($)
-    if (t === 'none') return { deny: 'No pane transport here.' }
-    const s = S.sessions.find((x) => x.name === (typeof e.name === 'string' ? e.name.trim() : ''))
-    if (s) {
-      const c = await closeSession($, t, s)
-      if (c === 'failed') return { deny: 'Could not close ' + s.name + '.' }
-      return { result: c === 'closed' ? 'Closed ' + s.name + '.' : s.name + ' is already closed.' }
-    }
-    await pollNow($, t)
-    const c = closeTarget(e, S.panes, t === 'herdr' && S.selfTab ? [S.selfTab, ...ownedTabs] : null, openedNames)
-    if (c.gone) return { result: c.gone + ' is already closed (the reaper closed it after its answer was saved).' }
-    if (c.error) return { deny: c.error }
-    const r = await $.process.run(t === 'herdr' ? herdrCloseArgv(c.pane.id) : tmuxKillArgv(c.pane.id), PROBE).catch(() => null)
-    if (!r || r.exitCode !== 0) return { deny: 'Could not close ' + c.pane.name + '.' }
-    harvested.add(c.pane.id)
-    await pollNow($, t)
-    return { result: 'Closed ' + c.pane.name + '.' }
-  })
+  on('tool.call', { tool: 'mcp__agentille__spawn_pane' }, spawnPane)
+  on('tool.call', { tool: 'mcp__agentille__open_sessions' }, openSessions)
+  on('tool.call', { tool: 'mcp__agentille__close_pane' }, closePane)
 
   on('command.run', { command: 'agt-clean' }, async ($, e) => {
     if (S.selfName || S.worker) return { text: 'agt clean runs in the lead session, not in a worker pane.' }
     return { text: cleanText(await cleanWorkspace($, { all: true })) }
   })
 
-  // A typed /agt starts a clean run; a task notification, plugin or peer turn is not the person's prompt.
+  // A typed /agt starts a clean run; a task notification, plugin or peer turn is not the person's prompt,
+  // and neither is one whose origin the host did not name.
   on('prompt.submit', async ($, e, next) => {
     const k = e.origin?.kind
-    if (k !== undefined && k !== 'composer' && k !== 'bridge') return next(e)
+    if (k !== 'composer' && k !== 'bridge') return next(e)
     S.lastTyped = String(e.text ?? '')
     S.agtTurn = isAgtPrompt(e.text)
     if (S.agtTurn) S.flags = []   // a new run starts with a clean slate
@@ -459,9 +311,12 @@ export function register(on) {
         $.ui.toast(r?.isCopied ? 'Copied to the clipboard: paste it as is.' : 'agentille: could not copy the answer (' + (r?.reason ?? 'error') + ')')
       }
       // A run's ✓/✗ card ends it: its own ⚑ lines carry what is left, so the band's flags come down,
-      // and what the run leaves behind is tidied (finished orphans, merged worktrees).
-      if (S.agtTurn && !S.selfName && !S.worker && /^[✓✗]/.test(e.answer.trimStart())) {
+      // what the run leaves behind is tidied (finished orphans, merged worktrees), and the typed proof
+      // lapses: the next worker pane needs the next typed /agt. A run nobody typed /agt for tidies nothing.
+      if (S.agtTurn && S.agtTyped && !S.selfName && !S.worker && /^[✓✗]/.test(e.answer.trimStart())) {
         S.flags = []
+        S.agtTyped = false
+        S.fableTyped = false
         void cleanWorkspace($, { auto: true }).catch(() => {})
       }
     }

@@ -305,7 +305,8 @@ export async function completeReport($, path) {
 }
 
 // Every Agent dispatch of an agentille role: the header is proved, the model rewritten by the table and the
-// ladder, the run's counters moved, the routing logged. A foreign subagent is only watched for the band.
+// ladder, the run's counters moved, the routing logged. A foreign subagent is only watched: for the band, its
+// transcript row (display.rows) and the spinner's count (display.spinner).
 export async function dispatchAgent($, e, next) {
   if (e.fork) return next(e)
   const role = roleOf(e.subagentType)

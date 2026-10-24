@@ -139,7 +139,7 @@ Everything lives in `~/.agentille/profile.json`. Every key is optional, and a mi
 - **Map:** two Haiku scouts map the code (what exists, what is half-built).
 - **Research:** eight Sonnet lenses research in parallel: user complaints, competitors, what people pay for, cheap wins in the code, activation loops, distribution hooks, new platform capability, quality users notice.
 - **Pick:** a judge merges and scores them (`2·user + 2·value + fit − effort − risk`), an adversary red-teams the top 8, and the auto-pick keeps 2–5 that fit one heavy run.
-- **Spec:** the spec lands in `docs/storm/<date>.md` with acceptance criteria per pick, committed.
+- **Spec:** it writes `docs/storm/<date>.md`, with acceptance criteria per pick, and commits it on a feature branch; on main, master or a detached HEAD it leaves the file uncommitted.
 - **Build:** then a fresh Claude session opens beside you and types `/agt heavy "Build the picks in docs/storm/<date>.md …"`. Without Herdr or tmux it prints that line to paste.
 - **Without agentille at all** ([storm-skill](https://github.com/hasuwini77/storm-skill), a mirror of `skills/storm/`), the build still runs: a tmux window when one is live, else built-in Sonnet subagents in worktrees, one PR per pick, never merged for you.
 
@@ -229,7 +229,7 @@ Before you type anything the mod does four small things:
 
 Everything else waits for a typed `/agt`, `/storm` or a session ask. When you do:
 
-- **Your repo:** a branch per slice (`feat/<slug>`, `fix/<slug>`, or `agt/<slug>` off a feature branch), atomic commits, one PR per slice, and with `auto` a merge commit plus a version tag. `/agt next` and `/storm --next` keep `.agentille/backlog.md` (gitignored on first use). `/storm` commits `docs/storm/<date>.md`.
+- **Your repo:** a branch per slice (`feat/<slug>`, `fix/<slug>`, or `agt/<slug>` off a feature branch), atomic commits, one PR per slice, and with `auto` a merge commit plus a version tag. `/agt next` and `/storm --next` keep `.agentille/backlog.md` (gitignored on first use). `/storm` writes `docs/storm/<date>.md` and commits it on a feature branch; on main, master or a detached HEAD it leaves the file uncommitted.
 - **On GitHub:** with `gh`, one issue per slice and one PR per slice; with `auto`, merged PRs and pushed tags.
 - **Beside your repo:** each parallel executor works in a sibling worktree `../<project>-<slug>` with your `.env*` files copied in and `node_modules` copied (never linked).
   - The worktree stays until the slice is merged or escalated, then the lead removes it (the branch stays).

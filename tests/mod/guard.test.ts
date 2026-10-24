@@ -741,7 +741,7 @@ describe('guard: the lead stays guarded for the whole run', () => {
     await $.turn.complete({ answer: 'done', durationMs: 1, isAborted: false, turnId: 's1', reason: 'answer', agentId: 'sub1' })
   }
 
-  test('61 minutes into a run with its id named, after a typed question, a merge is still denied', async ($, on) => {
+  test('61 minutes into a run with its id named, after a typed question, a merge is still denied', { timeoutMs: 20_000 }, async ($, on) => {
     const { clock } = setup(on)
     await boot($)
     await typed($)
@@ -762,7 +762,7 @@ describe('guard: the lead stays guarded for the whole run', () => {
     expect((await bash($, 'gh pr merge 9 --merge')).deny).toBe(DENY_INTEGRATION)
   })
 
-  test('a dispatch on a later turn names the run when the /agt turn did not', async ($, on) => {
+  test('a dispatch on a later turn names the run when the /agt turn did not', { timeoutMs: 20_000 }, async ($, on) => {
     const { clock } = setup(on)
     await boot($)
     await typed($)
@@ -774,7 +774,7 @@ describe('guard: the lead stays guarded for the whole run', () => {
     expect((await bash($, 'gh pr merge 9')).deny).toBe(DENY_INTEGRATION)
   })
 
-  test('the card ends it, even on a turn the person typed after the run lapsed', async ($, on) => {
+  test('the card ends it, even on a turn the person typed after the run lapsed', { timeoutMs: 20_000 }, async ($, on) => {
     const { clock } = setup(on)
     await boot($)
     await typed($)

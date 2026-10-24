@@ -155,7 +155,7 @@ describe('rows: in the transcript', () => {
     expect(await drawn('tuI2', { isRunning: true })).not.toEqual(engine)
   })
 
-  test('a workflow agent keeps the script\'s model; a table mismatch is logged and toasted, never rewritten', async ($, on) => {
+  test('a workflow agent is never rewritten: a script naming another model is refused, one naming none is logged and toasted', async ($, on) => {
     on('store.get', async () => ({ value: null }))
     const toasts: string[] = []
     on('ui.toast', async ($: any, e: any) => { toasts.push(e.text ?? String(e)); return { value: undefined } })
@@ -163,10 +163,13 @@ describe('rows: in the transcript', () => {
     on('agent.spawn', async ($, e) => { asked.push(e.model); return { model: 'claude-haiku-4-5', agentId: 'wfm' + asked.length } })
     on('ui.render', async () => ({ type: 'engine', ref: 0 }) as never)
     const wf = { tool_use_id: 'tuWfm', workflow: { runId: 'wf_2', agentIndex: 1 } }
-    await $.agent.spawn({ prompt: '[agt run=wfrun size=large mode=review]\nreview', subagentType: 'agentille:agentille-code-reviewer', model: 'haiku', ...wf } as never)
-    expect(asked).toEqual(['haiku']) // untouched: the table would have said opus
+    const r = await $.agent.spawn({ prompt: '[agt run=wfrun size=large mode=review]\nreview', subagentType: 'agentille:agentille-code-reviewer', model: 'haiku', ...wf } as never) as any
+    expect(r.deny).toContain('agt ✗ workflow code-reviewer asks haiku, routed opus · high') // the table says opus
+    expect(asked).toEqual([])
+    await $.agent.spawn({ prompt: '[agt run=wfrun size=large mode=review]\nreview', subagentType: 'agentille:agentille-code-reviewer', ...wf } as never)
+    expect(asked).toEqual([undefined]) // untouched: the engine's default runs
     expect(toasts.some((t) => /workflow code-reviewer runs haiku — table says opus · high/.test(t))).toBe(true)
-    expect((await $.command.run({ command: 'agt-info', args: 'routing' })).text).toBe('code-reviewer → claude-haiku-4-5  (workflow, table says opus · high)')
+    expect((await $.command.run({ command: 'agt-info', args: 'routing' })).text).toBe('code-reviewer → claude-haiku-4-5  (workflow, no model named: engine default haiku, table says opus · high)')
   })
 
   test('a workflow agent with no header joins the run in progress', async ($, on) => {

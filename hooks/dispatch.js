@@ -313,6 +313,11 @@ export async function completeReport($, path) {
   }
 }
 
+// The one line a workflow agent is refused with when its script names another model than the routed pick.
+export function workflowModelDeny(role, asked, d) {
+  return 'agt ✗ workflow ' + role + ' asks ' + asked + ', routed ' + d.model + ' · ' + d.effort + ': the mod cannot rewrite a workflow agent\'s model, so it is refused. Set model "' + d.model + '" on this ' + role + ' in the workflow script and run it again.'
+}
+
 // Every Agent dispatch of an agentille role: the header is proved, the model rewritten by the table and the
 // ladder, the run's counters moved, the routing logged. A foreign subagent is only watched: for the band, its
 // transcript row (display.rows) and the spinner's count (display.spinner).
@@ -334,8 +339,9 @@ export async function dispatchAgent($, e, next) {
     demoteToast($, SAFE_RUN.test(hdr.run ?? '') ? hdr.run : my.lastRun)
   }
   // A workflow script's agent: the engine ignores a model rewrite there (and logs a failure line), so it runs on the
-  // model the script chose, and the lead must name the routed model in the script. Log that model, not the table's,
-  // and flag a mismatch. A deny does hold there, so the run's stop (stopAtCeiling, stopAtWeeklyPct) is enforced.
+  // model the script chose, and the lead must name the routed model in the script. A deny does hold there, so the
+  // run's stop (stopAtCeiling, stopAtWeeklyPct) is enforced and a script naming another model than the routed pick is
+  // refused. One that names none runs the engine's default; log the model it ran, not the table's, and flag a drift.
   if (e.workflow) {
     // Its prompt may carry no header: it then joins the run in progress rather than reset it. A header
     // names its run, but the band moves to it only when the current run has nothing working, subagent or pane.
@@ -353,10 +359,14 @@ export async function dispatchAgent($, e, next) {
     const d = decide({ role, hdr, run: { ...runRec(runId), fixes: ladderFixes(runRec(runId), sliceOf(hdr)), usd: spent }, depth: Profile.depth, settings: Profile.settings, weeklyPct: Session.weeklyPct })
     // The run is stopped: the workflow agent is refused before it reaches the engine, whatever the role.
     if (d.stop) return { deny: d.stop }
+    // A model the script names (`inherit` is the lead's) must be the routed one: refused before the engine runs it.
+    const asked = e.model === 'inherit' ? e.parentModel : e.model
+    if (asked && short(asked) !== short(d.model)) return { deny: workflowModelDeny(role, e.model === 'inherit' ? 'inherit (' + short(asked) + ')' : e.model, d) }
     const res = await next(e)
     if (res.deny) return res
     const off = short(res.model) !== short(d.model)
-    const drift = off ? 'workflow, table says ' + d.model + ' · ' + d.effort : 'workflow'
+    const unnamed = asked ? '' : ', no model named: engine default ' + short(res.model)
+    const drift = 'workflow' + unnamed + (off ? ', table says ' + d.model + ' · ' + d.effort : '')
     if (res.agentId) {
       const a = heard(newAgent({ id: res.agentId, role, routed: false, model: res.model, effort: null, reason: off ? drift : null, run: runId, now: Date.now(), parentId: e.parentAgentId ?? null }), e)
       a.fileRun = fileRun

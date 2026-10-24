@@ -4,7 +4,7 @@
 // integration candidate (commandSteps/codeStep). Policy (guard-policy.js) judges those candidates.
 import { Profile } from './state.js'
 import { base, ghStep, httpStep } from './guard-steps.js'
-import { ELSEWHERE, NPM_SCRIPT_ALIASES } from './script-refs.js'
+import { ELSEWHERE, NPM_SCRIPT_ALIASES, pythonModule } from './script-refs.js'
 
 export { base }
 
@@ -718,6 +718,9 @@ function codeStep(w, here, stdin = null, piped = false, env = null) {
   // a tool or spawns), or null.
   const judgeCode = (code, label) => (PROTECT_IN_CODE.test(String(code ?? '')) ? protect('the trust root or repo git state (named in ' + p + ' ' + label + ')') : riskyCode(code) ? hidden(p + ' ' + label + ' runs code that reaches git, gh or curl') : null)
   const ik = interpKey(p)
+  // python -m pkg.mod runs a module found on python's path, not a file named on the line.
+  const mod = ik && /^(python|pypy)/.test(ik) ? pythonModule(w.slice(1)) : null
+  if (mod !== null) return { kind: 'file', how: 'module', what: p + ' -m ' + mod, module: mod, interp: w[0], pyPath: env?.get('PYTHONPATH') ?? null, dir: here, slug: null }
   // bun is a package manager as well as a runtime: `bun run x`, `bun test`, `bun <script>` are its package side.
   const bunFirst = p === 'bun' ? w.slice(1).find((x) => !x.startsWith('-')) : undefined
   const bunPkg = bunFirst !== undefined && !w.slice(1).some((x) => INTERP.bun.includes(x)) && !bunFirst.includes('/') && !/\.[cm]?[jt]sx?$/.test(bunFirst)

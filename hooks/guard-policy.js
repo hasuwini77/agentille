@@ -5,7 +5,7 @@
 import { Profile, Proofs } from './state.js'
 import { PROBE } from './panes.js'
 import { base, commands, commandSteps, joinPath, lineMovesHead, protectedPath, SCRIPT_RISK, MAKE_RISK } from './guard-lex.js'
-import { scriptChain } from './script-refs.js'
+import { PLAIN_MODULE, moduleFiles, scriptChain } from './script-refs.js'
 
 // The gh and curl/wget step readers live in a leaf the lexer shares; the policy keeps carrying their names.
 export { ghStep, httpStep } from './guard-steps.js'
@@ -252,6 +252,49 @@ async function textRisk($, text, dir, what, label, depth, seen, lang = 'sh') {
 // it runs are read). The line said so (node x.js, sh x.sh), else the shebang does; no shebang is a shell script.
 const langOf = (c, text) => c.lang && c.lang !== 'other' ? c.lang : c.lang === 'other' ? 'other' : /^#!.*\b(node|nodejs|bun|deno|tsx|ts-node)\b/.test(text) ? 'node' : /^#!.*\bpython/.test(text) ? 'python' : /^#!/.test(text) && !/^#!.*\b(ba|z|da|k)?sh\b/.test(text) ? 'other' : 'sh'
 
+// python -m pkg.mod: the module is looked for where python looks first, the command's folder, then each PYTHONPATH
+// entry; its parent packages' __init__.py and its own file are read. Not there, python is asked where the module
+// lives (by its top-level name, isolated from the folder and PYTHONPATH, so no repo code runs): a module inside
+// the folder (an editable install) is read from there, one installed elsewhere (the standard library, a
+// site-packages tool such as pytest) is a program, not read. A module found nowhere, or a PYTHONPATH entry the guard
+// cannot read before it is found, refuses (from a shell script: skipped).
+async function moduleRisk($, c, from) {
+  const miss = (why) => (lenient(from) ? null : c.what + why)
+  if (!PLAIN_MODULE.test(c.module)) return miss(' names a module the guard cannot read')
+  if (!c.dir) return miss(' runs a module the guard cannot locate (write the directory out)')
+  const pp = c.pyPath ?? (await $.env.get('PYTHONPATH').catch(() => null)) ?? ''
+  const roots = [c.dir, ...String(pp).split(':').filter(Boolean).map((x) => (/[$`~]/.test(x) ? null : x.startsWith('/') ? joinPath('/', x) : joinPath(c.dir, x)))]
+  const { parents, own } = moduleFiles(c.module)
+  const top = c.module.split('.')[0]
+  const readAt = async (root) => {
+    const got = []
+    for (const f of [...parents, ...own]) {
+      const t = await $.fs.read(root + '/' + f).catch(() => null)
+      if (t !== null) got.push({ f, t })
+    }
+    return got.some((x) => own.includes(x.f)) ? got : null
+  }
+  let got = null
+  for (const root of roots) {
+    if (root === null) return miss(' runs a module from a PYTHONPATH entry the guard cannot read')
+    got = await readAt(root)
+    if (got) break
+  }
+  if (!got) {
+    const py = /[$`]/.test(String(c.interp)) ? null : c.interp
+    const code = 'import importlib.util,sys\ns=importlib.util.find_spec(sys.argv[1])\nprint(s.origin if s and s.origin else "")'
+    const r = py ? await $.process.run([py, '-I', '-c', code, top], { ...PROBE, cwd: c.dir }).catch(() => null) : null
+    const origin = r && r.exitCode === 0 ? String(r.stdout ?? '').trim() : ''
+    if (!origin.startsWith('/')) return origin ? null : miss(' runs a module the guard cannot find')
+    if (!(origin === c.dir || origin.startsWith(c.dir.replace(/\/+$/, '') + '/'))) return null
+    const root = origin.replace(new RegExp('/' + top + '(/__init__)?\\.py$'), '')
+    got = root !== origin ? await readAt(root) : null
+    if (!got) return miss(' runs a module the guard cannot find')
+  }
+  for (const { t } of got) if (SCRIPT_RISK.test(t)) return c.what + ' runs a module' + RISK_TAIL
+  return null
+}
+
 // A file candidate → why it is refused below auto (its code calls a tool that can push, merge, tag or release,
 // or it runs something the guard cannot read), or null. `from` says where the candidate came from (see lenient):
 // the Bash line, a package script's text or a shell script's text.
@@ -296,6 +339,7 @@ async function fileRisk($, c, depth = 0, seen = new Set(), from = 'line') {
     if (text === null) return skip ? null : c.what + ' runs a recipe the guard cannot read'
     return SCRIPT_RISK.test(text) ? c.what + ' runs a recipe' + RISK_TAIL : null
   }
+  if (c.how === 'module') return moduleRisk($, c, from)
   if (!c.path) return skip ? null : c.what + ' runs a script the guard cannot locate (write its path out)'
   if (INSTALLED.test(c.path) || seen.has(c.path)) return null
   seen.add(c.path)

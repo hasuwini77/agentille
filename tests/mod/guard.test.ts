@@ -1007,12 +1007,17 @@ describe('guard: package scripts, modules and imports are followed', () => {
     await deny('npm run build', 'npm run build (its postbuild script), then npm run tag-it runs a package script')
     await deny('npm run a', 'tools/push.sh runs a script that calls git push')
     await deny('yarn run gone', 'node tools/gone.mjs runs a file the guard cannot read')
+    await deny('bun run mod', 'python3 -m tools.rel runs a module that calls git push')
     await deny('npm run d1', 'nested deeper than the guard reads')
     await deny('npm test', 'npm test runs a package script that calls git push')
     await deny('pnpm test', 'pnpm test runs a package script')
     await deny('pnpm ship', 'its preship script')
     await deny('pnpm -r run build', 'another package folder')
     await deny('npm run lint --workspaces', 'another package folder')
+    await deny('python3 -m tools.rel', 'runs a module that calls git push')
+    await deny('PYTHONPATH=src python3 -m app', 'python3 -m app runs a module that calls git push')
+    await deny('python3 -m nowhere.mod', 'runs a module the guard cannot find')
+    await deny('PYTHONPATH=$X python3 -m nowhere', 'PYTHONPATH entry the guard cannot read')
     // A package script's own steps are judged strictly: a script named through a variable refuses.
     await deny('npm run vary', 'cannot locate')
     // A shell file's steps are followed where the guard can place and read them; the rest are skipped.

@@ -294,11 +294,18 @@ try {
       ['npm run ship', 'its preship script'],
       ['npm run a', 'tools/push.sh runs a script that calls git push'],
       ['npm run gone', 'cannot read'],
+      ['npm run mod', 'runs a module that calls git push'],
+      ['python3 -m tools.rel', 'runs a module that calls git push'],
+      ['python3 -m tools.nowhere', 'cannot find'],
     ]) {
       const r = await run(line)
       check(line + ': denied', r?.deny?.includes(text), JSON.stringify(r))
     }
     check('... origin/main unchanged', refOf('origin.git', 'main') === w.main)
+    if (spawnSync('python3', ['-c', 'pass'], { env }).status === 0) {
+      const std = await run('python3 -m json.tool --help')
+      check('control: python3 -m json.tool (the standard library) runs', !std?.deny && std.exit === 0, JSON.stringify(std))
+    }
     const hello = await run('npm run hello')
     check('control: npm run hello is not refused', !hello?.deny, JSON.stringify(hello))
   }

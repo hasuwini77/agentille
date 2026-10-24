@@ -26,7 +26,7 @@ One typed command runs the work. Type `/agt "task"` in Claude Code and that one 
    Open: ~/.agentille/state/run-a1b2/report.md
    Next: gh pr merge 12 --merge
    ```
-6. **Then:** every other key in `~/.agentille/profile.json` is optional ([Settings](#settings)). `/agentille-init` adds your voice; `/agentille-project` adds a repo's entry. Each surface the mod draws (the band, the status line, the mascot, the deck, the `⚑` flags, reply highlighting) has an off switch in the profile's `display` block, and `AGENTILLE_UPDATE_CHECK=0` turns the daily version check off: [docs/settings.md](./docs/settings.md#display-switches).
+6. **Then:** every other key in `~/.agentille/profile.json` is optional ([Settings](#settings)). `/agentille-init` adds your voice; `/agentille-project` adds a repo's entry. Each surface the mod draws has an off switch in the profile's `display` block: `band` (the band and its session-start toasts), `statusLine`, `mascot`, `rows` (the transcript rows), `spinner`, `deck`, `focus` (the `⚑` flags) and `highlight` (reply highlighting). The top-level `sessions` key stops a plain prompt from opening sessions, and `AGENTILLE_UPDATE_CHECK=0` turns the daily version check off: [docs/settings.md](./docs/settings.md#display-switches).
 
 Small tasks stay cheap: a one-sentence task with no risk words (the typo, the rename) runs solo, with no agents and no card. A plain prompt never starts `/agt`: the skill runs only when you type it. Powered by [Systown AI Lab](https://systown.ai).
 

@@ -93,7 +93,8 @@ const setup = (on: any, o: { profile?: unknown; repoConfig?: unknown; env?: Reco
   on('fs.exists', async () => ({ value: false }))
   on('fs.list', async () => ({ value: [] }))
   // The other session's worktree was made a minute ago; ours an hour ago.
-  on('fs.stat', async ($: any, e: any) => ({ value: { kind: 'dir', size: 0, mtimeMs: e.path === '/work/repo-other' ? now - 60_000 : now - 3_600_000, isLink: false } }))
+  // A .env sweep in a tree touches its directory: from then on it reads as just modified.
+  on('fs.stat', async ($: any, e: any) => ({ value: { kind: 'dir', size: 0, mtimeMs: e.path === '/work/repo-other' || seen.some((a) => a.includes(e.path) && a.includes('clean')) ? Date.now() : now - 3_600_000, isLink: false } }))
   on('store.get', async () => ({ value: undefined }))
   on('store.set', async () => ({ value: undefined }))
   on('ui.toast', async () => ({ value: undefined }))

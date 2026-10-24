@@ -296,6 +296,9 @@ export async function cleanGit($, run, r, { sweepEnv = false } = {}) {
   const born = new Map(mine.map((o) => [o.path, o.head]))
   const owned = (t) => (t.path && paths.has(t.path)) || (!!t.branch && names.has(t.branch))
   const linked = trees.slice(1).filter((t) => !t.prunable && t.path !== cwd)
+  // Ages first: deleting a .env copy touches the directory, and would make every swept tree look fresh.
+  const ages = new Map()
+  for (const t of linked.filter(owned)) ages.set(t.path, (await $.fs.stat(t.path).catch(() => null))?.mtimeMs)
   if (sweepEnv) for (const t of linked.filter(owned)) await run(['git', '-C', t.path, 'clean', '-fqx', '--', '.env*'])
   const lines = (x) => (x?.exitCode === 0 ? String(x.stdout).split('\n').map((l) => l.trim()).filter(Boolean) : [])
   const base = lines(await git('symbolic-ref', '--short', 'refs/remotes/origin/HEAD'))[0]
@@ -317,8 +320,8 @@ export async function cleanGit($, run, r, { sweepEnv = false } = {}) {
     // recorded fork point counts as empty while its tip is the base's or HEAD's (a fast-forward looks the same).
     const fork = born.get(t.path)
     if (!t.head || (fork ? fork === t.head : tips.has(t.head))) empty.add(t.path)
-    const at = await $.fs.stat(t.path).catch(() => null)
-    if (typeof at?.mtimeMs !== 'number' || Date.now() - at.mtimeMs < FRESH_MS) fresh.add(t.path)
+    const at = ages.get(t.path)
+    if (typeof at !== 'number' || Date.now() - at < FRESH_MS) fresh.add(t.path)
   }
   const branches = lines(await git('branch', '--format=%(refname:short)', '--list', 'agt/*'))
   const plan = worktreePlan(trees, merged, dirty, branches, { owned, empty, fresh })

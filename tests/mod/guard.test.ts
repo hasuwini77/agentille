@@ -1,5 +1,5 @@
 import { describe, expect, mock, test } from 'claude-code/testing'
-import { DENY_INTEGRATION, DENY_LOCAL, DENY_PUSH, capsOf, integrationIn, integrationOf, joinPath, judgePush, newTrees, normSlug, normUrl, parseOwned, sameRepo, splitCommands, worktreeAdds } from '../../hooks/guard.js'
+import { DENY_INTEGRATION, DENY_LOCAL, DENY_PUSH, capsOf, integrationIn, integrationOf, joinPath, judgePush, newTrees, normSlug, normUrl, parseOwned, recordTrees, sameRepo, claimedTrees, scriptSlugs, scriptTrees, splitCommands, worktreeAdds } from '../../hooks/guard.js'
 import { parseWorktrees } from '../../hooks/clean.js'
 
 // What the repo looks like to a line read alone: the slice branch is checked out, the base is main.
@@ -219,6 +219,39 @@ describe('guard: worktree adds', () => {
     expect(newTrees(before, after, 'git worktree add ../app-x2 -b agt/x2 && echo built-ui').map((t) => t.path)).toEqual([])
   })
 
+  test('the script\'s two lines are read from a Bash result or plain text, a path only with the branch after it', async () => {
+    expect(scriptTrees({ stdout: 'Preparing worktree\npath=/w/app-ui\nbranch=feat/ui\n', stderr: '' })).toEqual([{ path: '/w/app-ui', branch: 'feat/ui' }])
+    expect(scriptTrees('path=/w/app-a\r\nbranch=agt/a\r\npath=/w/app-b\nbranch=agt/b\n').map((t: any) => t.path)).toEqual(['/w/app-a', '/w/app-b'])
+    expect(scriptTrees('path=/w/app-a\nnoise\nbranch=agt/a\n')).toEqual([])
+    expect(scriptTrees('path=rel\nbranch=agt/a\n')).toEqual([])
+    expect(scriptTrees(undefined)).toEqual([])
+    expect([...scriptSlugs('cd /w/app && bash /opt/plugin/scripts/agt-worktree.sh --base main ui --branch feat/ui')]).toEqual(['ui'])
+    expect([...scriptSlugs("bash -c 'bash /opt/plugin/scripts/agt-worktree.sh api'")]).toEqual(['api'])
+    expect([...scriptSlugs('git worktree add ../app-x -b agt/x')]).toEqual([])
+  })
+
+  test('a printed tree counts only where git lists it, on that branch, under the name the script gives it', async () => {
+    const after = parseWorktrees('worktree /w/app\nHEAD a\nbranch refs/heads/main\n\nworktree /w/app-ui\nHEAD b\nbranch refs/heads/feat/ui\n\nworktree /w/other\nHEAD c\nbranch refs/heads/agt/other\n\nworktree /w/app-old\nHEAD c\nbranch refs/heads/agt/old\nprunable gone\n')
+    const ui = new Set(['ui'])
+    expect(claimedTrees([{ path: '/w/app-ui', branch: 'feat/ui' }], after, ui).map((t: any) => t.path)).toEqual(['/w/app-ui'])
+    // the wrong branch, the main checkout, another session's tree, a path git does not list: nothing
+    expect(claimedTrees([{ path: '/w/app-ui', branch: 'agt/ui' }], after, ui)).toEqual([])
+    expect(claimedTrees([{ path: '/w/app', branch: 'main' }], after, new Set(['']))).toEqual([])
+    expect(claimedTrees([{ path: '/w/other', branch: 'agt/other' }], after, ui)).toEqual([])
+    expect(claimedTrees([{ path: '/w/app-x', branch: 'agt/x' }], after, new Set(['x']))).toEqual([])
+    expect(claimedTrees([{ path: '/w/app-old', branch: 'agt/old' }], after, new Set(['old']))).toEqual([])
+    // the slug the line passed must be the tree's
+    expect(claimedTrees([{ path: '/w/app-ui', branch: 'feat/ui' }], after, new Set(['api']))).toEqual([])
+  })
+
+  test('a re-attached tree keeps the fork point it was first recorded with', async () => {
+    const list = [{ path: '/w/app-x', branch: 'agt/x', head: 'm1', run: 'r1', at: 1, src: 'script' }]
+    recordTrees(list, [{ path: '/w/app-x', branch: 'agt/x', head: null, run: 'r2', at: 2, src: 'script' }])
+    expect(list).toEqual([{ path: '/w/app-x', branch: 'agt/x', head: 'm1', run: 'r2', at: 2, src: 'script' }])
+    recordTrees(list, [{ path: '/w/app-y', branch: 'agt/y', head: 'm2', run: 'r2', at: 3, src: 'add' }])
+    expect(list.map((r: any) => [r.path, r.head])).toEqual([['/w/app-x', 'm1'], ['/w/app-y', 'm2']])
+  })
+
   test('splitting keeps quoted operators inside their word', async () => {
     expect(splitCommands('a "b && c" | d; e')).toEqual([['a', 'b && c'], ['d'], ['e']])
   })
@@ -266,8 +299,18 @@ const setup = (on: any, o: { profile?: unknown; repoConfig?: unknown; env?: Reco
   // The engine runs the command: a worktree add makes the tree.
   on('tool.call', async ($: any, e: any) => {
     ran.push(e.command)
-    if (/worktree add.*agt\//.test(e.command ?? '')) git.made = true
-    if (/worktree add.*feat\/f/.test(e.command ?? '')) git.feat = true
+    const cmd = String(e.command ?? '')
+    if (/worktree add.*agt\//.test(cmd)) git.made = true
+    if (/worktree add.*feat\/f/.test(cmd)) git.feat = true
+    // scripts/agt-worktree.sh: `f --branch feat/f` makes /work/repo-f, `x` makes /work/repo-x; what it prints
+    // is what the Bash tool returns, plus anything else the line echoes.
+    if (/agt-worktree\.sh/.test(cmd)) {
+      const lines: string[] = []
+      if (/agt-worktree\.sh f --branch feat\/f/.test(cmd)) git.feat = true, lines.push('path=/work/repo-f', 'branch=feat/f')
+      if (/agt-worktree\.sh x\b/.test(cmd)) git.made = true, lines.push('path=/work/repo-x', 'branch=agt/x')
+      for (const m of cmd.matchAll(/echo '([^']*)'/g)) lines.push(m[1])
+      return { result: { stdout: lines.join('\n') + '\n', stderr: '' } }
+    }
     return { result: 'ok' }
   })
   on('process.run', async ($: any, e: any) => {

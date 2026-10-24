@@ -968,6 +968,17 @@ function codeStep(w, here, stdin = null, piped = false, env = null) {
       const prog = w.slice(1).find((x) => !x.startsWith('-'))
       return prog ? judgeCode(prog, 'program') : null
     }
+    // node --test runs the files it is given (files, folders, globs) or, with none, the files node's own patterns
+    // find under the folder: guardLine lists and reads each one.
+    if ((ik === 'node' || ik === 'nodejs') && w.slice(1).some((x) => x === '--test' || x.startsWith('--test='))) {
+      const takes = new Set(['--test-reporter', '--test-reporter-destination', '--test-name-pattern', '--test-skip-pattern', '--test-concurrency', '--test-shard', '--test-timeout', '--import', '--require', '-r', '--loader', '--experimental-loader', '--env-file', '--conditions', '-C'])
+      const targets = []
+      for (let i = 1; i < w.length; i++) {
+        if (takes.has(w[i])) i++
+        else if (!w[i].startsWith('-')) targets.push(w[i])
+      }
+      return { kind: 'file', how: 'tests', what: p + ' --test' + (targets.length ? ' ' + targets.join(' ') : ''), targets, dir: here, slug: null }
+    }
     // No code flag: the first positional is a script file (a pipe into it is data), else it reads code from stdin.
     const pos = w.slice(1).filter((x) => !x.startsWith('-') || x === '-')
     const f = pos.find((x) => x !== '-')
@@ -1070,6 +1081,11 @@ export function commandSteps(line, cwd = null, depth = 0, homes = [], { strict =
     // A program word built by a substitution or a variable the line does not set (`$c push`, c=$(printf gi)t): which
     // program runs cannot be read. On the Bash line it refuses (`"$EDITOR" f` too); in a script's text, only with an
     // integration word after it, where it may be git or gh. A variable the line sets was expanded already.
+    // `$(npm bin)/x` is the package's own local bin folder: read as node_modules/.bin/x.
+    if (/^\$\((npm|pnpm|yarn) bin\)\//.test(w[0] ?? '')) {
+      w = [String(w[0]).replace(/^\$\((npm|pnpm|yarn) bin\)\//, 'node_modules/.bin/'), ...w.slice(1)]
+      p = base(w[0])
+    }
     if (/[$`]/.test(w[0] ?? '')) {
       const hidden = unreadProgram(w[0], homes)
       const after = w.slice(1).find((x) => INTEGRATION_WORD.test(x))

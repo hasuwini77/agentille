@@ -1007,6 +1007,7 @@ describe('guard: scripts are read before they run', () => {
     '/work/repo/ship.py': 'import subprocess\nsubprocess.run(["git", "push", "origin", "main"])\n',
     '/work/repo/test.sh': '#!/bin/sh\nnpm test\n',
     '/work/repo/Makefile': 'test:\n\tnpm test\n\nrelease: test tag-it\n\nlint:\n\tnpm run lint\n\ntag-it:\n\tgit tag v1 && git push --tags\n\n%.o: %.c\n\tcc $<\n',
+    '/work/repo/package.json': JSON.stringify({ name: 'p', scripts: { test: 'echo t', lint: 'eslint .' } }),
   }
 
   test('a script that pushes, merges or tags is refused, and the text says why; a plain one runs', async ($, on) => {
@@ -1808,6 +1809,79 @@ describe('guard: publish, deploy and destructive repo changes are auto only', ()
     expect((await bash($, 'npm publish')).result).toBe('ok')
     expect((await bash($, 'gh secret set X --body y')).result).toBe('ok')
     expect(ran).toEqual(['npm publish', 'gh secret set X --body y'])
+  })
+})
+
+describe('guard: recipes, local bins, test files and Python imports are followed', () => {
+  const files = {
+    '/work/repo/Makefile': 'SHIP = ./bin/ship\ngo:\n\t@$(SHIP) --now\nbuild:\n\t./bin/tool\nsub:\n\t$(MAKE) -C /work/repo go\nok:\n\t-echo fine && $(CC) -o x x.c\n',
+    '/work/repo/bin/ship': '#!/bin/sh\ngit push origin HEAD:main\n',
+    '/work/repo/bin/tool': '\u0000ELF binary',
+    '/work/repo/package.json': JSON.stringify({ name: 'p', scripts: { thing: 'node_modules/.bin/thing --go', npmbin: '$(npm bin)/thing', test: 'vitest run', prepare: 'husky' } }),
+    '/work/repo/node_modules/.bin/thing': "#!/usr/bin/env node\nimport '../thing/lib/cli.js'\n",
+    '/work/repo/node_modules/thing/lib/cli.js': "require('child_process').execSync('git push origin HEAD:main')\n",
+    '/work/repo/run.py': 'import os\nimport pusher\npusher.go()\n',
+    '/work/repo/pusher.py': 'import subprocess\ndef go():\n    subprocess.run(["git", "push", "origin", "HEAD:main"])\n',
+    '/work/repo/fine.py': 'import os, json\nfrom pathlib import Path\nprint(1)\n',
+  }
+
+  test('a make recipe is followed into the scripts and bins it runs; one that is no readable script refuses', async ($, on) => {
+    const { ran } = setup(on, { files })
+    await boot($)
+    await typed($)
+    expect((await bash($, 'make go')).deny).toContain('./bin/ship runs a script that calls git push')
+    expect((await bash($, 'make sub')).deny).toContain('./bin/ship runs a script that calls git push')
+    expect((await bash($, 'make build')).deny).toContain('the guard cannot read')
+    expect((await bash($, 'make ok')).result).toBe('ok')
+    expect(ran).toEqual(['make ok'])
+  })
+
+  test('a local bin a package script names is read where it lands, with its own package\'s imports', async ($, on) => {
+    const { ran } = setup(on, { files })
+    await boot($)
+    await typed($)
+    expect((await bash($, 'npm run thing')).deny).toContain('imports ../thing/lib/cli.js, which calls git push')
+    expect((await bash($, 'npm run npmbin')).deny).toContain('imports ../thing/lib/cli.js')
+    // A bare program word is an installed program: not read (vitest, husky).
+    expect((await bash($, 'npm test')).result).toBe('ok')
+    expect((await bash($, 'npm ci')).result).toBe('ok')
+    expect(ran).toEqual(['npm test', 'npm ci'])
+  })
+
+  test('python3 <file> reads the modules beside it that the file imports, one level deep', async ($, on) => {
+    const { ran } = setup(on, { files })
+    await boot($)
+    await typed($)
+    expect((await bash($, 'python3 run.py')).deny).toContain('run.py imports pusher, which calls git push')
+    expect((await bash($, 'python3 fine.py')).result).toBe('ok')
+    expect(ran).toEqual(['python3 fine.py'])
+  })
+
+  test('node --test reads the files it runs: given, or found by node\'s own patterns', async () => {
+    seed(Profile, { home: '/h' })
+    const tree: Record<string, string> = {
+      '/w/app/package.json': JSON.stringify({ scripts: { test: 'node --test', some: 'node --test "test/*.test.mjs"', one: 'node --test test/ok.test.mjs' } }),
+      '/w/app/test/pusher.test.mjs': "import { ship } from './helpers/ship.mjs'\nship()\n",
+      '/w/app/test/helpers/ship.mjs': "export const ship = () => require('child_process').execSync('git push origin HEAD:main')\n",
+      '/w/app/test/ok.test.mjs': "import assert from 'node:assert'\nassert.ok(1)\n",
+      '/w/app/src/index.js': 'export const x = 1\n',
+    }
+    const dirs = new Set<string>()
+    for (const f of Object.keys(tree)) for (let d = f.slice(0, f.lastIndexOf('/')); d; d = d.slice(0, d.lastIndexOf('/'))) dirs.add(d)
+    const host: any = {
+      fs: {
+        read: async (p: string) => { if (p in tree) return tree[p]; throw new Error('ENOENT') },
+        stat: async (p: string) => { if (p in tree) return { kind: 'file' }; if (dirs.has(p)) return { kind: 'dir' }; throw new Error('ENOENT') },
+        list: async (d: string) => { if (!dirs.has(d)) throw new Error('ENOENT'); const out = new Map<string, string>(); for (const f of Object.keys(tree)) if (f.startsWith(d + '/')) { const n = f.slice(d.length + 1).split('/'); out.set(n[0], n.length > 1 ? 'dir' : 'file') } return [...out].map(([name, kind]) => ({ name, kind })) },
+      },
+      process: { run: async () => ({ exitCode: 1, stdout: '', stderr: '' }) },
+      env: { get: async () => null },
+    }
+    expect(await judge(host, 'npm test', '/w/app')).toContain('imports ./helpers/ship.mjs, which calls git push')
+    expect(await judge(host, 'npm run some', '/w/app')).toContain('pusher.test.mjs')
+    expect(await judge(host, 'node --test', '/w/app')).toContain('imports ./helpers/ship.mjs')
+    expect(await judge(host, 'npm run one', '/w/app')).toBe(null)
+    expect(await judge(host, 'node --test test/ok.test.mjs', '/w/app')).toBe(null)
   })
 })
 

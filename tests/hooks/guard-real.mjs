@@ -609,6 +609,39 @@ try {
     check('... none of them ran, origin/main unchanged', ran.length === 0 && refOf('origin.git', 'main') === w.main, JSON.stringify(ran))
   }
   {
+    // What a recipe, a package script or a test run reaches is followed: a make recipe's script, a local bin and its
+    // package's own code, the files `node --test` finds, the modules a Python file imports beside it.
+    const w = world()
+    fs.mkdirSync(APP + '/bin', { recursive: true })
+    fs.writeFileSync(APP + '/bin/ship', '#!/bin/sh\ngit push -q origin HEAD:main\n', { mode: 0o755 })
+    fs.writeFileSync(APP + '/Makefile', 'SHIP = ./bin/ship\ngo:\n\t@$(SHIP)\nok:\n\t@echo fine\n')
+    fs.mkdirSync(APP + '/node_modules/release-it/lib', { recursive: true })
+    fs.mkdirSync(APP + '/node_modules/.bin', { recursive: true })
+    fs.writeFileSync(APP + '/node_modules/release-it/cli.js', "#!/usr/bin/env node\nimport './lib/run.js'\n", { mode: 0o755 })
+    fs.writeFileSync(APP + '/node_modules/release-it/lib/run.js', "import { execSync } from 'node:child_process'\nexecSync('git push -q origin HEAD:main')\n")
+    fs.symlinkSync('../release-it/cli.js', APP + '/node_modules/.bin/release-it')
+    fs.symlinkSync('../release-it/cli.js', APP + '/node_modules/.bin/shipper')
+    fs.mkdirSync(APP + '/test', { recursive: true })
+    fs.mkdirSync(APP + '/lib', { recursive: true })
+    fs.writeFileSync(APP + '/test/pusher.test.mjs', "import { ship } from '../lib/ship.mjs'\nship()\n")
+    fs.writeFileSync(APP + '/lib/ship.mjs', "import { execSync } from 'node:child_process'\nexport const ship = () => execSync('git push -q origin HEAD:main')\n")
+    fs.writeFileSync(APP + '/run.py', 'import pusher\npusher.go()\n')
+    fs.writeFileSync(APP + '/pusher.py', 'import subprocess\ndef go():\n    subprocess.run(["git", "push", "-q", "origin", "HEAD:main"])\n')
+    fs.writeFileSync(APP + '/package.json', JSON.stringify({ name: 'p', scripts: { release: 'release-it', bin: 'node_modules/.bin/shipper', test: 'node --test' } }))
+    for (const [line, text] of [['make -s go', './bin/ship runs a script that calls git push'], ['npm run -s release', 'release-it'], ['npm run -s bin', 'imports ./lib/run.js, which calls git push'], ['npm test', 'pusher.test.mjs) imports ../lib/ship.mjs, which calls git push'], ['python3 run.py', 'imports pusher, which calls git push']]) {
+      const r = await run(line)
+      check(line + ': denied', r?.deny?.includes(text), JSON.stringify(r))
+    }
+    check('... origin/main unchanged', refOf('origin.git', 'main') === w.main)
+    const ok = await run('make -s ok')
+    check('control: a recipe that only echoes runs', !ok?.deny && ok.exit === 0, JSON.stringify(ok))
+    fs.rmSync(APP + '/test', { recursive: true, force: true })
+    fs.mkdirSync(APP + '/test', { recursive: true })
+    fs.writeFileSync(APP + '/test/ok.test.mjs', "import test from 'node:test'\ntest('ok', () => {})\n")
+    const t = await run('npm test')
+    check('control: npm test, node --test with a clean test file, runs', !t?.deny && t.exit === 0, JSON.stringify(t))
+  }
+  {
     // Controls below auto: the run's own branch and ordinary writes still pass.
     world()
     const ok = await run('git push -q -u origin agt/x')

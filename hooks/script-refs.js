@@ -86,3 +86,22 @@ export function pyImports(text) {
   }
   return out
 }
+
+// The files a Python import may load from the importing file's folder, relative to it, in the order Python tries
+// them: for `import a.b` / `from a import b`, a/b.py and a/b/__init__.py (and a/__init__.py, a.py for the parent),
+// with `../` for each dot past the first of a relative import. Absolute names found nowhere there are the standard
+// library or installed: the caller skips them.
+export function pyCandidates(imp) {
+  const up = imp.level > 1 ? '../'.repeat(imp.level - 1) : ''
+  const mods = imp.mod ? [imp.mod, ...imp.names.map((n) => imp.mod + '.' + n)] : imp.names
+  const out = []
+  for (const m of mods) {
+    const { parents, own } = moduleFiles(m)
+    for (const f of [...parents, ...own.slice(0, 2)]) if (!out.includes(up + f)) out.push(up + f)
+  }
+  return out
+}
+
+// The test files `node --test` runs when it is given no file: node's default patterns, matched against a path
+// relative to the folder it searches (node_modules is never searched).
+export const NODE_TEST_FILE = /(^|\/)(test\/.*\.[cm]?[jt]s|[^/]*[.\-_]test\.[cm]?[jt]s|test-[^/]*\.[cm]?[jt]s|test\.[cm]?[jt]s)$/

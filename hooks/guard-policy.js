@@ -6,7 +6,7 @@ import { Profile } from './profile.js'
 import { Proofs } from './proofs.js'
 import { PROBE } from './panes.js'
 import { base, commands, commandSteps, joinPath, lineMovesHead, protectedPath, SCRIPT_RISK, MAKE_RISK } from './guard-lex.js'
-import { PLAIN_MODULE, jsCandidates, jsImports, moduleFiles, scriptChain } from './script-refs.js'
+import { NODE_TEST_FILE, PLAIN_MODULE, jsCandidates, jsImports, moduleFiles, pyCandidates, pyImports, scriptChain } from './script-refs.js'
 import { Worktrees, ownedBranches } from './guard-own.js'
 
 // The gh and curl/wget step readers live in a leaf the lexer shares; the policy keeps carrying their names.
@@ -244,7 +244,7 @@ async function textRisk($, text, dir, what, label, depth, seen, lang = 'sh') {
   }
   if (SCRIPT_RISK.test(text) || SCRIPT_RISK.test(expanded)) return what + ' runs a ' + label + RISK_TAIL
   if (lang !== 'sh') return null
-  const from = label === 'package script' ? 'pkg' : 'shell'
+  const from = label === 'package script' || label === 'make recipe' ? 'pkg' : 'shell'
   let steps
   try {
     steps = commandSteps(text, dir, 1, await homes($))
@@ -291,7 +291,7 @@ const langOf = (c, text) => c.lang && c.lang !== 'other' ? c.lang : c.lang === '
 
 // A node file's relative imports, one level deep: each must be found and read (unless the file was reached from a
 // shell script, `from` 'shell'), and none may call a tool that can push, merge, tag or release.
-async function importRisk($, c, text, from) {
+async function importRisk($, c, text, from, installed = false) {
   const dir = c.path.slice(0, c.path.lastIndexOf('/')) || '/'
   for (const spec of jsImports(text)) {
     let found = null
@@ -307,7 +307,7 @@ async function importRisk($, c, text, from) {
       if (lenient(from)) continue
       return c.what + ' imports ' + spec + ', which the guard cannot read'
     }
-    if (INSTALLED.test(found.p)) continue
+    if (INSTALLED.test(found.p) && !installed) continue
     if (SCRIPT_RISK.test(found.t)) return c.what + ' imports ' + spec + RISK_TAIL.replace(' that', ', which')
   }
   return null
@@ -368,7 +368,16 @@ async function fileRisk($, c, depth = 0, seen = new Set(), from = 'line') {
     for (const f of c.paths) {
       const text = await $.fs.read(f).catch(() => null)
       if (text === null) continue
-      return MAKE_RISK.test(makeRecipe(text, c.targets)) ? c.what + ' runs a recipe that mentions push, merge, tag or release' : null
+      const recipe = makeRecipe(text, c.targets)
+      if (MAKE_RISK.test(recipe)) return c.what + ' runs a recipe that mentions push, merge, tag or release'
+      // Each recipe line is a shell line of its own: followed into the scripts, package scripts and bins it runs,
+      // as a package script's steps are, with the makefile's own variables expanded.
+      for (const line of recipeLines(recipe, makeVars(text, c.dir))) {
+        if (depth + 1 > READ_DEPTH) return skip ? null : c.what + ' runs scripts nested deeper than the guard reads'
+        const why = await textRisk($, line, c.dir, c.what, 'make recipe', depth + 1, seen)
+        if (why) return skip ? null : why
+      }
+      return null
     }
     return strict ? c.what + ' runs a makefile the guard cannot read' : null
   }
@@ -411,17 +420,122 @@ async function fileRisk($, c, depth = 0, seen = new Set(), from = 'line') {
     return SCRIPT_RISK.test(text) ? c.what + ' runs a recipe' + RISK_TAIL : null
   }
   if (c.how === 'module') return moduleRisk($, c, from)
+  if (c.how === 'tests') return testsRisk($, c, depth, seen, from)
   if (!c.path) return skip ? null : c.what + ' runs a script the guard cannot locate (write its path out)'
-  if (INSTALLED.test(c.path) || seen.has(c.path)) return null
+  // A local bin (node_modules/.bin/x, as a package script or `$(npm bin)/x` names it) is read where its link lands,
+  // with its own package's imports; one that is no readable script refuses where a package script runs it.
+  const bin = LOCAL_BIN.test(c.path)
+  if ((INSTALLED.test(c.path) && !bin) || seen.has(c.path)) return null
   seen.add(c.path)
-  const text = await $.fs.read(c.path).catch(() => null)
-  if (text === null || text.includes('\u0000')) return strict ? c.what + ' runs a file the guard cannot read' : null
+  const at = bin ? (await $.fs.stat(c.path, { resolve: true }).catch(() => null))?.realPath ?? c.path : c.path
+  const text = await $.fs.read(at).catch(() => null)
+  if (text === null || text.includes('\u0000')) return strict ? c.what + (bin ? ' runs a local bin' : ' runs a file') + ' the guard cannot read' : null
   // Read the script as the shell would: variables it sets itself are expanded, so a command assembled from
   // pieces (`G=git; $G ${P}sh`) is seen too.
   const lang = langOf(c, text)
   const why = await textRisk($, text, c.dir, c.what, 'script', depth, seen, lang)
-  if (why || lang !== 'node') return why
-  return importRisk($, c, text, from)
+  if (why) return why
+  if (lang === 'node') return importRisk($, { ...c, path: at }, text, from, bin)
+  if (lang === 'python') return pyImportRisk($, { ...c, path: at }, text)
+  return null
+}
+
+// A package's local bin folder: what a package script's bare program word, or `$(npm bin)/x`, resolves to.
+const LOCAL_BIN = /(^|\/)node_modules\/\.bin\/[^/]+$/
+
+// A Python file's imports, one level deep, from the file's own folder (where python puts a script's folder on its
+// path): each that names a file there is read, and one that calls a tool that can push, merge, tag or release
+// refuses. A name found nowhere there is the standard library or an installed package: not read.
+async function pyImportRisk($, c, text) {
+  const dir = c.path.slice(0, c.path.lastIndexOf('/')) || '/'
+  for (const imp of pyImports(text)) {
+    for (const rel of pyCandidates(imp)) {
+      const t = await $.fs.read(joinPath(dir, rel)).catch(() => null)
+      if (t !== null && SCRIPT_RISK.test(t)) return c.what + ' imports ' + (imp.mod || imp.names.join(', ')) + RISK_TAIL.replace(' that', ', which')
+    }
+  }
+  return null
+}
+
+// How many files `node --test` may name before the guard stops listing them (and refuses, from a package script).
+const TESTS_MAX = 200
+
+// The files under `dir` (node_modules, .git and other dot folders left out), as paths relative to it; null past
+// TESTS_MAX files or when a folder cannot be listed.
+async function filesUnder($, dir) {
+  const out = []
+  const walk = async (rel, depth) => {
+    if (depth > 12) return false
+    const entries = await $.fs.list(rel ? dir + '/' + rel : dir).catch(() => null)
+    if (!Array.isArray(entries)) return false
+    for (const e of entries) {
+      if (e.name === 'node_modules' || e.name.startsWith('.')) continue
+      const r = rel ? rel + '/' + e.name : e.name
+      if (e.kind === 'dir') {
+        if (!(await walk(r, depth + 1))) return false
+      } else if (out.push(r) > TESTS_MAX * 20) return false
+    }
+    return true
+  }
+  return (await walk('', 0)) ? out : null
+}
+
+// A shell glob (`*`, `**`, `?`) as a regex over a relative path.
+const globRe = (g) => new RegExp('^' + String(g).replace(/^\.\//, '').replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*\*\/?/g, '\u0000').replace(/\*/g, '[^/]*').replace(/\?/g, '[^/]').replace(/\u0000/g, '(?:.*/)?') + '$')
+
+// node --test: the files it runs, each read with its relative imports one level deep as `node <file>` is. A file or
+// a folder (searched with node's patterns) or a glob it is given; with none, node's patterns under the folder.
+async function testsRisk($, c, depth, seen, from) {
+  const skip = lenient(from)
+  if (!c.dir) return skip ? null : c.what + ' runs tests the guard cannot locate (write the folder out)'
+  const files = []
+  const add = (abs) => { if (!files.includes(abs)) files.push(abs) }
+  let all = null
+  const under = async () => (all ??= await filesUnder($, c.dir))
+  for (const t of c.targets.length ? c.targets : [null]) {
+    if (t !== null && /[$`]/.test(t)) return skip ? null : c.what + ' names tests the guard cannot read'
+    const abs = t === null ? c.dir : t.startsWith('/') ? joinPath('/', t) : joinPath(c.dir, t)
+    const st = t !== null && !/[*?]/.test(t) ? await $.fs.stat(abs).catch(() => null) : null
+    if (st && st.kind !== 'dir') add(abs)
+    else if (st?.kind === 'dir' || t === null) {
+      const list = t === null ? await under() : await filesUnder($, abs)
+      if (!list) return skip ? null : c.what + ' runs more test files than the guard reads'
+      for (const r of list) if (NODE_TEST_FILE.test(r) || (t !== null && /\.[cm]?[jt]s$/.test(r) && NODE_TEST_FILE.test('test/' + r))) add(joinPath(abs, r))
+    } else if (/[*?]/.test(t)) {
+      const list = await under()
+      if (!list) return skip ? null : c.what + ' runs more test files than the guard reads'
+      const re = globRe(t)
+      for (const r of list) if (re.test(r)) add(joinPath(c.dir, r))
+    }
+    if (files.length > TESTS_MAX) return skip ? null : c.what + ' runs more test files than the guard reads'
+  }
+  for (const f of files) {
+    const why = await fileRisk($, { kind: 'file', how: 'script', what: c.what + ' (' + f.slice(c.dir.length + 1) + ')', path: f, dir: c.dir, lang: 'node', rest: [] }, depth, seen, from)
+    if (why) return why
+  }
+  return null
+}
+
+// A makefile's own variables (`X = v`, `X := v`, `X ?= v`, `override`/`export X = v`) over make's defaults, each
+// value expanded once against the others.
+const MAKE_DEFAULTS = { MAKE: 'make', CC: 'cc', CXX: 'c++', CPP: 'cc -E', LD: 'ld', AR: 'ar', AS: 'as', RM: 'rm -f', SHELL: '/bin/sh', MAKEFLAGS: '', MFLAGS: '' }
+function makeVars(text, dir) {
+  const vars = new Map(Object.entries({ ...MAKE_DEFAULTS, CURDIR: dir ?? '' }))
+  for (const line of String(text ?? '').split('\n')) {
+    const m = /^(?:override\s+|export\s+)?([A-Za-z_][\w.-]*)\s*(?:\?=|::?=|\+=|=)\s*(.*)$/.exec(line)
+    if (m && !line.startsWith('\t')) vars.set(m[1], m[2].replace(/\s+#.*$/, '').trim())
+  }
+  for (const [k, v] of vars) vars.set(k, makeExpand(v, vars, 0))
+  return vars
+}
+function makeExpand(s, vars, depth) {
+  return String(s).replace(/\$\$/g, '\u0001').replace(/\$[({]([A-Za-z_][\w.-]*)[)}]/g, (m, n) => (vars.has(n) && depth < 4 ? makeExpand(vars.get(n), vars, depth + 1) : '$' + n)).replace(/\$([@<^*?])/g, 'x').replace(/\u0001/g, '$')
+}
+
+// A recipe as the shell lines make runs: continuations joined, the leading tab and the @, - and + prefixes dropped,
+// make's variables expanded (an unknown one left as a shell variable) and $$ read as $.
+function recipeLines(recipe, vars) {
+  return String(recipe ?? '').replace(/\\\n\t?/g, ' ').split('\n').map((l) => makeExpand(l.replace(/^\t/, '').replace(/^[@+\-\s]+/, ''), vars, 0)).filter((l) => l.trim())
 }
 
 

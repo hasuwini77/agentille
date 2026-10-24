@@ -42,8 +42,12 @@ export const S = {
   flags: [],  // [{ text, key, at }] from agent results this run
   agtTurn: false,  // this turn is part of an /agt run
   worktrees: [],  // { path, branch, head, run, at } of the worktrees this session's runs made (guard.js), saved to lead-<pane>.worktrees
+  // The typed proofs: written only through proofs.js, read here and through ctx.
   agtTyped: false,  // the person typed /agt and its run is not over (routing.js runInFlight): only then may the lead open worker panes
   fableTyped: false,  // ... and typed --fable on it: only then does a header's fable=forced hold
+  agtTypedAt: null,  // $.clock.now() of the newest typed /agt (null: unknown): its run is in flight AGT_INFLIGHT_MAX_MS at most
+  agtBirth: false,  // this turn is the typed /agt's own: any run id may open a pane, and the first one is the run's
+  agtRun: null,  // the run id the typed /agt's turn named first (a pane or a routed dispatch): later turns open panes only for it
   agtTypedSince: 0,  // typed prompts other than /agt since the newest typed /agt (the run's grace, AGT_GRACE_TYPED)
   sessionsAsked: false,  // this turn's prompt was typed and asked for sessions of the person's own (open_sessions)
   lastTyped: '',  // the newest typed prompt: a shell session runs only a command it asks for
@@ -81,6 +85,9 @@ export const S = {
   listBusy: false,
 }
 
+// This session is the lead: no worker env and no agt- name of its own. The one lead/worker predicate.
+export const isLead = () => !S.worker && !S.selfName
+
 // What the modules wired last in register(on) read: live state through getters, since most of
 // it is reassigned.
 export const ctx = {
@@ -89,6 +96,6 @@ export const ctx = {
   get tick() { return S.tick },
   get panes() { return S.panes },
   get routes() { return S.paneRoutes },
-  get isLead() { return !S.worker && !S.selfName },
+  get isLead() { return isLead() },
   onTick: [], // (io, ctx, now) callbacks the redraw ticker calls each period; a module adds its own while registering
 }

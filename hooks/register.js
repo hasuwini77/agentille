@@ -1,7 +1,7 @@
 // agentille mod entry: wires the hooks. The state is in state.js; routing, panes, sessions, the reaper, the
 // timers, the worker's wire, display settings, drawing and run files each have a module beside this one.
 
-import { S, ctx } from './state.js'
+import { S, ctx, isLead } from './state.js'
 import { registerAutocomplete } from './autocomplete.js'
 import { toolLabel, runPhases } from './board.js'
 import { cleanText } from './clean.js'
@@ -27,6 +27,8 @@ import { refreshAgents, working, ensurePolling, ensureTicker } from './ticker.js
 import { statusKey, freshStatus, validLead, parseWire, shortName, logWire, parseTellArgs } from './wire.js'
 import { publish } from './worker.js'
 import { onPromptSubmit, onTurnComplete } from './turns.js'
+import { dispatchedRun } from './proofs.js'
+import { parseHeader, roleOf } from './routing.js'
 import * as P from './panerec.js'
 const { runs, live, paneRoutes, openedNames, mascot, litMemo, hlMemo, rawIds, wireLog, pub } = S
 
@@ -78,7 +80,7 @@ export function register(on) {
       await pollNow($, S.transport)
       if (S.panes.length) ensurePolling($)
       // A lead that died skipped its SessionEnd sweep: close its finished workers now.
-      if (S.panes.length && !S.selfName && !S.worker) void cleanWorkspace($, { auto: true, panesOnly: true }).catch(() => {})
+      if (S.panes.length && isLead()) void cleanWorkspace($, { auto: true, panesOnly: true }).catch(() => {})
     }
     if (working()) ensureTicker($)
     if (S.wireName) await publish($, true)
@@ -149,7 +151,7 @@ export function register(on) {
   on('tool.call', { tool: 'Bash' }, bashCall)  // guard.js: integration guard + worktree ownership
 
   on('command.run', { command: 'agt-clean' }, async ($, e) => {
-    if (S.selfName || S.worker) return { text: 'agt clean runs in the lead session, not in a worker pane.' }
+    if (!isLead()) return { text: 'agt clean runs in the lead session, not in a worker pane.' }
     return { text: cleanText(await cleanWorkspace($, { all: true })) }
   })
 
@@ -163,7 +165,7 @@ export function register(on) {
     if (t !== 'none') ensurePolling($)
     const draws = canDraw(await $.session.surfaces().catch(() => []))
     if (draws) await tipOnce($)
-    return next({ ...e, text: e.text + S.squadBlock + transportBlock(t, S.paneTools && !S.selfName) + drawingBlock(draws) })
+    return next({ ...e, text: e.text + S.squadBlock + transportBlock(t, S.paneTools && isLead()) + drawingBlock(draws) })
   })
 
   // Worker results arrive as peer messages: log them for the band and the deck, then let the
@@ -226,6 +228,7 @@ export function register(on) {
   // Routing happens in dispatch.js; the redraw ticker is nudged here so dispatch.js needs no timer.
   on('agent.spawn', async ($, e, next) => {
     const res = await dispatchAgent($, e, next)
+    if (!res?.deny && roleOf(e.subagentType)) dispatchedRun(parseHeader(e.prompt)?.run)
     ensureTicker($)
     return res
   })

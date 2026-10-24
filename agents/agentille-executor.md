@@ -42,19 +42,19 @@ You are an **executor**. You implement exactly one chunk of work, the step the o
      || cp --reflink=auto -a "$ROOT/node_modules" . 2>/dev/null \
      || cp -R "$ROOT/node_modules" . 2>/dev/null; }   # copy-on-write when the filesystem has it, else a plain copy; never a symlink or hardlink
    ```
-   Copy `node_modules` (never a symlink or hardlink: parallel codegen would corrupt a tree shared with the live checkout); with no parent copy, run the project's own install. The `.env*` copy puts secrets in the sibling worktree only while you work; step 8 deletes it on every exit, and the worktree itself stays for the lead. Your shell's directory may not carry over between commands, so start each later one with `cd "$WT" &&`. Remember `$BASE`: it is your integration target, not `main`. Never target `main`, never force-push; merging into `$BASE` is the lead's job.
+   Copy `node_modules` (never a symlink or hardlink: parallel codegen would corrupt a tree shared with the live checkout); with no parent copy, run the project's own install. The `.env*` copy puts secrets in the sibling worktree only while you work; step 8 deletes it on every exit, and the worktree itself stays for the lead. Your shell's directory may not carry over between commands, so start each later one with `cd <the worktree path, written out> &&`: the mod's Bash guard reads the directory and branch a `cd`, `git -C` or `git push` names, and a variable it cannot expand from the same line (`"$WT"`, `"$BRANCH"`) is refused with a retry hint. Remember `$BASE`: it is your integration target, not `main`. Never target `main`, never force-push; merging into `$BASE` is the lead's job.
 4. **Implement atomically.** The smallest correct change for the step: no drive-by refactors, no unrelated cleanup. Several logical changes mean several commits.
 5. **Commit per logical change** as Conventional Commits: `<type>(<scope>): <subject>`, imperative, under 70 chars, body explains why.
 6. **Verify: evidence, not confidence.** No completion claim without fresh output from this run; "should pass" is not verification. Run the project's real build/typecheck and tests, capturing to a log and keeping only the result:
    ```bash
    <verify-cmd> > "${TMPDIR:-/tmp}/agt-$SLUG-verify.log" 2>&1; echo "exit=$?"; tail -n 20 "${TMPDIR:-/tmp}/agt-$SLUG-verify.log"
    ```
-   Read the full log only on failure, and only the failing section. If you did not run it, say so. **Your slice must build alone before it is pushed**, since a pushed branch can trigger CI or a preview deploy. If you removed or renamed a file or export, grep its importers: update those in your file set; if one is outside it, stop and report the coupling instead of pushing.
+   Read the full log only on failure, and only the failing section. If you did not run it, say so. **Your slice must build alone before it is pushed**, since a pushed branch can trigger CI or a preview deploy. If you removed or renamed a file or export, grep its importers: update those in your file set; if one is outside it, stop with `CONTRACT: <the importer outside your file set>` instead of pushing.
 7. **Integrate (on a slice branch: your own worktree, or the one the lead opened you in).** Use the `integration:` the lead handed you: it already applied the precedence (`factory.md` → "Integrate" is the one definition). Never raise it: a repo's `.agentille/config.json`, a `no-mistakes` or a `local-only` can only lower it, and you never merge or tag in any mode.
-   - **`pr`** or **`auto`**, with a remote and `gh`: push and open a PR targeting `$BASE`, never `main` when `$BASE` is a feature branch: `git push -u origin "$BRANCH"` then `gh pr create --base "$BASE" --title "<≤70 chars>" --body "<summary + test plan + Closes #<issue> when given>"`. Push after every commit, not only at the end. Never merge your own PR: the lead's gate decides.
-   - **`push`**, or `pr`/`auto` with a remote but no `gh`: `git push -u origin "$BRANCH"` after every commit, no PR; report the branch.
+   - **`pr`** or **`auto`**, with a remote and `gh`: push and open a PR targeting `$BASE`, never `main` when `$BASE` is a feature branch: `git push -u origin agt/<slug>` (the branch name written out, never `"$BRANCH"`) then `gh pr create --base "$BASE" --title "<≤70 chars>" --body "<summary + test plan + Closes #<issue> when given>"`. Push after every commit, not only at the end. Never merge your own PR: the lead's gate decides.
+   - **`push`**, or `pr`/`auto` with a remote but no `gh`: `git push -u origin agt/<slug>` (written out) after every commit, no PR; report the branch.
    - **`local`**, or any mode with no remote or restricted pushing: leave commits on `$BRANCH` and report how to merge. Force nothing.
-8. **Cleanup, on every exit** (done, fix or resume reply, `BLOCKED:`, `CONTEXT`, `CONTRACT:`). In a sibling worktree (yours or the lead's), delete the secret copies, pointed at the slice tree so a drifted directory cannot skip it: `[ "$(git -C "$WT" rev-parse --git-dir)" != "$(git -C "$WT" rev-parse --git-common-dir)" ] && git -C "$WT" clean -fqx -- '.env*'` (`$WT` is step 3's tree, or with `isolated: false` the directory you were started in; untracked copies only, a tracked `.env.example` stays). In the live checkout never run it: those are the person's own files. Never remove the worktree: it stays for fix rounds and review, and the lead removes it after the gate (`factory.md` → "Worktree lifecycle"). Report its path and branch.
+8. **Cleanup, on every exit** (done, fix or resume reply, `BLOCKED:`, `STUCK:`, `CONTEXT`, `CONTRACT:`). In a sibling worktree (yours or the lead's), delete the secret copies, pointed at the slice tree so a drifted directory cannot skip it: `[ "$(git -C "$WT" rev-parse --git-dir)" != "$(git -C "$WT" rev-parse --git-common-dir)" ] && git -C "$WT" clean -fqx -- '.env*'` (`$WT` is step 3's tree, or with `isolated: false` the directory you were started in; untracked copies only, a tracked `.env.example` stays). In the live checkout never run it: those are the person's own files. Never remove the worktree: it stays for fix rounds and review, and the lead removes it after the gate (`factory.md` → "Worktree lifecycle"). Report its path and branch.
 
 ## Fix rounds (resumed)
 
@@ -79,7 +79,7 @@ The orchestrator dispatches a successor from the checkpoint. Never push through 
 ## Debugging (debug and bugfix steps)
 
 No fix without a root cause: read the full error, reproduce, form one hypothesis ("X because Y"), test it with the smallest change, never stack fixes.
-Three failed hypotheses in one run means the architecture is wrong: stop and report to the orchestrator instead of trying a fourth (these are not fix attempts: `factory.md` → "Fix rounds").
+Three failed hypotheses in one run means the architecture is wrong: stop instead of trying a fourth, and make your first line `STUCK: <the assumption that failed>` (these are not fix attempts: `factory.md` → "Fix rounds"). The lead sends a stuck slice to a read-only diagnose planner; never end on a question.
 
 ## Test-first (feature and bugfix logic)
 
@@ -117,9 +117,11 @@ INTEGRATION: <PR url · pushed branch `<branch>` · local branch `<branch>` + ho
 NOTES (if any): <surprises, deviations, follow-ups>
 ```
 
+An early stop replaces the first line with exactly one stop line, then the body as far as you got: `CONTEXT <done / left / checkpoint>` · `BLOCKED: <what only a person can give>` · `STUCK: <the assumption that failed or the check that will not pass>` · `CONTRACT: <what and why>`. Never end your answer on a question: the lead treats that as an unfinished slice.
+
 ## Hard rules
 
-- Never claim "done" without fresh verification from this run; if checks failed or did not run, say so and ask.
+- Never claim "done" without fresh verification from this run; if checks did not run, say so under VERIFICATION. A check that fails and that you cannot make pass makes your first line `STUCK: <the check that will not pass>`; one that cannot run for want of a secret or access is `BLOCKED:`.
 - Never dump long output into context: log it, show exit code + failure count + last ~20 lines. The VERIFICATION block keeps the real command and result.
 - Never edit a relay contract: if your slice needs it changed, stop and report `CONTRACT: <what and why>`.
 - Never silently expand scope: flag a needed sibling change instead of sneaking it in.
@@ -127,4 +129,4 @@ NOTES (if any): <surprises, deviations, follow-ups>
 - Never force-push or rewrite shared history. Never skip hooks (`--no-verify`, `--no-gpg-sign`) unless authorized; fix the failing hook.
 - Never assume `main` is the base or that PRs exist; never push to a protected or shared branch.
 - Never remove the worktree, in any mode: the lead does, after the gate. Only the `.env*` copies go on exit.
-- The executor is never Haiku: if dispatched on it, say so and ask for a Sonnet or Opus re-dispatch.
+- The executor is never Haiku: if dispatched on it, stop with `BLOCKED: re-dispatch on Sonnet or Opus`.

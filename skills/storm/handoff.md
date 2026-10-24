@@ -69,7 +69,7 @@ Same picks, built with what every Claude Code has. The storm session is the lead
 Executor dispatch (one `general-purpose` Sonnet per pick, at most 3 at once, one message, background):
 
 ```
-Build pick <n> from docs/storm/<date>.md in this worktree only: <root>/.worktrees/storm-<date>-<slug> on branch storm/<date>-<slug> (create both with git worktree add -b). Scope and Acceptance under the pick are the contract: build every acceptance line, nothing outside Scope. Copy .env* from the root, and on every exit, done or failed, delete those copies first with git clean -fqx -- '.env*' in the worktree. Run the repo's test and build commands; fix until green. Commit in small logical steps. Reply with: VERIFICATION: <commands run and results>, then FILES: <paths>, then OPEN: <anything you could not do>.
+Build pick <n> from <root>/docs/storm/<date>.md (read it there: it may be uncommitted) in this worktree only: <root>/.worktrees/storm-<date>-<slug> on branch storm/<date>-<slug> (create both with git worktree add -b). Scope and Acceptance under the pick are the contract: build every acceptance line, nothing outside Scope. Copy .env* from the root, and on every exit, done or failed, delete those copies first with git clean -fqx -- '.env*' in the worktree. Run the repo's test and build commands; fix until green. Commit in small logical steps. Reply with: VERIFICATION: <commands run and results>, then FILES: <paths>, then OPEN: <anything you could not do>.
 ```
 
 The `.env*` clean is the agentille executor's own rule (its step 8, Cleanup, on every exit): secrets live in a sibling worktree only while an agent works in it. The prompt carries the command itself, since a plain-build executor cannot read agentille's files.
@@ -81,7 +81,7 @@ Integrate: `git push -u origin storm/<date>-<slug>` and `gh pr create --title "<
 Plain build prompt (what the tmux window's `claude` receives, one line, no newlines):
 
 ```
-Build the <k> picks in docs/storm/<date>.md, one at a time in this order: 1) <title> 2) <title>. For each: a worktree at .worktrees/storm-<date>-<slug> on branch storm/<date>-<slug>, build every Acceptance line under the pick and nothing outside its Scope, run the repo's tests and build until green, commit in small steps, push and open a PR titled "<title>" with the doc path in the body, then remove the worktree. Never merge. End with one line per pick: PR URL or what blocked it.
+Build the <k> picks in docs/storm/<date>.md (read it in the project root: it may be uncommitted), one at a time in this order: 1) <title> 2) <title>. For each: a worktree at .worktrees/storm-<date>-<slug> on branch storm/<date>-<slug>, build every Acceptance line under the pick and nothing outside its Scope, run the repo's tests and build until green, commit in small steps, push and open a PR titled "<title>" with the doc path in the body, then remove the worktree. Never merge. End with one line per pick: PR URL or what blocked it.
 ```
 
 ## Final card (≤8 lines, the only end-of-run output)
@@ -90,7 +90,7 @@ Build the <k> picks in docs/storm/<date>.md, one at a time in this order: 1) <ti
 storm <id> · <project> · <agents> agents · <n> candidates → <k> picks
  1. <title> — <score> · <effort>
  2. …
-doc: docs/storm/<date>.md (committed <sha>)
+doc: docs/storm/<date>.md (committed <sha> on <branch> | uncommitted, on main)
 build: session opened → /agt heavy running beside you  |  paste the line below  |  queued <k> in .agentille/backlog.md → /agt next  |  tmux window → plain build running  |  plain build here → <k> PRs open, none merged  |  skipped (--no-build)
 ⚑ <one line per real problem: a lens that returned nothing, a risk-2 runner-up that needs the user>
 ```

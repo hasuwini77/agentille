@@ -19,11 +19,11 @@ Run inside a repo to register it and seed its `./CLAUDE.md`. Never auto-trigger.
    5. **claudeUse** — how Claude is used here
    6. **constraints** — rules Claude must respect
    7. **integration** — where finished work lands: `pr` (open a PR), `push` (push my feature branch, no merge), `local` (no remote)
-4. **Register.** Read-merge-write `~/.agentille/profile.json`: append to `projects[]`, or replace the entry with the same `id`. Touch nothing else in the file.
+4. **Register.** Read-merge-write `~/.agentille/profile.json`: append to `projects[]`, or replace the entry with the same `url` or `path` (else the same `id`). Touch nothing else in the file. `url` is the `origin` remote (`git remote get-url origin`, omit the key when there is none) and `path` the repo root: the mod's Bash guard looks a run's integration mode up by the repo a command targets, matched on `url` or `path`; an entry with only an `id` counts for a repo with no remote and can only lower the mode.
 
    ```json
-   { "id": "<slug>", "name": "", "description": "", "techStack": [], "goals": "",
-     "claudeUse": "", "constraints": "", "integration": "pr | push | local" }
+   { "id": "<slug>", "url": "<origin remote URL>", "path": "<repo root>", "name": "", "description": "",
+     "techStack": [], "goals": "", "claudeUse": "", "constraints": "", "integration": "pr | push | local" }
    ```
 
    Slug: lowercase, non-alphanumeric to `-`, trimmed; empty → `project-<random>`.

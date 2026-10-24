@@ -2,7 +2,7 @@
 // lead (split or run tab), the startup dialogs it clears, the run tabs a lead records, and the pane tools'
 // registration on the typed prompt that unlocks them.
 
-import { S } from './state.js'
+import { S, isLead } from './state.js'
 import { PROBE, HERDR_START_TIMEOUT, pickTransport, splitName, paneKey, answerFile, advisorEnv, tmuxSplitArgv, tmuxEvenArgv, tmuxTagArgvs, tmuxPaneIdOf, tmuxKillArgv, herdrSplitArgv, herdrPaneIdOf, herdrTabArgv, herdrTabOf, herdrTabListArgv, herdrTabIds, tabsFile, panesFile, startupDialog, dialogKeys, herdrReadArgv, herdrKeysArgv, agentStatusOf, herdrGetArgv, screenLine, codexTask, herdrStartArgv, herdrPromptArgv, herdrCloseArgv, herdrMetaArgv, SPAWN_TOOL, CLOSE_TOOL, OPEN_SESSIONS_TOOL } from './panes.js'
 import { wireEnv, shortName } from './wire.js'
 const { ownedTabs, openedNames } = S
@@ -77,13 +77,16 @@ export async function sameRepo($, a, b) {
 }
 
 // Whether the mod may accept the folder-trust prompt for `cwd` on the person's behalf. Sharing the lead's git
-// common dir is not enough: a worktree of a contributor's branch can carry its own .claude/settings.json hooks.
-// Trusted: the lead's own checkout (or a folder in it), or a worktree of the same repo on an agt/*, feat/* or fix/*
-// branch that this lead made. The lead's lead-<pane>.worktrees list (guard.js: JSON records with path and branch;
-// a plain one-per-line list is read too) says which it made; with no list, the worktree must carry no .claude/settings.json or settings.local.json that
-// differs from the lead checkout's.
-const OWN_BRANCH = /^(?:agt|feat|fix)\/[A-Za-z0-9._/-]+$/
-const SETTINGS = ['.claude/settings.json', '.claude/settings.local.json']
+// common dir is not enough: a worktree of a contributor's branch can carry its own hooks, MCP servers, agents and
+// commands. Trusted: the lead's own checkout (or a folder in it), or a worktree of the same repo on an agt/* branch
+// that this lead's runs made, named on its lead-<pane>.worktrees list (guard.js: JSON records with path and branch;
+// a plain one-per-line list is read too), whose project config matches the lead checkout's: .mcp.json and the two
+// .claude settings files absent or byte for byte the same, .claude/agents and .claude/commands absent or the same
+// files with the same contents. With no list nothing but the lead's own checkout is accepted.
+const OWN_BRANCH = /^agt\/[A-Za-z0-9._/-]+$/
+const CONFIG_FILES = ['.mcp.json', '.claude/settings.json', '.claude/settings.local.json']
+const CONFIG_DIRS = ['.claude/agents', '.claude/commands']
+const TREE_MAX = 500
 // Does a lead-<pane>.worktrees file name this worktree: a JSON array of { path, branch } records (guard.js), or
 // one path or branch per line.
 export function ownedWorktree(listed, top, branch) {
@@ -92,6 +95,57 @@ export function ownedWorktree(listed, top, branch) {
     if (Array.isArray(recs)) return recs.some((r) => r && (r.path === top || (branch && r.branch === branch)))
   } catch {}
   return String(listed).split('\n').some((l) => l.trim().split(/\s+/).some((f) => f === top || (branch && f === branch)))
+}
+
+// A file's text, ABSENT when there is none, UNREADABLE when it is there but cannot be read. Existence is asked of
+// stat, the call that answers for files and folders alike.
+const ABSENT = Symbol('absent')
+const UNREADABLE = Symbol('unreadable')
+async function missing($, path) {
+  return $.fs.stat(path).then(() => false, () => true)
+}
+async function configFile($, path) {
+  const text = await $.fs.read(path).catch(() => null)
+  if (typeof text === 'string') return text
+  return (await missing($, path)) ? ABSENT : UNREADABLE
+}
+
+// Every file under `dir` as relative path → text (empty for no dir), or null when any part cannot be read or the
+// tree is too big to compare.
+async function configTree($, dir) {
+  const out = new Map()
+  const walk = async (rel) => {
+    const entries = await $.fs.list(rel ? dir + '/' + rel : dir).catch(() => null)
+    if (!Array.isArray(entries)) return false
+    for (const e of entries) {
+      const path = rel ? rel + '/' + e.name : e.name
+      if (e.kind === 'dir') {
+        if (!(await walk(path))) return false
+        continue
+      }
+      const text = await $.fs.read(dir + '/' + path).catch(() => null)
+      if (typeof text !== 'string' || out.size >= TREE_MAX) return false
+      out.set(path, text)
+    }
+    return true
+  }
+  if (await walk('')) return out
+  return (await missing($, dir)) && out.size === 0 ? out : null
+}
+
+// The worktree brings no project config of its own: what it has is the lead checkout's, byte for byte.
+export async function sameConfig($, top, leadTop) {
+  for (const f of CONFIG_FILES) {
+    const mine = await configFile($, top + '/' + f)
+    if (mine === ABSENT) continue
+    if (mine === UNREADABLE || mine !== (await configFile($, leadTop + '/' + f))) return false
+  }
+  for (const d of CONFIG_DIRS) {
+    const [mine, lead] = await Promise.all([configTree($, top + '/' + d), configTree($, leadTop + '/' + d)])
+    if (!mine || !lead || mine.size !== lead.size) return false
+    for (const [k, v] of mine) if (lead.get(k) !== v) return false
+  }
+  return true
 }
 
 export async function trustable($, cwd, leadCwd) {
@@ -108,13 +162,8 @@ export async function trustable($, cwd, leadCwd) {
   if (!OWN_BRANCH.test(branch)) return false
   const file = String(panesFile(S.home, await leadPane($)) ?? '').replace(/\.panes$/, '.worktrees')
   const listed = file ? await $.fs.read(file).catch(() => null) : null
-  if (typeof listed === 'string') return ownedWorktree(listed, top, branch)
-  for (const f of SETTINGS) {
-    const mine = await $.fs.read(top + '/' + f).catch(() => null)
-    if (typeof mine !== 'string') continue
-    if (mine !== (await $.fs.read(leadTop + '/' + f).catch(() => null))) return false
-  }
-  return true
+  if (typeof listed !== 'string' || !ownedWorktree(listed, top, branch)) return false
+  return sameConfig($, top, leadTop)
 }
 
 // A fresh worker stopped on a startup screen (agent_not_ready): classify it, press the keys that clear it, up to
@@ -228,7 +277,7 @@ export async function openPane($, t, o) {
 // and a host without a pane transport gets none. A tool registered while a prompt is submitted is in that
 // turn's list.
 export async function ensureTools($, which) {
-  if (S.selfName || S.worker || S.hostOld) return
+  if (!isLead() || S.hostOld) return
   if ((which === 'panes' ? S.paneTools : S.sessionTools) || (await transportOf($)) === 'none') return
   try {
     await $.tool.register(which === 'panes' ? SPAWN_TOOL : OPEN_SESSIONS_TOOL)

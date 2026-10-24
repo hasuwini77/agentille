@@ -1,37 +1,159 @@
 import { describe, expect, mock, test } from 'claude-code/testing'
-import { DENY_INTEGRATION, integrationIn, integrationOf, joinPath, newTrees, parseOwned, splitCommands, worktreeAdds } from '../../hooks/guard.js'
+import { DENY_INTEGRATION, DENY_LOCAL, DENY_PUSH, capsOf, integrationIn, integrationOf, joinPath, judgePush, newTrees, normSlug, normUrl, parseOwned, sameRepo, splitCommands, worktreeAdds } from '../../hooks/guard.js'
 import { parseWorktrees } from '../../hooks/clean.js'
 
+// What the repo looks like to a line read alone: the slice branch is checked out, the base is main.
+const onSlice = { current: 'agt/x', cwd: '/w/app' }
+
 describe('guard: which commands integrate', () => {
-  test('merge, tag and tag pushes are caught, wherever they sit in the line', async () => {
+  test('merge, tag, release and API merges are caught, wherever they sit and whatever wraps them', async () => {
     for (const line of [
       'gh pr merge 12 --merge --delete-branch',
       'npm test && gh pr merge 12',
       'git tag v1.2.0',
+      'git tag rc1',
+      'git tag -d v1.0.0',
       'git -C ../app tag -a v1.2.0 -m release',
-      'git push --tags',
-      'git push origin --follow-tags',
-      'git push origin v3.21.0',
-      'git push origin refs/tags/v3.21.0',
       'cd ../app; git tag v1.0.0 && git push origin v1.0.0',
       "bash -c 'gh pr merge 4'",
+      'eval gh pr merge 4',
+      'bash <<EOF\ngh pr merge 4\nEOF',
       'GH_TOKEN=x gh pr merge 4',
+      '/usr/bin/env gh pr merge 4',
+      'env GH_TOKEN=x gh pr merge 4',
+      'timeout 60 gh pr merge 4',
+      'timeout -s KILL 60 gh pr merge 4',
+      'echo 4 | xargs gh pr merge',
+      'xargs -n1 gh pr merge < prs.txt',
+      'command gh pr merge 4',
+      'nice gh pr merge 4',
+      'nice -n 5 gh pr merge 4',
+      'sudo -u bob gh pr merge 4',
+      'time gh pr merge 4',
+      '/opt/homebrew/bin/gh pr merge 4',
+      'echo "$(gh pr merge 4)"',
+      'x=`gh pr merge 4`',
       'gh release create v1.0.0',
-    ]) expect([line, integrationIn(line)]).toEqual([line, expect.any(String)])
+      'gh release upload v1.0.0 app.zip',
+      'gh api -X PUT repos/o/r/pulls/12/merge',
+      'gh api repos/o/r/pulls/12/merge -XPUT',
+      'gh api --method=PUT repos/o/r/pulls/12/merge',
+      'gh api repos/o/r/pulls/12/merge -f merge_method=merge',
+      'gh api repos/{owner}/{repo}/merges -f base=main -f head=agt/x',
+      'gh api -X POST repos/o/r/releases -f tag_name=v1',
+      'gh api -X PATCH repos/o/r/git/refs/heads/main -f sha=abc',
+      'gh api graphql -f query="mutation { mergePullRequest(input: {}) { clientMutationId } }"',
+      'curl -X PUT -H "Authorization: token t" https://api.github.com/repos/o/r/pulls/12/merge',
+      'curl -sS -d \'{"tag_name":"v1"}\' https://api.github.com/repos/o/r/releases',
+      'wget --method=PUT https://api.github.com/repos/o/r/pulls/12/merge',
+      'wget --post-data=x https://api.github.com/repos/o/r/releases',
+    ]) expect([line, integrationIn(line, onSlice)]).toEqual([line, expect.any(String)])
   })
 
-  test('branch pushes, PRs, tag listing and quoted text are left alone', async () => {
+  test('pushes of the base branch, tags, every branch, a force or a variable are caught', async () => {
+    for (const line of [
+      'git push origin HEAD:main',
+      'git push origin feat/x:main',
+      'git push origin agt/x:refs/heads/main',
+      'git push origin main',
+      'git push origin master',
+      'git push -f origin agt/x',
+      'git push --force origin agt/x',
+      'git push --force-with-lease origin agt/x',
+      'git push -uf origin agt/x',
+      'git push origin +agt/x',
+      'git merge --no-ff agt/x && git push origin main',
+      'git push origin agt/x 2>&1 && git push origin main',
+      'git push --tags',
+      'git push origin --follow-tags',
+      'git push --all origin',
+      'git push --mirror',
+      'git push origin v3.21.0',
+      'git push origin rc1',
+      'git push origin refs/tags/rc1',
+      'git push origin :main',
+      'git push origin --delete main',
+      'git push origin "$BRANCH"',
+      'B=main; git push origin "$B"',
+      "bash -c 'git push origin main'",
+      'if true; then git push origin main; fi',
+      '(cd ../app && git push origin main)',
+      'git -C ../app push origin HEAD:main',
+      'git push origin release/1.0',
+    ]) expect([line, integrationIn(line, onSlice)]).toEqual([line, expect.any(String)])
+  })
+
+  test('a bare push or HEAD is the branch checked out: refused on the base, or when it cannot be read', async () => {
+    expect(integrationIn('git push', { current: 'main' })).toBe('git push to main')
+    expect(integrationIn('git push origin HEAD', { current: 'main' })).toBe('git push to main')
+    expect(integrationIn('git push -u origin HEAD', { current: 'develop', base: 'develop' })).toBe('git push to develop')
+    expect(integrationIn('git push origin HEAD', {})).toContain('cannot be read')
+    expect(integrationIn('git push', { current: 'agt/x', pushDst: 'main' })).toBe('git push to main')
+    expect(integrationIn('git push', { current: 'agt/x' })).toBeNull()
+    expect(integrationIn('git push origin HEAD', { current: 'storm/2026-10-24-x' })).toBeNull()
+  })
+
+  test('the slice\'s own pushes, PRs, tag listing, API reads and quoted text are left alone', async () => {
     for (const line of [
       'git push -u origin agt/filter',
       'git push origin feat/v1-ui',
+      'git push origin fix/login',
+      'git push -u origin HEAD',
+      'git push',
+      'git push -u origin "$(git branch --show-current)"',
+      'SLUG=filter; git push -u origin "agt/$SLUG"',
+      'git push origin --delete agt/x',
+      'git push -n origin main',
+      'git push -u origin agt/x 2>&1 | tail -3',
+      'git push origin agt/x > /dev/null 2>&1',
       'gh pr create --base main --title x --body "then gh pr merge it"',
+      'gh pr view 12 --json state -q .state',
+      'gh api repos/o/r/pulls/12',
+      'gh api repos/o/r/pulls/12/merge',
+      'gh api repos/o/r/releases/latest',
+      'curl -s https://api.github.com/repos/o/r/releases',
       'git commit -m "do not git push --tags here"',
       'git tag',
       'git tag -l "v*"',
       'git tag --list --sort=-v:refname',
+      'git tag --contains HEAD',
       'git log --oneline v1.2.0..HEAD',
       'echo gh pr merge',
-    ]) expect([line, integrationIn(line)]).toEqual([line, null])
+      'command -v gh',
+      'cat <<EOF > notes.md\ngit push origin main\ngh pr merge 3\nEOF',
+    ]) expect([line, integrationIn(line, onSlice)]).toEqual([line, null])
+  })
+
+  test('a PR or commit body in a heredoc is text, even with a ) and commands in it', async () => {
+    const pr = `gh pr create --title t --body "$(cat <<'EOF'\nCloses #12 (see the note)\n\ngit push origin main\ngh pr merge 3\n)\nEOF\n)" && git push -u origin agt/x`
+    const commit = `git commit -m "$(cat <<'EOF'\nfix: a thing (scope)\n\nthen git push --tags and gh pr merge 3\nEOF\n)"`
+    expect(integrationIn(pr, onSlice)).toBeNull()
+    expect(integrationIn(commit, onSlice)).toBeNull()
+    expect(integrationIn(pr + ' && git push origin main', onSlice)).toBe('git push to main')
+  })
+
+  test('auto lets every step through; local refuses pushes and PRs too', async () => {
+    expect(integrationIn('gh pr merge 3 && git tag v1.0.0 && git push origin main v1.0.0', { mode: 'auto' })).toBeNull()
+    expect(integrationIn('git push -u origin agt/x', { ...onSlice, mode: 'local' })).toBe('git push')
+    expect(integrationIn('gh pr create --title x', { mode: 'local' })).toBe('gh pr create')
+    expect(integrationIn('gh pr create --title x', { mode: 'push' })).toBeNull()
+  })
+
+  test('judgePush on its own: a dry run passes, refs outside heads do not', async () => {
+    const p = { remote: 'origin', specs: ['HEAD:refs/for/main'], force: false, del: false, bulk: null, dry: false, mergeOpt: false }
+    expect(judgePush(p, { current: 'agt/x' })).toContain('refs/for/main')
+    expect(judgePush({ ...p, dry: true }, { current: 'agt/x' })).toBeNull()
+  })
+})
+
+describe('guard: the repo a profile entry names', () => {
+  test('remotes compare without scheme, user, port or .git', async () => {
+    expect(normUrl('git@github.com:Me/App.git')).toBe('github.com/me/app')
+    expect(normUrl('https://github.com/me/app.git/')).toBe('github.com/me/app')
+    expect(normUrl('ssh://git@github.com:22/me/app')).toBe('github.com/me/app')
+    expect(normSlug('me/app')).toBe('github.com/me/app')
+    expect(sameRepo('github.com/me/app', 'me/app')).toBe(true)
+    expect(sameRepo('github.com/me/app', 'github.com/other/app')).toBe(false)
   })
 
   test('the profile decides; a repo config lowers it and never raises it', async () => {
@@ -39,10 +161,36 @@ describe('guard: which commands integrate', () => {
     expect(integrationOf({ integration: 'auto' }, ['app'])).toBe('auto')
     expect(integrationOf({ integration: 'auto', projects: [{ id: 'app', integration: 'pr' }] }, ['app'])).toBe('pr')
     expect(integrationOf({ projects: [{ name: 'My App', integration: 'auto' }] }, ['my-app'])).toBe('pr')
-    expect(integrationOf({ projects: [{ id: 'my-app', integration: 'auto' }] }, ['My App'])).toBe('auto')
+    expect(integrationOf({ projects: [{ id: 'my-app', integration: 'auto' }] }, ['My App'])).toBe('pr')
     expect(integrationOf({ integration: 'auto' }, ['app'], ['push'])).toBe('push')
     expect(integrationOf({ integration: 'pr' }, ['app'], ['auto'])).toBe('pr')
     expect(integrationOf({ integration: 'yes' }, ['app'])).toBe('pr')
+  })
+
+  test('projects[] match by remote or path; a bare name only for a repo with no remote', async () => {
+    const repo = { url: 'git@github.com:me/app.git', paths: ['/w/app', '/w/app-x'], name: 'app' }
+    expect(integrationOf({ projects: [{ url: 'https://github.com/me/app', integration: 'auto' }] }, repo)).toBe('auto')
+    expect(integrationOf({ projects: [{ url: 'https://github.com/someone/app', integration: 'auto' }] }, repo)).toBe('pr')
+    expect(integrationOf({ projects: [{ path: '/w/app/', integration: 'auto' }] }, repo)).toBe('auto')
+    expect(integrationOf({ projects: [{ path: '~/app', integration: 'auto' }] }, { ...repo, paths: ['/h/app'], home: '/h' })).toBe('auto')
+    // Same folder name, someone else's clone: the name alone does not carry auto over.
+    expect(integrationOf({ projects: [{ id: 'app', integration: 'auto' }] }, repo)).toBe('pr')
+    expect(integrationOf({ projects: [{ id: 'app', integration: 'auto' }] }, { ...repo, url: null })).toBe('auto')
+    expect(integrationOf({ projects: [{ id: 'app', url: 'github.com/me/other', integration: 'auto' }] }, { ...repo, url: null })).toBe('pr')
+    // ...yet a name-only entry still lowers: auto at the top, pr for this repo by name, stays pr.
+    expect(integrationOf({ integration: 'auto', projects: [{ id: 'app', integration: 'pr' }] }, repo)).toBe('pr')
+    expect(integrationOf({ integration: 'auto', projects: [{ name: 'app', integration: 'local' }] }, repo)).toBe('local')
+    expect(integrationOf({ integration: 'auto', projects: [{ id: 'other', integration: 'pr' }] }, repo)).toBe('auto')
+    expect(integrationOf({ integration: 'auto', projects: [{ id: 'app', integration: 'pr' }, { url: 'github.com/me/app', integration: 'auto' }] }, repo)).toBe('auto')
+  })
+
+  test('CLAUDE.md and AGENTS.md caps: local-only, no-mistakes, as words', async () => {
+    expect(capsOf('Repo rules: `local-only`, no remote.')).toEqual(['local'])
+    expect(capsOf('no-mistakes mode')).toEqual(['pr'])
+    expect(capsOf('a non-local-only-ish note')).toEqual([])
+    expect(integrationOf({ integration: 'auto' }, ['app'], capsOf('no-mistakes'))).toBe('pr')
+    expect(integrationOf({ integration: 'push' }, ['app'], capsOf('no-mistakes'))).toBe('push')
+    expect(integrationOf({ integration: 'auto' }, ['app'], capsOf('local-only'))).toBe('local')
   })
 })
 
@@ -62,6 +210,15 @@ describe('guard: worktree adds', () => {
     expect(newTrees(before, after, line).map((t) => t.path)).toEqual(['/w/app-filter'])
   })
 
+  test('a name inside another word claims nothing: the person\'s feat/ui tree is not the run\'s', async () => {
+    const before = parseWorktrees('worktree /w/app\nHEAD a\nbranch refs/heads/main\n')
+    const after = parseWorktrees('worktree /w/app\nHEAD a\nbranch refs/heads/main\n\nworktree /w/app-x\nHEAD a\nbranch refs/heads/agt/x\n\nworktree /w/ui\nHEAD a\nbranch refs/heads/feat/ui\n')
+    expect(newTrees(before, after, 'npm run build && git worktree add ../app-x -b agt/x main').map((t) => t.path)).toEqual(['/w/app-x'])
+    expect(newTrees(before, after, 'git worktree add ../ui -b feat/ui').map((t) => t.path)).toEqual(['/w/ui'])
+    expect(newTrees(before, after, 'git worktree add /w/ui feat/ui').map((t) => t.path)).toEqual(['/w/ui'])
+    expect(newTrees(before, after, 'git worktree add ../app-x2 -b agt/x2 && echo built-ui').map((t) => t.path)).toEqual([])
+  })
+
   test('splitting keeps quoted operators inside their word', async () => {
     expect(splitCommands('a "b && c" | d; e')).toEqual([['a', 'b && c'], ['d'], ['e']])
   })
@@ -75,12 +232,15 @@ describe('guard: worktree adds', () => {
 })
 
 // A run in a session with no pane transport: the ownership list lives in memory.
-const setup = (on: any, o: { profile?: unknown; repoConfig?: unknown; env?: Record<string, string> } = {}) => {
+// git: per dir, the branch checked out (`current`), its remote URL and its main checkout (default /work/repo).
+type Repo = { current?: string; remote?: string; common?: string }
+const setup = (on: any, o: { profile?: unknown; repoConfig?: unknown; env?: Record<string, string>; files?: Record<string, string>; repos?: Record<string, Repo>; feat?: boolean } = {}) => {
   const seen: string[][] = []
   const ran: string[] = []
-  const git = { made: false, committed: false }
+  const git = { made: false, committed: false, feat: false }
   const now = Date.now()
-  const files: Record<string, string> = {}
+  const files: Record<string, string> = { ...(o.files ?? {}) }
+  const repos: Record<string, Repo> = { '/work/repo': { current: 'main' }, '/work/repo-x': { current: 'agt/x' }, ...(o.repos ?? {}) }
   if (o.profile) files['/h/.agentille/profile.json'] = JSON.stringify(o.profile)
   if (o.repoConfig) files['/work/repo/.agentille/config.json'] = JSON.stringify(o.repoConfig)
   on('env.get', async ($: any, e: any) => ({ value: ({ HOME: '/h', ...(o.env ?? {}) } as any)[e.name] }))
@@ -104,7 +264,12 @@ const setup = (on: any, o: { profile?: unknown; repoConfig?: unknown; env?: Reco
   on('turn.complete', async ($: any, e: any) => ({ text: e.answer }))
   on('agent.spawn', async ($: any, e: any) => ({ model: e.model ?? 'sonnet', agentId: 'sub1' }))
   // The engine runs the command: a worktree add makes the tree.
-  on('tool.call', async ($: any, e: any) => { ran.push(e.command); if (/worktree add/.test(e.command ?? '')) git.made = true; return { result: 'ok' } })
+  on('tool.call', async ($: any, e: any) => {
+    ran.push(e.command)
+    if (/worktree add.*agt\//.test(e.command ?? '')) git.made = true
+    if (/worktree add.*feat\/f/.test(e.command ?? '')) git.feat = true
+    return { result: 'ok' }
+  })
   on('process.run', async ($: any, e: any) => {
     seen.push(e.argv)
     const a = e.argv.join(' ')
@@ -114,8 +279,14 @@ const setup = (on: any, o: { profile?: unknown; repoConfig?: unknown; env?: Reco
         'worktree /work/repo', 'HEAD ' + (git.committed ? 'm2' : 'm1'), 'branch refs/heads/main', '',
         'worktree /work/repo-other', 'HEAD m1', 'branch refs/heads/agt/other', '',
         ...(git.made ? ['worktree /work/repo-x', 'HEAD ' + (git.committed ? 'x1' : 'm1'), 'branch refs/heads/agt/x', ''] : []),
+        ...(git.feat ? ['worktree /work/repo-f', 'HEAD ' + (git.committed ? 'f1' : 'm1'), 'branch refs/heads/feat/f', ''] : []),
       ].join('\n'))
     }
+    const dir = e.argv[1] === '-C' ? e.argv[2] : ''
+    if (a.endsWith('symbolic-ref --short -q HEAD')) return repos[dir]?.current ? out(repos[dir].current + '\n') : out('', 1)
+    if (a.includes('config --get-regexp')) return out(repos[dir]?.remote ? 'remote.origin.url ' + repos[dir].remote + '\n' : '', repos[dir]?.remote ? 0 : 1)
+    if (a.includes('@{push}')) return out('', 128)
+    if (a.includes('rev-parse --path-format=absolute --git-common-dir') && repos[dir]?.common) return out(repos[dir].common + '\n')
     if (a.includes('symbolic-ref')) return out('', 1)
     if (a.includes('branch --merged')) return out('agt/other\n' + (git.made ? 'agt/x\n' : ''))
     if (a === 'git -C /work/repo rev-parse HEAD') return out(git.committed ? 'm2\n' : 'm1\n')
@@ -154,14 +325,98 @@ describe('guard: integration in the mod', () => {
     expect(ran).toEqual(['gh pr create --base main --title x --body y'])
   })
 
-  test('an agentille subagent stays guarded after the person moves on; the lead does not', async ($, on) => {
+  test('a question typed mid-run keeps the lead and its subagent guarded', async ($, on) => {
     setup(on)
     await boot($)
     await typed($)
     await $.agent.spawn({ prompt: '[agt run=gd1 size=small mode=build]\nbuild', subagentType: 'agentille:agentille-executor', model: 'sonnet' })
+    await typed($, 'how is it going?')
+    expect((await bash($, 'gh pr merge 3')).deny).toBe(DENY_INTEGRATION)
+  })
+
+  test('once the run\'s card is out, the lead is a plain session again', async ($, on) => {
+    setup(on)
+    await boot($)
+    await typed($)
+    expect((await bash($, 'gh pr merge 3')).deny).toBe(DENY_INTEGRATION)
+    await card($)
     await typed($, 'something else')
-    expect((await bash($, 'gh pr merge 3', 'sub1')).deny).toBe(DENY_INTEGRATION)
     expect((await bash($, 'gh pr merge 3')).result).toBe('ok')
+  })
+
+  test('pushes: the slice branch goes, the base branch, a force and a variable ref do not, with a retry hint', async ($, on) => {
+    const { ran } = setup(on)
+    await boot($)
+    await typed($)
+    expect((await bash($, 'cd /work/repo-x && git push -u origin HEAD')).result).toBe('ok')
+    expect((await bash($, 'git -C /work/repo-x push')).result).toBe('ok')
+    expect((await bash($, 'git push -u origin agt/x')).result).toBe('ok')
+    const main = await bash($, 'git merge --no-ff agt/x && git push origin main')
+    expect(main.deny).toContain(DENY_PUSH)
+    expect(main.deny).toContain('git push to main')
+    expect((await bash($, 'git push')).deny).toContain('git push to main')
+    expect((await bash($, 'git push --force-with-lease origin agt/x')).deny).toContain('--force')
+    expect((await bash($, 'cd "$WT" && git push -u origin "$BRANCH"')).deny).toContain('(a variable)')
+    expect((await bash($, 'cd "$WT" && git push -u origin HEAD')).deny).toContain('cannot be read')
+    expect(ran).toEqual(['cd /work/repo-x && git push -u origin HEAD', 'git -C /work/repo-x push', 'git push -u origin agt/x'])
+  })
+
+  test('the repo the command targets decides, not the session\'s', async ($, on) => {
+    setup(on, {
+      profile: { projects: [{ url: 'https://github.com/me/repo', integration: 'auto' }] },
+      repos: { '/work/repo': { current: 'main', remote: 'git@github.com:me/repo.git' }, '/work/lib': { current: 'main', remote: 'git@github.com:me/lib.git', common: '/work/lib/.git' } },
+    })
+    await boot($)
+    await typed($)
+    expect((await bash($, 'gh pr merge 3 --merge')).result).toBe('ok')
+    expect((await bash($, 'cd /work/lib && gh pr merge 3')).deny).toBe(DENY_INTEGRATION)
+    expect((await bash($, 'git -C /work/lib tag v1.0.0')).deny).toBe(DENY_INTEGRATION)
+    expect((await bash($, 'gh pr merge 3 -R me/lib')).deny).toBe(DENY_INTEGRATION)
+    expect((await bash($, 'gh api -X PUT repos/me/lib/pulls/3/merge')).deny).toBe(DENY_INTEGRATION)
+    expect((await bash($, 'gh api -X PUT repos/me/repo/pulls/3/merge')).result).toBe('ok')
+    expect((await bash($, 'git -C /work/lib push origin main')).deny).toContain('git push to main')
+  })
+
+  test('the session\'s repo is auto, the other is: a command into it may merge', async ($, on) => {
+    setup(on, {
+      profile: { projects: [{ path: '/work/lib', integration: 'auto' }] },
+      repos: { '/work/lib': { current: 'main', common: '/work/lib/.git' } },
+    })
+    await boot($)
+    await typed($)
+    expect((await bash($, 'gh pr merge 3')).deny).toBe(DENY_INTEGRATION)
+    expect((await bash($, 'cd /work/lib && gh pr merge 3 && git push origin main')).result).toBe('ok')
+  })
+
+  test('a profile entry with only a name does not match a repo with a remote', async ($, on) => {
+    setup(on, { profile: { projects: [{ id: 'repo', integration: 'auto' }] }, repos: { '/work/repo': { current: 'main', remote: 'git@github.com:someone/repo.git' } } })
+    await boot($)
+    await typed($)
+    expect((await bash($, 'gh pr merge 3')).deny).toBe(DENY_INTEGRATION)
+  })
+
+  test('auto at the top, pr for this repo by name: a repo with a remote keeps its pr', async ($, on) => {
+    setup(on, { profile: { integration: 'auto', projects: [{ id: 'repo', integration: 'pr' }] }, repos: { '/work/repo': { current: 'main', remote: 'git@github.com:me/repo.git' } } })
+    await boot($)
+    await typed($)
+    expect((await bash($, 'gh pr merge 3')).deny).toBe(DENY_INTEGRATION)
+  })
+
+  test('CLAUDE.md no-mistakes caps a profile auto at pr; AGENTS.md local-only refuses pushes and PRs', async ($, on) => {
+    setup(on, { profile: { integration: 'auto' }, files: { '/work/repo/CLAUDE.md': '# Rules\n\nThis repo is no-mistakes.\n' } })
+    await boot($)
+    await typed($)
+    expect((await bash($, 'gh pr merge 3')).deny).toBe(DENY_INTEGRATION)
+    expect((await bash($, 'git push -u origin agt/x')).result).toBe('ok')
+  })
+
+  test('local-only in AGENTS.md: no push, no PR', async ($, on) => {
+    setup(on, { profile: { integration: 'pr' }, files: { '/work/repo/AGENTS.md': 'Mode: local-only.\n' } })
+    await boot($)
+    await typed($)
+    expect((await bash($, 'git push -u origin agt/x')).deny).toBe(DENY_LOCAL)
+    expect((await bash($, 'gh pr create --title x --body y')).deny).toBe(DENY_LOCAL)
+    expect((await bash($, 'git commit -m x')).result).toBe('ok')
   })
 
   test('auto in the profile for this repo lets the run merge and tag', async ($, on) => {
@@ -210,9 +465,11 @@ describe('guard: worktree ownership and the run-end tidy', () => {
     expect(early.text).toContain('agt/x (no commits of its own)')
     expect(early.text).toContain('agt/other (not opened by this session)')
     expect(seen.some((a) => a.join(' ') === 'git -C /work/repo-other status --porcelain')).toBe(false)
-    expect(seen.some((a) => a.includes('clean'))).toBe(false)
+    // A typed /agt-clean sweeps the run's .env copies even while it keeps the tree (an aborted run's go too).
+    expect(seen.filter((a) => a.includes('clean')).map((a) => a.join(' '))).toEqual(['git -C /work/repo-x clean -fqx -- .env*'])
     // The slice commits and merges; the run ends on its card.
     git.committed = true
+    seen.length = 0
     await card($)
     const sweep = seen.findIndex((a) => a.join(' ') === 'git -C /work/repo-x clean -fqx -- .env*')
     const removed = seen.findIndex((a) => a.join(' ') === 'git -C /work/repo worktree remove /work/repo-x')
@@ -223,6 +480,17 @@ describe('guard: worktree ownership and the run-end tidy', () => {
     expect(seen).not.toContainEqual(['git', '-C', '/work/repo', 'branch', '-d', 'agt/other'])
     // The main checkout's own .env is never swept.
     expect(seen.some((a) => a.join(' ') === 'git -C /work/repo clean -fqx -- .env*')).toBe(false)
+  })
+
+  test('the run-end sweep leaves an owned feat/* tree\'s .env alone; only agt/* trees are swept', async ($, on) => {
+    const { seen, git } = setup(on)
+    await boot($)
+    await typed($)
+    await bash($, 'git worktree add ../repo-x -b agt/x main && git worktree add ../repo-f -b feat/f main')
+    git.committed = true
+    await card($)
+    expect(seen).toContainEqual(['git', '-C', '/work/repo-x', 'clean', '-fqx', '--', '.env*'])
+    expect(seen.some((a) => a.includes('/work/repo-f') && a.includes('clean'))).toBe(false)
   })
 
   test('a session that recorded no worktree removes nothing', async ($, on) => {

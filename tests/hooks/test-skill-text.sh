@@ -28,13 +28,19 @@ for f in agents/agentille-{code,design,perf,payments,seo,security}-reviewer.md; 
 done
 check "plan-reviewer answers APPROVE or REVISE" 'has agents/agentille-plan-reviewer.md "APPROVE" && has agents/agentille-plan-reviewer.md "REVISE"'
 check "adversary answers BROKEN or HELD" 'has agents/agentille-adversary.md "BROKEN" && has agents/agentille-adversary.md "HELD"'
-for tok in "FIX:" "BLOCKED:" "CONTEXT" "CONTRACT:" "ACCEPTANCE" "VERIFICATION:" "RESUME:"; do
+for tok in "FIX:" "BLOCKED:" "STUCK:" "CONTEXT" "CONTRACT:" "ACCEPTANCE" "VERIFICATION:" "RESUME:"; do
   check "executor knows $tok" 'has agents/agentille-executor.md "$tok"'
 done
 check "planner writes ACCEPTANCE" 'has agents/agentille-planner.md "ACCEPTANCE"'
 check "SKILL.md reads ACCEPTANCE" 'has skills/agt/SKILL.md "ACCEPTANCE"'
 check "SKILL.md prints the recon line" 'has skills/agt/SKILL.md "recon: <level>"'
-check "factory.md handles BLOCKED: and CONTEXT" 'has skills/agt/factory.md "BLOCKED:" && has skills/agt/factory.md "CONTEXT"'
+# every stop head factory.md routes is listed in display.md and written by the executor
+for tok in "CONTEXT" "BLOCKED:" "CONTRACT:" "STUCK:" "RESUME:"; do
+  check "factory.md routes $tok" 'has skills/agt/factory.md "$tok"'
+  check "display.md lists $tok" 'has skills/agt/display.md "$tok"'
+  check "executor writes $tok" 'has agents/agentille-executor.md "$tok"'
+done
+check "Codex workers get the STUCK: line" 'has skills/agt/panes-mode.md "STUCK:"'
 
 # 4. one vocabulary: "slice" in prose; "piece" only as the header key
 for f in skills/agt/*.md agents/agentille-*.md README.md; do

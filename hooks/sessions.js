@@ -9,7 +9,7 @@ import { forgetResting } from './panerec.js'
 
 // The person's sessions this lead opened: { id, name, kind, tab, terminal }, oldest first. Read through the Sessions
 // view; written only here.
-const { s: my, view } = makeStore('sessions.js', {
+const { s: my, view, raw } = makeStore('sessions.js', {
   sessions: [],
 })
 export const Sessions = view
@@ -43,7 +43,9 @@ export async function closeSession($, t, s) {
   return r?.exitCode === 0 ? 'closed' : 'gone'
 }
 
+// `s` may be a record read through the Sessions view: raw() gives back the record itself.
 export async function forgetSession($, s) {
+  s = raw(s)
   my.sessions = my.sessions.filter((x) => x !== s)
   forgetResting(s.name)
   if (s.terminal) await saveSessions($)

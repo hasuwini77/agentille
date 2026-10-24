@@ -15,7 +15,7 @@ import { adopt, applyStatus, quietWorkflows } from './tree.js'
 
 // The run bookkeeping store: the run the band follows, each run's counters and routing log, every agent this session
 // has seen, the dispatch decisions and the pane routes. Read through the Runs view; written only here.
-const { s: my, view } = makeStore('dispatch.js', {
+const { s: my, view, raw } = makeStore('dispatch.js', {
   lastRun: 'adhoc',
   runs: new Map(),  // run id → { revise, fixes, fable, formation, log: [], reports: { role → count } }
   live: new Map(),  // agentId → live agent (live.js)
@@ -224,7 +224,8 @@ export async function writeRunFile($, runId, name, text) {
 // A subagent's raw answer goes to run-<id>/agents/<role>-<n>.md, written here so the lead spends
 // no tokens copying it. n counts per role in the run; a second turn of the same agent overwrites.
 export async function writeReport($, a, answer) {
-  if (!a.routed || !answer) return
+  a = raw(a) // read through the Runs view by the caller: the report name is written on the record itself
+  if (!a?.routed || !answer) return
   const counts = runRec(a.run).reports
   a.report ??= a.role + '-' + (counts[a.role] = (counts[a.role] ?? 0) + 1) + '.md'
   await writeRunFile($, a.run, 'agents/' + a.report, answer)

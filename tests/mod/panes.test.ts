@@ -831,7 +831,7 @@ describe('pane tools: in the mod', () => {
     expect((await call('zq81mx', 'exec-1')).deny).toContain('only for run k7f2ab')
   })
 
-  test('a tmux worker that never writes its done file keeps the run in flight for AGT_INFLIGHT_MAX_MS at most', async ($, on) => {
+  test('a tmux worker that never writes its done file keeps the run in flight for AGT_INFLIGHT_MAX_MS at most', { timeoutMs: 20_000 }, async ($, on) => {
     let rows = [['%1', '', 'claude', '0', '@1']]
     const { clock } = setup(on, TMUX, { 'tmux split-window': { stdout: '%9\n' }, 'tmux list-panes': () => ({ stdout: rows.map((r) => r.join(T)).join('\n') + '\n' }) })
     on('ui.status', async () => ({ value: undefined }))

@@ -4,7 +4,7 @@ The README's Settings section covers every `~/.agentille/profile.json` key. This
 
 ## Display switches
 
-Each surface the mod draws has its own key in the `display` block. An invalid value is ignored and the key takes its default. `/agt-info` prints the value in effect and where it came from. Turning a surface off changes nothing about `/agt` itself: runs are routed, counted and reported the same, and `/agt-info` still shows them.
+Each surface the mod draws has its own key in the `display` block. An invalid value is ignored, and the key falls back to the value a settings command left in the mod's own store (`/agt-deck` for `deck`, `/agt-focus` for `focus`, `/agt-highlight` for `highlight`), then to its default; an invalid stored value counts as not set. `band`, `statusLine` and `mascot` never had a command, so an invalid value there goes straight to the default. `/agt-info` prints the value in effect and where it came from. Turning a surface off changes nothing about `/agt` itself: runs are routed, counted and reported the same, and `/agt-info` still shows them.
 
 | key | values | default | `off` (or the other value) does |
 |---|---|---|---|

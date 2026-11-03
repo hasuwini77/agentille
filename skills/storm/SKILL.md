@@ -97,4 +97,4 @@ User: <name>, <role> (from profile.json, each omitted when absent). Avoid: <neve
 - **One message per fan-out, one wait.** Scouts in one message; all lenses in one message; the adversary alone in the foreground.
 - **No popups, no dashboards.** Progress is the TodoWrite spine and the two cards; detail lives in the run dir and the storm doc.
 - **Honor `neverDo`** verbatim in every dispatch.
-- **Nothing idle survives.** Stop every background subagent once its output is merged. The hand-off session is the user's, not yours: never close it.
+- **Nothing idle survives.** `TaskStop` every background subagent once its output is merged, so none stays listed as idle. The hand-off session is the user's, not yours: never close it.

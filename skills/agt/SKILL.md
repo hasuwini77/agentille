@@ -72,7 +72,7 @@ Print the recon line before anything else: `recon: <level> · <transport> · <on
    - Never build a plan the last review did not approve.
 8. **Build, then review**, in dependency order, pipelined: review each finished slice while the others build. Every reviewer a slice needs goes out in ONE message as parallel background `Agent` calls. Fix rounds resume the same executor (`factory.md` → "Fix rounds").
 9. **Gate and integrate.** P0/P1 block. Then the escalate checklist decides merge or ⚑ (`factory.md` → "Gate" and "Integrate"). The profile sets `integration`, and a repo can only lower it. Remove each slice's worktree once the gate decides (`factory.md` → "Worktree lifecycle").
-10. **Close everything.** Close each `agt-<run>-*` pane the moment its answer is harvested, then confirm the run lists zero panes (`transport-panes.md` → "Harvest, then close"). Stop every background subagent once its handoff is used.
+10. **Close everything.** Close each `agt-<run>-*` pane the moment its answer is harvested, then confirm the run lists zero panes (`transport-panes.md` → "Harvest, then close"). `TaskStop` every subagent once nothing will message it again, and any still listed before the card (`factory.md` → "Stop finished subagents").
 11. **Report, then the card.** Write `report.md` once, never print it, then print the final card (`display.md`). That card is the only end-of-run output.
 
 ## Dispatch header

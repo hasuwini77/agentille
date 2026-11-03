@@ -2,6 +2,26 @@
 
 All notable changes to agentille are documented here.
 
+## [Unreleased]
+
+### Changed
+
+- **Finished subagents are stopped, not left idle.** `factory.md` gains
+  "Stop finished subagents": the lead calls `TaskStop` on a planner, plan
+  reviewer, UI prototyper, adversary or reviewer as soon as its answer is
+  read, on an executor when its slice ends (merged, held at its PR, or
+  stopped with a `⚑` line), and on any subagent still listed before the
+  final card. `SKILL.md` step 10 and `/storm`'s cleanup rule name the tool
+  and point there.
+
+### Rationale
+
+- The old step 10 said "stop every background subagent once its handoff is
+  used" without naming a tool or saying when an executor is safe to stop,
+  so a long run ended with every agent it started still listed as idle,
+  which reads as work still running. Executors stay alive between fix
+  rounds because those reach them by `SendMessage`.
+
 ## [3.24.0] — 2026-10-25
 
 Fixes and clean-up batched since 3.23.0 (`docs/releasing.md`): guard hardening

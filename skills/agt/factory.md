@@ -66,6 +66,16 @@ Resume once per slice. Its header says `work=build`, never `work=fix`:
 - **Subagent executor:** `SendMessage` to the same agent id: "RESUME: finish the slice from your checkpoint and `git log $BASE..HEAD`, keep landed commits, reply in your output format."
 - **Pane executor:** `close_pane`, then `spawn_pane` the same role and cwd (the slice's worktree, `isolated: false`) with the slice, `RESUME:`, the checkpoint path and the answer file path (the same path as a pane fix round).
 
+## Stop finished subagents
+
+A subagent that has answered stays in the person's agent list as idle until it is stopped, and a column of idle agents reads as work still running. Call `TaskStop` with its agent id once the lead will send it nothing more:
+
+- **Planner, plan reviewer, UI prototyper, adversary, every reviewer:** as soon as its answer is read. A later round dispatches a fresh one.
+- **Executor:** when its slice ends: merged, held at its PR, or stopped with a `⚑` line. Never between fix rounds or before a resume or `INTEGRATE:`: those reach it by `SendMessage`.
+- **Run end:** before the final card, stop every subagent this run started that is still listed.
+
+Stopping an agent that has already answered only marks it stopped; its commits and answer stay. Pane workers close through `close_pane` and the SessionEnd sweep instead.
+
 ## Gate — merge or escalate
 
 Runs after review passes (no P0/P1) and every ACCEPTANCE criterion has evidence (a criterion without evidence is a P1). The lead applies it from `git diff --stat`, the diff and the plan's ASSUMPTIONS; no extra agent. **Escalate** (PR or branch left open, `⚑ escalated: <reason>` on the card) when the diff:
